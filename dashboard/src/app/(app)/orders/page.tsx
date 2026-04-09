@@ -3,13 +3,15 @@ import { Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth";
 import { usd, date } from "@/lib/format";
-import { STATUS_LABELS, type OrderWithTotals, type OrderDocument, type Supplier } from "@/lib/types";
+import { type OrderWithTotals, type OrderDocument, type Supplier } from "@/lib/types";
+import { t, type Locale } from "@/lib/i18n";
 import QuickDocs from "./[id]/quick-docs";
 import DocIndicators from "./[id]/doc-indicators";
 
 export default async function OrdersPage() {
   const profile = await requireProfile();
   const supabase = await createClient();
+  const locale = (profile.language ?? "de") as Locale;
 
   const [{ data: orders }, { data: suppliers }, { data: documents }] = await Promise.all([
     supabase
@@ -32,11 +34,17 @@ export default async function OrdersPage() {
     docsByOrder.set(d.order_id, arr);
   }
 
-  // Gruppiere Bestellungen nach Lieferant; Lieferanten ohne Bestellungen werden nicht angezeigt.
+  // Sort by order_date desc, then created_at desc
+  const sorted = [...list].sort((a, b) => {
+    const da = a.order_date ?? a.created_at;
+    const db = b.order_date ?? b.created_at;
+    return db.localeCompare(da);
+  });
+
   const grouped = supplierList
     .map((s) => ({
       supplier: s,
-      orders: list.filter((o) => o.supplier_id === s.id),
+      orders: sorted.filter((o) => o.supplier_id === s.id),
     }))
     .filter((g) => g.orders.length > 0);
 
@@ -44,9 +52,9 @@ export default async function OrdersPage() {
     <div className="p-8 space-y-8 max-w-7xl">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-neutral-900">Bestellungen</h1>
+          <h1 className="text-2xl font-semibold text-neutral-900">{t(locale, "nav.orders")}</h1>
           <p className="text-sm text-neutral-500 mt-1">
-            {list.length} insgesamt · {grouped.length} Lieferanten
+            {list.length} {t(locale, "orders.total")} · {grouped.length} {t(locale, "orders.suppliers")}
           </p>
         </div>
         {profile.is_admin && (
@@ -54,27 +62,27 @@ export default async function OrdersPage() {
             href="/orders/new"
             className="inline-flex items-center gap-2 bg-neutral-900 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-neutral-800 transition"
           >
-            <Plus size={16} /> Neue Bestellung
+            <Plus size={16} /> {t(locale, "dashboard.new_order")}
           </Link>
         )}
       </header>
 
       {list.length === 0 && (
         <div className="bg-white rounded-2xl border border-neutral-200 p-12 text-center text-neutral-500 text-sm">
-          Noch keine Bestellungen.
+          {t(locale, "orders.no_orders")}
         </div>
       )}
 
-      {grouped.map(({ supplier, orders }) => {
-        const open = orders.reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
-        const invoiced = orders.reduce((sum, o) => sum + Number(o.invoice_total ?? 0), 0);
+      {grouped.map(({ supplier, orders: sOrders }) => {
+        const open = sOrders.reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
+        const invoiced = sOrders.reduce((sum, o) => sum + Number(o.invoice_total ?? 0), 0);
         return (
           <section key={supplier.id} className="space-y-3">
             <div className="flex items-end justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-neutral-900">{supplier.name}</h2>
                 <p className="text-xs text-neutral-500">
-                  {orders.length} Bestellungen · Rechnung {usd(invoiced)} · Offen {usd(open)}
+                  {sOrders.length} {t(locale, "dashboard.orders_count")} · {t(locale, "dashboard.invoice_label")} {usd(invoiced)} · {t(locale, "dashboard.open_label")} {usd(open)}
                 </p>
               </div>
               {supplier.price_list_url && (
@@ -84,7 +92,7 @@ export default async function OrdersPage() {
                   rel="noreferrer"
                   className="text-xs text-blue-600 hover:underline"
                 >
-                  Preisliste öffnen →
+                  {t(locale, "dashboard.price_list")} →
                 </a>
               )}
             </div>
@@ -93,16 +101,16 @@ export default async function OrdersPage() {
               <table className="w-full text-sm">
                 <thead className="bg-neutral-50 text-left text-xs uppercase text-neutral-500">
                   <tr>
-                    <th className="px-4 py-3 font-medium">Label</th>
-                    <th className="px-4 py-3 font-medium">Status</th>
-                    <th className="px-4 py-3 font-medium">Ankunft ca.</th>
-                    <th className="px-4 py-3 font-medium">Dokumente</th>
-                    <th className="px-4 py-3 font-medium text-right">Rechnung</th>
-                    <th className="px-4 py-3 font-medium text-right">Offen</th>
+                    <th className="px-4 py-3 font-medium">{t(locale, "table.label")}</th>
+                    <th className="px-4 py-3 font-medium">{t(locale, "table.status")}</th>
+                    <th className="px-4 py-3 font-medium">{t(locale, "table.eta")}</th>
+                    <th className="px-4 py-3 font-medium">{t(locale, "table.documents")}</th>
+                    <th className="px-4 py-3 font-medium text-right">{t(locale, "table.invoice")}</th>
+                    <th className="px-4 py-3 font-medium text-right">{t(locale, "table.open")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
-                  {orders.map((o) => (
+                  {sOrders.map((o) => (
                     <tr key={o.id} className="hover:bg-neutral-50">
                       <td className="px-4 py-3">
                         <Link
@@ -128,12 +136,12 @@ export default async function OrdersPage() {
                         })()}
                       </td>
                       <td className="px-4 py-3">
-                        <StatusBadge status={o.status} />
+                        <StatusBadge status={o.status} locale={locale} />
                       </td>
                       <td className="px-4 py-3 text-neutral-700">{date(o.eta)}</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} />
+                          <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} locale={locale} />
                           <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
                         </div>
                       </td>
@@ -155,23 +163,24 @@ export default async function OrdersPage() {
   );
 }
 
-function StatusBadge({ status }: { status: keyof typeof STATUS_LABELS }) {
-  const colors: Record<string, string> = {
-    draft: "bg-neutral-100 text-neutral-700",
-    sent_to_supplier: "bg-blue-50 text-blue-700",
-    confirmed: "bg-indigo-50 text-indigo-700",
-    in_production: "bg-amber-50 text-amber-700",
-    ready_to_ship: "bg-purple-50 text-purple-700",
-    shipped: "bg-cyan-50 text-cyan-700",
-    in_customs: "bg-orange-50 text-orange-700",
-    delivered: "bg-emerald-50 text-emerald-700",
-    cancelled: "bg-red-50 text-red-700",
-  };
+const STATUS_COLORS: Record<string, string> = {
+  draft: "bg-neutral-100 text-neutral-700",
+  sent_to_supplier: "bg-blue-50 text-blue-700",
+  confirmed: "bg-indigo-50 text-indigo-700",
+  in_production: "bg-amber-50 text-amber-700",
+  ready_to_ship: "bg-purple-50 text-purple-700",
+  shipped: "bg-cyan-50 text-cyan-700",
+  in_customs: "bg-orange-50 text-orange-700",
+  delivered: "bg-emerald-50 text-emerald-700",
+  cancelled: "bg-red-50 text-red-700",
+};
+
+function StatusBadge({ status, locale }: { status: string; locale: Locale }) {
   return (
     <span
-      className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${colors[status] ?? "bg-neutral-100"}`}
+      className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[status] ?? "bg-neutral-100"}`}
     >
-      {STATUS_LABELS[status]}
+      {t(locale, `order.status.${status}`)}
     </span>
   );
 }

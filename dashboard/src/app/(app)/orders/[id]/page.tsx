@@ -12,6 +12,7 @@ import {
   type OrderDocument,
   type OrderEvent,
 } from "@/lib/types";
+import { t, type Locale } from "@/lib/i18n";
 import EditPanel from "./edit-panel";
 import PaymentForm from "./payment-form";
 import PaymentItem from "./payment-item";
@@ -28,6 +29,7 @@ export default async function OrderDetailPage({
   const { id } = await params;
   const profile = await requireProfile();
   const supabase = await createClient();
+  const locale = (profile.language ?? "de") as Locale;
 
   const { data: order } = await supabase
     .from("orders_with_totals")
@@ -90,36 +92,36 @@ export default async function OrderDetailPage({
   return (
     <div className="p-8 space-y-6 max-w-6xl">
       <div>
-        <BackLink />
+        <BackLink locale={locale} />
         <div className="flex items-start justify-between mt-2">
           <div>
             <h1 className="text-2xl font-semibold text-neutral-900">{o.label}</h1>
             <p className="text-sm text-neutral-500 mt-1">
-              {sup?.name} · erstellt {dateTime(o.created_at)}
+              {sup?.name} · {t(locale, "order.created")} {dateTime(o.created_at)}
             </p>
           </div>
           <span className="inline-flex px-3 py-1 rounded-full text-xs font-medium bg-neutral-100 text-neutral-700">
-            {STATUS_LABELS[o.status]}
+            {t(locale, `order.status.${o.status}`)}
           </span>
         </div>
         <div className="mt-4">
-          <QuickDocs documents={docs} paidTotal={o.paid_total} />
+          <QuickDocs documents={docs} paidTotal={o.paid_total} locale={locale} />
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          {/* Übersicht + Edit */}
+          {/* Details + Edit */}
           <section className="bg-white rounded-2xl border border-neutral-200 p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-medium text-neutral-700">Details</h2>
+              <h2 className="text-sm font-medium text-neutral-700">{t(locale, "order.details")}</h2>
             </div>
             <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-              <Info label="Beschreibung" value={o.description ?? "—"} />
-              <Info label="Tags" value={o.tags?.join(", ") || "—"} />
-              <Info label="Ankunft ca." value={date(o.eta)} />
+              <Info label={t(locale, "order.description")} value={o.description ?? "—"} />
+              <Info label={t(locale, "order.tags")} value={o.tags?.join(", ") || "—"} />
+              <Info label={t(locale, "order.eta")} value={date(o.eta)} />
               <Info
-                label="Gewicht / Pakete"
+                label={t(locale, "order.weight_packages")}
                 value={
                   <span className="inline-flex items-center gap-1">
                     <Weight size={13} className="text-neutral-400" />
@@ -131,7 +133,7 @@ export default async function OrderDetailPage({
                 }
               />
               <Info
-                label="Tracking"
+                label={t(locale, "order.tracking")}
                 value={
                   o.tracking_number ? (
                     o.tracking_url ? (
@@ -152,7 +154,7 @@ export default async function OrderDetailPage({
                 }
               />
               <Info
-                label="Google Sheet"
+                label={t(locale, "order.google_sheet")}
                 value={
                   o.sheet_url ? (
                     <a
@@ -161,28 +163,28 @@ export default async function OrderDetailPage({
                       rel="noreferrer"
                       className="text-blue-600 hover:underline inline-flex items-center gap-1"
                     >
-                      öffnen <ExternalLink size={12} />
+                      {t(locale, "order.open_sheet")} <ExternalLink size={12} />
                     </a>
                   ) : (
                     "—"
                   )
                 }
               />
-              <Info label="Letztes Update vom Lieferant" value={date(o.last_supplier_update)} />
-              <Info label="Notizen" value={o.notes ?? "—"} />
+              <Info label={t(locale, "order.last_supplier_update")} value={date(o.last_supplier_update)} />
+              <Info label={t(locale, "order.notes")} value={o.notes ?? "—"} />
             </dl>
             <div className="mt-5 pt-4 border-t border-neutral-100 flex justify-end">
-              <EditPanel order={o} isAdmin={profile.is_admin} />
+              <EditPanel order={o} isAdmin={profile.is_admin} locale={locale} />
             </div>
           </section>
 
-          {/* Dokumente */}
+          {/* Documents */}
           <section className="bg-white rounded-2xl border border-neutral-200 p-6">
-            <h2 className="text-sm font-medium text-neutral-700 mb-4">Dokumente</h2>
-            <DocumentUpload orderId={o.id} />
+            <h2 className="text-sm font-medium text-neutral-700 mb-4">{t(locale, "order.documents_title")}</h2>
+            <DocumentUpload orderId={o.id} locale={locale} />
             <ul className="mt-4 divide-y divide-neutral-100">
               {docs.length === 0 && (
-                <li className="text-sm text-neutral-500 py-3">Noch keine Dokumente.</li>
+                <li className="text-sm text-neutral-500 py-3">{t(locale, "order.no_documents_yet")}</li>
               )}
               {docs.map((d) => (
                 <DocumentItem
@@ -190,8 +192,9 @@ export default async function OrderDetailPage({
                   orderId={o.id}
                   doc={d}
                   isAdmin={profile.is_admin}
+                  locale={locale}
                   displayName={
-                    proofNumber.has(d.id) ? `Zahlung ${proofNumber.get(d.id)}` : undefined
+                    proofNumber.has(d.id) ? `${t(locale, "payment.number")} ${proofNumber.get(d.id)}` : undefined
                   }
                 />
               ))}
@@ -200,9 +203,9 @@ export default async function OrderDetailPage({
 
           {/* Timeline */}
           <section className="bg-white rounded-2xl border border-neutral-200 p-6">
-            <h2 className="text-sm font-medium text-neutral-700 mb-4">Verlauf</h2>
+            <h2 className="text-sm font-medium text-neutral-700 mb-4">{t(locale, "order.timeline")}</h2>
             <ul className="space-y-3 text-sm">
-              {evs.length === 0 && <li className="text-neutral-500">Keine Einträge.</li>}
+              {evs.length === 0 && <li className="text-neutral-500">{t(locale, "order.no_events_yet")}</li>}
               {evs.map((e) => {
                 const actor = e.actor_id ? actorMap.get(e.actor_id) : null;
                 return (
@@ -212,7 +215,7 @@ export default async function OrderDetailPage({
                       <div className="text-neutral-900">{e.message}</div>
                       <div className="text-xs text-neutral-500">
                         {dateTime(e.created_at)}
-                        {actor && <> · von <span className="text-neutral-700">{actor}</span></>}
+                        {actor && <> · {t(locale, "order.by")} <span className="text-neutral-700">{actor}</span></>}
                       </div>
                     </div>
                   </li>
@@ -222,38 +225,38 @@ export default async function OrderDetailPage({
           </section>
         </div>
 
-        {/* Sidebar: Geld */}
+        {/* Sidebar: Finance */}
         <aside className="space-y-6">
           <section className="bg-white rounded-2xl border border-neutral-200 p-6">
             <h2 className="text-sm font-medium text-neutral-700 mb-4 flex items-center gap-1.5">
               <DollarSign size={14} className="text-neutral-400" />
-              Finanzen
+              {t(locale, "order.finance")}
             </h2>
             <dl className="space-y-2 text-sm">
-              <Row label="Rechnung" value={usd(o.invoice_total)} />
-              <Row label="Ware" value={usd(o.goods_value)} />
-              <Row label="Versand" value={usd(o.shipping_cost)} />
-              <Row label="Zoll" value={usd(o.customs_duty)} />
-              <Row label="EUSt" value={usd(o.import_vat)} />
+              <Row label={t(locale, "order.invoice_amount")} value={usd(o.invoice_total)} />
+              <Row label={t(locale, "order.goods")} value={usd(o.goods_value)} />
+              <Row label={t(locale, "order.shipping")} value={usd(o.shipping_cost)} />
+              <Row label={t(locale, "order.customs")} value={usd(o.customs_duty)} />
+              <Row label={t(locale, "order.import_vat")} value={usd(o.import_vat)} />
               <div className="pt-2 mt-2 border-t border-neutral-100" />
-              <Row label="Landed Cost" value={usd(o.landed_cost)} bold />
-              <Row label="Bezahlt" value={usd(o.paid_total)} />
-              <Row label="Offen" value={usd(o.remaining_balance)} bold />
+              <Row label={t(locale, "order.landed_cost")} value={usd(o.landed_cost)} bold />
+              <Row label={t(locale, "order.paid")} value={usd(o.paid_total)} />
+              <Row label={t(locale, "order.remaining")} value={usd(o.remaining_balance)} bold />
             </dl>
           </section>
 
           <section className="bg-white rounded-2xl border border-neutral-200 p-6">
             <h2 className="text-sm font-medium text-neutral-700 mb-4 flex items-center gap-1.5">
               <CreditCard size={14} className="text-neutral-400" />
-              Zahlungen
+              {t(locale, "order.payments")}
             </h2>
-            {profile.is_admin && <PaymentForm orderId={o.id} />}
+            {profile.is_admin && <PaymentForm orderId={o.id} locale={locale} />}
             <ul className="mt-4 divide-y divide-neutral-100">
               {pays.length === 0 && (
-                <li className="text-sm text-neutral-500 py-3">Noch keine Zahlungen.</li>
+                <li className="text-sm text-neutral-500 py-3">{t(locale, "order.no_payments_yet")}</li>
               )}
               {pays.map((p) => (
-                <PaymentItem key={p.id} orderId={o.id} payment={p} isAdmin={profile.is_admin} />
+                <PaymentItem key={p.id} orderId={o.id} payment={p} isAdmin={profile.is_admin} locale={locale} />
               ))}
             </ul>
           </section>

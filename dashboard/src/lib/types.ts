@@ -125,6 +125,7 @@ export interface Order {
   tracking_number: string | null;
   tracking_url: string | null;
   eta: string | null;
+  order_date: string | null;
   last_supplier_update: string | null;
   notes: string | null;
   created_at: string;

@@ -2,8 +2,9 @@
 
 import { useState, useTransition, useRef } from "react";
 import { addPayment } from "@/lib/actions/orders";
+import { t, type Locale } from "@/lib/i18n";
 
-export default function PaymentForm({ orderId }: { orderId: string }) {
+export default function PaymentForm({ orderId, locale }: { orderId: string; locale: Locale }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -24,7 +25,7 @@ export default function PaymentForm({ orderId }: { orderId: string }) {
           name="amount"
           type="number"
           step="0.01"
-          placeholder="Betrag USD"
+          placeholder={t(locale, "payment.amount_placeholder")}
           required
           className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
         />
@@ -37,12 +38,12 @@ export default function PaymentForm({ orderId }: { orderId: string }) {
       </div>
       <input
         name="method"
-        placeholder="z.B. Sparkasse Überweisung"
+        placeholder={t(locale, "payment.method_placeholder")}
         className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
       />
       <input
         name="note"
-        placeholder="Notiz (optional)"
+        placeholder={t(locale, "payment.note_placeholder")}
         className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
       />
       {error && <p className="text-xs text-red-600">{error}</p>}
@@ -51,7 +52,7 @@ export default function PaymentForm({ orderId }: { orderId: string }) {
         disabled={pending}
         className="w-full rounded-lg bg-neutral-900 text-white text-sm font-medium py-2 hover:bg-neutral-800 disabled:opacity-50"
       >
-        {pending ? "Hinzufügen…" : "Zahlung hinzufügen"}
+        {pending ? t(locale, "payment.adding") : t(locale, "payment.add")}
       </button>
     </form>
   );

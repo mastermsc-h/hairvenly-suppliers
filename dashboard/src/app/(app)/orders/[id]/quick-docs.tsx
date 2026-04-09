@@ -4,12 +4,8 @@ import { useState } from "react";
 import { FileText, Receipt } from "lucide-react";
 import { getSignedUrl } from "@/lib/actions/orders";
 import type { OrderDocument } from "@/lib/types";
+import { t, type Locale } from "@/lib/i18n";
 
-/**
- * Quick-Open-Buttons für Rechnung + Zahlungsnachweis.
- * - Standard-Variante: volle Buttons mit Text (für Detail-Header)
- * - `compact`: kleine Icon-Buttons (für Tabellenzeilen)
- */
 const fmtUsd = (n: number) =>
   new Intl.NumberFormat("de-DE", { style: "currency", currency: "USD" }).format(n);
 
@@ -17,10 +13,12 @@ export default function QuickDocs({
   documents,
   compact = false,
   paidTotal,
+  locale = "de",
 }: {
   documents: OrderDocument[];
   compact?: boolean;
   paidTotal?: number | null;
+  locale?: Locale;
 }) {
   const invoices = documents.filter((d) => d.kind === "supplier_invoice");
   const proofsRaw = documents.filter((d) => d.kind === "payment_proof");
@@ -31,7 +29,7 @@ export default function QuickDocs({
     .forEach((d, i) => proofNumber.set(d.id, i + 1));
   const proofs = proofsRaw.map((d) => ({
     ...d,
-    file_name: `Zahlung ${proofNumber.get(d.id)}`,
+    file_name: `${t(locale, "payment.number")} ${proofNumber.get(d.id)}`,
   }));
 
   return (
@@ -39,9 +37,9 @@ export default function QuickDocs({
       <div className="flex flex-col">
         <QuickGroup
           icon={<Receipt size={compact ? 14 : 14} />}
-          label="Rechnung öffnen"
-          shortLabel="Rechnung"
-          empty="Keine Rechnung"
+          label={t(locale, "doc.open_invoice")}
+          shortLabel={t(locale, "doc.invoice_short")}
+          empty={t(locale, "doc.no_invoice")}
           docs={invoices}
           compact={compact}
         />
@@ -53,14 +51,14 @@ export default function QuickDocs({
       </div>
       <QuickGroup
         icon={<FileText size={compact ? 14 : 14} />}
-        label="Zahlungsnachweis öffnen"
-        shortLabel="Zahlung"
-        empty="Kein Nachweis"
+        label={t(locale, "doc.open_proof")}
+        shortLabel={t(locale, "doc.proof_short")}
+        empty={t(locale, "doc.no_proof")}
         docs={proofs}
         compact={compact}
         titleOverride={
           paidTotal != null && paidTotal > 0
-            ? `Bereits gezahlt: ${fmtUsd(Number(paidTotal))}`
+            ? `${t(locale, "doc.already_paid")}: ${fmtUsd(Number(paidTotal))}`
             : undefined
         }
       />

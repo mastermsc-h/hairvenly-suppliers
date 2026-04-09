@@ -5,15 +5,18 @@ import { Pencil, Trash2, X, Check } from "lucide-react";
 import { updatePayment, deletePayment } from "@/lib/actions/orders";
 import { usd, date } from "@/lib/format";
 import type { Payment } from "@/lib/types";
+import { t, type Locale } from "@/lib/i18n";
 
 export default function PaymentItem({
   orderId,
   payment,
   isAdmin,
+  locale,
 }: {
   orderId: string;
   payment: Payment;
   isAdmin: boolean;
+  locale: Locale;
 }) {
   const [editing, setEditing] = useState(false);
   const [pending, start] = useTransition();
@@ -29,7 +32,7 @@ export default function PaymentItem({
   }
 
   function remove() {
-    if (!confirm("Zahlung wirklich löschen?")) return;
+    if (!confirm(t(locale, "payment.confirm_delete"))) return;
     start(async () => {
       await deletePayment(orderId, payment.id);
     });
@@ -58,13 +61,13 @@ export default function PaymentItem({
           <input
             name="method"
             defaultValue={payment.method ?? ""}
-            placeholder="Methode"
+            placeholder={t(locale, "payment.method")}
             className="w-full rounded-lg border border-neutral-300 px-2 py-1.5 text-sm"
           />
           <input
             name="note"
             defaultValue={payment.note ?? ""}
-            placeholder="Notiz"
+            placeholder={t(locale, "payment.note")}
             className="w-full rounded-lg border border-neutral-300 px-2 py-1.5 text-sm"
           />
           {error && <p className="text-xs text-red-600">{error}</p>}
@@ -74,14 +77,14 @@ export default function PaymentItem({
               disabled={pending}
               className="inline-flex items-center gap-1 rounded-lg bg-neutral-900 text-white text-xs font-medium px-3 py-1.5 disabled:opacity-50"
             >
-              <Check size={12} /> Speichern
+              <Check size={12} /> {t(locale, "order.save")}
             </button>
             <button
               type="button"
               onClick={() => setEditing(false)}
               className="inline-flex items-center gap-1 rounded-lg border border-neutral-300 text-xs px-3 py-1.5"
             >
-              <X size={12} /> Abbrechen
+              <X size={12} /> {t(locale, "order.cancel")}
             </button>
           </div>
         </form>
@@ -99,7 +102,7 @@ export default function PaymentItem({
             <>
               <button
                 onClick={() => setEditing(true)}
-                title="Bearbeiten"
+                title={t(locale, "common.edit")}
                 className="text-neutral-400 hover:text-neutral-900"
               >
                 <Pencil size={13} />
@@ -107,7 +110,7 @@ export default function PaymentItem({
               <button
                 onClick={remove}
                 disabled={pending}
-                title="Löschen"
+                title={t(locale, "common.delete")}
                 className="text-neutral-400 hover:text-red-600"
               >
                 <Trash2 size={13} />

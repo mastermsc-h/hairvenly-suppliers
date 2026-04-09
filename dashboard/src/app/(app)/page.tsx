@@ -3,8 +3,9 @@ import { ExternalLink, Package, Wallet, Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth";
 import { usd, date } from "@/lib/format";
-import { STATUS_LABELS, type OrderWithTotals, type OrderDocument, type Supplier } from "@/lib/types";
+import { type OrderWithTotals, type OrderDocument, type Supplier } from "@/lib/types";
 import { buildMonthlyStats } from "@/lib/stats";
+import { t, type Locale } from "@/lib/i18n";
 import QuickDocs from "./orders/[id]/quick-docs";
 import DocIndicators from "./orders/[id]/doc-indicators";
 import AvatarUpload from "./avatar-upload";
@@ -15,11 +16,11 @@ import SupplierProfile from "./supplier-profile";
 import { VolumeChart, DebtChart } from "./charts";
 import SupplierKgBars, { type SupplierKgRow } from "./supplier-kg-bars";
 import { publicAvatarUrl, publicOverviewUrl } from "@/lib/storage";
-import { t, type Locale } from "@/lib/i18n";
 
 export default async function DashboardPage() {
   const profile = await requireProfile();
   const supabase = await createClient();
+  const locale = (profile.language ?? "de") as Locale;
 
   const [{ data: orders }, { data: suppliers }, { data: documents }, { data: payments }] =
     await Promise.all([
@@ -65,8 +66,6 @@ export default async function DashboardPage() {
       return { name: s.name, total, transit };
     })
     .filter((r) => r.total > 0);
-
-  const locale = (profile.language ?? "de") as Locale;
 
   const monthly = buildMonthlyStats(
     list.map((o) => ({ created_at: o.created_at, invoice_total: o.invoice_total })),
@@ -124,9 +123,13 @@ export default async function DashboardPage() {
           isAdmin={profile.is_admin}
           items={supplierList.map((s) => {
             const sOrders = list.filter((o) => o.supplier_id === s.id);
-            const openOrders = sOrders.filter(
-              (o) => o.status !== "delivered" && o.status !== "cancelled",
-            );
+            const openOrders = sOrders
+              .filter((o) => o.status !== "delivered" && o.status !== "cancelled")
+              .sort((a, b) => {
+                const da = a.order_date ?? a.created_at;
+                const db = b.order_date ?? b.created_at;
+                return db.localeCompare(da);
+              });
             const open = sOrders.reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
             const invoiced = sOrders.reduce((sum, o) => sum + Number(o.invoice_total ?? 0), 0);
 
@@ -148,7 +151,7 @@ export default async function DashboardPage() {
                       <div className="font-semibold text-neutral-900 truncate">{s.name}</div>
                     </SupplierProfile>
                     <div className="text-xs text-neutral-500 mt-0.5">
-                      {sOrders.length} Bestellungen · {openOrders.length} aktiv · Rechnung{" "}
+                      {sOrders.length} {t(locale, "dashboard.orders_count")} · {openOrders.length} {t(locale, "dashboard.active_count")} · {t(locale, "dashboard.invoice_label")}{" "}
                       {usd(invoiced)}
                     </div>
                   </div>
@@ -162,10 +165,11 @@ export default async function DashboardPage() {
                       label={s.overview_doc_label}
                       visibleToSupplier={s.overview_visible_to_supplier}
                       isAdmin={profile.is_admin}
+                      locale={locale}
                     />
                   )}
                   <div className="text-right">
-                    <div className="text-[10px] text-neutral-500 uppercase tracking-wide">Offen</div>
+                    <div className="text-[10px] text-neutral-500 uppercase tracking-wide">{t(locale, "dashboard.open_label")}</div>
                     <div className={`text-xl font-semibold ${open > 0 ? "text-rose-600" : "text-neutral-900"}`}>
                       {usd(open)}
                     </div>
@@ -180,7 +184,7 @@ export default async function DashboardPage() {
                   href={`/orders/new?supplier_id=${s.id}`}
                   className="inline-flex items-center gap-1 text-xs text-neutral-500 hover:text-indigo-700"
                 >
-                  <Plus size={14} /> Neue Bestellung
+                  <Plus size={14} /> {t(locale, "dashboard.new_order")}
                 </Link>
               </div>
             );
@@ -198,12 +202,12 @@ export default async function DashboardPage() {
                   <table className="w-full text-sm">
                     <thead className="bg-neutral-50/60 text-left text-xs uppercase text-neutral-500">
                       <tr>
-                        <th className="px-5 py-2.5 font-medium">Label</th>
-                        <th className="px-5 py-2.5 font-medium">Status</th>
-                        <th className="px-5 py-2.5 font-medium">Ankunft ca.</th>
-                        <th className="px-5 py-2.5 font-medium">Dokumente</th>
-                        <th className="px-5 py-2.5 font-medium text-right">Rechnung</th>
-                        <th className="px-5 py-2.5 font-medium text-right">Offen</th>
+                        <th className="px-5 py-2.5 font-medium">{t(locale, "table.label")}</th>
+                        <th className="px-5 py-2.5 font-medium">{t(locale, "table.status")}</th>
+                        <th className="px-5 py-2.5 font-medium">{t(locale, "table.eta")}</th>
+                        <th className="px-5 py-2.5 font-medium">{t(locale, "table.documents")}</th>
+                        <th className="px-5 py-2.5 font-medium text-right">{t(locale, "table.invoice")}</th>
+                        <th className="px-5 py-2.5 font-medium text-right">{t(locale, "table.open")}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-100">
@@ -228,12 +232,12 @@ export default async function DashboardPage() {
                             })()}
                           </td>
                           <td className="px-5 py-2.5">
-                            <StatusBadge status={o.status} />
+                            <StatusBadge status={o.status} locale={locale} />
                           </td>
                           <td className="px-5 py-2.5 text-neutral-700">{date(o.eta)}</td>
                           <td className="px-5 py-2.5">
                             <div className="flex flex-wrap items-center gap-1.5">
-                              <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} />
+                              <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} locale={locale} />
                               <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
                             </div>
                           </td>
@@ -260,18 +264,18 @@ export default async function DashboardPage() {
                     rel="noreferrer"
                     className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium"
                   >
-                    Preisliste öffnen <ExternalLink size={12} />
+                    {t(locale, "dashboard.price_list")} <ExternalLink size={12} />
                   </a>
                 ) : (
-                  <span className="text-neutral-400">Keine Preisliste hinterlegt</span>
+                  <span className="text-neutral-400">{t(locale, "dashboard.no_price_list")}</span>
                 )}
                 <span className="text-neutral-300">·</span>
                 <button
                   disabled
-                  title="Phase 2 — kommt später"
+                  title="Phase 2"
                   className="text-neutral-400 cursor-not-allowed"
                 >
-                  🔍 Rechnung scannen (bald)
+                  🔍 {t(locale, "dashboard.scan_invoice")}
                 </button>
               </div>
             );
@@ -294,10 +298,10 @@ export default async function DashboardPage() {
 
       {profile.is_admin && (
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ChartCard title="Bestellvolumen pro Monat" subtitle="Letzte 12 Monate · USD">
+          <ChartCard title={t(locale, "dashboard.volume_title")} subtitle={t(locale, "dashboard.volume_subtitle")}>
             <VolumeChart data={monthly} />
           </ChartCard>
-          <ChartCard title="Offene Schulden im Verlauf" subtitle="Kumuliert pro Monatsende · USD">
+          <ChartCard title={t(locale, "dashboard.debt_title")} subtitle={t(locale, "dashboard.debt_subtitle")}>
             <DebtChart data={monthly} />
           </ChartCard>
         </section>
@@ -368,12 +372,12 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: "bg-red-50 text-red-700",
 };
 
-function StatusBadge({ status }: { status: keyof typeof STATUS_LABELS }) {
+function StatusBadge({ status, locale }: { status: string; locale: Locale }) {
   return (
     <span
       className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${STATUS_COLORS[status] ?? "bg-neutral-100"}`}
     >
-      {STATUS_LABELS[status]}
+      {t(locale, `order.status.${status}`)}
     </span>
   );
 }

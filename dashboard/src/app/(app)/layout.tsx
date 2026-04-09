@@ -22,7 +22,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <NavLink href="/orders" icon={<Package size={16} />} label={t(locale, "nav.orders")} />
           {profile.is_admin && (
             <>
-              <NavLink href="/admin/suppliers" icon={<Building2 size={16} />} label="Lieferanten" />
+              <NavLink href="/admin/suppliers" icon={<Building2 size={16} />} label={t(locale, "nav.suppliers")} />
               <NavLink href="/admin/users" icon={<Users size={16} />} label={t(locale, "nav.users")} />
             </>
           )}

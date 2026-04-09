@@ -32,9 +32,29 @@ export async function createOrder(_prev: unknown, formData: FormData) {
   await requireAdmin();
   const supabase = await createClient();
 
+  const supplierId = String(formData.get("supplier_id"));
+  const orderDate = str(formData.get("order_date"));
+  let label = String(formData.get("label") ?? "").trim();
+
+  // Auto-generate label from supplier name + order_date if label is empty
+  if (!label && supplierId && orderDate) {
+    const { data: sup } = await supabase
+      .from("suppliers")
+      .select("name")
+      .eq("id", supplierId)
+      .single();
+    if (sup) {
+      const d = new Date(orderDate + "T00:00:00");
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const yyyy = d.getFullYear();
+      label = `${sup.name} ${dd}-${mm}-${yyyy}`;
+    }
+  }
+
   const payload = {
-    supplier_id: String(formData.get("supplier_id")),
-    label: String(formData.get("label") ?? "").trim(),
+    supplier_id: supplierId,
+    label,
     description: str(formData.get("description")),
     tags: formData.getAll("tags").map(String),
     sheet_url: str(formData.get("sheet_url")),
@@ -48,12 +68,16 @@ export async function createOrder(_prev: unknown, formData: FormData) {
     tracking_number: str(formData.get("tracking_number")),
     tracking_url: str(formData.get("tracking_url")),
     eta: str(formData.get("eta")),
+    order_date: orderDate,
     notes: str(formData.get("notes")),
     status: "draft" as const,
   };
 
-  if (!payload.supplier_id || !payload.label) {
-    return { error: "Lieferant und Label sind erforderlich." };
+  if (!payload.supplier_id) {
+    return { error: "Lieferant ist erforderlich." };
+  }
+  if (!payload.order_date) {
+    return { error: "Bestelldatum ist erforderlich." };
   }
 
   const { data, error } = await supabase.from("orders").insert(payload).select("id").single();
@@ -94,6 +118,7 @@ export async function updateOrder(orderId: string, formData: FormData) {
   // Nur Admin
   if (profile.is_admin) {
     setRequired("label");
+    setStr("order_date");
     setStr("description");
     setStr("sheet_url");
     if (formData.has("tags")) update.tags = formData.getAll("tags").map(String);

@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { t, type Locale } from "@/lib/i18n";
 
-export default function BackLink() {
+export default function BackLink({ locale = "de" }: { locale?: Locale }) {
   const router = useRouter();
   return (
     <button
@@ -13,7 +14,7 @@ export default function BackLink() {
       }}
       className="text-sm text-neutral-500 hover:text-neutral-900"
     >
-      ← Zurück
+      ← {t(locale, "common.back")}
     </button>
   );
 }
