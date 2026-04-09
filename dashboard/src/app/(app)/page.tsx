@@ -86,27 +86,29 @@ export default async function DashboardPage() {
           color="indigo"
         />
         <Stat
-          label="Offene Schulden"
+          label={profile.is_admin ? "Offene Schulden" : "Offener Betrag"}
           value={usd(totalOpen)}
           icon={<Wallet size={18} />}
           color="rose"
         />
-        <div className="sm:col-span-2 bg-white rounded-2xl border border-neutral-200 p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-xs text-neutral-500 uppercase tracking-wide">
-              Kg pro Lieferant
+        {profile.is_admin && (
+          <div className="sm:col-span-2 bg-white rounded-2xl border border-neutral-200 p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-xs text-neutral-500 uppercase tracking-wide">
+                Kg pro Lieferant
+              </div>
+              <div className="flex items-center gap-3 text-[10px] text-neutral-500">
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-indigo-200" /> Bestellt gesamt
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-indigo-600" /> davon unterwegs
+                </span>
+              </div>
             </div>
-            <div className="flex items-center gap-3 text-[10px] text-neutral-500">
-              <span className="inline-flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-sm bg-indigo-200" /> Bestellt gesamt
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-sm bg-indigo-600" /> davon unterwegs
-              </span>
-            </div>
+            <SupplierKgBars rows={kgRows} />
           </div>
-          <SupplierKgBars rows={kgRows} />
-        </div>
+        )}
       </section>
 
       <section>
