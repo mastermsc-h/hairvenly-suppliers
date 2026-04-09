@@ -264,7 +264,11 @@ function fetchShopifyInventoryData() {
     scriptProperties.deleteProperty("processedCollections");
     scriptProperties.deleteProperty("totalWeightMap");
     Logger.log("All collections processed.");
+    // ── Auto-Refresh-Kette: Dashboard → Verkaufsanalyse → Topseller ──────────
     createDashboard();
+    try { refreshVerkaufsanalyse(); } catch(e) { Logger.log("Auto-Refresh refreshVerkaufsanalyse Fehler: " + e.message); }
+    try { refreshTopseller();       } catch(e) { Logger.log("Auto-Refresh refreshTopseller Fehler: " + e.message); }
+    Logger.log("✅ Auto-Refresh vollständig abgeschlossen.");
   }
 }
 
@@ -287,6 +291,36 @@ function setupMultipleDailyTriggers() {
     ScriptApp.newTrigger("fetchShopifyInventoryData").timeBased().atHour(hour).everyDays(1).create();
   });
   Logger.log("Mehrere tägliche Trigger gesetzt.");
+}
+
+/**
+ * setupAutoDailyRefresh — einmalig aus dem Apps-Script-Editor ausführen!
+ *
+ * Installiert PERMANENTE tägliche Trigger (bleiben aktiv, bis man sie löscht):
+ *   • 06:00 Uhr → fetchShopifyInventoryData (→ createDashboard → refreshVerkaufsanalyse → refreshTopseller)
+ *   • 15:00 Uhr → fetchShopifyInventoryData (→ selbe Kette)
+ *
+ * Löscht vorher alle alten Trigger für fetchShopifyInventoryData, damit keine Duplikate entstehen.
+ */
+function setupAutoDailyRefresh() {
+  // Alle alten Shopify-Fetch-Trigger löschen (inkl. veralteter .after()-Einmal-Trigger)
+  deleteExistingTriggers("fetchShopifyInventoryData");
+
+  const stunden = [6, 15]; // 06:00 und 15:00 Uhr
+  stunden.forEach(function(h) {
+    ScriptApp.newTrigger("fetchShopifyInventoryData")
+      .timeBased()
+      .atHour(h)
+      .everyDays(1)
+      .create();
+  });
+
+  // Aktive Trigger zur Bestätigung loggen
+  const aktiv = ScriptApp.getProjectTriggers()
+    .filter(t => t.getHandlerFunction() === "fetchShopifyInventoryData")
+    .map(t => t.getTriggerSource() + " | " + t.getHandlerFunction());
+  Logger.log("✅ Auto-Refresh-Trigger installiert (2×/Tag, persistent):\n" + aktiv.join("\n"));
+  Logger.log("Kette pro Lauf: fetchShopifyInventoryData → createDashboard → refreshVerkaufsanalyse → refreshTopseller");
 }
 
 function deleteExistingTriggers(functionName) {
@@ -2032,6 +2066,13 @@ function createBestellungChina() {
     let verfügbar = lager + unterwegs;
     let bedarf = Math.max(0, ziel - verfügbar);
 
+    // Option B China: werden im Velocity-Check gesetzt
+    let tagesrateC = 0;           // Echte Tagesrate aus Velocity-Daten
+    let stock_at_84C = null;      // Simulierter Lagerstand bei Ankunft neuer Bestellung (Tag 84)
+    let hat_lückeC = false;       // Wird Regal leer bevor erste Lieferung ankommt?
+    let lücken_dauerC = 0;        // Anzahl Tage mit leerem Regal (geschätzt)
+    let lastTagesBisAnkunftC = 0; // Tage bis letzte bekannte Unterwegs-Lieferung ankommt
+
     // ─── VELOCITY-CHECK: Pro Bestellung mit echtem Ankunftsdatum ─────────────────────────────────
     // Für jede unterwegs-Bestellung: Ankunft = Bestelldatum + 56 Tage (8 Wochen China)
     // Lager bei Ankunft = Lager heute - Verbrauch bis Ankunft
@@ -2050,6 +2091,7 @@ function createBestellungChina() {
             const anteilFaktor2 = (TIER_W2[tier] || 1) / totalA2;
             const g30dProdukt2 = vdEntry2.g30d * anteilFaktor2;
             const tagesVerkauf2 = g30dProdukt2 / 30;
+            tagesrateC = tagesVerkauf2; // Option B: für Budget-Runden merken
             const heute2 = new Date();
             // Unterwegs-Details pro Bestellung laden
             const unterwegsDetails2 = getUnterwegsDetailForProduct(allOrders, "China", colorRaw.split(" ")[0], mapping.collName, mapping.länge.toLowerCase(), null);
@@ -2076,6 +2118,7 @@ function createBestellungChina() {
                 " | Verfügbar:" + verfügbarBeiAnkunft2 + "g | Bedarf:" + bedarfNachAnkunft2 + "g");
               // Lager nach Ankunft = Lager + Lieferung (für nächste Bestellung)
               lagerSimuliert = verfügbarBeiAnkunft2;
+              lastTagesBisAnkunftC = tagesBisAnkunft2; // Option B: letzter Ankunftstag merken
             }
             // Falls keine Bestellungen unterwegs: Velocity mit neuer Bestellung in 56T prüfen
             if (unterwegsDetails2.length === 0) {
@@ -2120,7 +2163,43 @@ function createBestellungChina() {
               }
               if (bedarfVelocity2 > bedarf) bedarf = bedarfVelocity2;
             }
-            // ──────────────────────────────────────────────────────────────────────────────
+            // ── Option B: stock_at_84 — Lager wenn neue Bestellung ankommt (Tag 84) ─────
+            // lagerSimuliert = Bestand nach letzter bekannter Lieferung
+            // lastTagesBisAnkunftC = wann diese letzte Lieferung ankommt
+            // Neue Bestellung: 84 Tage = 56T Lieferzeit + 14T Puffer für Verzögerungen + 14T Sicherheit
+            {
+              const daysToNew84 = Math.max(0, 84 - lastTagesBisAnkunftC);
+              stock_at_84C = Math.max(0, lagerSimuliert - Math.round(tagesVerkauf2 * daysToNew84));
+              Logger.log("📦 Option B stock_at_84 " + invRow.product + ": lagerSim=" + lagerSimuliert +
+                "g lastArrival=T+" + lastTagesBisAnkunftC + " daysToNew=" + daysToNew84 +
+                " → stock_at_84=" + stock_at_84C + "g");
+            }
+            // ── Lücken-Erkennung: Wird Regal leer bevor erste Lieferung ankommt? ─────────
+            if (tagesVerkauf2 > 0) {
+              const reichweite = lager / tagesVerkauf2; // Tage bis Lager leer
+              if (unterwegsDetails2.length > 0) {
+                // Prüfe ob Lager vor ERSTER Lieferung auf 0 fällt
+                const erstesDetail = unterwegsDetails2[0]; // bereits sortiert (älteste zuerst)
+                const ersteBestellDatum = parseDateDE(erstesDetail.date);
+                const ersteAnkunft = new Date(ersteBestellDatum.getTime() + 56 * 24 * 60 * 60 * 1000);
+                const ersteAnkunftTage = Math.max(0, Math.round((ersteAnkunft - heute2) / (24 * 60 * 60 * 1000)));
+                if (reichweite < ersteAnkunftTage) {
+                  hat_lückeC = true;
+                  lücken_dauerC = Math.round(ersteAnkunftTage - reichweite);
+                }
+              } else {
+                // Keine Bestellungen unterwegs
+                if (lager === 0) {
+                  hat_lückeC = true;
+                  lücken_dauerC = 84; // ganzer Horizont bis neue Bestellung ankommt
+                } else if (reichweite < 84) {
+                  hat_lückeC = true;
+                  lücken_dauerC = Math.round(84 - reichweite);
+                }
+              }
+              if (hat_lückeC) Logger.log("⚠️ Lücke China: " + invRow.product +
+                " | Reichweite=" + Math.round(reichweite) + "T | Lücke=" + lücken_dauerC + "T");
+            }
           }
         } catch(e2) { Logger.log("Velocity-Check China Fehler: " + e2.message); }
       }
@@ -2139,7 +2218,8 @@ function createBestellungChina() {
     // Standard Tapes Russisch: Key = "Standard Tapes|" (keine Länge im Produktnamen)
     const isPremiumKeys = ["tapes|55cm", "tapes|65cm", "bondings|65cm", "genius weft|65cm", "standard tapes|"];
     const isPremium = isPremiumKeys.includes((mapping.typ + "|" + mapping.länge).toLowerCase());
-    rowsByGroup[groupKey].push({ rang, tier, isPremium, lager, unterwegs, ziel, bedarf, nächste: nächsteBestellungChina, product: invRow.product });
+    rowsByGroup[groupKey].push({ rang, tier, isPremium, lager, unterwegs, ziel, bedarf, nächste: nächsteBestellungChina, product: invRow.product,
+      tagesrate: tagesrateC, stock_at_84: stock_at_84C, hat_lücke: hat_lückeC, lücken_dauer: lücken_dauerC });
   }
 
   // Zeilen zusammenbauen (nach Rang sortiert innerhalb jeder Gruppe)
@@ -2175,121 +2255,229 @@ function createBestellungChina() {
   let budgetProp = PropertiesService.getScriptProperties().getProperty("BUDGET_CHINA");
   let budgetG = (budgetProp && parseInt(budgetProp) > 0) ? parseInt(budgetProp) : 20000;
 
-  // ─── BUDGET-LISTE berechnen (3-Runden-Strategie) ───
-  // Kandidaten aufbauen
+  // ─── BUDGET-LISTE berechnen (8-Runden-Strategie – Option B China) ──────────────────────────
+  // Kernprinzip: Alle 2 Wochen bestellen → jede Bestellung deckt ~21 Tage (3W Sicherheitspuffer).
+  // stock_at_84 statt rohem lager+unterwegs → unterwegs-Ware die bis Tag 84 verbraucht wird,
+  // zählt nicht als "gedeckt". NOTFALL-Produkte (Lücke unvermeidbar) bekommen immer Vorrang.
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+
   let allCandidates = [];
   for (let g of groupOrder) {
     for (let r of rowsByGroup[g.key]) {
       if (r.bedarf <= 0) continue;
-      // isTop: TOP7 für normale Kategorien, TOP10 für Premium (Tapes 55/65cm, Bondings 65cm)
-      let isTop = (r.tier === "TOP7"); // Echter Verkaufsrang!
+      let isTop = (r.tier === "TOP7");
       let isMid = (r.tier === "MID");
-      allCandidates.push({ rang: r.rang, tier: r.tier, isPremium: r.isPremium, isTop, isMid, lager: r.lager, unterwegs: r.unterwegs,
-        ziel: r.ziel, bedarf: r.bedarf, nächste: r.nächste || 0, product: r.product, typ: g.typ, länge: g.länge,
-        zugeteilt: 0 });
+      // grundbedarf: Anteil dieser Bestellung = 21 Tage Verbrauch (3 Wochen Sicherheitspuffer)
+      // mind. 500g (Mindestbestellmenge China)
+      const gbd = (r.tagesrate > 0)
+        ? Math.max(500, Math.round(r.tagesrate * 21 / 100) * 100)
+        : 500;
+      // notfall: Lücke > 14 Tage ODER lager=0+unterwegs=0 ODER stock_at_84 < 7 Tage Rate
+      const notfall = (r.lager === 0 && r.unterwegs === 0) ||
+        (r.hat_lücke && r.lücken_dauer > 14) ||
+        (r.stock_at_84 != null && r.tagesrate > 0 && r.stock_at_84 < r.tagesrate * 7);
+      allCandidates.push({
+        rang: r.rang, tier: r.tier, isPremium: r.isPremium, isTop, isMid,
+        lager: r.lager, unterwegs: r.unterwegs, verfügbar: r.lager + r.unterwegs,
+        ziel: r.ziel, bedarf: r.bedarf, nächste: r.nächste || 0,
+        product: r.product, typ: g.typ, länge: g.länge,
+        tagesrate: r.tagesrate || 0, stock_at_84: r.stock_at_84,
+        hat_lücke: r.hat_lücke || false, lücken_dauer: r.lücken_dauer || 0,
+        notfall, grundbedarf: gbd,
+        zugeteilt: 0
+      });
     }
   }
 
-  const MINDEST_TOP = 500;   // Mindestmenge für Topseller (Rang ≤ 6)
-  const MINDEST_REST = 500;  // Mindestmenge für übrige Produkte
+  const tierPrio = (c) => c.isTop ? 0 : (c.isMid ? 1 : 2);
 
-  // verfügbar = Lager + Unterwegs für korrekte Priorisierung
-  for (let c of allCandidates) {
-    c.verfügbar = c.lager + c.unterwegs;
+  // MID-Cap: nur wenn Budget < Gesamtbedarf der Grundversorgung aller Produkte
+  const gesamtGrundbedarf = allCandidates.reduce((s, c) => s + c.grundbedarf, 0);
+  const budgetKnappC = budgetG < gesamtGrundbedarf;
+  const MID_CAP_C = 0.6;
+  if (budgetKnappC) {
+    Logger.log("⚠️ Budget knapp China: " + (budgetG/1000).toFixed(1) + "kg < Grundbedarf " + (gesamtGrundbedarf/1000).toFixed(1) + "kg → MID-Cap 60% aktiv");
+  } else {
+    Logger.log("✅ Budget China ausreichend: " + (budgetG/1000).toFixed(1) + "kg >= Grundbedarf " + (gesamtGrundbedarf/1000).toFixed(1) + "kg");
   }
+
+  function midCapC(c, proposed) {
+    if (!c.isMid || !budgetKnappC) return proposed;
+    const maxTotal = Math.max(500, Math.round(c.grundbedarf * MID_CAP_C / 100) * 100);
+    const remaining = Math.max(0, maxTotal - c.zugeteilt);
+    return Math.min(proposed, remaining);
+  }
+  function rundeC_(val) { return Math.round(val / 100) * 100; }
 
   let restBudget = budgetG;
 
-  // RUNDE 0: Produkte mit lager=0 UND unterwegs=0 – nach echtem tier sortiert (TOP7 > MID > REST)
-  const tierPrio = (c) => c.isTop ? 0 : (c.isMid ? 1 : 2);
-  let runde0 = allCandidates
-    .filter(c => c.lager === 0 && c.unterwegs === 0)
-    .sort((a, b) => tierPrio(a) - tierPrio(b) || a.rang - b.rang || a.verfügbar - b.verfügbar);
-  for (let c of runde0) {
-    if (restBudget <= 0) break;
-    let zugeteilt = Math.min(c.bedarf, restBudget);
-    zugeteilt = Math.round(zugeteilt / 100) * 100;
-    if (zugeteilt < 300) zugeteilt = 300;
-    zugeteilt = Math.min(zugeteilt, restBudget);
-    if (zugeteilt > 0) { c.zugeteilt += zugeteilt; restBudget -= zugeteilt; }
+  // ─── RUNDE 0: lager=0 & unterwegs=0 → Mindestmenge 500g ──────────────────────────────────
+  // Niemand bleibt dauerhaft bei Null — auch REST bekommt etwas. TOP → MID → REST.
+  {
+    let r0 = allCandidates
+      .filter(c => c.lager === 0 && c.unterwegs === 0)
+      .sort((a, b) => tierPrio(a) - tierPrio(b) || a.rang - b.rang);
+    for (let c of r0) {
+      if (restBudget <= 0) break;
+      if (c.zugeteilt >= 500) continue;
+      let zugeteilt = Math.min(500, restBudget, c.bedarf - c.zugeteilt);
+      zugeteilt = rundeC_(zugeteilt);
+      if (zugeteilt >= 100) { c.zugeteilt += zugeteilt; restBudget -= zugeteilt; }
+    }
   }
 
-  // RUNDE 1: Produkte mit lager=0 aber unterwegs > 0 – Mindestmenge
-  for (let c of allCandidates) {
-    if (restBudget <= 0) break;
-    if (c.lager > 0 || c.unterwegs === 0) continue;
-    let mindest = c.isTop ? MINDEST_TOP : MINDEST_REST;
-    let restBedarf = c.bedarf - c.zugeteilt;
-    let zugeteilt = Math.min(mindest, restBedarf, restBudget);
-    zugeteilt = Math.round(zugeteilt / 100) * 100;
-    if (zugeteilt < 300) zugeteilt = Math.min(300, restBudget);
-    if (zugeteilt > 0) { c.zugeteilt += zugeteilt; restBudget -= zugeteilt; }
+  // ─── RUNDE 1: NOTFALL → Aufholbedarf ──────────────────────────────────────────────────────
+  // Produkte mit Lücke > 14T oder stock_at_84 < 7 Tage. TOP7 zuerst.
+  // TOP7: grundbedarf × 2 | MID: × 1.5 | REST: × 1 — capped bei c.bedarf
+  {
+    let r1 = allCandidates
+      .filter(c => c.notfall)
+      .sort((a, b) => tierPrio(a) - tierPrio(b) || a.rang - b.rang);
+    for (let c of r1) {
+      if (restBudget <= 0) break;
+      const aufholFaktor = c.isTop ? 2.0 : (c.isMid ? 1.5 : 1.0);
+      let aufhol = Math.min(c.bedarf, rundeC_(c.grundbedarf * aufholFaktor));
+      aufhol = midCapC(c, aufhol);
+      let restBedarf = aufhol - c.zugeteilt;
+      if (restBedarf <= 0) continue;
+      let zugeteilt = Math.min(restBedarf, restBudget);
+      zugeteilt = rundeC_(zugeteilt);
+      if (zugeteilt >= 100) { c.zugeteilt += zugeteilt; restBudget -= zugeteilt; }
+    }
   }
 
-  // RUNDE 2: Produkte mit verfügbar < 500g bekommen Mindestmenge
-  for (let c of allCandidates) {
-    if (restBudget <= 0) break;
-    if (c.verfügbar === 0 || c.verfügbar >= 500) continue;
-    let mindest = c.isTop ? MINDEST_TOP : MINDEST_REST;
-    let restBedarf = c.bedarf - c.zugeteilt;
-    let zugeteilt = Math.min(mindest, restBedarf, restBudget);
-    zugeteilt = Math.round(zugeteilt / 100) * 100;
-    if (zugeteilt < 500) zugeteilt = Math.min(500, restBudget);
-    if (zugeteilt > 0) { c.zugeteilt += zugeteilt; restBudget -= zugeteilt; }
+  // ─── RUNDE 2: KRITISCH (stock_at_84 < 14 Tage Rate) → Nachholbedarf ──────────────────────
+  // Produkte die bei Ankunft fast leer sind. grundbedarf × 1.5. TOP7 → MID.
+  {
+    let r2 = allCandidates
+      .filter(c => !c.notfall && c.stock_at_84 != null && c.tagesrate > 0 && c.stock_at_84 < c.tagesrate * 14)
+      .sort((a, b) => {
+        const reichwA = a.stock_at_84 / Math.max(0.1, a.tagesrate);
+        const reichwB = b.stock_at_84 / Math.max(0.1, b.tagesrate);
+        return tierPrio(a) - tierPrio(b) || reichwA - reichwB;
+      });
+    for (let c of r2) {
+      if (restBudget <= 0) break;
+      let nachhol = Math.min(c.bedarf, rundeC_(c.grundbedarf * 1.5));
+      nachhol = midCapC(c, nachhol);
+      let restBedarf = nachhol - c.zugeteilt;
+      if (restBedarf <= 0) continue;
+      let zugeteilt = Math.min(restBedarf, restBudget);
+      zugeteilt = rundeC_(zugeteilt);
+      if (zugeteilt >= 100) { c.zugeteilt += zugeteilt; restBudget -= zugeteilt; }
+    }
   }
 
-  // RUNDE 3: Restbedarf aller Produkte nach Rang auffüllen (TOP7 > MID > REST)
-  let runde3 = allCandidates
-    .filter(c => c.bedarf - c.zugeteilt > 0)
-    .sort((a, b) => tierPrio(a) - tierPrio(b) || a.rang - b.rang || a.verfügbar - b.verfügbar);
-  for (let c of runde3) {
-    if (restBudget <= 0) break;
-    let restBedarf = c.bedarf - c.zugeteilt;
-    let zugeteilt = Math.min(restBedarf, restBudget);
-    zugeteilt = Math.round(zugeteilt / 100) * 100;
-    if (zugeteilt > 0) { c.zugeteilt += zugeteilt; restBudget -= zugeteilt; }
+  // ─── RUNDE 3: Grundversorgung ALLE → grundbedarf (21 Tage × Rate) ─────────────────────────
+  // Jedes Produkt bekommt seinen Bestellintervall-Anteil. TOP → MID (60%-Cap) → REST.
+  {
+    let r3 = allCandidates
+      .sort((a, b) => tierPrio(a) - tierPrio(b) || a.rang - b.rang);
+    for (let c of r3) {
+      if (restBudget <= 0) break;
+      let target = midCapC(c, c.grundbedarf);
+      let restBedarf = Math.min(c.bedarf, target) - c.zugeteilt;
+      if (restBedarf <= 0) continue;
+      let zugeteilt = Math.min(restBedarf, restBudget);
+      zugeteilt = rundeC_(zugeteilt);
+      if (zugeteilt >= 100) { c.zugeteilt += zugeteilt; restBudget -= zugeteilt; }
+    }
   }
 
-  // RUNDE 4: Restbudget → TOP7 nach globalem Rang aufstocken bis ihr velocity-basiertes Ziel.
-  // Kein fixer Mindestwert (früher 1500g) – das Ziel kommt aus getVerkaufsZielGrams_() = echte Velocity.
-  // Beispiel: #2E 85cm (425g/90T) → Ziel ≈ 500g, nicht 1500g.
-  let top7Sorted = allCandidates
-    .filter(c => c.isTop)
-    .sort((a, b) => a.rang - b.rang);
-  for (let c of top7Sorted) {
-    if (restBudget <= 0) break;
-    let bereits = c.lager + c.unterwegs + c.zugeteilt;
-    if (bereits >= c.ziel) continue;
-    let aufstockung = c.ziel - bereits;
-    aufstockung = Math.round(aufstockung / 100) * 100;
-    aufstockung = Math.min(aufstockung, restBudget);
-    if (aufstockung >= 100) { c.zugeteilt += aufstockung; restBudget -= aufstockung; }
+  // ─── RUNDE 4: TOP7 → Aufstocken bis Ziel (stock_at_84-basiert) ────────────────────────────
+  // Benutze stock_at_84 statt rohem lager+unterwegs (Option B)
+  {
+    let r4 = allCandidates
+      .filter(c => c.isTop)
+      .sort((a, b) => a.rang - b.rang);
+    for (let c of r4) {
+      if (restBudget <= 0) break;
+      const stockBase = (c.stock_at_84 != null) ? c.stock_at_84 : (c.lager + c.unterwegs);
+      let bereits = stockBase + c.zugeteilt;
+      if (bereits >= c.ziel) continue;
+      let aufstockung = Math.min(c.ziel - bereits, c.bedarf - c.zugeteilt);
+      aufstockung = rundeC_(aufstockung);
+      aufstockung = Math.min(aufstockung, restBudget);
+      if (aufstockung >= 100) { c.zugeteilt += aufstockung; restBudget -= aufstockung; }
+    }
   }
 
-  // RUNDE 5: Restbudget → MID nach Rang aufstocken bis Ziel
-  let midSorted = allCandidates
-    .filter(c => !c.isTop && c.rang <= 14)
-    .sort((a, b) => a.rang - b.rang);
-  for (let c of midSorted) {
-    if (restBudget <= 0) break;
-    let bereits = c.lager + c.unterwegs + c.zugeteilt;
-    if (bereits >= c.ziel) continue;
-    let aufstockung = c.ziel - bereits;
-    aufstockung = Math.round(aufstockung / 100) * 100;
-    aufstockung = Math.min(aufstockung, restBudget);
-    if (aufstockung >= 100) { c.zugeteilt += aufstockung; restBudget -= aufstockung; }
+  // ─── RUNDE 5: MID → Aufstocken bis Ziel (stock_at_84-basiert) ─────────────────────────────
+  {
+    let r5 = allCandidates
+      .filter(c => c.isMid)
+      .sort((a, b) => a.rang - b.rang);
+    for (let c of r5) {
+      if (restBudget <= 0) break;
+      const stockBase = (c.stock_at_84 != null) ? c.stock_at_84 : (c.lager + c.unterwegs);
+      let bereits = stockBase + c.zugeteilt;
+      if (bereits >= c.ziel) continue;
+      let aufstockung = Math.min(c.ziel - bereits, c.bedarf - c.zugeteilt);
+      aufstockung = rundeC_(aufstockung);
+      aufstockung = Math.min(aufstockung, restBudget);
+      if (aufstockung >= 100) { c.zugeteilt += aufstockung; restBudget -= aufstockung; }
+    }
+  }
+
+  // ─── RUNDE 6: REST → Restbedarf ────────────────────────────────────────────────────────────
+  {
+    let r6 = allCandidates
+      .filter(c => !c.isTop && !c.isMid)
+      .sort((a, b) => a.rang - b.rang);
+    for (let c of r6) {
+      if (restBudget <= 0) break;
+      let restBedarf = c.bedarf - c.zugeteilt;
+      if (restBedarf <= 0) continue;
+      let zugeteilt = Math.min(restBedarf, restBudget);
+      zugeteilt = rundeC_(zugeteilt);
+      if (zugeteilt >= 100) { c.zugeteilt += zugeteilt; restBudget -= zugeteilt; }
+    }
+  }
+
+  // ─── RUNDE 7: Breite Verteilung – Restbudget nach Coverage-Ratio ──────────────────────────
+  // Sortiert nach niedrigster Coverage (stock_at_84 + zugeteilt / ziel).
+  // Pro Pass: max grundbedarf extra. Bis zu 5 Durchläufe. Cap: 2× Ziel.
+  {
+    for (let pass = 0; pass < 5; pass++) {
+      if (restBudget <= 0) break;
+      let r7 = allCandidates.sort((a, b) => {
+        const sA = (a.stock_at_84 != null ? a.stock_at_84 : (a.lager + a.unterwegs)) + a.zugeteilt;
+        const sB = (b.stock_at_84 != null ? b.stock_at_84 : (b.lager + b.unterwegs)) + b.zugeteilt;
+        const rA = sA / Math.max(1, a.ziel);
+        const rB = sB / Math.max(1, b.ziel);
+        if (Math.abs(rA - rB) > 0.01) return rA - rB;
+        return tierPrio(a) - tierPrio(b) || (a.rang || 999) - (b.rang || 999);
+      });
+      let anyAdded = false;
+      for (let c of r7) {
+        if (restBudget <= 0) break;
+        const stockBase = (c.stock_at_84 != null) ? c.stock_at_84 : (c.lager + c.unterwegs);
+        if ((stockBase + c.zugeteilt) / Math.max(1, c.ziel) >= 2.0) continue;
+        let extra = Math.max(100, rundeC_(c.grundbedarf));
+        extra = Math.min(extra, restBudget, c.bedarf - c.zugeteilt);
+        extra = rundeC_(extra);
+        if (extra >= 100) { c.zugeteilt += extra; restBudget -= extra; anyAdded = true; }
+      }
+      if (!anyAdded) break;
+    }
+    if (restBudget > 0) Logger.log("💰 China Runde 7: Restbudget: " + (restBudget/1000).toFixed(1) + "kg");
   }
 
   // Nur Kandidaten mit Zuteilung > 0, nach Typ+Länge gruppiert sortieren
-  let budgetItems = allCandidates
+  // Sortierung NOTFALL-Produkte zuerst innerhalb ihrer Gruppe
+  let budgetCandidatesSorted_ = allCandidates
     .filter(c => c.zugeteilt > 0)
     .sort((a, b) => {
       let typOrder = ["Tapes", "Bondings", "Classic Weft", "Genius Weft"];
       let ai = typOrder.indexOf(a.typ), bi = typOrder.indexOf(b.typ);
       if (ai !== bi) return ai - bi;
       if (a.länge !== b.länge) return a.länge.localeCompare(b.länge);
+      // NOTFALL zuerst, dann nach Rang
+      if (a.notfall !== b.notfall) return a.notfall ? -1 : 1;
       return a.rang - b.rang;
-    })
+    });
+
+  let budgetItems = budgetCandidatesSorted_
     .map(c => [c.typ, c.länge, c.product, c.lager, c.unterwegs, c.ziel, c.zugeteilt, c.nächste > 0 ? c.nächste : ""]);
 
   // Gruppenstruktur: Typ nur in erster Zeile
@@ -2301,9 +2489,16 @@ function createBestellungChina() {
     return row;
   });
 
+  // NOTFALL-Warnzeilen sammeln (Produkte mit unvermeidbarer Lücke)
+  const notfallProdukte = allCandidates.filter(c => c.notfall && c.hat_lücke && c.lücken_dauer > 0);
+  const notfallText = notfallProdukte.length > 0
+    ? "🚨 NOTFALL (" + notfallProdukte.length + " Produkte): " +
+      notfallProdukte.map(c => c.product.split(" ").slice(0,2).join(" ") + " (" + c.lücken_dauer + "T Lücke)").join(" · ")
+    : null;
+
   // ─── BUDGET-LISTE oben schreiben ───
   let colCount = 8;
-  let headerRow = ["Typ", "Länge", "Farbcode", "Lager (g)", "Unterwegs (g)", "Ziel (g) Minimum", "Bestellung (g)", "Nächste Best. (g)"];
+  let headerRow = ["Typ", "Länge", "Farbcode", "Lager (g)", "Unterwegs (g)", "Ziel (g)", "Bestellung (g)", "Nächste Best. (g)"];
   let budgetTitle = "CHINA (Usbekisch Wellig) – BUDGET-BESTELLUNG " + dateStr + "  |  Budget: " + (budgetG/1000).toFixed(1) + " kg  |  Verbraucht: " + ((budgetG - restBudget)/1000).toFixed(1) + " kg";
   let budgetTotalBedarf = budgetItems.reduce((s, r) => s + (typeof r[6] === "number" ? r[6] : 0), 0);
   let nächsteTotalChina = budgetItems.reduce((s, r) => s + (typeof r[7] === "number" ? r[7] : 0), 0);
@@ -2314,6 +2509,7 @@ function createBestellungChina() {
 
   let budgetAllRows = [
     [budgetTitle, ...Array(colCount - 1).fill("")],
+    ...(notfallText ? [[notfallText, ...Array(colCount - 1).fill("")]] : []),
     headerRow,
     ...budgetRows,
     budgetSubtotal
@@ -2329,39 +2525,39 @@ function createBestellungChina() {
   sheet.getRange(2, 1, 1, colCount)
     .setBackground("#2d2d2d").setFontColor("#ffffff").setFontWeight("bold").setFontSize(10)
     .setHorizontalAlignment("center");
-  // Datenzeilen Budget-Liste
-  let sectionColorsBudget = { "Tapes": "#e8f0fe", "Bondings": "#fce8e6", "Classic Weft": "#e6f4ea", "Genius Weft": "#fef9e7" };
-  let curBg = "#e8f0fe";
-  // isTop-Lookup aus allCandidates (sortiert wie budgetItems)
-  let budgetCandidatesSorted = allCandidates.filter(c => c.zugeteilt > 0)
-    .sort((a, b) => {
-      let typOrder = ["Tapes", "Bondings", "Classic Weft", "Genius Weft"];
-      let ai = typOrder.indexOf(a.typ), bi = typOrder.indexOf(b.typ);
-      if (ai !== bi) return ai - bi;
-      if (a.länge !== b.länge) return a.länge.localeCompare(b.länge);
-      return a.rang - b.rang;
-    });
   // ── Tier-Farbschema (konsistent mit Topseller-Tab) ──
   const B_TOP7  = "#fff9c4"; const B_TOP7B = "#fff3a0";
   const B_MID   = "#e3f2fd"; const B_MIDB  = "#bbdefb";
   const B_REST  = "#f1f8e9"; const B_RESTB = "#dcedc8";
   const BC_TOP7 = "#f9a825"; const BC_MID  = "#1565c0"; const BC_REST = "#558b2f";
 
-  for (let i = 2; i < budgetAllRows.length - 1; i++) {
+  // NOTFALL-Warnzeile formatieren (falls vorhanden: Zeile 2)
+  let dataRowOffset = notfallText ? 3 : 2; // Zeile ab der Datenzeilen beginnen (1-basiert: nach Titel [+Warnung] +Header)
+  if (notfallText) {
+    sheet.getRange(2, 1, 1, colCount).merge()
+      .setBackground("#b71c1c").setFontColor("#ffffff").setFontWeight("bold").setFontSize(10)
+      .setHorizontalAlignment("center");
+  }
+
+  // Datenzeilen Budget-Liste
+  // budgetCandidatesSorted_ bereits korrekt sortiert (mit NOTFALL zuerst)
+  for (let i = dataRowOffset; i < budgetAllRows.length - 1; i++) {
     let r = budgetAllRows[i];
-    let itemIdx = i - 2;
-    let cand = budgetCandidatesSorted[itemIdx];
+    let itemIdx = i - dataRowOffset;
+    let cand = budgetCandidatesSorted_[itemIdx];
     let isTop7 = cand && cand.isTop;
     let isMid  = cand && cand.isMid;
+    let isNotfall = cand && cand.notfall;
     let bg;
-    if (isTop7)     bg = (i % 2 === 0) ? B_TOP7  : B_TOP7B;
-    else if (isMid) bg = (i % 2 === 0) ? B_MID   : B_MIDB;
-    else            bg = (i % 2 === 0) ? B_REST  : B_RESTB;
+    if (isNotfall)  bg = (i % 2 === 0) ? "#ffcdd2" : "#ef9a9a"; // Rot für NOTFALL
+    else if (isTop7) bg = (i % 2 === 0) ? B_TOP7  : B_TOP7B;
+    else if (isMid)  bg = (i % 2 === 0) ? B_MID   : B_MIDB;
+    else             bg = (i % 2 === 0) ? B_REST  : B_RESTB;
     sheet.getRange(i + 1, 1, 1, colCount).setBackground(bg).setFontSize(10);
-    if (isTop7) sheet.getRange(i + 1, 1, 1, colCount).setFontWeight("bold");
+    if (isTop7 || isNotfall) sheet.getRange(i + 1, 1, 1, colCount).setFontWeight("bold");
     let bedarf = r[6];
     if (typeof bedarf === "number" && bedarf > 0) {
-      let bedarfBg = isTop7 ? BC_TOP7 : (isMid ? BC_MID : BC_REST);
+      let bedarfBg = isNotfall ? "#c62828" : (isTop7 ? BC_TOP7 : (isMid ? BC_MID : BC_REST));
       sheet.getRange(i + 1, 7).setBackground(bedarfBg)
         .setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
     }
