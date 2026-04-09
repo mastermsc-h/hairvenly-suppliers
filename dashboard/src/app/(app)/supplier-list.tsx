@@ -76,14 +76,14 @@ export default function SupplierList({
           onDragEnd={handleDragEnd}
           onDragOver={(e) => handleDragOver(e, idx)}
           onDrop={(e) => handleDrop(e, idx)}
-          className={`relative group transition-transform ${
+          className={`relative group/drag transition-transform ${
             overIdx === idx && dragIdx !== null && dragIdx !== idx
               ? "ring-2 ring-indigo-300 rounded-2xl"
               : ""
           } ${pending ? "opacity-70 pointer-events-none" : ""}`}
         >
           {/* Drag handle */}
-          <div className="absolute left-0 top-0 bottom-0 z-10 flex items-center -ml-7 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing">
+          <div className="absolute left-0 top-0 bottom-0 z-10 flex items-center -ml-7 opacity-0 group-hover/drag:opacity-100 transition-opacity cursor-grab active:cursor-grabbing">
             <GripVertical size={16} className="text-neutral-400" />
           </div>
           {item.node}
