@@ -74,7 +74,7 @@ export default async function DashboardPage() {
   );
 
   return (
-    <div className="p-8 space-y-8 max-w-7xl">
+    <div className="p-4 md:p-8 space-y-6 md:space-y-8 max-w-7xl">
       <header>
         <h1 className="text-2xl font-semibold text-neutral-900">{t(locale, "nav.overview")}</h1>
         <p className="text-sm text-neutral-500 mt-1">{t(locale, "dashboard.subtitle")}</p>
@@ -138,7 +138,7 @@ export default async function DashboardPage() {
             const showOverview = profile.is_admin || s.overview_visible_to_supplier;
 
             const header = (
-              <div className="px-4 py-4 flex items-center justify-between gap-4">
+              <div className="px-3 py-3 md:px-4 md:py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <AvatarUpload
                     supplierId={s.id}
@@ -156,7 +156,7 @@ export default async function DashboardPage() {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-5 shrink-0">
+                <div className="flex items-center gap-4 sm:gap-5 shrink-0 pl-12 sm:pl-0">
                   {showOverview && (
                     <OverviewDoc
                       supplierId={s.id}
@@ -179,7 +179,7 @@ export default async function DashboardPage() {
             );
 
             const addBtn = (
-              <div className="px-5 py-2 border-t border-neutral-100 bg-neutral-50/40">
+              <div className="px-4 md:px-5 py-2 border-t border-neutral-100 bg-neutral-50/40">
                 <Link
                   href={`/orders/new?supplier_id=${s.id}`}
                   className="inline-flex items-center gap-1 text-xs text-neutral-500 hover:text-indigo-700"
@@ -192,14 +192,15 @@ export default async function DashboardPage() {
             const body =
               openOrders.length === 0 ? (
                 <>
-                  <div className="px-5 py-6 text-center text-sm text-neutral-400 border-t border-neutral-100">
+                  <div className="px-4 md:px-5 py-6 text-center text-sm text-neutral-400 border-t border-neutral-100">
                     {t(locale, "dashboard.no_active_orders")}
                   </div>
                   {addBtn}
                 </>
               ) : (
                 <div className="border-t border-neutral-100">
-                  <table className="w-full text-sm">
+                  {/* Desktop table */}
+                  <table className="hidden md:table w-full text-sm">
                     <thead className="bg-neutral-50/60 text-left text-xs uppercase text-neutral-500">
                       <tr>
                         <th className="px-5 py-2.5 font-medium">{t(locale, "table.label")}</th>
@@ -251,12 +252,36 @@ export default async function DashboardPage() {
                       ))}
                     </tbody>
                   </table>
+                  {/* Mobile card list */}
+                  <div className="md:hidden divide-y divide-neutral-100">
+                    {openOrders.map((o) => (
+                      <Link key={o.id} href={`/orders/${o.id}`} className="block px-4 py-3 hover:bg-indigo-50/30 active:bg-indigo-50/50 transition">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="font-medium text-neutral-900 text-sm truncate">{o.label}</div>
+                            <div className="flex items-center gap-2 mt-1">
+                              <StatusBadge status={o.status} locale={locale} />
+                              {o.eta && <span className="text-xs text-neutral-500">{date(o.eta)}</span>}
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-sm font-semibold text-neutral-900">{usd(o.remaining_balance)}</div>
+                            <div className="text-[10px] text-neutral-500">{usd(o.invoice_total)}</div>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                          <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} locale={locale} />
+                          <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
                   {addBtn}
                 </div>
               );
 
             const footer = (
-              <div className="px-5 py-3 border-t border-neutral-100 flex items-center gap-3 text-xs bg-neutral-50/40">
+              <div className="px-4 md:px-5 py-3 border-t border-neutral-100 flex flex-wrap items-center gap-2 md:gap-3 text-xs bg-neutral-50/40">
                 {s.price_list_url ? (
                   <a
                     href={s.price_list_url}

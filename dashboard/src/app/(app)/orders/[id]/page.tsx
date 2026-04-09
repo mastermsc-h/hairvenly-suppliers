@@ -90,17 +90,17 @@ export default async function OrderDetailPage({
   }
 
   return (
-    <div className="p-8 space-y-6 max-w-6xl">
+    <div className="p-4 md:p-8 space-y-5 md:space-y-6 max-w-6xl">
       <div>
         <BackLink locale={locale} />
-        <div className="flex items-start justify-between mt-2">
-          <div>
-            <h1 className="text-2xl font-semibold text-neutral-900">{o.label}</h1>
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mt-2">
+          <div className="min-w-0">
+            <h1 className="text-xl md:text-2xl font-semibold text-neutral-900 break-words">{o.label}</h1>
             <p className="text-sm text-neutral-500 mt-1">
               {sup?.name} · {t(locale, "order.created")} {dateTime(o.created_at)}
             </p>
           </div>
-          <span className="inline-flex px-3 py-1 rounded-full text-xs font-medium bg-neutral-100 text-neutral-700">
+          <span className="inline-flex px-3 py-1 rounded-full text-xs font-medium bg-neutral-100 text-neutral-700 self-start shrink-0">
             {t(locale, `order.status.${o.status}`)}
           </span>
         </div>
@@ -112,11 +112,11 @@ export default async function OrderDetailPage({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           {/* Details + Edit */}
-          <section className="bg-white rounded-2xl border border-neutral-200 p-6">
+          <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-medium text-neutral-700">{t(locale, "order.details")}</h2>
             </div>
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
               <Info label={t(locale, "order.description")} value={o.description ?? "—"} />
               <Info label={t(locale, "order.tags")} value={o.tags?.join(", ") || "—"} />
               <Info label={t(locale, "order.eta")} value={date(o.eta)} />
@@ -179,7 +179,7 @@ export default async function OrderDetailPage({
           </section>
 
           {/* Documents */}
-          <section className="bg-white rounded-2xl border border-neutral-200 p-6">
+          <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
             <h2 className="text-sm font-medium text-neutral-700 mb-4">{t(locale, "order.documents_title")}</h2>
             <DocumentUpload orderId={o.id} locale={locale} />
             <ul className="mt-4 divide-y divide-neutral-100">
@@ -202,7 +202,7 @@ export default async function OrderDetailPage({
           </section>
 
           {/* Timeline */}
-          <section className="bg-white rounded-2xl border border-neutral-200 p-6">
+          <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
             <h2 className="text-sm font-medium text-neutral-700 mb-4">{t(locale, "order.timeline")}</h2>
             <ul className="space-y-3 text-sm">
               {evs.length === 0 && <li className="text-neutral-500">{t(locale, "order.no_events_yet")}</li>}
@@ -227,7 +227,7 @@ export default async function OrderDetailPage({
 
         {/* Sidebar: Finance */}
         <aside className="space-y-6">
-          <section className="bg-white rounded-2xl border border-neutral-200 p-6">
+          <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
             <h2 className="text-sm font-medium text-neutral-700 mb-4 flex items-center gap-1.5">
               <DollarSign size={14} className="text-neutral-400" />
               {t(locale, "order.finance")}
@@ -245,7 +245,7 @@ export default async function OrderDetailPage({
             </dl>
           </section>
 
-          <section className="bg-white rounded-2xl border border-neutral-200 p-6">
+          <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
             <h2 className="text-sm font-medium text-neutral-700 mb-4 flex items-center gap-1.5">
               <CreditCard size={14} className="text-neutral-400" />
               {t(locale, "order.payments")}

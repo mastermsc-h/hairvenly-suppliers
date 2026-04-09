@@ -17,7 +17,7 @@ export default async function NewOrderPage({
   const sp = await searchParams;
 
   return (
-    <div className="p-8 max-w-3xl">
+    <div className="p-4 md:p-8 max-w-3xl">
       <Link href="/orders" className="text-sm text-neutral-500 hover:text-neutral-900">
         ← {t(locale, "nav.orders")}
       </Link>

@@ -49,8 +49,8 @@ export default async function OrdersPage() {
     .filter((g) => g.orders.length > 0);
 
   return (
-    <div className="p-8 space-y-8 max-w-7xl">
-      <header className="flex items-center justify-between">
+    <div className="p-4 md:p-8 space-y-6 md:space-y-8 max-w-7xl">
+      <header className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-neutral-900">{t(locale, "nav.orders")}</h1>
           <p className="text-sm text-neutral-500 mt-1">
@@ -98,7 +98,8 @@ export default async function OrdersPage() {
             </div>
 
             <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
-              <table className="w-full text-sm">
+              {/* Desktop table */}
+              <table className="hidden md:table w-full text-sm">
                 <thead className="bg-neutral-50 text-left text-xs uppercase text-neutral-500">
                   <tr>
                     <th className="px-4 py-3 font-medium">{t(locale, "table.label")}</th>
@@ -155,6 +156,33 @@ export default async function OrdersPage() {
                   ))}
                 </tbody>
               </table>
+              {/* Mobile card list */}
+              <div className="md:hidden divide-y divide-neutral-100">
+                {sOrders.map((o) => (
+                  <Link key={o.id} href={`/orders/${o.id}`} className="block px-4 py-3 hover:bg-neutral-50 active:bg-neutral-100 transition">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-medium text-neutral-900 text-sm truncate">{o.label}</div>
+                        {o.description && (
+                          <div className="text-xs text-neutral-500 truncate">{o.description}</div>
+                        )}
+                        <div className="flex items-center gap-2 mt-1">
+                          <StatusBadge status={o.status} locale={locale} />
+                          {o.eta && <span className="text-xs text-neutral-500">{date(o.eta)}</span>}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-sm font-semibold text-neutral-900">{usd(o.remaining_balance)}</div>
+                        <div className="text-[10px] text-neutral-500">{usd(o.invoice_total)}</div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                      <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} locale={locale} />
+                      <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
+                    </div>
+                  </Link>
+                ))}
+              </div>
             </div>
           </section>
         );
