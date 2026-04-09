@@ -12,7 +12,7 @@ export async function requireProfile(): Promise<Profile> {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id, email, username, display_name, is_admin, approved, supplier_id")
+    .select("id, email, username, display_name, is_admin, approved, language, supplier_id")
     .eq("id", user.id)
     .single();
 

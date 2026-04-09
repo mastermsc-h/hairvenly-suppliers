@@ -103,6 +103,7 @@ export interface Profile {
   display_name: string | null;
   is_admin: boolean;
   approved: boolean;
+  language: string;
   supplier_id: string | null;
 }
 
