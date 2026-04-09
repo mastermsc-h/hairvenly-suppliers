@@ -96,6 +96,75 @@ export async function updateOverviewLabel(supplierId: string, label: string) {
   return { ok: true };
 }
 
+export async function createSupplier(formData: FormData) {
+  await requireAdmin();
+  const supabase = await createClient();
+  const s = (v: FormDataEntryValue | null) => {
+    const x = String(v ?? "").trim();
+    return x || null;
+  };
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) return { error: "Name ist erforderlich." };
+
+  const { error } = await supabase.from("suppliers").insert({
+    name,
+    email: s(formData.get("email")),
+    phone: s(formData.get("phone")),
+    address: s(formData.get("address")),
+    sort_order: Number(formData.get("sort_order")) || 0,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/");
+  return { ok: true };
+}
+
+export async function updateSupplierBasic(supplierId: string, formData: FormData) {
+  await requireAdmin();
+  const supabase = await createClient();
+  const s = (v: FormDataEntryValue | null) => {
+    const x = String(v ?? "").trim();
+    return x || null;
+  };
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) return { error: "Name ist erforderlich." };
+
+  const { error } = await supabase
+    .from("suppliers")
+    .update({
+      name,
+      email: s(formData.get("email")),
+      phone: s(formData.get("phone")),
+      address: s(formData.get("address")),
+      sort_order: Number(formData.get("sort_order")) || 0,
+    })
+    .eq("id", supplierId);
+  if (error) return { error: error.message };
+  revalidatePath("/");
+  return { ok: true };
+}
+
+export async function deleteSupplier(supplierId: string) {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  // Check if any orders are linked to this supplier
+  const { count } = await supabase
+    .from("orders")
+    .select("id", { count: "exact", head: true })
+    .eq("supplier_id", supplierId);
+
+  if (count && count > 0) {
+    return {
+      error: `Lieferant kann nicht gelöscht werden — ${count} Bestellung(en) verknüpft.`,
+    };
+  }
+
+  const { error } = await supabase.from("suppliers").delete().eq("id", supplierId);
+  if (error) return { error: error.message };
+  revalidatePath("/");
+  return { ok: true };
+}
+
 export async function setOverviewVisibility(supplierId: string, visible: boolean) {
   await requireAdmin();
   const supabase = await createClient();

@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import { signOut } from "@/lib/actions/auth";
-import { LayoutDashboard, Package, Users, LogOut } from "lucide-react";
+import { t, type Locale } from "@/lib/i18n";
+import { LayoutDashboard, Package, Building2, Users, LogOut } from "lucide-react";
+import LanguageSwitcher from "./language-switcher";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const profile = await requireProfile();
+  const locale = (profile.language ?? "de") as Locale;
 
   return (
     <div className="min-h-screen flex bg-neutral-50">
@@ -15,21 +18,27 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
 
         <nav className="flex-1 p-3 space-y-1 text-sm">
-          <NavLink href="/" icon={<LayoutDashboard size={16} />} label="Übersicht" />
-          <NavLink href="/orders" icon={<Package size={16} />} label="Bestellungen" />
+          <NavLink href="/" icon={<LayoutDashboard size={16} />} label={t(locale, "nav.overview")} />
+          <NavLink href="/orders" icon={<Package size={16} />} label={t(locale, "nav.orders")} />
           {profile.is_admin && (
-            <NavLink href="/admin/users" icon={<Users size={16} />} label="Benutzer" />
+            <>
+              <NavLink href="/admin/suppliers" icon={<Building2 size={16} />} label="Lieferanten" />
+              <NavLink href="/admin/users" icon={<Users size={16} />} label={t(locale, "nav.users")} />
+            </>
           )}
         </nav>
 
         <div className="p-3 border-t border-neutral-200">
           <div className="px-2 py-2">
-            <div className="text-xs text-neutral-500">Eingeloggt als</div>
-            <div className="text-sm font-medium text-neutral-900 truncate">
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-neutral-500">{t(locale, "nav.logged_in_as")}</div>
+              <LanguageSwitcher current={locale} />
+            </div>
+            <div className="text-sm font-medium text-neutral-900 truncate mt-1">
               {profile.display_name || profile.username || profile.email}
             </div>
             <div className="text-xs text-neutral-500 mt-0.5">
-              {profile.is_admin ? "Admin" : "Lieferant"}
+              {profile.is_admin ? t(locale, "nav.admin") : t(locale, "nav.supplier")}
             </div>
           </div>
           <form action={signOut}>
@@ -37,7 +46,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               type="submit"
               className="w-full flex items-center gap-2 px-2 py-2 text-sm text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition"
             >
-              <LogOut size={16} /> Abmelden
+              <LogOut size={16} /> {t(locale, "nav.logout")}
             </button>
           </form>
         </div>

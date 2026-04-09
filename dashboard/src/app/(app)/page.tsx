@@ -15,6 +15,7 @@ import SupplierProfile from "./supplier-profile";
 import { VolumeChart, DebtChart } from "./charts";
 import SupplierKgBars, { type SupplierKgRow } from "./supplier-kg-bars";
 import { publicAvatarUrl, publicOverviewUrl } from "@/lib/storage";
+import { t, type Locale } from "@/lib/i18n";
 
 export default async function DashboardPage() {
   const profile = await requireProfile();
@@ -65,6 +66,8 @@ export default async function DashboardPage() {
     })
     .filter((r) => r.total > 0);
 
+  const locale = (profile.language ?? "de") as Locale;
+
   const monthly = buildMonthlyStats(
     list.map((o) => ({ created_at: o.created_at, invoice_total: o.invoice_total })),
     (payments ?? []) as { paid_at: string; amount: number | null }[],
@@ -74,19 +77,19 @@ export default async function DashboardPage() {
   return (
     <div className="p-8 space-y-8 max-w-7xl">
       <header>
-        <h1 className="text-2xl font-semibold text-neutral-900">Übersicht</h1>
-        <p className="text-sm text-neutral-500 mt-1">Zahlen, Bestellungen, Lieferanten</p>
+        <h1 className="text-2xl font-semibold text-neutral-900">{t(locale, "nav.overview")}</h1>
+        <p className="text-sm text-neutral-500 mt-1">{t(locale, "dashboard.subtitle")}</p>
       </header>
 
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Stat
-          label="Aktive Bestellungen"
+          label={t(locale, "dashboard.active_orders")}
           value={activeOrders.toString()}
           icon={<Package size={18} />}
           color="indigo"
         />
         <Stat
-          label={profile.is_admin ? "Offene Schulden" : "Offener Betrag"}
+          label={profile.is_admin ? t(locale, "dashboard.open_debt") : t(locale, "dashboard.open_amount")}
           value={usd(totalOpen)}
           icon={<Wallet size={18} />}
           color="rose"
@@ -95,14 +98,14 @@ export default async function DashboardPage() {
           <div className="sm:col-span-2 bg-white rounded-2xl border border-neutral-200 p-5 shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <div className="text-xs text-neutral-500 uppercase tracking-wide">
-                Kg pro Lieferant
+                {t(locale, "dashboard.kg_per_supplier")}
               </div>
               <div className="flex items-center gap-3 text-[10px] text-neutral-500">
                 <span className="inline-flex items-center gap-1">
-                  <span className="w-2.5 h-2.5 rounded-sm bg-indigo-200" /> Bestellt gesamt
+                  <span className="w-2.5 h-2.5 rounded-sm bg-indigo-200" /> {t(locale, "dashboard.ordered_total")}
                 </span>
                 <span className="inline-flex items-center gap-1">
-                  <span className="w-2.5 h-2.5 rounded-sm bg-indigo-600" /> davon unterwegs
+                  <span className="w-2.5 h-2.5 rounded-sm bg-indigo-600" /> {t(locale, "dashboard.in_transit")}
                 </span>
               </div>
             </div>
@@ -112,9 +115,9 @@ export default async function DashboardPage() {
       </section>
 
       <section>
-        <h2 className="text-lg font-semibold text-neutral-900 mb-1">Bestellungen pro Lieferant</h2>
+        <h2 className="text-lg font-semibold text-neutral-900 mb-1">{t(locale, "dashboard.orders_per_supplier")}</h2>
         <p className="text-xs text-neutral-500 mb-4">
-          Live-Übersicht aller aktiven Bestellungen mit Status, Dokumenten und Beträgen
+          {t(locale, "dashboard.orders_subtitle")}
         </p>
 
         <SupplierList
@@ -186,7 +189,7 @@ export default async function DashboardPage() {
               openOrders.length === 0 ? (
                 <>
                   <div className="px-5 py-6 text-center text-sm text-neutral-400 border-t border-neutral-100">
-                    Keine aktiven Bestellungen
+                    {t(locale, "dashboard.no_active_orders")}
                   </div>
                   {addBtn}
                 </>

@@ -12,7 +12,7 @@ export default async function UsersPage() {
   const [{ data: profiles }, { data: suppliers }] = await Promise.all([
     supabase
       .from("profiles")
-      .select("id, email, username, display_name, is_admin, approved, supplier_id, created_at")
+      .select("id, email, username, display_name, is_admin, approved, supplier_id, language, created_at")
       .order("created_at", { ascending: false }),
     supabase.from("suppliers").select("*").order("sort_order").order("name"),
   ]);
@@ -25,6 +25,7 @@ export default async function UsersPage() {
     is_admin: boolean;
     approved: boolean;
     supplier_id: string | null;
+    language: string;
     created_at: string;
   }[];
   const allSuppliers = (suppliers ?? []) as Supplier[];

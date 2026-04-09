@@ -79,6 +79,16 @@ export async function register(
   redirect("/pending");
 }
 
+export async function updateLanguage(language: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Nicht eingeloggt." };
+  if (!["de", "en", "tr"].includes(language)) return { error: "Ungültige Sprache." };
+  await supabase.from("profiles").update({ language }).eq("id", user.id);
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
 export async function signOut() {
   const supabase = await createClient();
   await supabase.auth.signOut();
@@ -123,6 +133,34 @@ export async function rejectUser(userId: string) {
 
   // Delete the auth user (cascades to profile)
   const { error } = await supabase.auth.admin.deleteUser(userId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/admin/users");
+  return { ok: true };
+}
+
+export async function updateUser(userId: string, formData: FormData) {
+  const supabase = await createClient();
+
+  // Verify caller is admin
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Nicht eingeloggt." };
+  const { data: caller } = await supabase
+    .from("profiles")
+    .select("is_admin")
+    .eq("id", user.id)
+    .single();
+  if (!caller?.is_admin) return { error: "Nur Admins können Benutzer bearbeiten." };
+
+  const username = String(formData.get("username") ?? "").trim() || null;
+  const displayName = String(formData.get("display_name") ?? "").trim() || null;
+  const language = String(formData.get("language") ?? "de").trim();
+  const supplierId = String(formData.get("supplier_id") ?? "").trim() || null;
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({ username, display_name: displayName, language, supplier_id: supplierId })
+    .eq("id", userId);
   if (error) return { error: error.message };
 
   revalidatePath("/admin/users");
