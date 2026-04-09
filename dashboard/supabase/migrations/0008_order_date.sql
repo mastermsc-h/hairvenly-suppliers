@@ -1,11 +1,13 @@
 -- Add order_date column: the actual date of the order (chosen by user)
-ALTER TABLE orders ADD COLUMN order_date date;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_date date;
 
--- Backfill: try to parse date from label, otherwise use created_at date
+-- Backfill: use created_at date for existing orders
 UPDATE orders SET order_date = created_at::date WHERE order_date IS NULL;
 
--- Update the orders_with_totals view to include order_date
-CREATE OR REPLACE VIEW orders_with_totals AS
+-- Must drop + recreate view because new column in o.* shifts column positions
+DROP VIEW IF EXISTS orders_with_totals;
+
+CREATE VIEW orders_with_totals AS
 SELECT
   o.*,
   COALESCE(o.invoice_total, 0)
