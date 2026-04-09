@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Weight, Package as PackageIcon, DollarSign, CreditCard, Pencil } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth";
 import { usd, date, dateTime } from "@/lib/format";
@@ -109,16 +109,26 @@ export default async function OrderDetailPage({
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          {/* Übersicht */}
+          {/* Übersicht + Edit */}
           <section className="bg-white rounded-2xl border border-neutral-200 p-6">
-            <h2 className="text-sm font-medium text-neutral-700 mb-4">Details</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-medium text-neutral-700">Details</h2>
+            </div>
             <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
               <Info label="Beschreibung" value={o.description ?? "—"} />
               <Info label="Tags" value={o.tags?.join(", ") || "—"} />
               <Info label="Ankunft ca." value={date(o.eta)} />
               <Info
                 label="Gewicht / Pakete"
-                value={`${o.weight_kg ?? "—"} kg / ${o.package_count ?? "—"}`}
+                value={
+                  <span className="inline-flex items-center gap-1">
+                    <Weight size={13} className="text-neutral-400" />
+                    {o.weight_kg ?? "—"} kg
+                    <span className="text-neutral-400 mx-0.5">/</span>
+                    <PackageIcon size={13} className="text-neutral-400" />
+                    {o.package_count ?? "—"}
+                  </span>
+                }
               />
               <Info
                 label="Tracking"
@@ -161,10 +171,10 @@ export default async function OrderDetailPage({
               <Info label="Letztes Update vom Lieferant" value={date(o.last_supplier_update)} />
               <Info label="Notizen" value={o.notes ?? "—"} />
             </dl>
+            <div className="mt-5 pt-4 border-t border-neutral-100 flex justify-end">
+              <EditPanel order={o} isAdmin={profile.is_admin} />
+            </div>
           </section>
-
-          {/* Edit */}
-          <EditPanel order={o} isAdmin={profile.is_admin} />
 
           {/* Dokumente */}
           <section className="bg-white rounded-2xl border border-neutral-200 p-6">
@@ -215,7 +225,10 @@ export default async function OrderDetailPage({
         {/* Sidebar: Geld */}
         <aside className="space-y-6">
           <section className="bg-white rounded-2xl border border-neutral-200 p-6">
-            <h2 className="text-sm font-medium text-neutral-700 mb-4">Finanzen</h2>
+            <h2 className="text-sm font-medium text-neutral-700 mb-4 flex items-center gap-1.5">
+              <DollarSign size={14} className="text-neutral-400" />
+              Finanzen
+            </h2>
             <dl className="space-y-2 text-sm">
               <Row label="Rechnung" value={usd(o.invoice_total)} />
               <Row label="Ware" value={usd(o.goods_value)} />
@@ -230,7 +243,10 @@ export default async function OrderDetailPage({
           </section>
 
           <section className="bg-white rounded-2xl border border-neutral-200 p-6">
-            <h2 className="text-sm font-medium text-neutral-700 mb-4">Zahlungen</h2>
+            <h2 className="text-sm font-medium text-neutral-700 mb-4 flex items-center gap-1.5">
+              <CreditCard size={14} className="text-neutral-400" />
+              Zahlungen
+            </h2>
             {profile.is_admin && <PaymentForm orderId={o.id} />}
             <ul className="mt-4 divide-y divide-neutral-100">
               {pays.length === 0 && (

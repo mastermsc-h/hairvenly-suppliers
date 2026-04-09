@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { Pencil } from "lucide-react";
 import { updateOrder } from "@/lib/actions/orders";
 import { ORDER_STATUSES, STATUS_LABELS, type OrderWithTotals } from "@/lib/types";
 
@@ -28,16 +29,20 @@ export default function EditPanel({
     return (
       <button
         onClick={() => setOpen(true)}
-        className="text-sm text-neutral-700 hover:text-neutral-900 underline"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 text-neutral-700 hover:bg-neutral-50 hover:border-neutral-400 transition"
       >
+        <Pencil size={12} />
         Bestellung bearbeiten
       </button>
     );
   }
 
   return (
-    <form action={submit} className="bg-white rounded-2xl border border-neutral-200 p-6 space-y-4">
-      <h2 className="text-sm font-medium text-neutral-700">Bearbeiten</h2>
+    <form action={submit} className="space-y-4 w-full">
+      <h2 className="text-sm font-medium text-neutral-700 flex items-center gap-1.5">
+        <Pencil size={13} className="text-neutral-400" />
+        Bearbeiten
+      </h2>
 
       <div className="grid grid-cols-2 gap-4 text-sm">
         <Field label="Status">
