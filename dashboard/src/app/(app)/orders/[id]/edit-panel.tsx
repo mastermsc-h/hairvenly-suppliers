@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Pencil } from "lucide-react";
-import { updateOrder } from "@/lib/actions/orders";
+import { Pencil, Trash2 } from "lucide-react";
+import { updateOrder, deleteOrder } from "@/lib/actions/orders";
 import { ORDER_STATUSES, type OrderWithTotals } from "@/lib/types";
 import { t, type Locale } from "@/lib/i18n";
 
@@ -25,6 +25,14 @@ export default function EditPanel({
       const res = await updateOrder(order.id, formData);
       if (res?.error) setError(res.error);
       else setOpen(false);
+    });
+  }
+
+  function handleDelete() {
+    if (!confirm(t(locale, "order.confirm_delete"))) return;
+    start(async () => {
+      const res = await deleteOrder(order.id);
+      if (res?.error) setError(res.error);
     });
   }
 
@@ -166,7 +174,7 @@ export default function EditPanel({
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2">
         <button
           type="submit"
           disabled={pending}
@@ -181,6 +189,17 @@ export default function EditPanel({
         >
           {t(locale, "order.cancel")}
         </button>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={pending}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg text-xs font-medium px-3 py-2 text-red-600 hover:bg-red-50 border border-red-200 transition disabled:opacity-50"
+          >
+            <Trash2 size={13} />
+            {t(locale, "order.delete")}
+          </button>
+        )}
       </div>
     </form>
   );

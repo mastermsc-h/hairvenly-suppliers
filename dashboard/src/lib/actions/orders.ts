@@ -241,6 +241,32 @@ export async function deleteDocument(orderId: string, documentId: string, filePa
   return { ok: true };
 }
 
+export async function deleteOrder(orderId: string) {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  // Delete related data first (payments, documents, events)
+  const { data: docs } = await supabase
+    .from("documents")
+    .select("file_path")
+    .eq("order_id", orderId);
+  if (docs && docs.length > 0) {
+    await supabase.storage
+      .from("order-files")
+      .remove(docs.map((d) => d.file_path));
+  }
+  await supabase.from("documents").delete().eq("order_id", orderId);
+  await supabase.from("payments").delete().eq("order_id", orderId);
+  await supabase.from("order_events").delete().eq("order_id", orderId);
+
+  const { error } = await supabase.from("orders").delete().eq("id", orderId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/orders");
+  revalidatePath("/");
+  redirect("/");
+}
+
 export async function getSignedUrl(filePath: string) {
   const supabase = await createClient();
   const { data, error } = await supabase.storage

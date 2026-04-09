@@ -62,6 +62,8 @@ export const messages: Record<Locale, Record<string, string>> = {
     "order.save": "Speichern",
     "order.cancel": "Abbrechen",
     "order.saving": "Speichern…",
+    "order.delete": "Bestellung löschen",
+    "order.confirm_delete": "Bestellung wirklich löschen? Alle Zahlungen, Dokumente und Einträge werden unwiderruflich entfernt.",
     "order.created": "erstellt",
     "order.by": "von",
 
@@ -289,6 +291,8 @@ export const messages: Record<Locale, Record<string, string>> = {
     "order.save": "Save",
     "order.cancel": "Cancel",
     "order.saving": "Saving…",
+    "order.delete": "Delete order",
+    "order.confirm_delete": "Really delete this order? All payments, documents and events will be permanently removed.",
     "order.created": "created",
     "order.by": "by",
 
@@ -516,6 +520,8 @@ export const messages: Record<Locale, Record<string, string>> = {
     "order.save": "Kaydet",
     "order.cancel": "İptal",
     "order.saving": "Kaydediliyor…",
+    "order.delete": "Siparişi sil",
+    "order.confirm_delete": "Sipariş silinsin mi? Tüm ödemeler, belgeler ve kayıtlar kalıcı olarak kaldırılacak.",
     "order.created": "oluşturuldu",
     "order.by": "tarafından",
 
