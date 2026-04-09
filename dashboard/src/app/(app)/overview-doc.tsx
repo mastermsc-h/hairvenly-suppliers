@@ -41,6 +41,15 @@ export default function OverviewDoc({
   const isPdf = !!path && /\.pdf$/i.test(path);
   const isImage = !!path && /\.(png|jpe?g|gif|webp|svg|bmp|heic|heif)$/i.test(path);
 
+  // Extract upload timestamp from path like "overview_xxx_1712345678901.ext"
+  const updatedAt = (() => {
+    if (!path) return null;
+    const m = path.match(/_(\d{13})\./);
+    if (!m) return null;
+    const d = new Date(Number(m[1]));
+    return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+  })();
+
   useEffect(() => {
     if (!lightbox) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setLightbox(false);
@@ -202,6 +211,11 @@ export default function OverviewDoc({
             >
               löschen
             </button>
+          </div>
+        )}
+        {updatedAt && (
+          <div className="text-[9px] text-neutral-400 mt-0.5">
+            Aktualisiert {updatedAt}
           </div>
         )}
       </div>
