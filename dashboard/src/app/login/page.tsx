@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 import { login, type LoginState } from "@/lib/actions/auth";
 
@@ -18,15 +19,15 @@ export default function LoginPage() {
         </div>
 
         <div className="space-y-1.5">
-          <label htmlFor="email" className="text-sm font-medium text-neutral-700">
-            E-Mail
+          <label htmlFor="identifier" className="text-sm font-medium text-neutral-700">
+            E-Mail oder Benutzername
           </label>
           <input
-            id="email"
-            name="email"
-            type="email"
+            id="identifier"
+            name="identifier"
+            type="text"
             required
-            autoComplete="email"
+            autoComplete="username"
             className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
           />
         </div>
@@ -58,6 +59,13 @@ export default function LoginPage() {
         >
           {pending ? "Anmelden…" : "Anmelden"}
         </button>
+
+        <p className="text-center text-sm text-neutral-500">
+          Noch kein Konto?{" "}
+          <Link href="/register" className="text-neutral-900 font-medium hover:underline">
+            Registrieren
+          </Link>
+        </p>
       </form>
     </main>
   );

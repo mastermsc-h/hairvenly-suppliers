@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import { signOut } from "@/lib/actions/auth";
-import { LayoutDashboard, Package, LogOut } from "lucide-react";
+import { LayoutDashboard, Package, Users, LogOut } from "lucide-react";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const profile = await requireProfile();
@@ -17,12 +17,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <nav className="flex-1 p-3 space-y-1 text-sm">
           <NavLink href="/" icon={<LayoutDashboard size={16} />} label="Übersicht" />
           <NavLink href="/orders" icon={<Package size={16} />} label="Bestellungen" />
+          {profile.is_admin && (
+            <NavLink href="/admin/users" icon={<Users size={16} />} label="Benutzer" />
+          )}
         </nav>
 
         <div className="p-3 border-t border-neutral-200">
           <div className="px-2 py-2">
             <div className="text-xs text-neutral-500">Eingeloggt als</div>
-            <div className="text-sm font-medium text-neutral-900 truncate">{profile.email}</div>
+            <div className="text-sm font-medium text-neutral-900 truncate">
+              {profile.display_name || profile.username || profile.email}
+            </div>
             <div className="text-xs text-neutral-500 mt-0.5">
               {profile.is_admin ? "Admin" : "Lieferant"}
             </div>

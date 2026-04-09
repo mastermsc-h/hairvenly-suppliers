@@ -99,7 +99,10 @@ export interface Supplier {
 export interface Profile {
   id: string;
   email: string;
+  username: string | null;
+  display_name: string | null;
   is_admin: boolean;
+  approved: boolean;
   supplier_id: string | null;
 }
 

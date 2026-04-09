@@ -12,7 +12,7 @@ export async function requireProfile(): Promise<Profile> {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id, email, is_admin, supplier_id")
+    .select("id, email, username, display_name, is_admin, approved, supplier_id")
     .eq("id", user.id)
     .single();
 
@@ -21,6 +21,12 @@ export async function requireProfile(): Promise<Profile> {
     await supabase.auth.signOut();
     redirect("/login");
   }
+
+  // Redirect unapproved, non-admin users to pending page
+  if (!profile.approved && !profile.is_admin) {
+    redirect("/pending");
+  }
+
   return profile as Profile;
 }
 
