@@ -63,6 +63,21 @@
 - Apps Script Web App: env GOOGLE_APPS_SCRIPT_URL (doPost mit {supplier, budgetG})
 - Service Account: google-service-account.json (in .gitignore!)
 
+## Geplante Features (Roadmap)
+- **Produktlager:** Lagerbestand-Dashboard mit Shopify-Daten, Velocity, Topseller, Nullbestand-Alerts, Nachbestellpunkte — als neuer Sidebar-Punkt
+- **WhatsApp-Benachrichtigungen:** Mitarbeiter benachrichtigen wenn Bestellungen fällig sind (via Twilio oder WhatsApp Business API)
+- **Finanzen:** BWA-Analyse, EÜR, Schulden/Rücklagen-Übersicht, Steuerzahlungen
+- **Shopify-Integration:** Live-Daten direkt aus Shopify statt über Sheets
+
+## Datenquellen für Lagerbestand
+- **Shopify-Daten** stehen im Google Sheet "Stock calculation" (env GOOGLE_SHEET_STOCK)
+  - Tab "Russisch - GLATT": Amanda-Produkte mit Lagerbestand, Unterwegs, Varianten
+  - Tab "Usbekisch - WELLIG": Eyfel-Produkte mit Lagerbestand, Unterwegs, Varianten
+  - Tab "Vorschlag - Amanda/China": Bestellvorschläge mit Velocity, Ziel, Bestellung
+  - Tab "Topseller": Verkaufsstatistiken
+  - Tab "Verkaufsanalyse": Detaillierte Verkaufsdaten
+- **Apps Script** aktualisiert diese Daten aus Shopify (Funktion: refreshTopseller, createBestellungAmanda/China)
+
 ## Wichtige Regeln
 - NIEMALS bestehende Features/Dateien ändern ohne explizite Anweisung
 - Neue Features als NEUE Sidebar-Punkte unter einem Separator
