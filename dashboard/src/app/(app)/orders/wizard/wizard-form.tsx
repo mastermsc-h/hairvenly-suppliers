@@ -95,13 +95,15 @@ export default function WizardForm({ suppliers, catalogs, locale }: Props) {
     setItems([]);
     setShowChecker(false);
     setSuggestionMeta(null);
-    // Auto-load suggestion meta
+    // Auto-load suggestion meta (non-blocking, fail silently)
     if (sup) {
       getSuggestionMeta(sup.name).then((meta) => {
         if (meta.title) {
           setSuggestionMeta({ title: meta.title, budgetKg: meta.budgetKg ?? 0, usedKg: meta.usedKg ?? 0 });
           setBudgetKg(String(meta.budgetKg ?? 20));
         }
+      }).catch(() => {
+        // Sheets API not available — that's ok
       });
     }
   };
@@ -479,7 +481,7 @@ export default function WizardForm({ suppliers, catalogs, locale }: Props) {
                     })()}
                   </div>
                 ) : (
-                  <p className="text-xs text-neutral-400 mt-0.5">Lade Vorschlagsdaten...</p>
+                  <p className="text-xs text-neutral-400 mt-0.5">Vorschläge aus dem Stock-Sheet laden oder neu generieren</p>
                 )}
               </div>
             </div>
