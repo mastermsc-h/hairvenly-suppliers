@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import { signOut } from "@/lib/actions/auth";
 import { t, type Locale } from "@/lib/i18n";
-import { LayoutDashboard, Package, Building2, Users, LogOut } from "lucide-react";
+import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette } from "lucide-react";
 import LanguageSwitcher from "./language-switcher";
 import { MobileSidebarWrapper } from "./mobile-sidebar";
 
@@ -24,6 +24,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <>
             <NavLink href="/admin/suppliers" icon={<Building2 size={16} />} label={t(locale, "nav.suppliers")} />
             <NavLink href="/admin/users" icon={<Users size={16} />} label={t(locale, "nav.users")} />
+
+            <div className="border-t border-neutral-200 my-2" />
+            <NavLink href="/orders/wizard" icon={<FilePlus size={16} />} label={t(locale, "nav.wizard")} />
+            <NavLink href="/catalog" icon={<Palette size={16} />} label={t(locale, "nav.catalog")} />
           </>
         )}
       </nav>

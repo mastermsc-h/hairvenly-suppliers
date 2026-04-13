@@ -1,1 +1,72 @@
-@AGENTS.md
+# Hairvenly Dashboard — Projekt-Kontext
+
+## Tech Stack
+- **Framework:** Next.js 16 + React 19 + TypeScript
+- **Database:** Supabase (PostgreSQL + Auth + Storage + RLS)
+- **Styling:** Tailwind CSS 4 (neutral color palette, rounded-2xl cards, shadow-sm)
+- **Icons:** Lucide React
+- **Charts:** Recharts
+- **i18n:** Custom (de/en/tr) in src/lib/i18n.ts
+- **Google APIs:** googleapis (Sheets export, import, Apps Script integration)
+
+## Architektur
+- Server Components (default) + Client Components ("use client") für Interaktivität
+- Server Actions ("use server") mit FormData für Mutations
+- Supabase RLS: Admins sehen alles, Suppliers nur eigene Daten
+- Auth: requireProfile() / requireAdmin() Helpers
+
+## Bestehende Features
+- **Übersicht:** Dashboard mit KPIs, Bestellungen pro Lieferant
+- **Bestellungen:** CRUD, Payments, Documents, Timeline
+- **Neue Bestellung (Wizard):** Kaskadierte Dropdowns, Bestellvorschläge aus Sheets importieren, Budget-Generierung via Apps Script Web App, Google Sheets Export, PDF-Generierung
+- **Produktkatalog:** Sync aus Shopify-Sheets + Bestell-Sheets, 3-fach Mapping (Hairvenly/Lieferant/Shopify), CRUD
+- **Lieferanten:** CRUD, Banking, Avatar, Drag-to-reorder
+- **Benutzer:** Registrierung, Approval, Multi-Language
+
+## Datei-Konventionen
+- Pages: `src/app/(app)/[bereich]/page.tsx`
+- Client Components: `[bereich]/component-name.tsx` mit "use client"
+- Server Actions: `src/lib/actions/[bereich].ts`
+- Types: `src/lib/types.ts` (am Ende anhängen)
+- i18n: `src/lib/i18n.ts` (Keys am Ende jeder Sprach-Sektion anhängen)
+- Migrations: `supabase/migrations/NNNN_beschreibung.sql`
+
+## UI Patterns
+- Cards: `bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm`
+- Primary Button: `bg-neutral-900 text-white font-medium rounded-lg px-4 py-2`
+- Inputs: `rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900`
+- Labels: `text-xs font-medium text-neutral-600 uppercase tracking-wide`
+- Sidebar NavLink: `flex items-center gap-2 px-3 py-2 rounded-lg`
+
+## Sidebar-Struktur (aktuelle Reihenfolge)
+1. Übersicht
+2. Bestellungen
+3. Lieferanten (admin)
+4. Benutzer (admin)
+5. --- Separator ---
+6. Neue Bestellung (admin)
+7. Produktkatalog (admin)
+
+## Lieferanten
+- Amanda (6 Wochen Lieferzeit)
+- Eyfel Ebru CN+TR (8 Wochen CN, 2 Wochen TR, regions: ["CN", "TR"])
+- Aria (6 Wochen)
+
+## Supabase
+- URL: xzisnlkqiomvmbslwhvg.supabase.co
+- Tabellen: suppliers, profiles, orders, payments, documents, order_events, orders_with_totals (view), product_methods, product_lengths, product_colors, order_items
+
+## Google Sheets Integration
+- Amanda Bestell-Sheet: env GOOGLE_SHEET_AMANDA
+- China Bestell-Sheet: env GOOGLE_SHEET_CHINA
+- Stock Calculation: env GOOGLE_SHEET_STOCK
+- Apps Script Web App: env GOOGLE_APPS_SCRIPT_URL (doPost mit {supplier, budgetG})
+- Service Account: google-service-account.json (in .gitignore!)
+
+## Wichtige Regeln
+- NIEMALS bestehende Features/Dateien ändern ohne explizite Anweisung
+- Neue Features als NEUE Sidebar-Punkte unter einem Separator
+- Immer i18n für alle 3 Sprachen (de/en/tr)
+- Immer RLS Policies für neue Tabellen
+- Migrationen als neue nummerierte Dateien (aktuell: 0013), nie bestehende ändern
+- Bei neuen Sidebar-Bereichen: Separator-Gruppe verwenden

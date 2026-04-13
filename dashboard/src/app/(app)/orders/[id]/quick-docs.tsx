@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { FileText, Receipt, X } from "lucide-react";
+import { FileText, Receipt, X, ClipboardList } from "lucide-react";
 import { getSignedUrl } from "@/lib/actions/orders";
 import type { OrderDocument } from "@/lib/types";
 import { t, type Locale } from "@/lib/i18n";
@@ -20,6 +20,7 @@ export default function QuickDocs({
   paidTotal?: number | null;
   locale?: Locale;
 }) {
+  const overviews = documents.filter((d) => d.kind === "order_overview");
   const invoices = documents.filter((d) => d.kind === "supplier_invoice");
   const proofsRaw = documents.filter((d) => d.kind === "payment_proof");
   const proofNumber = new Map<string, number>();
@@ -35,6 +36,18 @@ export default function QuickDocs({
 
   return (
     <div className="flex flex-wrap gap-2 items-start">
+      {overviews.length > 0 && (
+        <QuickGroup
+          icon={<ClipboardList size={14} />}
+          label={t(locale, "doc.overview")}
+          shortLabel={t(locale, "doc.overview_short")}
+          empty=""
+          docs={overviews}
+          compact={compact}
+          mode="preview"
+          onPreview={setPreview}
+        />
+      )}
       <div className="flex flex-col">
         <QuickGroup
           icon={<Receipt size={14} />}

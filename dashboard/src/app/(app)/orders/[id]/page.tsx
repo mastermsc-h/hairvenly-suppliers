@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ExternalLink, Weight, Package as PackageIcon, DollarSign, CreditCard, Pencil } from "lucide-react";
+import { ExternalLink, Weight, Package as PackageIcon, DollarSign, CreditCard, Pencil, ChevronDown, FileSpreadsheet } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth";
 import { usd, date, dateTime } from "@/lib/format";
@@ -11,6 +11,7 @@ import {
   type Payment,
   type OrderDocument,
   type OrderEvent,
+  type OrderItem,
 } from "@/lib/types";
 import { t, type Locale } from "@/lib/i18n";
 import EditPanel from "./edit-panel";
@@ -20,6 +21,8 @@ import DocumentUpload from "./document-upload";
 import DocumentItem from "./document-item";
 import QuickDocs from "./quick-docs";
 import BackLink from "./back-link";
+import OrderItemsSection from "./order-items-section";
+import StatusDropdown from "./status-dropdown";
 
 export default async function OrderDetailPage({
   params,
@@ -40,7 +43,7 @@ export default async function OrderDetailPage({
 
   const o = order as OrderWithTotals;
 
-  const [{ data: supplier }, { data: payments }, { data: documents }, { data: events }] =
+  const [{ data: supplier }, { data: payments }, { data: documents }, { data: events }, { data: orderItems }] =
     await Promise.all([
       supabase.from("suppliers").select("*").eq("id", o.supplier_id).single(),
       supabase
@@ -59,12 +62,32 @@ export default async function OrderDetailPage({
         .eq("order_id", id)
         .order("created_at", { ascending: false })
         .limit(50),
+      supabase
+        .from("order_items")
+        .select("*")
+        .eq("order_id", id)
+        .order("created_at"),
     ]);
 
   const sup = supplier as Supplier | null;
   const pays = (payments ?? []) as Payment[];
   const docs = (documents ?? []) as OrderDocument[];
   const evs = (events ?? []) as OrderEvent[];
+  const items = (orderItems ?? []) as OrderItem[];
+
+  // Group order items by method + length
+  const itemGroups: { label: string; items: OrderItem[] }[] = [];
+  const groupMap = new Map<string, OrderItem[]>();
+  for (const item of items) {
+    const key = `${item.method_name}|${item.length_value}`;
+    if (!groupMap.has(key)) groupMap.set(key, []);
+    groupMap.get(key)!.push(item);
+  }
+  for (const [key, groupItems] of groupMap) {
+    const [method, length] = key.split("|");
+    itemGroups.push({ label: `${method} · ${length}`, items: groupItems });
+  }
+  const totalQty = items.reduce((s, i) => s + i.quantity, 0);
 
   // Payment-proof Nummerierung (älteste = Zahlung 1)
   const proofNumber = new Map<string, number>();
@@ -100,9 +123,13 @@ export default async function OrderDetailPage({
               {sup?.name} · {t(locale, "order.created")} {dateTime(o.created_at)}
             </p>
           </div>
-          <span className="inline-flex px-3 py-1 rounded-full text-xs font-medium bg-neutral-100 text-neutral-700 self-start shrink-0">
-            {t(locale, `order.status.${o.status}`)}
-          </span>
+          {profile.is_admin ? (
+            <StatusDropdown orderId={o.id} currentStatus={o.status} locale={locale} />
+          ) : (
+            <span className="inline-flex px-3 py-1 rounded-full text-xs font-medium bg-neutral-100 text-neutral-700 self-start shrink-0">
+              {t(locale, `order.status.${o.status}`)}
+            </span>
+          )}
         </div>
         <div className="mt-4">
           <QuickDocs documents={docs} paidTotal={o.paid_total} locale={locale} />
@@ -177,6 +204,19 @@ export default async function OrderDetailPage({
               <EditPanel order={o} isAdmin={profile.is_admin} locale={locale} />
             </div>
           </section>
+
+          {/* Order Items (from Wizard) */}
+          {items.length > 0 && (
+            <OrderItemsSection
+              items={items}
+              itemGroups={itemGroups}
+              totalQty={totalQty}
+              locale={locale}
+              sheetUrl={o.sheet_url}
+              orderId={o.id}
+              isAdmin={profile.is_admin}
+            />
+          )}
 
           {/* Documents */}
           <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">

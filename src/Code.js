@@ -264,16 +264,22 @@ function fetchShopifyInventoryData() {
     scriptProperties.deleteProperty("processedCollections");
     scriptProperties.deleteProperty("totalWeightMap");
     Logger.log("All collections processed.");
-    // ── Auto-Refresh-Kette: Dashboard → Verkaufsanalyse → Topseller ──────────
+    // ── Auto-Refresh-Kette: Dashboard → Verkaufsanalyse → Topseller → Bestellvorschläge ──────────
     createDashboard();
     try { refreshVerkaufsanalyse(); } catch(e) { Logger.log("Auto-Refresh refreshVerkaufsanalyse Fehler: " + e.message); }
     try { refreshTopseller();       } catch(e) { Logger.log("Auto-Refresh refreshTopseller Fehler: " + e.message); }
-    Logger.log("✅ Auto-Refresh vollständig abgeschlossen.");
+    // Flag setzen: Bestellvorschläge sollen empfohlenes Budget nutzen (nicht manuell gesetztes)
+    PropertiesService.getScriptProperties().setProperty("AUTO_BUDGET", "true");
+    try { createBestellungChina();  } catch(e) { Logger.log("Auto-Refresh createBestellungChina Fehler: " + e.message); }
+    try { createBestellungAmanda(); } catch(e) { Logger.log("Auto-Refresh createBestellungAmanda Fehler: " + e.message); }
+    PropertiesService.getScriptProperties().deleteProperty("AUTO_BUDGET");
+    Logger.log("✅ Auto-Refresh vollständig abgeschlossen (inkl. Bestellvorschläge).");
   }
 }
 
 function scheduleNextExecution() {
-  deleteExistingTriggers("fetchShopifyInventoryData");
+  // WICHTIG: Keine Trigger löschen! .after()-Trigger sind einmalig und löschen sich selbst.
+  // deleteExistingTriggers() würde die permanenten Tages-Trigger (06:00/15:00) zerstören!
   ScriptApp.newTrigger("fetchShopifyInventoryData").timeBased().after(2000).create();
   Logger.log("Scheduled next execution in a few seconds.");
 }
@@ -297,7 +303,7 @@ function setupMultipleDailyTriggers() {
  * setupAutoDailyRefresh — einmalig aus dem Apps-Script-Editor ausführen!
  *
  * Installiert PERMANENTE tägliche Trigger (bleiben aktiv, bis man sie löscht):
- *   • 06:00 Uhr → fetchShopifyInventoryData (→ createDashboard → refreshVerkaufsanalyse → refreshTopseller)
+ *   • 09:30 Uhr → fetchShopifyInventoryData (→ createDashboard → refreshVerkaufsanalyse → refreshTopseller → Bestellvorschläge China+Amanda)
  *   • 15:00 Uhr → fetchShopifyInventoryData (→ selbe Kette)
  *
  * Löscht vorher alle alten Trigger für fetchShopifyInventoryData, damit keine Duplikate entstehen.
@@ -306,7 +312,7 @@ function setupAutoDailyRefresh() {
   // Alle alten Shopify-Fetch-Trigger löschen (inkl. veralteter .after()-Einmal-Trigger)
   deleteExistingTriggers("fetchShopifyInventoryData");
 
-  const stunden = [6, 15]; // 06:00 und 15:00 Uhr
+  const stunden = [9, 15]; // 09:30 und 15:00 Uhr (atHour = früheste Stunde, GAS feuert 09:00-10:00)
   stunden.forEach(function(h) {
     ScriptApp.newTrigger("fetchShopifyInventoryData")
       .timeBased()
@@ -320,7 +326,7 @@ function setupAutoDailyRefresh() {
     .filter(t => t.getHandlerFunction() === "fetchShopifyInventoryData")
     .map(t => t.getTriggerSource() + " | " + t.getHandlerFunction());
   Logger.log("✅ Auto-Refresh-Trigger installiert (2×/Tag, persistent):\n" + aktiv.join("\n"));
-  Logger.log("Kette pro Lauf: fetchShopifyInventoryData → createDashboard → refreshVerkaufsanalyse → refreshTopseller");
+  Logger.log("Kette pro Lauf: fetchShopifyInventoryData → createDashboard → refreshVerkaufsanalyse → refreshTopseller → Bestellvorschläge China+Amanda");
 }
 
 function deleteExistingTriggers(functionName) {
@@ -450,6 +456,8 @@ function fetchWithRetry(url, accessToken) {
 function getActiveOrderDates() {
   let activeChina  = new Set();
   let activeAmanda = new Set();
+  let allChina     = new Set(); // Alle Daten (auch "angekommen"), für Fallback-Erkennung
+  let allAmanda    = new Set();
   
   try {
     let overviewSs = SpreadsheetApp.openById(OVERVIEW_SHEET_ID);
@@ -487,6 +495,12 @@ function getActiveOrderDates() {
       
       Logger.log("[Overview] Zeile " + (i+1) + ": Anbieter='" + currentProvider + "' Datum='" + orderDate + "' Status='" + status + "'");
       
+      // Alle Daten merken (für Fallback: "existiert in Übersicht aber nicht aktiv")
+      if (orderDate) {
+        if (currentProvider === "China") allChina.add(orderDate);
+        else if (currentProvider === "Amanda") allAmanda.add(orderDate);
+      }
+
       // "unbekannt" UND "verzollung" einbeziehen (= noch unterwegs, Paket in DE)
       const istAktiv = status.includes("unbekannt") || status.includes("verzollung");
       if (orderDate && istAktiv) {
@@ -505,22 +519,49 @@ function getActiveOrderDates() {
   Logger.log("Aktive China-Bestellungen: " + JSON.stringify([...activeChina]));
   Logger.log("Aktive Amanda-Bestellungen: " + JSON.stringify([...activeAmanda]));
   
-  return { china: activeChina, amanda: activeAmanda };
+  return { china: activeChina, amanda: activeAmanda, chinaAll: allChina, amandaAll: allAmanda };
 }
 
 /**
- * Liest nur die aktiven ("unbekannt") Bestellungs-Tabs aus China- und Amanda-Sheets.
+ * Liest Status einer Bestellung direkt aus dem Tab (Zeile 2, Spalte B).
+ * Gibt zurück: "aktiv" | "entwurf" | "storniert" | "angekommen"
+ * Aktiv = unterwegs/bestellt. Nur aktive Bestellungen werden als "unterwegs" gezählt.
+ */
+function getOrderStatusFromTab(sheet) {
+  try {
+    let data = sheet.getRange(1, 1, 2, 4).getValues(); // Zeile 1-2, Spalte A-D
+    // Neues Format: Zeile 1 = Header (Bestellung, Status, Gewicht, Voraussichtliche Lieferung)
+    // Zeile 2 = Werte
+    let statusCell = String(data[1][1] || "").trim().toLowerCase(); // B2
+
+    // Prüfe ob Zeile 1 tatsächlich den Header hat (Format-Erkennung)
+    let h0 = String(data[0][0] || "").trim().toLowerCase();
+    if (h0 !== "bestellung") {
+      // Altes Format ohne Status-Zeile → als aktiv behandeln (Fallback)
+      return "aktiv";
+    }
+
+    if (statusCell.includes("entwurf"))    return "entwurf";
+    if (statusCell.includes("storniert") || statusCell.includes("storno")) return "storniert";
+    if (statusCell.includes("angekommen") || statusCell.includes("eingetroffen") || statusCell.includes("geliefert")) return "angekommen";
+
+    // Alles andere (leer, "unterwegs", "bestellt", "verzollung", etc.) = aktiv
+    return "aktiv";
+  } catch(e) {
+    return "aktiv"; // Fehler → sicherheitshalber als aktiv
+  }
+}
+
+/**
+ * Liest alle aktiven Bestellungs-Tabs aus China- und Amanda-Sheets.
+ * Status wird direkt aus jedem Tab gelesen (Spalte B2), NICHT aus Übersichts-Sheet.
  * Gibt ein Array von Bestellobjekten zurück:
  * { provider, date, name, items: [{type, length, color, weight}] }
  */
 function getAllOrders() {
   Logger.log(">>> getAllOrders() START");
   let orders = [];
-  
-  // Hole zuerst die aktiven Bestelldaten aus der Übersichtstabelle
-  let activeDates = getActiveOrderDates();
-  Logger.log(">>> getAllOrders() activeDates.amanda=" + JSON.stringify([...activeDates.amanda]));
-  
+
   try {
     // --- CHINA ---
     let chinaSs = SpreadsheetApp.openById(CHINA_SHEET_ID);
@@ -529,13 +570,13 @@ function getAllOrders() {
       let sName = sheet.getName().trim();
       let date = extractDateFromTabName(sName);
       if (!date) continue;
-      
-      // Nur einbeziehen, wenn diese Bestellung laut Übersicht noch "unbekannt" (nicht angekommen) ist
-      if (!activeDates.china.has(date)) {
-        Logger.log("China " + date + " übersprungen (nicht 'unbekannt' / bereits angekommen).");
+
+      let status = getOrderStatusFromTab(sheet);
+      if (status !== "aktiv") {
+        Logger.log("China " + date + " übersprungen (Status: " + status + ")");
         continue;
       }
-      
+
       let items = parseChinaOrderSheet(sheet);
       if (items.length > 0) {
         orders.push({
@@ -546,7 +587,7 @@ function getAllOrders() {
         });
       }
     }
-    
+
     // --- AMANDA ---
     let amandaSs = SpreadsheetApp.openById(AMANDA_SHEET_ID);
     let amandaSheets = amandaSs.getSheets();
@@ -555,15 +596,15 @@ function getAllOrders() {
       if (!sName.match(/Amanda|Sunny/i)) continue;
       let date = extractDateFromTabName(sName);
       if (!date) continue;
-      
-      // Nur einbeziehen, wenn diese Bestellung laut Übersicht noch "unbekannt" (nicht angekommen) ist
-      if (!activeDates.amanda.has(date)) {
-        Logger.log("Amanda " + date + " übersprungen (nicht 'unbekannt' / bereits angekommen).");
+
+      let status = getOrderStatusFromTab(sheet);
+      if (status !== "aktiv") {
+        Logger.log("Amanda " + date + " übersprungen (Status: " + status + ")");
         continue;
       }
-      
+
       let items = parseAmandaOrderSheet(sheet);
-      Logger.log("Amanda Tab '" + sName + "' -> date='" + date + "' items=" + items.length + " activeSet=" + JSON.stringify([...activeDates.amanda]));
+      Logger.log("Amanda Tab '" + sName + "' -> date='" + date + "' status=" + status + " items=" + items.length);
       if (items.length > 0) {
         orders.push({
           provider: "Amanda",
@@ -574,14 +615,14 @@ function getAllOrders() {
         Logger.log("Amanda PUSHED: " + sName + " -> orders.length=" + orders.length);
       }
     }
-    
+
   } catch (e) {
     Logger.log("Fehler beim Laden der Bestellungen: " + e.message);
   }
-  
+
   // Sortiere nach Datum (älteste zuerst)
   orders.sort((a, b) => parseDateDE(a.date) - parseDateDE(b.date));
-  
+
   Logger.log("Aktive Bestellungen gesamt: " + orders.length);
   return orders;
 }
@@ -619,22 +660,40 @@ function parseChinaOrderSheet(sheet) {
   let items = [];
   let currentType   = "";
   let currentLength = "";
-  
-  // Format erkennen: Wenn Zeile 1 Spalte C leer und Spalte B numerisch -> Format B (2-spaltig)
-  // Zeile 0 = Header-Zeile
-  let headerRow = data[0] || [];
+
+  // Format V3 erkennen: Zeile 1 Spalte A = "Bestellung" (mit Status-Zeile)
+  let row0a = String((data[0] || [])[0] || "").trim().toLowerCase();
+  let isV3 = (row0a === "bestellung");
+  let dataOffset = 0; // Wo die eigentlichen Daten anfangen
+
+  if (isV3) {
+    // V3: Zeile 1-2 = Meta, Zeile 3 = leer, Zeile 4 = Header, ab Zeile 5 = Daten
+    for (let i = 2; i < Math.min(data.length, 8); i++) {
+      let cellA = String(data[i][0] || "").trim().toLowerCase();
+      if (cellA.includes("typ") || cellA.includes("type") || cellA.includes("method") || cellA.includes("farbcode")) {
+        dataOffset = i + 1;
+        break;
+      }
+    }
+    if (dataOffset === 0) dataOffset = 4; // Fallback
+  }
+
+  // Format erkennen für nicht-V3: Wenn Zeile 1 Spalte C leer und Spalte B numerisch -> Format B (2-spaltig)
+  let headerRowIdx = isV3 ? (dataOffset - 1) : 0;
+  let headerRow = data[headerRowIdx] || [];
   let col2Header = String(headerRow[2] || "").trim();
   let col1Header = String(headerRow[1] || "").trim().toLowerCase();
-  let isTwoColumnFormat = (col2Header === "" && (col1Header.includes("quantity") || col1Header.includes("gramm") || col1Header.includes("g)")));
-  Logger.log('[China Parse] Sheet: ' + sheet.getName() + ' | rows: ' + data.length + ' | col0[0]: "' + String(headerRow[0]||'').trim() + '" | col1[0]: "' + col1Header + '" | col2[0]: "' + col2Header + '" | isTwoCol: ' + isTwoColumnFormat);
+  let isTwoColumnFormat = !isV3 && (col2Header === "" && (col1Header.includes("quantity") || col1Header.includes("gramm") || col1Header.includes("g)")));
+  Logger.log('[China Parse] Sheet: ' + sheet.getName() + ' | rows: ' + data.length + ' | isV3: ' + isV3 + ' | isTwoCol: ' + isTwoColumnFormat);
   
+  let startIdx = isV3 ? dataOffset : 1; // V3: nach Status+Header, sonst ab Zeile 2
+
   if (isTwoColumnFormat) {
     // Format B: Zeile 1 = Typ-Überschrift (z.B. "Invisible Tapes"), Zeile 2 = Header, ab Zeile 3 = Daten
-    // Typ aus Zeile 0 Spalte A lesen
     currentType = String(data[0][0] || "").trim();
-    currentLength = ""; // Keine Längenangabe in diesem Format
-    
-    for (let i = 1; i < data.length; i++) {
+    currentLength = "";
+
+    for (let i = startIdx; i < data.length; i++) {
       let row = data[i];
       let col0 = String(row[0]).trim(); // Farbcode
       let col1 = String(row[1]).trim(); // Gramm
@@ -654,20 +713,21 @@ function parseChinaOrderSheet(sheet) {
     }
   } else {
     // Format A: A=Typ, B=Länge, C=Farbcode, D=Gramm
-    for (let i = 1; i < data.length; i++) {
+    // Funktioniert mit UND ohne merged cells (carry-over via currentType/currentLength)
+    for (let i = startIdx; i < data.length; i++) {
       let row = data[i];
       let col0 = String(row[0]).trim();
       let col1 = String(row[1]).trim();
       let col2 = String(row[2]).trim();
       let col3 = String(row[3]).trim();
-      
-      if (col0 === "Subtotal" || col0.toLowerCase().includes("subtotal")) break;
-      
+
+      if (col0.toLowerCase() === "subtotal" || col0.toLowerCase().includes("subtotal")) break;
+
       if (col0 !== "") currentType   = col0;
       if (col1 !== "") currentLength = col1;
-      
+
       let weight = parseFloat(col3.replace(/[^0-9.]/g, "")) || 0;
-      
+
       if (col2 !== "" && weight > 0) {
         items.push({
           type:   currentType,
@@ -684,34 +744,96 @@ function parseChinaOrderSheet(sheet) {
 
 /**
  * Liest ein Amanda-Bestell-Sheet aus.
- * Struktur: A=Quality, B=Method, C=Length/Variant, D=Farbcode, E=Quantity(g)
+ * Unterstützt DREI Formate:
+ *   Format V3 (mit Status):  Zeile 1=Meta-Header, Zeile 2=Werte(Bestellung,Status,Gewicht,Lieferung),
+ *                             Zeile 3=leer, Zeile 4=Spalten-Header, ab Zeile 5=Daten
+ *                             A=Method, B=Length/Variant, C=Farbcode, D=Quantity(g)
+ *   Format V2 (4 Spalten):   Zeile 1=Titel, Zeile 2=Header, ab Zeile 3=Daten
+ *                             A=Method, B=Length/Variant, C=Farbcode, D=Quantity(g)
+ *   Format V1 (5 Spalten):   Zeile 1=Titel, Zeile 2=Header, ab Zeile 3=Daten
+ *                             A=Quality, B=Method, C=Length/Variant, D=Farbcode, E=Quantity(g)
  */
 function parseAmandaOrderSheet(sheet) {
   let data = sheet.getDataRange().getValues();
   let items = [];
   let currentMethod = "";
   let currentLength = "";
-  
-  // Zeile 1 = Überschrift (Tab-Name), Zeile 2 = Spalten-Header
-  for (let i = 2; i < data.length; i++) {
-    let row = data[i];
-    let col1 = String(row[1]).trim(); // Method
-    let col2 = String(row[2]).trim(); // Length/Variant
-    let col3 = String(row[3]).trim(); // Farbcode
-    let col4 = String(row[4]).trim(); // Quantity (g)
-    
-    if (col1 !== "") currentMethod = col1;
-    if (col2 !== "") currentLength = col2;
-    
-    let weight = parseFloat(col4.replace(/[^0-9.]/g, "")) || 0;
-    
-    if (col3 !== "" && weight > 0) {
-      items.push({
-        method: currentMethod,
-        length: currentLength,
-        color:  col3,
-        weight: weight
-      });
+
+  // Format-Erkennung: Prüfe ob Zeile 1 Spalte A "Bestellung" ist (= V3 mit Status-Zeile)
+  let row0a = String((data[0] || [])[0] || "").trim().toLowerCase();
+  let isV3 = (row0a === "bestellung");
+
+  if (isV3) {
+    // FORMAT V3: Status-Header in Zeile 1-2, Daten-Header in Zeile 4 (Index 3), Daten ab Zeile 5 (Index 4)
+    // Finde die Header-Zeile (suche nach "Method" in Spalte A)
+    let dataStartIdx = 4; // Standard: Zeile 5
+    for (let i = 2; i < Math.min(data.length, 8); i++) {
+      let cellA = String(data[i][0] || "").trim().toLowerCase();
+      if (cellA === "method" || cellA === "methode") {
+        dataStartIdx = i + 1;
+        break;
+      }
+    }
+    for (let i = dataStartIdx; i < data.length; i++) {
+      let row = data[i];
+      let col0 = String(row[0]).trim();
+      let col1 = String(row[1]).trim();
+      let col2 = String(row[2]).trim();
+      let col3 = String(row[3]).trim();
+
+      if (col0.toLowerCase() === "subtotal" || col0.toLowerCase().includes("subtotal")) break;
+      if (col0 !== "") currentMethod = col0;
+      if (col1 !== "") currentLength = col1;
+
+      let weight = parseFloat(col3.replace(/[^0-9.]/g, "")) || 0;
+      if (col2 !== "" && weight > 0) {
+        items.push({ method: currentMethod, length: currentLength, color: col2, weight: weight });
+      }
+    }
+    Logger.log("[Amanda Parse] Sheet: " + sheet.getName() + " | format=V3(status) | dataStart=" + dataStartIdx + " | items=" + items.length);
+  } else {
+    // V1 oder V2: Header in Zeile 2 (Index 1)
+    let headerRow = data[1] || [];
+    let h0 = String(headerRow[0] || "").trim().toLowerCase();
+    let isV2 = (h0 === "method" || h0 === "methode");
+
+    if (isV2) {
+      // FORMAT V2: A=Method, B=Length/Variant, C=Farbcode, D=Quantity(g)
+      for (let i = 2; i < data.length; i++) {
+        let row = data[i];
+        let col0 = String(row[0]).trim();
+        let col1 = String(row[1]).trim();
+        let col2 = String(row[2]).trim();
+        let col3 = String(row[3]).trim();
+
+        if (col0.toLowerCase() === "subtotal" || col0.toLowerCase().includes("subtotal")) break;
+        if (col0 !== "") currentMethod = col0;
+        if (col1 !== "") currentLength = col1;
+
+        let weight = parseFloat(col3.replace(/[^0-9.]/g, "")) || 0;
+        if (col2 !== "" && weight > 0) {
+          items.push({ method: currentMethod, length: currentLength, color: col2, weight: weight });
+        }
+      }
+      Logger.log("[Amanda Parse] Sheet: " + sheet.getName() + " | format=V2(4col) | items=" + items.length);
+    } else {
+      // FORMAT V1: A=Quality, B=Method, C=Length/Variant, D=Farbcode, E=Quantity(g)
+      for (let i = 2; i < data.length; i++) {
+        let row = data[i];
+        let col1 = String(row[1]).trim();
+        let col2 = String(row[2]).trim();
+        let col3 = String(row[3]).trim();
+        let col4 = String(row[4]).trim();
+
+        if (col1 !== "") currentMethod = col1;
+        if (col2 !== "") currentLength = col2;
+
+        let weight = parseFloat(col4.replace(/[^0-9.]/g, "")) || 0;
+        if (col3 !== "" && weight > 0) {
+          items.push({ method: currentMethod, length: currentLength, color: col3, weight: weight });
+        }
+      }
+      Logger.log("[Amanda Parse] Sheet: " + sheet.getName() + " | format=V1(5col) | items=" + items.length);
     }
   }
   return items;
@@ -1947,13 +2069,21 @@ function writeBestellungSheet(sheet, title, columns, rows, headerBg, topColor, m
 function createBestellungChina() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const tabName = "Vorschlag - China";
+  const isAutoRun = PropertiesService.getScriptProperties().getProperty("AUTO_BUDGET") === "true";
   let sheet = ss.getSheetByName(tabName);
+  // Bei manuellem Aufruf: Budget aus Zelle I2 lesen BEVOR der Tab gelöscht wird
+  if (sheet && !isAutoRun) {
+    const cellVal = sheet.getRange(2, 9).getValue();
+    if (cellVal && parseInt(cellVal) > 0) {
+      PropertiesService.getScriptProperties().setProperty("BUDGET_CHINA", String(parseInt(cellVal)));
+    }
+  }
   if (sheet) ss.deleteSheet(sheet);
   sheet = ss.insertSheet(tabName);
   sheet.setTabColor("#1a73e8");
 
   const today = new Date();
-  const dateStr = Utilities.formatDate(today, Session.getScriptTimeZone(), "dd.MM.yyyy");
+  const dateStr = Utilities.formatDate(today, Session.getScriptTimeZone(), "dd.MM.yyyy, HH:mm");
 
   // Alle Inventar-Zeilen aus "Usbekisch - WELLIG" Sheet lesen
   const invRows = readInventoryRowsFromSheet("Usbekisch - WELLIG");
@@ -2037,8 +2167,9 @@ function createBestellungChina() {
     // Farbcode (erstes Wort ab #, z.B. "#2E", "#PEARL")
     let colorOneWord = colorRaw.split(" ")[0];
     let tier = getTierChina(colorOneWord, mapping.typ);
-    if (tier === "KAUM" && lager > 0) continue; // Lager vorhanden → wirklich langsam, skip
-    // KAUM + lager===0 → ausverkauft → minimal 300g bestellen
+    // < 150g Lager = unverkäuflich (Kunden kaufen min. ~150g) → wie ausverkauft behandeln
+    if (tier === "KAUM" && lager >= 150) continue; // Genug Lager + keine Verkäufe → wirklich langsam
+    // KAUM + lager < 150g → Nachbestellen auf verkaufbare Menge
 
     // Ziel: verkaufsbasiert (70% Ø3M + 30% letzter Monat) oder Fallback auf fixe Stufen
     let tierCounts = tierCountsCache[mapping.collName] || { TOP7: 1, MID: 1, REST: 1 };
@@ -2082,7 +2213,15 @@ function createBestellungChina() {
       if (rawVD2) {
         try {
           const vd2 = JSON.parse(rawVD2);
-          const vdKey2 = "Usbekisch Wellig|" + mapping.collName;
+          // collMapping.collName (z.B. "Tapes Wellig 45cm") → VERKAUFS_DATA-Label (z.B. "Tapes 45cm")
+          const VD_KEY_MAP_C = {
+            "Tapes Wellig 45cm": "Tapes 45cm", "Tapes Wellig 55cm": "Tapes 55cm",
+            "Tapes Wellig 65cm": "Tapes 65cm", "Tapes Wellig 85cm": "Tapes 85cm",
+            "Bondings wellig 65cm": "Bondings 65cm", "Bondings wellig 85cm": "Bondings 85cm",
+            "Usbekische Classic Tressen (Wellig)": "Classic Weft",
+            "Usbekische Genius Tressen (Wellig)": "Genius Weft"
+          };
+          const vdKey2 = "Usbekisch Wellig|" + (VD_KEY_MAP_C[mapping.collName] || mapping.collName);
           const vdEntry2 = vd2[vdKey2];
           if (vdEntry2 && vdEntry2.g30d) {
             const tc2 = tierCountsCache[mapping.collName] || { TOP7: 1, MID: 1, REST: 1 };
@@ -2188,14 +2327,16 @@ function createBestellungChina() {
                   lücken_dauerC = Math.round(ersteAnkunftTage - reichweite);
                 }
               } else {
-                // Keine Bestellungen unterwegs
+                // Keine Bestellungen unterwegs – Lücke nur wenn wirklich dringend
+                // (< 14 Tage Stock = weniger als 1 Bestellzyklus, KEINE Ware in der Pipeline)
                 if (lager === 0) {
                   hat_lückeC = true;
-                  lücken_dauerC = 84; // ganzer Horizont bis neue Bestellung ankommt
-                } else if (reichweite < 84) {
+                  lücken_dauerC = 84; // Regal jetzt leer, nichts kommt
+                } else if (reichweite < 14) {
                   hat_lückeC = true;
-                  lücken_dauerC = Math.round(84 - reichweite);
+                  lücken_dauerC = Math.round(84 - reichweite); // < 2 Wochen Stock, nichts bestellt
                 }
+                // reichweite >= 14 → genug Lager um nächsten Bestellzyklus zu überbrücken, KEIN Notfall
               }
               if (hat_lückeC) Logger.log("⚠️ Lücke China: " + invRow.product +
                 " | Reichweite=" + Math.round(reichweite) + "T | Lücke=" + lücken_dauerC + "T");
@@ -2250,10 +2391,36 @@ function createBestellungChina() {
     return;
   }
 
-  // ─── BUDGET lesen (Spalte I2 – bleibt erhalten wenn Tab nicht neu erstellt wird) ───
-  // Da der Tab oben gelöscht und neu erstellt wird, Budget aus Properties lesen
-  let budgetProp = PropertiesService.getScriptProperties().getProperty("BUDGET_CHINA");
-  let budgetG = (budgetProp && parseInt(budgetProp) > 0) ? parseInt(budgetProp) : 20000;
+  // ─── BUDGET: Empfehlung berechnen (2-Wochen-Bedarf) und als Default nutzen ───
+  let empfBudgetChina = 0;
+  {
+    const rawVDbudget = PropertiesService.getScriptProperties().getProperty("VERKAUFS_DATA");
+    if (rawVDbudget) {
+      try {
+        const vdBudget = JSON.parse(rawVDbudget);
+        const chinaLabels = ["Tapes 45cm","Tapes 55cm","Tapes 65cm","Tapes 85cm",
+          "Bondings 65cm","Bondings 85cm","Classic Weft","Genius Weft"];
+        for (const label of chinaLabels) {
+          const e = vdBudget["Usbekisch Wellig|" + label];
+          if (e && (e.avgG3M || e.g30d)) {
+            empfBudgetChina += Math.round((e.avgG3M || 0) * 0.5 + (e.g30d || 0) * 0.5) * 0.5;
+          }
+        }
+      } catch(ex) {}
+    }
+    empfBudgetChina = Math.round(empfBudgetChina / 1000) * 1000; // auf ganze kg runden
+  }
+  // Budget: Auto-Trigger → Empfehlung | Manuell → Zellenwert/Property → Empfehlung → 20kg
+  let budgetG;
+  if (isAutoRun) {
+    budgetG = empfBudgetChina > 0 ? empfBudgetChina : 20000;
+    Logger.log("🤖 Auto-Budget China: " + (budgetG/1000).toFixed(1) + " kg (Empfehlung)");
+  } else {
+    let budgetProp = PropertiesService.getScriptProperties().getProperty("BUDGET_CHINA");
+    budgetG = (budgetProp && parseInt(budgetProp) > 0) ? parseInt(budgetProp)
+      : (empfBudgetChina > 0 ? empfBudgetChina : 20000);
+    Logger.log("👤 Manuelles Budget China: " + (budgetG/1000).toFixed(1) + " kg");
+  }
 
   // ─── BUDGET-LISTE berechnen (8-Runden-Strategie – Option B China) ──────────────────────────
   // Kernprinzip: Alle 2 Wochen bestellen → jede Bestellung deckt ~21 Tage (3W Sicherheitspuffer).
@@ -2272,10 +2439,9 @@ function createBestellungChina() {
       const gbd = (r.tagesrate > 0)
         ? Math.max(500, Math.round(r.tagesrate * 21 / 100) * 100)
         : 500;
-      // notfall: Lücke > 14 Tage ODER lager=0+unterwegs=0 ODER stock_at_84 < 7 Tage Rate
+      // notfall: Regal leer+nichts kommt ODER echte Versorgungslücke > 14 Tage
       const notfall = (r.lager === 0 && r.unterwegs === 0) ||
-        (r.hat_lücke && r.lücken_dauer > 14) ||
-        (r.stock_at_84 != null && r.tagesrate > 0 && r.stock_at_84 < r.tagesrate * 7);
+        (r.hat_lücke && r.lücken_dauer > 14);
       allCandidates.push({
         rang: r.rang, tier: r.tier, isPremium: r.isPremium, isTop, isMid,
         lager: r.lager, unterwegs: r.unterwegs, verfügbar: r.lager + r.unterwegs,
@@ -2307,7 +2473,11 @@ function createBestellungChina() {
     const remaining = Math.max(0, maxTotal - c.zugeteilt);
     return Math.min(proposed, remaining);
   }
-  function rundeC_(val) { return Math.round(val / 100) * 100; }
+  // TOP7: aufrunden, MID/REST: abrunden. Budget-Cap am Ende korrigiert Überschreitung.
+  function rundeC_(val, c) {
+    const fn = (c && c.isTop) ? Math.ceil : Math.floor;
+    return fn(val / 100) * 100;
+  }
 
   let restBudget = budgetG;
 
@@ -2321,7 +2491,7 @@ function createBestellungChina() {
       if (restBudget <= 0) break;
       if (c.zugeteilt >= 500) continue;
       let zugeteilt = Math.min(500, restBudget, c.bedarf - c.zugeteilt);
-      zugeteilt = rundeC_(zugeteilt);
+      zugeteilt = rundeC_(zugeteilt, c);
       if (zugeteilt >= 100) { c.zugeteilt += zugeteilt; restBudget -= zugeteilt; }
     }
   }
@@ -2336,12 +2506,12 @@ function createBestellungChina() {
     for (let c of r1) {
       if (restBudget <= 0) break;
       const aufholFaktor = c.isTop ? 2.0 : (c.isMid ? 1.5 : 1.0);
-      let aufhol = Math.min(c.bedarf, rundeC_(c.grundbedarf * aufholFaktor));
+      let aufhol = Math.min(c.bedarf, rundeC_(c.grundbedarf * aufholFaktor, c));
       aufhol = midCapC(c, aufhol);
       let restBedarf = aufhol - c.zugeteilt;
       if (restBedarf <= 0) continue;
       let zugeteilt = Math.min(restBedarf, restBudget);
-      zugeteilt = rundeC_(zugeteilt);
+      zugeteilt = rundeC_(zugeteilt, c);
       if (zugeteilt >= 100) { c.zugeteilt += zugeteilt; restBudget -= zugeteilt; }
     }
   }
@@ -2358,12 +2528,12 @@ function createBestellungChina() {
       });
     for (let c of r2) {
       if (restBudget <= 0) break;
-      let nachhol = Math.min(c.bedarf, rundeC_(c.grundbedarf * 1.5));
+      let nachhol = Math.min(c.bedarf, rundeC_(c.grundbedarf * 1.5, c));
       nachhol = midCapC(c, nachhol);
       let restBedarf = nachhol - c.zugeteilt;
       if (restBedarf <= 0) continue;
       let zugeteilt = Math.min(restBedarf, restBudget);
-      zugeteilt = rundeC_(zugeteilt);
+      zugeteilt = rundeC_(zugeteilt, c);
       if (zugeteilt >= 100) { c.zugeteilt += zugeteilt; restBudget -= zugeteilt; }
     }
   }
@@ -2379,7 +2549,7 @@ function createBestellungChina() {
       let restBedarf = Math.min(c.bedarf, target) - c.zugeteilt;
       if (restBedarf <= 0) continue;
       let zugeteilt = Math.min(restBedarf, restBudget);
-      zugeteilt = rundeC_(zugeteilt);
+      zugeteilt = rundeC_(zugeteilt, c);
       if (zugeteilt >= 100) { c.zugeteilt += zugeteilt; restBudget -= zugeteilt; }
     }
   }
@@ -2396,7 +2566,7 @@ function createBestellungChina() {
       let bereits = stockBase + c.zugeteilt;
       if (bereits >= c.ziel) continue;
       let aufstockung = Math.min(c.ziel - bereits, c.bedarf - c.zugeteilt);
-      aufstockung = rundeC_(aufstockung);
+      aufstockung = rundeC_(aufstockung, c);
       aufstockung = Math.min(aufstockung, restBudget);
       if (aufstockung >= 100) { c.zugeteilt += aufstockung; restBudget -= aufstockung; }
     }
@@ -2413,7 +2583,7 @@ function createBestellungChina() {
       let bereits = stockBase + c.zugeteilt;
       if (bereits >= c.ziel) continue;
       let aufstockung = Math.min(c.ziel - bereits, c.bedarf - c.zugeteilt);
-      aufstockung = rundeC_(aufstockung);
+      aufstockung = rundeC_(aufstockung, c);
       aufstockung = Math.min(aufstockung, restBudget);
       if (aufstockung >= 100) { c.zugeteilt += aufstockung; restBudget -= aufstockung; }
     }
@@ -2429,7 +2599,7 @@ function createBestellungChina() {
       let restBedarf = c.bedarf - c.zugeteilt;
       if (restBedarf <= 0) continue;
       let zugeteilt = Math.min(restBedarf, restBudget);
-      zugeteilt = rundeC_(zugeteilt);
+      zugeteilt = rundeC_(zugeteilt, c);
       if (zugeteilt >= 100) { c.zugeteilt += zugeteilt; restBudget -= zugeteilt; }
     }
   }
@@ -2453,14 +2623,48 @@ function createBestellungChina() {
         if (restBudget <= 0) break;
         const stockBase = (c.stock_at_84 != null) ? c.stock_at_84 : (c.lager + c.unterwegs);
         if ((stockBase + c.zugeteilt) / Math.max(1, c.ziel) >= 2.0) continue;
-        let extra = Math.max(100, rundeC_(c.grundbedarf));
+        let extra = Math.max(100, rundeC_(c.grundbedarf, c));
         extra = Math.min(extra, restBudget, c.bedarf - c.zugeteilt);
-        extra = rundeC_(extra);
+        extra = rundeC_(extra, c);
         if (extra >= 100) { c.zugeteilt += extra; restBudget -= extra; anyAdded = true; }
       }
       if (!anyAdded) break;
     }
     if (restBudget > 0) Logger.log("💰 China Runde 7: Restbudget: " + (restBudget/1000).toFixed(1) + "kg");
+  }
+
+  // ─── HARTER BUDGET-CAP CHINA ───
+  {
+    let totalZ = allCandidates.reduce((s, c) => s + c.zugeteilt, 0);
+    let über = totalZ - budgetG;
+    if (über > 0) {
+      Logger.log("⚠️ China Budget-Cap: " + (über/1000).toFixed(1) + "kg über Budget → kürze REST, dann MID");
+      const restS = allCandidates.filter(c => !c.isTop && !c.isMid && c.zugeteilt > 0)
+        .sort((a, b) => (b.rang || 999) - (a.rang || 999));
+      for (let c of restS) {
+        if (über <= 0) break;
+        const min = 500;
+        const kürzbar = c.zugeteilt - min;
+        if (kürzbar <= 0) continue;
+        const k = Math.min(kürzbar, über);
+        const kR = Math.floor(k / 100) * 100;
+        c.zugeteilt -= kR; über -= kR;
+      }
+      if (über > 0) {
+        const midS = allCandidates.filter(c => c.isMid && c.zugeteilt > 0)
+          .sort((a, b) => (b.rang || 999) - (a.rang || 999));
+        for (let c of midS) {
+          if (über <= 0) break;
+          const min = 500;
+          const kürzbar = c.zugeteilt - min;
+          if (kürzbar <= 0) continue;
+          const k = Math.min(kürzbar, über);
+          const kR = Math.floor(k / 100) * 100;
+          c.zugeteilt -= kR; über -= kR;
+        }
+      }
+      restBudget = budgetG - allCandidates.reduce((s, c) => s + c.zugeteilt, 0);
+    }
   }
 
   // Nur Kandidaten mit Zuteilung > 0, nach Typ+Länge gruppiert sortieren
@@ -2478,7 +2682,7 @@ function createBestellungChina() {
     });
 
   let budgetItems = budgetCandidatesSorted_
-    .map(c => [c.typ, c.länge, c.product, c.lager, c.unterwegs, c.ziel, c.zugeteilt, c.nächste > 0 ? c.nächste : ""]);
+    .map(c => [c.typ, c.länge, c.product, c.lager, c.unterwegs, c.ziel, c.zugeteilt]);
 
   // Gruppenstruktur: Typ nur in erster Zeile
   let lastTypBudget = null;
@@ -2497,14 +2701,12 @@ function createBestellungChina() {
     : null;
 
   // ─── BUDGET-LISTE oben schreiben ───
-  let colCount = 8;
-  let headerRow = ["Typ", "Länge", "Farbcode", "Lager (g)", "Unterwegs (g)", "Ziel (g)", "Bestellung (g)", "Nächste Best. (g)"];
+  let colCount = 7;
+  let headerRow = ["Typ", "Länge", "Farbcode", "Lager (g)", "Unterwegs (g)", "Ziel (g)", "Bestellung (g)"];
   let budgetTitle = "CHINA (Usbekisch Wellig) – BUDGET-BESTELLUNG " + dateStr + "  |  Budget: " + (budgetG/1000).toFixed(1) + " kg  |  Verbraucht: " + ((budgetG - restBudget)/1000).toFixed(1) + " kg";
   let budgetTotalBedarf = budgetItems.reduce((s, r) => s + (typeof r[6] === "number" ? r[6] : 0), 0);
-  let nächsteTotalChina = budgetItems.reduce((s, r) => s + (typeof r[7] === "number" ? r[7] : 0), 0);
   let budgetSubtotal = Array(colCount).fill("");
   budgetSubtotal[0] = "Subtotal";
-  budgetSubtotal[7] = nächsteTotalChina > 0 ? nächsteTotalChina : "";
   budgetSubtotal[6] = budgetTotalBedarf;
 
   let budgetAllRows = [
@@ -2521,8 +2723,9 @@ function createBestellungChina() {
   sheet.getRange(1, 1, 1, colCount).merge()
     .setBackground("#1a73e8").setFontColor("#ffffff").setFontWeight("bold").setFontSize(13)
     .setHorizontalAlignment("center");
-  // Header
-  sheet.getRange(2, 1, 1, colCount)
+  // Header (Zeile 2 wenn kein NOTFALL, Zeile 3 wenn NOTFALL-Warnzeile vorhanden)
+  const headerSheetRow = notfallText ? 3 : 2;
+  sheet.getRange(headerSheetRow, 1, 1, colCount)
     .setBackground("#2d2d2d").setFontColor("#ffffff").setFontWeight("bold").setFontSize(10)
     .setHorizontalAlignment("center");
   // ── Tier-Farbschema (konsistent mit Topseller-Tab) ──
@@ -2557,13 +2760,10 @@ function createBestellungChina() {
     if (isTop7 || isNotfall) sheet.getRange(i + 1, 1, 1, colCount).setFontWeight("bold");
     let bedarf = r[6];
     if (typeof bedarf === "number" && bedarf > 0) {
-      let bedarfBg = isNotfall ? "#c62828" : (isTop7 ? BC_TOP7 : (isMid ? BC_MID : BC_REST));
+      let bedarfBg = isTop7 ? BC_TOP7 : (isMid ? BC_MID : BC_REST);
       sheet.getRange(i + 1, 7).setBackground(bedarfBg)
         .setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
     }
-    let nächste = r[7];
-    if (typeof nächste === "number" && nächste > 0)
-      sheet.getRange(i + 1, 8).setBackground("#ff9800").setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
     let lager = r[3];
     if (typeof lager === "number" && lager === 0)
       sheet.getRange(i + 1, 4).setBackground("#db4437").setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
@@ -2574,14 +2774,12 @@ function createBestellungChina() {
     .setHorizontalAlignment("center");
   sheet.getRange(budgetAllRows.length, 1).setHorizontalAlignment("left");
 
-  // Hinweis: Nächste Bestellung China
-  if (nächsteTotalChina > 0) {
-    sheet.getRange(budgetAllRows.length + 1, 9).setValue("📋 Nächste Best. China").setFontWeight("bold").setFontSize(9)
-      .setBackground("#ff9800").setFontColor("#ffffff").setHorizontalAlignment("center");
-    sheet.getRange(budgetAllRows.length + 2, 9).setValue((nächsteTotalChina/1000).toFixed(1) + " kg Fehlmenge").setFontSize(10).setFontWeight("bold")
+  // MID-Cap Hinweis China
+  if (budgetKnappC) {
+    sheet.getRange(budgetAllRows.length + 1, 9).setValue("⚠️ Budget knapp").setFontWeight("bold").setFontSize(9)
+      .setBackground("#e65100").setFontColor("#ffffff").setHorizontalAlignment("center");
+    sheet.getRange(budgetAllRows.length + 2, 9).setValue("MID auf 60% gedeckelt").setFontSize(8)
       .setFontColor("#e65100").setHorizontalAlignment("center");
-    sheet.getRange(budgetAllRows.length + 3, 9).setValue("in 8 Wochen nachbestellen").setFontSize(7)
-      .setFontColor("#555555").setHorizontalAlignment("left");
   }
 
   // Hinweis wenn keine Topseller-Daten vorhanden
@@ -2699,21 +2897,27 @@ function createBestellungChina() {
 function createBestellungAmanda() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const tabName = "Vorschlag - Amanda";
+  const isAutoRun = PropertiesService.getScriptProperties().getProperty("AUTO_BUDGET") === "true";
   let sheet = ss.getSheetByName(tabName);
+  // Bei manuellem Aufruf: Budget aus Zelle J2 lesen BEVOR der Tab gelöscht wird
+  if (sheet && !isAutoRun) {
+    const cellVal = sheet.getRange(2, 10).getValue();
+    if (cellVal && parseInt(cellVal) > 0) {
+      PropertiesService.getScriptProperties().setProperty("BUDGET_AMANDA", String(parseInt(cellVal)));
+    }
+  }
   if (sheet) ss.deleteSheet(sheet);
   sheet = ss.insertSheet(tabName);
   sheet.setTabColor("#0f9d58");
 
   const today = new Date();
-  const dateStr = Utilities.formatDate(today, Session.getScriptTimeZone(), "dd.MM.yyyy");
-  const timeStr = Utilities.formatDate(today, Session.getScriptTimeZone(), "dd.MM.yyyy HH:mm");
-  const CODE_VERSION = "v5.0 – Breite vor Tiefe: dynamischer MID-Cap + Nächste Best. | " + timeStr + " Uhr";
+  const dateStr = Utilities.formatDate(today, Session.getScriptTimeZone(), "dd.MM.yyyy, HH:mm");
+  const CODE_VERSION = "v5.0 – Breite vor Tiefe | " + dateStr + " Uhr";
 
   // Alle Inventar-Zeilen aus "Russisch - GLATT" Sheet lesen
   const invRows = readInventoryRowsFromSheet("Russisch - GLATT");
   // Clip-Ins kommen aus "Russisch - GLATT" Sheet, Ponytails aus "Usbekisch - WELLIG"
-  const invGlattRows = readInventoryRowsFromSheet("Russisch - GLATT");  // für Clip-Ins
-  const invWelligRows = invGlattRows; // Alias (wird für Clip-In Schleife verwendet)
+  const invGlattRows = readInventoryRowsFromSheet("Russisch - GLATT");  // für Clip-Ins (alle Varianten)
   const invWellig = readInventoryFromSheet("Usbekisch - WELLIG");  // für Ponytails
 
   // Aktive Bestellungen laden
@@ -2724,9 +2928,47 @@ function createBestellungAmanda() {
   // TOPSELLER_DATA einmal laden (Performance: kein wiederholter PropertiesService-Aufruf in Schleifen)
   const tsDataA = hasTopsellerdatenA ? loadChunked_(PropertiesService.getScriptProperties(), "TOPSELLER_DATA") : null;
 
+  // ─── PER-PRODUCT VELOCITY LOOKUP (aus VA_PRODUCT_DATA) ───
+  // Ermöglicht produktspezifische Tagesrate statt Collection-Durchschnitt
+  const vaVelocityLookup = {}; // key: "handle|#FARBE" → { g30d, g60d_alt, g90d }
+  try {
+    const vaDataA = loadChunked_(PropertiesService.getScriptProperties(), "VA_PRODUCT_DATA");
+    if (vaDataA) {
+      for (const vaKey in vaDataA) {
+        const vp = vaDataA[vaKey];
+        if (!vp.handle) continue;
+        let farbe = "";
+        const hIdx = (vp.name || "").indexOf("#");
+        if (hIdx >= 0) farbe = (vp.name || "").substring(hIdx).split(" ")[0].toUpperCase();
+        if (!farbe) continue;
+        const lookupKey = vp.handle + "|" + farbe;
+        // Höchste Velocity behalten (falls mehrere Einträge für gleiche Farbe)
+        if (!vaVelocityLookup[lookupKey] || (vp.g30d || 0) > vaVelocityLookup[lookupKey].g30d) {
+          vaVelocityLookup[lookupKey] = {
+            g30d: vp.g30d || 0,
+            g60d_alt: vp.g60d_alt || 0,
+            g90d: vp.g90d || 0
+          };
+        }
+      }
+      Logger.log("✅ VA-Velocity-Lookup: " + Object.keys(vaVelocityLookup).length + " Einträge");
+    }
+  } catch(eVAvel) { Logger.log("⚠️ VA-Velocity-Lookup fehlgeschlagen: " + eVAvel.message); }
+
+  // Method → Shopify Handle Mapping (für VA-Velocity-Lookup)
+  const METHOD_TO_HANDLE_A = {
+    "Standard Tapes": "russische-normal-tapes",
+    "Minitapes": "mini-tapes",
+    "Bondings": "bondings-glatt",
+    "Classic Weft": "tressen-russisch-classic",
+    "Genius Weft": "tressen-russisch-genius",
+    "Invisible Weft": "tressen-russisch-invisible"
+  };
+
   // Tier für Amanda-Produkt bestimmen (dynamisch oder Fallback)
   function getTierAmanda(colorOneWord, method, isInvisible) {
-    if (isInvisible) return "REST"; // Invisible Weft immer REST (1000g)
+    // Alle Methoden bekommen echten Tier aus Topseller-Daten (inkl. Invisible Weft)
+    // Invisible Weft ist keine Prio-Kategorie, aber Top-Seller dort sollen trotzdem als TOP7/MID erkannt werden
     if (hasTopsellerdatenA && tsDataA) {
       return getTopsellertierTS_cached_(tsDataA, "Russisch Glatt", method, colorOneWord);
     }
@@ -2746,7 +2988,7 @@ function createBestellungAmanda() {
   // ─── TIER-COUNTS vorberechnen (für proportionale Zielmengen) ───
   const tierCountsCacheA = {}; // key: collName -> { TOP7, MID, REST }
   for (let m of collMappingAmanda) {
-    if (tierCountsCacheA[m.collName] || m.isInvisible) continue;
+    if (tierCountsCacheA[m.collName]) continue;
     tierCountsCacheA[m.collName] = countTiersForCollection_(
       invRows, "Russisch Glatt", m.collName, m.method,
       (c, meth) => getTierAmanda(c, meth, false),
@@ -2781,18 +3023,29 @@ function createBestellungAmanda() {
 
     // Tier bestimmen (dynamisch)
     let tier = getTierAmanda(colorOneWord, mapping.method, mapping.isInvisible);
-    if (tier === "KAUM" && lager > 0) continue; // Lager vorhanden → wirklich langsam, skip
-    // KAUM + lager===0 → Produkt ist ausverkauft (0 Verkäufe weil kein Lager, nicht weil kein Interesse)
-    // → minimal 300g bestellen damit die Farbe nicht dauerhaft ausgelistet bleibt
+    // KAUM-Logik: < 150g Lager gilt als "unverkäuflich" (Kunden kaufen min. ~150g)
+    // → 30d-Verkauf = 0 weil niemand so wenig kaufen kann, nicht weil kein Interesse
+    // → Historische Daten (g60d_alt) prüfen ob das Produkt früher verkauft wurde
+    const MIN_VERKAUFSMENGE = 150; // g — unter dieser Menge kauft niemand (außer Clip-ins)
+    const istUnverkaeuflich = (lager > 0 && lager < MIN_VERKAUFSMENGE && mapping.method !== "Clip-ins");
+    if (tier === "KAUM" && !istUnverkaeuflich && lager > 0) continue; // Genug Lager + keine Verkäufe → wirklich langsam
+    // KAUM + lager=0 oder < 150g → Nachbestellen
 
-    // Ziel: verkaufsbasiert (70% Ø3M + 30% letzter Monat) oder Fallback auf fixe Stufen
-    // Invisible Weft: immer REST mit Fallback-Ziel 300g
-    // KAUM mit lager=0: immer 300g (Mindestabdeckung)
+    // Bei KAUM + unverkäuflich: Historische Daten prüfen → wenn früher verkauft, als REST behandeln
+    if (tier === "KAUM" && istUnverkaeuflich) {
+      const handleUV = METHOD_TO_HANDLE_A[mapping.method] || "";
+      const vaUV = handleUV ? vaVelocityLookup[handleUV + "|" + colorOneWord.toUpperCase()] : null;
+      if (vaUV && (vaUV.g60d_alt > 0 || vaUV.g90d > 0)) {
+        tier = "REST"; // Früher verkauft → nicht tot, nur unverkäuflicher Restbestand
+        Logger.log("🔄 KAUM→REST: " + invRow.product + " | Lager=" + lager + "g < " + MIN_VERKAUFSMENGE + "g (unverkäuflich) | g60d_alt=" + (vaUV.g60d_alt||0));
+      }
+    }
+
+    // Ziel: verkaufsbasiert oder Fallback
+    // Alle Methoden (inkl. Invisible Weft) bekommen echte verkaufsbasierte Ziele
     let ziel;
     if (tier === "KAUM") {
-      ziel = 300; // Ausverkauft – Mindestbestellung
-    } else if (mapping.isInvisible) {
-      ziel = 300;
+      ziel = 300; // Ausverkauft/unverkäuflich – Mindestbestellung
     } else {
       let tierCounts = tierCountsCacheA[mapping.collName] || { TOP7: 1, MID: 1, REST: 1 };
       ziel = getVerkaufsZielGrams_("Russisch Glatt", mapping.collName, tier, tierCounts, 6, colorOneWord, lager); // Amanda: 6 Wochen
@@ -2831,6 +3084,7 @@ function createBestellungAmanda() {
     let bedarf = Math.max(0, ziel - verfügbar);
 
     let stockAt42A2 = null; // Option B: Simulierter Lagerbestand bei Ankunft der neuen Bestellung (Tag 42)
+    let tagesVerkaufA2 = 0; // Tagesrate für grundbedarf-Berechnung (wird im Velocity-Check gesetzt)
 
     // ─── VELOCITY-CHECK: Pro Bestellung mit echtem Ankunftsdatum (Amanda) ────────────────────────
     // Für jede unterwegs-Bestellung: Ankunft = Bestelldatum + 42 Tage (6 Wochen Amanda)
@@ -2839,15 +3093,47 @@ function createBestellungAmanda() {
       if (rawVDA2) {
         try {
           const vdA2 = JSON.parse(rawVDA2);
-          const vdKeyA2 = "Russisch Glatt|" + mapping.collName;
+          // collMappingAmanda.collName (z.B. "Standard Tapes Russisch") → VERKAUFS_DATA-Label (z.B. "Standard Tapes")
+          const VD_KEY_MAP_A = {
+            "Standard Tapes Russisch": "Standard Tapes",
+            "Mini Tapes Glatt": "Minitapes",
+            "Russische Bondings (Glatt)": "Bondings",
+            "Russische Classic Tressen (Glatt)": "Classic Weft",
+            "Russische Genius Tressen (Glatt)": "Genius Weft",
+            "Russische Invisible Tressen (Glatt)": "Invisible Weft"
+          };
+          const vdKeyA2 = "Russisch Glatt|" + (VD_KEY_MAP_A[mapping.collName] || mapping.collName);
           const vdEntryA2 = vdA2[vdKeyA2];
           if (vdEntryA2 && vdEntryA2.g30d) {
-            const tcA2 = tierCountsCacheA[mapping.collName] || { TOP7: 1, MID: 1, REST: 1 };
-            const TIER_WA2 = { "TOP7": 7, "MID": 4, "REST": 1 };
-            const totalAA2 = (tcA2.TOP7||0)*7 + (tcA2.MID||0)*4 + (tcA2.REST||0)*1 || 1;
-            const anteilFaktorA2 = (TIER_WA2[tier] || 1) / totalAA2;
-            const g30dProduktA2 = vdEntryA2.g30d * anteilFaktorA2;
-            const tagesVerkaufA2 = g30dProduktA2 / 30;
+            // ── Per-Product Velocity (bevorzugt) oder Collection-Durchschnitt (Fallback) ──
+            const handleA2 = METHOD_TO_HANDLE_A[mapping.method] || "";
+            const vaVelEntry = handleA2 ? vaVelocityLookup[handleA2 + "|" + colorOneWord.toUpperCase()] : null;
+
+            // tagesVerkaufA2 ist oben deklariert (= 0), hier wird sie befüllt
+            if (vaVelEntry && (vaVelEntry.g30d > 0 || vaVelEntry.g60d_alt > 0)) {
+              // Per-product Daten vorhanden → Ausverkauf-korrigierte Rate verwenden
+              const rateNeuA2 = vaVelEntry.g30d / 30;
+              const rateAltA2 = (vaVelEntry.g60d_alt || 0) / 60;
+              // Ausverkauf-Erkennung: wenn alte Rate deutlich höher → Ausverkauf, alte Rate verwenden
+              if (rateAltA2 > 0.5 && rateNeuA2 < rateAltA2 * 0.6) {
+                tagesVerkaufA2 = rateAltA2; // Historische Rate (vor Ausverkauf)
+              } else {
+                tagesVerkaufA2 = Math.max(rateNeuA2, rateAltA2 * 0.3); // Aktuelle Rate, min. 30% der alten
+              }
+              Logger.log("📊 Velocity per-product: " + colorOneWord + " " + mapping.method +
+                " | g30d=" + vaVelEntry.g30d + " g60d_alt=" + (vaVelEntry.g60d_alt||0) +
+                " → " + (tagesVerkaufA2*30).toFixed(0) + "g/30T");
+            } else {
+              // Fallback: Collection-Durchschnitt / Tier-Gewicht
+              const tcA2 = tierCountsCacheA[mapping.collName] || { TOP7: 1, MID: 1, REST: 1 };
+              const TIER_WA2 = { "TOP7": 7, "MID": 4, "REST": 1 };
+              const totalAA2 = (tcA2.TOP7||0)*7 + (tcA2.MID||0)*4 + (tcA2.REST||0)*1 || 1;
+              const anteilFaktorA2 = (TIER_WA2[tier] || 1) / totalAA2;
+              const g30dProduktA2 = vdEntryA2.g30d * anteilFaktorA2;
+              tagesVerkaufA2 = g30dProduktA2 / 30;
+              Logger.log("📊 Velocity fallback (Collection-Ø): " + colorOneWord + " " + mapping.method +
+                " | anteil=" + (anteilFaktorA2*100).toFixed(1) + "% → " + (tagesVerkaufA2*30).toFixed(0) + "g/30T");
+            }
             const heuteA2 = new Date();
             let lastTagesBisAnkunftA2 = 0; // Option B: Tage bis zur letzten bekannten Lieferung
             // Unterwegs-Details pro Bestellung laden
@@ -2915,15 +3201,26 @@ function createBestellungAmanda() {
     }
     // ──────────────────────────────────────────────────────────────────────────────────────────
 
-    if (bedarf <= 0) continue;
-    // Kein pauschales Minimum hier – Budget-Logik regelt Mindestmengen
+    // Produkt aufnehmen wenn:
+    // 1. bedarf > 0 (normaler Fall: ziel > verfügbar), ODER
+    // 2. stock_at_42 ≤ 0 (wird vor Ankunft ausverkauft, auch wenn viel unterwegs)
+    //    → grundbedarf (21 Tage) als Bedarf setzen, damit bei nächster Bestellung Nachschub kommt
+    if (bedarf <= 0) {
+      if (stockAt42A2 != null && stockAt42A2 <= 0 && tagesVerkaufA2 > 0) {
+        // stock_at_arrival sagt: Produkt wird leer sein → grundbedarf als Minimum
+        bedarf = Math.max(100, Math.ceil(tagesVerkaufA2 * 21 / 100) * 100);
+        Logger.log("🔄 Bedarf erzwungen für " + invRow.product + ": stock_at_42=" + stockAt42A2 + " → grundbedarf=" + bedarf + "g");
+      } else {
+        continue;
+      }
+    }
 
     let groupKey = mapping.method;
     if (!rowsByGroup[groupKey]) {
       rowsByGroup[groupKey] = [];
       groupOrder.push({ key: groupKey, quality: "Russian Straight hair", method: mapping.method });
     }
-    rowsByGroup[groupKey].push({ rang, tier, lager, unterwegs, ziel, bedarf, product: invRow.product, stock_at_42: stockAt42A2 });
+    rowsByGroup[groupKey].push({ rang, tier, lager, unterwegs, ziel, bedarf, product: invRow.product, stock_at_42: stockAt42A2, tagesrate: tagesVerkaufA2 || 0 });
   }
 
   // Zeilen zusammenbauen (nach Rang sortiert) – Quality + Method IMMER gesetzt (für Budget-Sortierung)
@@ -2942,7 +3239,8 @@ function createBestellungAmanda() {
         r.bedarf,       // [7]
         r.tier,         // [8] "TOP7" | "MID" | "REST"
         r.rang,         // [9] echter Rang (1, 2, 3...)
-        r.stock_at_42 != null ? r.stock_at_42 : null  // [10] Option B: Lager bei Ankunft neue Bestellung
+        r.stock_at_42 != null ? r.stock_at_42 : null,  // [10] Option B: Lager bei Ankunft neue Bestellung
+        r.tagesrate || 0  // [11] tagesrate (g/Tag) für grundbedarf-Berechnung
       ]);
     }
   }
@@ -2950,9 +3248,9 @@ function createBestellungAmanda() {
    // ─── CLIP-INS: Dynamisch aus Lager-Sheet lesen (Usbekisch-WELLIG, Collection "Clip In Extensions Echthaar") ───
   // Alle einzigartigen Clip-In Produkte + Varianten direkt aus dem Sheet ermitteln
   {
-    // Sammle alle Clip-In Zeilen aus invWelligRows
+    // Sammle alle Clip-In Zeilen aus Russisch - GLATT
     let clipInMap = {}; // key: "PRODUKTNAME|VARIANTE" → { productName, variant, lagerG }
-    for (let row of invWelligRows) {
+    for (let row of invGlattRows) {
       let collUpper = row.collection.toUpperCase();
       if (!collUpper.includes("CLIP IN") && !collUpper.includes("CLIP-IN")) continue;
       let variant = row.unitWeight || 0; // Gewicht pro Stück (100, 150, 225)
@@ -3099,9 +3397,36 @@ function createBestellungAmanda() {
     return;
   }
 
-  // ─── BUDGET lesen (aus Properties) ───
-  let budgetPropA = PropertiesService.getScriptProperties().getProperty("BUDGET_AMANDA");
-  let budgetGA = (budgetPropA && parseInt(budgetPropA) > 0) ? parseInt(budgetPropA) : 20000;
+  // ─── BUDGET: Empfehlung berechnen (2-Wochen-Bedarf) und als Default nutzen ───
+  let empfBudgetAmanda = 0;
+  {
+    const rawVDbudgetA = PropertiesService.getScriptProperties().getProperty("VERKAUFS_DATA");
+    if (rawVDbudgetA) {
+      try {
+        const vdBA = JSON.parse(rawVDbudgetA);
+        const amandaLabels = ["Standard Tapes","Minitapes","Bondings",
+          "Classic Weft","Genius Weft","Invisible Weft","Clip-ins"];
+        for (const label of amandaLabels) {
+          const e = vdBA["Russisch Glatt|" + label];
+          if (e && (e.avgG3M || e.g30d)) {
+            empfBudgetAmanda += Math.round((e.avgG3M || 0) * 0.5 + (e.g30d || 0) * 0.5) * 0.5;
+          }
+        }
+      } catch(ex) {}
+    }
+    empfBudgetAmanda = Math.round(empfBudgetAmanda / 1000) * 1000;
+  }
+  // Budget: Auto-Trigger → Empfehlung | Manuell → Zellenwert/Property → Empfehlung → 20kg
+  let budgetGA;
+  if (isAutoRun) {
+    budgetGA = empfBudgetAmanda > 0 ? empfBudgetAmanda : 20000;
+    Logger.log("🤖 Auto-Budget Amanda: " + (budgetGA/1000).toFixed(1) + " kg (Empfehlung)");
+  } else {
+    let budgetPropA = PropertiesService.getScriptProperties().getProperty("BUDGET_AMANDA");
+    budgetGA = (budgetPropA && parseInt(budgetPropA) > 0) ? parseInt(budgetPropA)
+      : (empfBudgetAmanda > 0 ? empfBudgetAmanda : 20000);
+    Logger.log("👤 Manuelles Budget Amanda: " + (budgetGA/1000).toFixed(1) + " kg");
+  }
 
   // ─── BUDGET-LISTE berechnen (3-Runden-Strategie) ───
   // rows hat: [quality, method, länge, product, lager, unterwegs, ziel, bedarf, tier]
@@ -3120,15 +3445,18 @@ function createBestellungAmanda() {
   }
   const methodOrderA = ["Standard Tapes", "Minitapes", "Bondings", "Classic Weft", "Genius Weft", "Invisible Weft", "Clip-ins", "Ponytail"];
 
+  // ── Prio-Kategorien: Diese Methoden haben Vorrang bei Budgetverteilung ──
+  // Russisch Glatt: Standard Tapes, Minitapes, Bondings
+  const PRIO_METHODS_A = ["Standard Tapes", "Minitapes", "Bondings"];
+
   let allCandidatesA = rows.filter(r => (r[7] || 0) > 0).map(r => {
     let quality = r[0], method = r[1], länge = r[2], product = r[3];
     let lager = r[4], unterwegs = r[5], ziel = r[6], bedarf = r[7];
-    // tier aus rows[8] – gesetzt bei Bedarfsberechnung. Clip-ins/Ponytail → REST
     let tier = r[8] || "REST";
     let rang = r[9] || 999;
-    let isTop = (tier === "TOP7"); // Echter Verkaufsrang!
+    let isTop = (tier === "TOP7");
     let isMid = (tier === "MID");
-    let isInvisible = method === "Invisible Weft";
+    let isPrio = PRIO_METHODS_A.indexOf(method) >= 0; // Prio-Kategorie?
     let verfügbar = lager + unterwegs;
     // Einheitsgröße für Clip-ins aus länge ("100g", "150g", "225g"), Ponytails 130g, sonst 100g
     let einheit = 100;
@@ -3136,67 +3464,109 @@ function createBestellungAmanda() {
       let m = String(länge).match(/(\d+)/);
       if (m) einheit = parseInt(m[1]);
     } else if (method === "Ponytail") {
-      einheit = 130; // Ponytail = 130g pro Stück
+      einheit = 130;
     }
-    // Option B: stock_at_arrival = simulierter Lagerstand wenn neue Bestellung ankommt (Tag 42)
-    // null = kein Velocity-Daten vorhanden → Fallback auf lager + unterwegs
     const stock_at_arrival = (r[10] != null) ? r[10] : null;
-    return { quality, method, länge, product, lager, unterwegs, verfügbar, ziel, bedarf, tier, rang, isTop, isMid, isInvisible, einheit, zugeteilt: 0, stock_at_arrival };
+    const tagesrate = r[11] || 0;
+
+    // ── grundbedarf: Wie China — Anteil DIESER Bestellung = 21 Tage Verbrauch ──
+    // Bei knappem Budget wird nur grundbedarf bestellt, nicht voller 45-Tage-bedarf.
+    // Bei genug Budget wird voller bedarf bestellt.
+    // mind. 1 Einheit (100g/150g/225g)
+    let grundbedarf;
+    if (tagesrate > 0) {
+      grundbedarf = Math.max(einheit, Math.ceil(tagesrate * 21 / einheit) * einheit);
+    } else {
+      // Kein Velocity → fallback mindestAmanda-Menge
+      grundbedarf = (lager === 0 && (isTop || isMid)) ? 500 : (lager === 0 ? 300 : 200);
+      grundbedarf = Math.ceil(grundbedarf / einheit) * einheit;
+    }
+    grundbedarf = Math.min(grundbedarf, bedarf); // nie mehr als tatsächlichen Bedarf
+
+    return { quality, method, länge, product, lager, unterwegs, verfügbar, ziel, bedarf, tier, rang,
+             isTop, isMid, isPrio, einheit, zugeteilt: 0, stock_at_arrival, tagesrate, grundbedarf };
   });
 
   let restBudgetA = budgetGA;
 
   // Hilfsfunktion: Rundung auf 100g für Standard-Produkte, auf Einheit für Clip-ins/Ponytails
   function rundeAmanda(val, c) {
+    // TOP7: aufrunden (Bestseller sollen nicht zu kurz kommen)
+    // MID/REST: abrunden (Budget schützen)
+    const fn = c.isTop ? Math.ceil : Math.floor;
     if (c.method === "Clip-ins" || c.method === "Ponytail") {
-      return Math.round(val / c.einheit) * c.einheit;
+      return fn(val / c.einheit) * c.einheit;
     }
-    return Math.round(val / 100) * 100;
+    return fn(val / 100) * 100;
   }
 
-  // ─── BUDGET-RUNDEN A–J (v6 – "Breite vor Tiefe") ──────────────────────────────────────────
-  // Strategie: Erst ALLE ausverkauften Produkte mit Mindestmenge versorgen (Grundversorgung),
-  // dann TOP voll auffüllen. Bei knappem Budget: MID auf 60% cappen.
-  // So wird kein Produkt dauerhaft bei 0 gelassen, auch bei knappem Budget.
+  // ─── BUDGET-RUNDEN A–K (v8 – "Grundbedarf + Proportional") ────────────────────────────────
+  // Kernkonzept: Wir bestellen alle 2 Wochen → jede Bestellung deckt NUR 21 Tage (grundbedarf).
+  // Bei knappem Budget: grundbedarf pro Produkt, NICHT voller 45-Tage-Bedarf.
+  // Bei ausreichendem Budget: voller Bedarf.
+  // Clip-ins sind GLEICHBERECHTIGT — ein TOP7 Clip-in = TOP7 Tape.
+  // Innerhalb jedes Tiers: PROPORTIONAL statt sequentiell.
+  // Prio-Kategorien (Tapes, Minitapes, Bondings) > Non-Prio bei gleichem Tier.
   // ─────────────────────────────────────────────────────────────────────────────────────────────
 
-  // MID-Cap: NUR wenn Budget < Gesamtbedarf (= Budget reicht nicht für alles).
-  // Bei ausreichendem Budget → kein Cap, MID bekommt volles Ziel.
+  // Budget-Knappheit: Vergleiche mit Gesamtgrundbedarf (21 Tage), nicht vollem 45-Tage-Bedarf
   const gesamtBedarfA = allCandidatesA.reduce((s, c) => s + c.bedarf, 0);
+  const gesamtGrundbedarfA = allCandidatesA.reduce((s, c) => s + c.grundbedarf, 0);
   const budgetKnappA = budgetGA < gesamtBedarfA;
   const MID_CAP_FACTOR = 0.6;
   if (budgetKnappA) {
-    Logger.log("⚠️ Budget knapp: " + (budgetGA/1000).toFixed(1) + "kg < Bedarf " + (gesamtBedarfA/1000).toFixed(1) + "kg → MID-Cap 60% aktiv");
+    Logger.log("⚠️ Budget knapp: " + (budgetGA/1000).toFixed(1) + "kg < Bedarf " + (gesamtBedarfA/1000).toFixed(1) + "kg (Grundbedarf " + (gesamtGrundbedarfA/1000).toFixed(1) + "kg) → grundbedarf-Modus + MID-Cap 60%");
   } else {
-    Logger.log("✅ Budget ausreichend: " + (budgetGA/1000).toFixed(1) + "kg >= Bedarf " + (gesamtBedarfA/1000).toFixed(1) + "kg → kein MID-Cap");
+    Logger.log("✅ Budget ausreichend: " + (budgetGA/1000).toFixed(1) + "kg >= Bedarf " + (gesamtBedarfA/1000).toFixed(1) + "kg → voller Bedarf-Modus");
   }
 
   // Hilfsfunktion: Tier-Priorität (niedrigere Zahl = höhere Priorität)
+  // Clip-ins werden NICHT mehr degradiert — ein TOP7 Clip-in = TOP7 Tape
+  // Ponytails kommen am Ende, alles andere nach Tier
   const tierPrioA = (c) => {
-    if (c.method === "Ponytail") return 10;   // Ponytail immer zuletzt
-    if (c.method === "Clip-ins") return 5;    // Clip-ins nach TOP/MID
+    if (c.method === "Ponytail") return 10;
     if (c.isTop) return 0;
     if (c.isMid) return 1;
-    return 3; // REST
+    return 3;
   };
 
+  // ── Kritisch-Check: Produkt wird vor Ankunft der neuen Bestellung ausverkauft sein ──
+  // Berücksichtigt Lieferzeit (42 Tage) + aktuelle Velocity
+  function isCriticalA(c) {
+    if (c.lager === 0 && c.unterwegs === 0) return true;
+    if (c.stock_at_arrival != null && c.stock_at_arrival <= 0) return true;
+    return false;
+  }
+
+  // Log: Kritische Produkte mit Lager > 0
+  allCandidatesA.filter(c => c.lager > 0 && c.stock_at_arrival != null && c.stock_at_arrival <= 0).forEach(c => {
+    Logger.log("🔴 KRITISCH trotz Lager: " + c.product + " | Lager=" + c.lager + "g → stock_at_arrival=" + c.stock_at_arrival + "g | tier=" + c.tier);
+  });
+
   // Hilfsfunktion: MID-Cap anwenden — NUR bei knappem Budget
-  // Bei ausreichendem Budget: kein Cap, MID bekommt alles
   function midCap(c, proposed) {
     if (!c.isMid || !budgetKnappA) return proposed;
-    const maxTotal = Math.max(mindestAmanda(c), Math.round(c.bedarf * MID_CAP_FACTOR));
+    const maxTotal = Math.max(mindestAmanda(c), Math.round(c.grundbedarf * MID_CAP_FACTOR));
     const remaining = Math.max(0, maxTotal - c.zugeteilt);
     return Math.min(proposed, remaining);
   }
 
-  // RUNDE A: ALLE Produkte mit lager=0 UND unterwegs=0 → Mindestmenge zuteilen
-  //   "Grundversorgung": Jedes ausverkaufte Produkt bekommt garantiert etwas,
-  //   bevor einzelne Produkte mehr als das Minimum bekommen.
-  //   Sortierung: TOP > MID > REST, innerhalb nach Rang
+  // Hilfsfunktion: effektiver Bedarf für diese Runde
+  // Bei knappem Budget: grundbedarf (21 Tage). Bei genug Budget: voller bedarf.
+  function effektiverBedarf(c) {
+    return budgetKnappA ? c.grundbedarf : c.bedarf;
+  }
+
+  // ╔══════════════════════════════════════════════════════════════════════════╗
+  // ║  RUNDE A: NUR TOP7 + MID kritisch → Mindestmenge                      ║
+  // ║  REST/KAUM kommen NICHT hierhin — die bekommen erst Budget in Runde E  ║
+  // ║  nach TOP7/MID vollständig versorgt sind.                              ║
+  // ╚══════════════════════════════════════════════════════════════════════════╝
   {
     let rundeA = allCandidatesA
-      .filter(c => c.lager === 0 && c.unterwegs === 0 && c.method !== "Clip-ins" && c.method !== "Ponytail")
+      .filter(c => (c.isTop || c.isMid) && isCriticalA(c) && c.method !== "Ponytail")
       .sort((a, b) => tierPrioA(a) - tierPrioA(b) || (a.rang || 999) - (b.rang || 999));
+    let sumA = 0;
     for (let c of rundeA) {
       if (restBudgetA <= 0) break;
       let restBedarf = c.bedarf - c.zugeteilt;
@@ -3204,94 +3574,121 @@ function createBestellungAmanda() {
       let mindest = mindestAmanda(c);
       let zugeteilt = Math.min(mindest, restBedarf, restBudgetA);
       zugeteilt = rundeAmanda(zugeteilt, c);
-      if (zugeteilt > 0) { c.zugeteilt += zugeteilt; restBudgetA -= zugeteilt; }
+      if (zugeteilt > 0) { c.zugeteilt += zugeteilt; restBudgetA -= zugeteilt; sumA += zugeteilt; }
     }
+    Logger.log("📦 Runde A (TOP7+MID mindest): " + rundeA.length + " Produkte, " + (sumA/1000).toFixed(1) + "kg vergeben");
   }
 
-  // RUNDE A2: TOP-Produkte aus Runde A → auf vollen Bedarf auffüllen
-  //   TOP-Bestseller brauchen volle Menge, weil sie am schnellsten verkauft werden.
+  // ╔══════════════════════════════════════════════════════════════════════════╗
+  // ║  RUNDE A2: TOP7 kritisch → PROPORTIONALE Auffüllung                    ║
+  // ║  Bei knappem Budget: nur grundbedarf (21 Tage). Bei genug: voller Bed. ║
+  // ║  PROPORTIONAL: Desert+Dubai bekommen gleich viel, nicht Rang1 alles.   ║
+  // ╚══════════════════════════════════════════════════════════════════════════╝
   {
-    let rundeA2 = allCandidatesA
-      .filter(c => c.isTop && c.lager === 0 && c.unterwegs === 0 && c.method !== "Clip-ins" && c.method !== "Ponytail")
-      .sort((a, b) => (a.rang || 999) - (b.rang || 999));
-    for (let c of rundeA2) {
-      if (restBudgetA <= 0) break;
-      let restBedarf = c.bedarf - c.zugeteilt;
-      if (restBedarf <= 0) continue;
-      let zugeteilt = Math.min(restBedarf, restBudgetA);
+    let top7Crit = allCandidatesA
+      .filter(c => c.isTop && isCriticalA(c) && c.method !== "Ponytail" && (effektiverBedarf(c) - c.zugeteilt) > 0);
+    let totalRestBedarf = top7Crit.reduce((s, c) => s + Math.max(0, effektiverBedarf(c) - c.zugeteilt), 0);
+    let availForTop7 = Math.min(restBudgetA, totalRestBedarf);
+    let sumA2 = 0;
+    top7Crit.sort((a, b) => (a.rang || 999) - (b.rang || 999));
+    for (let c of top7Crit) {
+      let restBedarf = effektiverBedarf(c) - c.zugeteilt;
+      if (restBedarf <= 0 || restBudgetA <= 0) continue;
+      let fairShare = totalRestBedarf > 0 ? Math.round(availForTop7 * (restBedarf / totalRestBedarf)) : 0;
+      let zugeteilt = Math.min(fairShare, restBedarf, restBudgetA);
       zugeteilt = rundeAmanda(zugeteilt, c);
-      if (zugeteilt > 0) { c.zugeteilt += zugeteilt; restBudgetA -= zugeteilt; }
+      if (zugeteilt > 0) { c.zugeteilt += zugeteilt; restBudgetA -= zugeteilt; sumA2 += zugeteilt; }
     }
+    Logger.log("📦 Runde A2 (TOP7 proportional " + (budgetKnappA ? "grundbedarf" : "vollbedarf") + "): " + top7Crit.length + " Produkte, " + (sumA2/1000).toFixed(1) + "kg von " + (totalRestBedarf/1000).toFixed(1) + "kg");
   }
 
-  // RUNDE B: TOP + MID mit lager=0 aber unterwegs > 0 → Bedarf zuteilen
-  //   VORAUSBLICK-kalibrierter bedarf. MID: auf 60% gedeckelt.
-  //   Sortierung: TOP vor MID, innerhalb nach echtem Rang
+  // RUNDE A3: MID kritisch → proportionale Auffüllung mit MID-Cap
+  {
+    let midCrit = allCandidatesA
+      .filter(c => c.isMid && isCriticalA(c) && c.method !== "Ponytail" && (effektiverBedarf(c) - c.zugeteilt) > 0);
+    let totalMidBedarf = midCrit.reduce((s, c) => s + Math.max(0, midCap(c, effektiverBedarf(c) - c.zugeteilt)), 0);
+    let availForMid = Math.min(restBudgetA, totalMidBedarf);
+    let sumA3 = 0;
+    midCrit.sort((a, b) => (a.rang || 999) - (b.rang || 999));
+    for (let c of midCrit) {
+      let restBedarf = midCap(c, effektiverBedarf(c) - c.zugeteilt);
+      if (restBedarf <= 0 || restBudgetA <= 0) continue;
+      let fairShare = totalMidBedarf > 0 ? Math.round(availForMid * (restBedarf / totalMidBedarf)) : 0;
+      let zugeteilt = Math.min(fairShare, restBedarf, restBudgetA);
+      zugeteilt = rundeAmanda(zugeteilt, c);
+      if (zugeteilt > 0) { c.zugeteilt += zugeteilt; restBudgetA -= zugeteilt; sumA3 += zugeteilt; }
+    }
+    Logger.log("📦 Runde A3 (MID proportional): " + midCrit.length + " Produkte, " + (sumA3/1000).toFixed(1) + "kg");
+  }
+
+  // RUNDE B: TOP + MID mit lager=0 aber unterwegs > 0 → proportionale Bedarfszuteilung
   {
     let rundeB = allCandidatesA
-      .filter(c => (c.isTop || c.isMid) && c.lager === 0 && c.unterwegs > 0 && c.method !== "Clip-ins" && c.method !== "Ponytail")
-      .sort((a, b) => tierPrioA(a) - tierPrioA(b) || (a.rang || 999) - (b.rang || 999));
+      .filter(c => (c.isTop || c.isMid) && c.lager === 0 && c.unterwegs > 0 && c.method !== "Ponytail" && (effektiverBedarf(c) - c.zugeteilt) > 0);
+    let effBedarfMap = new Map();
+    let totalEffBedarf = 0;
+    for (let c of rundeB) {
+      let eff = midCap(c, effektiverBedarf(c) - c.zugeteilt);
+      eff = Math.max(eff, mindestAmanda(c));
+      eff = Math.min(eff, effektiverBedarf(c) - c.zugeteilt);
+      effBedarfMap.set(c, eff);
+      totalEffBedarf += eff;
+    }
+    let availB = Math.min(restBudgetA, totalEffBedarf);
+    let sumB = 0;
+    rundeB.sort((a, b) => tierPrioA(a) - tierPrioA(b) || (a.rang || 999) - (b.rang || 999));
     for (let c of rundeB) {
       if (restBudgetA <= 0) break;
-      let restBedarf = c.bedarf - c.zugeteilt;
-      if (restBedarf <= 0) continue;
-      let mindest = mindestAmanda(c);
-      let zugeteilt = Math.min(restBedarf, restBudgetA);
-      zugeteilt = midCap(c, zugeteilt); // MID: max 60%
+      let eff = effBedarfMap.get(c) || 0;
+      if (eff <= 0) continue;
+      let fairShare = totalEffBedarf > 0 ? Math.round(availB * (eff / totalEffBedarf)) : 0;
+      let zugeteilt = Math.min(fairShare, effektiverBedarf(c) - c.zugeteilt, restBudgetA);
       zugeteilt = rundeAmanda(zugeteilt, c);
-      if (zugeteilt < mindest) zugeteilt = Math.min(mindest, restBedarf, restBudgetA);
-      if (zugeteilt > 0) { c.zugeteilt += zugeteilt; restBudgetA -= zugeteilt; }
+      let mindest = mindestAmanda(c);
+      if (zugeteilt < mindest) zugeteilt = Math.min(mindest, effektiverBedarf(c) - c.zugeteilt, restBudgetA);
+      zugeteilt = rundeAmanda(zugeteilt, c);
+      if (zugeteilt > 0) { c.zugeteilt += zugeteilt; restBudgetA -= zugeteilt; sumB += zugeteilt; }
     }
+    Logger.log("📦 Runde B (TOP/MID lager=0 uw>0): " + rundeB.length + " Produkte, " + (sumB/1000).toFixed(1) + "kg");
   }
 
-  // RUNDE C: TOP + MID mit lager > 0 aber kritisch (verfügbar < 500g) → Restbedarf auffüllen
-  //   MID: auf 60% gedeckelt. Sortierung: nach verfügbar aufsteigend, dann Rang
+  // RUNDE C: TOP + MID mit Lager > 0 aber knapp → proportionale Auffüllung
   {
     let rundeC = allCandidatesA
-      .filter(c => (c.isTop || c.isMid) && c.lager > 0 && c.verfügbar < 500 && c.method !== "Clip-ins" && c.method !== "Ponytail")
-      .sort((a, b) => a.verfügbar - b.verfügbar || (a.rang || 999) - (b.rang || 999));
+      .filter(c => (c.isTop || c.isMid) && c.lager > 0 && effektiverBedarf(c) > c.zugeteilt && c.method !== "Ponytail"
+        && (c.verfügbar < 500 || (c.stock_at_arrival != null && c.stock_at_arrival < 500)));
+    let effBedarfC = new Map();
+    let totalEffC = 0;
+    for (let c of rundeC) {
+      let eff = midCap(c, effektiverBedarf(c) - c.zugeteilt);
+      eff = Math.max(0, eff);
+      effBedarfC.set(c, eff);
+      totalEffC += eff;
+    }
+    let availC = Math.min(restBudgetA, totalEffC);
+    let sumC = 0;
     for (let c of rundeC) {
       if (restBudgetA <= 0) break;
-      let restBedarf = c.bedarf - c.zugeteilt;
-      if (restBedarf <= 0) continue;
-      let zugeteilt = Math.min(restBedarf, restBudgetA);
-      zugeteilt = midCap(c, zugeteilt); // MID: max 60%
+      let eff = effBedarfC.get(c) || 0;
+      if (eff <= 0) continue;
+      let fairShare = totalEffC > 0 ? Math.round(availC * (eff / totalEffC)) : 0;
+      let zugeteilt = Math.min(fairShare, effektiverBedarf(c) - c.zugeteilt, restBudgetA);
       zugeteilt = rundeAmanda(zugeteilt, c);
-      if (zugeteilt > 0) { c.zugeteilt += zugeteilt; restBudgetA -= zugeteilt; }
+      if (zugeteilt > 0) { c.zugeteilt += zugeteilt; restBudgetA -= zugeteilt; sumC += zugeteilt; }
     }
+    Logger.log("📦 Runde C (TOP/MID knapp): " + rundeC.length + " Produkte, " + (sumC/1000).toFixed(1) + "kg");
   }
 
-  // RUNDE D: Clip-ins nach Rang (TOP > MID > REST)
-  //   Clip-ins 100g rang 1-10 → 600g, rang 11-20 → 400g
-  {
-    let rundeD = allCandidatesA
-      .filter(c => c.method === "Clip-ins")
-      .sort((a, b) => tierPrioA(a) - tierPrioA(b) || (a.rang || 999) - (b.rang || 999));
-    for (let c of rundeD) {
-      if (restBudgetA <= 0) break;
-      let wunschziel;
-      if (c.einheit <= 100) {
-        wunschziel = (c.rang <= 10) ? 600 : (c.rang <= 20 ? 400 : (c.isTop ? 400 : (c.isMid ? 300 : 200)));
-      } else {
-        wunschziel = c.isTop ? 450 : (c.isMid ? 300 : 200);
-      }
-      let bereits = c.lager + c.unterwegs + c.zugeteilt;
-      let restBedarf = Math.max(0, wunschziel - bereits);
-      if (restBedarf <= 0) continue;
-      let zugeteilt = Math.min(restBedarf, restBudgetA);
-      zugeteilt = rundeAmanda(zugeteilt, c);
-      let mindest = mindestAmanda(c);
-      if (zugeteilt < mindest && c.lager === 0) zugeteilt = Math.min(mindest, restBudgetA);
-      if (zugeteilt >= c.einheit) { c.zugeteilt += zugeteilt; restBudgetA -= zugeteilt; }
-    }
-  }
+  // RUNDE D entfernt — Clip-ins werden jetzt gleichberechtigt in allen Runden (A-C, E-K) behandelt.
+  // Ein TOP7 Clip-in hat dieselbe Priorität wie ein TOP7 Tape.
 
   // RUNDE E: REST-Produkte → nur Mindestmenge, nur wenn Budget übrig
-  //   REST erhält Budget ERST nachdem TOP/MID vollständig versorgt sind
+  //   REST erhält Budget ERST nachdem TOP/MID (inkl. Clip-in Topseller!) versorgt sind
   {
     let rundeE = allCandidatesA
-      .filter(c => !c.isTop && !c.isMid && c.method !== "Clip-ins" && c.method !== "Ponytail")
-      .sort((a, b) => methodOrderA.indexOf(a.method) - methodOrderA.indexOf(b.method) || a.lager - b.lager);
+      .filter(c => !c.isTop && !c.isMid && c.method !== "Ponytail")
+      // Prio-Kategorien zuerst, dann nach Lager (knappste zuerst)
+      .sort((a, b) => (b.isPrio ? 1 : 0) - (a.isPrio ? 1 : 0) || a.lager - b.lager);
     for (let c of rundeE) {
       if (restBudgetA <= 0) break;
       let mindest = mindestAmanda(c);
@@ -3318,36 +3715,47 @@ function createBestellungAmanda() {
     }
   }
 
-  // RUNDE G: Restbudget → TOP/MID nach Rang aufstocken bis Wunschziel
+  // RUNDE G: Restbudget → TOP/MID PROPORTIONAL aufstocken bis Wunschziel
   //   Standard Tapes rang 1-10 → 1500g, rang 11-20 → 1000g
-  //   MID: auf 60% gedeckelt (nächste Bestellung in 2 Wochen gleicht aus)
-  //   WICHTIG: Auch VORAUSBLICK-Bedarf (c.bedarf > c.zugeteilt) wird hier erfüllt.
+  //   MID: auf 60% gedeckelt.
+  //   PROPORTIONAL: Jedes Produkt bekommt (seinBedarf/gesamtBedarf)×Budget
+  //   → Bitter Cacao und Dubai bekommen gleich viel, nicht erst Rang1 alles
   {
     let rundeG = allCandidatesA
-      .filter(c => (c.isTop || c.isMid) && c.method !== "Clip-ins" && c.method !== "Ponytail")
-      .sort((a, b) => tierPrioA(a) - tierPrioA(b) || (a.rang || 999) - (b.rang || 999));
+      .filter(c => (c.isTop || c.isMid) && c.method !== "Ponytail");
+    // Effektive Aufstockung pro Produkt berechnen
+    let effMapG = new Map();
+    let totalEffG = 0;
     for (let c of rundeG) {
-      if (restBudgetA <= 0) break;
       let wunschziel;
       if (c.method === "Standard Tapes") {
         wunschziel = (c.rang <= 10) ? 1500 : 1000;
       } else {
         wunschziel = c.ziel;
       }
-      // Option B: Benutze stock_at_arrival statt (lager + unterwegs), wenn verfügbar
-      // → verhindert, dass Produkte übersprungen werden, deren Unterwegsware bis Tag 42 verbraucht ist
       const stockBaseG = (c.stock_at_arrival != null) ? c.stock_at_arrival : (c.lager + c.unterwegs);
       let bereits = stockBaseG + c.zugeteilt;
-      let restBedarf = c.bedarf - c.zugeteilt; // VORAUSBLICK-Bedarf noch ungedeckt?
+      let restBedarf = effektiverBedarf(c) - c.zugeteilt;
       let aufstockungBisWunsch = Math.max(0, wunschziel - bereits);
-      // Nimm das Maximum: entweder wunschziel-Gap oder noch ungedeckter VORAUSBLICK-Bedarf
       let aufstockung = Math.max(aufstockungBisWunsch, restBedarf);
-      if (aufstockung <= 0) continue;
-      aufstockung = midCap(c, aufstockung); // MID: max 60%
-      aufstockung = rundeAmanda(aufstockung, c);
-      aufstockung = Math.min(aufstockung, restBudgetA);
-      if (aufstockung >= 100) { c.zugeteilt += aufstockung; restBudgetA -= aufstockung; }
+      aufstockung = midCap(c, aufstockung);
+      if (aufstockung <= 0) { effMapG.set(c, 0); continue; }
+      effMapG.set(c, aufstockung);
+      totalEffG += aufstockung;
     }
+    let availG = Math.min(restBudgetA, totalEffG);
+    let sumG = 0;
+    rundeG.sort((a, b) => tierPrioA(a) - tierPrioA(b) || (a.rang || 999) - (b.rang || 999));
+    for (let c of rundeG) {
+      if (restBudgetA <= 0) break;
+      let eff = effMapG.get(c) || 0;
+      if (eff <= 0) continue;
+      let fairShare = totalEffG > 0 ? Math.round(availG * (eff / totalEffG)) : 0;
+      let aufstockung = Math.min(fairShare, eff, restBudgetA);
+      aufstockung = rundeAmanda(aufstockung, c);
+      if (aufstockung >= 100) { c.zugeteilt += aufstockung; restBudgetA -= aufstockung; sumG += aufstockung; }
+    }
+    Logger.log("📦 Runde G (TOP/MID proportional aufstocken): " + (sumG/1000).toFixed(1) + "kg von " + (totalEffG/1000).toFixed(1) + "kg Bedarf");
   }
 
   // RUNDE H: Restbudget → REST-Produkte über Mindestmenge hinaus aufstocken
@@ -3356,7 +3764,7 @@ function createBestellungAmanda() {
   //   Sortierung: nach Lager aufsteigend (knappste zuerst), dann nach Rang
   {
     let rundeH = allCandidatesA
-      .filter(c => !c.isTop && !c.isMid && c.method !== "Clip-ins" && c.method !== "Ponytail")
+      .filter(c => !c.isTop && !c.isMid && c.method !== "Ponytail")
       .sort((a, b) => a.lager - b.lager || (a.rang || 999) - (b.rang || 999));
     for (let c of rundeH) {
       if (restBudgetA <= 0) break;
@@ -3368,25 +3776,33 @@ function createBestellungAmanda() {
     }
   }
 
-  // RUNDE I: Restbudget → TOP/MID über Wunschziel hinaus aufstocken (bis volles Ziel)
-  //   Wenn nach Runde G+H noch Budget übrig ist, können TOP/MID-Produkte
-  //   über das konservative Wunschziel hinaus bis zum berechneten c.ziel aufgestockt werden.
-  //   Beispiel: Standard Tapes rang 5 hat wunschziel=1500, aber c.ziel=2200 → bekommt jetzt bis 2200
+  // RUNDE I: Restbudget → TOP/MID PROPORTIONAL über Wunschziel hinaus aufstocken (bis volles Ziel)
   {
     let rundeI = allCandidatesA
-      .filter(c => (c.isTop || c.isMid) && c.method !== "Clip-ins" && c.method !== "Ponytail")
-      .sort((a, b) => tierPrioA(a) - tierPrioA(b) || (a.rang || 999) - (b.rang || 999));
+      .filter(c => (c.isTop || c.isMid) && c.method !== "Ponytail");
+    let effMapI = new Map();
+    let totalEffI = 0;
     for (let c of rundeI) {
-      if (restBudgetA <= 0) break;
-      // Option B: Benutze stock_at_arrival statt (lager + unterwegs)
       const stockBaseI = (c.stock_at_arrival != null) ? c.stock_at_arrival : (c.lager + c.unterwegs);
       let bereits = stockBaseI + c.zugeteilt;
-      if (bereits >= c.ziel) continue;
+      if (bereits >= c.ziel) { effMapI.set(c, 0); continue; }
       let aufstockung = c.ziel - bereits;
-      aufstockung = rundeAmanda(aufstockung, c);
-      aufstockung = Math.min(aufstockung, restBudgetA);
-      if (aufstockung >= 100) { c.zugeteilt += aufstockung; restBudgetA -= aufstockung; }
+      effMapI.set(c, aufstockung);
+      totalEffI += aufstockung;
     }
+    let availI = Math.min(restBudgetA, totalEffI);
+    let sumI = 0;
+    rundeI.sort((a, b) => tierPrioA(a) - tierPrioA(b) || (a.rang || 999) - (b.rang || 999));
+    for (let c of rundeI) {
+      if (restBudgetA <= 0) break;
+      let eff = effMapI.get(c) || 0;
+      if (eff <= 0) continue;
+      let fairShare = totalEffI > 0 ? Math.round(availI * (eff / totalEffI)) : 0;
+      let aufstockung = Math.min(fairShare, eff, restBudgetA);
+      aufstockung = rundeAmanda(aufstockung, c);
+      if (aufstockung >= 100) { c.zugeteilt += aufstockung; restBudgetA -= aufstockung; sumI += aufstockung; }
+    }
+    Logger.log("📦 Runde I (TOP/MID proportional bis Ziel): " + (sumI/1000).toFixed(1) + "kg");
   }
 
   // RUNDE J: Restbudget → Alle Bestseller (inkl. Clip-ins) proportional aufstocken
@@ -3450,14 +3866,88 @@ function createBestellungAmanda() {
   }
 
     // Absolutes Minimum erzwingen: Wenn zugeteilt > 0 aber unter Mindest, auf Mindest anheben
+  // Budget-Tracking: Differenz wird von restBudgetA abgezogen
   allCandidatesA.forEach(c => {
     if (c.zugeteilt > 0) {
       const mindest = mindestAmanda(c);
       if (c.zugeteilt < mindest) {
+        const diff = mindest - c.zugeteilt;
         c.zugeteilt = mindest;
+        restBudgetA -= diff;
       }
     }
   });
+
+  // ─── HARTER BUDGET-CAP: Überschreitung korrigieren ───
+  // Phase 1: REST auf Mindestmenge kürzen
+  // Phase 2: REST komplett streichen (unwichtigste zuerst)
+  // Phase 3: MID auf Mindestmenge kürzen
+  // Phase 4: MID komplett streichen
+  // TOP7 bleibt IMMER unangetastet.
+  {
+    let totalZugeteilt = allCandidatesA.reduce((s, c) => s + c.zugeteilt, 0);
+    let überschuss = totalZugeteilt - budgetGA;
+    if (überschuss > 0) {
+      Logger.log("⚠️ Budget-Cap: " + (überschuss/1000).toFixed(1) + "kg über Budget");
+
+      // Phase 1: REST auf Mindest kürzen
+      const restSorted = allCandidatesA
+        .filter(c => !c.isTop && !c.isMid && c.zugeteilt > 0 && c.method !== "Ponytail")
+        .sort((a, b) => (b.rang || 999) - (a.rang || 999));
+      for (let c of restSorted) {
+        if (überschuss <= 0) break;
+        const mindest = mindestAmanda(c);
+        if (c.zugeteilt > mindest) {
+          const diff = c.zugeteilt - mindest;
+          c.zugeteilt = mindest;
+          überschuss -= diff;
+        }
+      }
+
+      // Phase 2: REST komplett streichen (unwichtigste zuerst)
+      if (überschuss > 0) {
+        for (let c of restSorted) {
+          if (überschuss <= 0) break;
+          if (c.zugeteilt > 0) {
+            überschuss -= c.zugeteilt;
+            c.zugeteilt = 0;
+          }
+        }
+      }
+
+      // Phase 3: MID auf Mindest kürzen
+      if (überschuss > 0) {
+        const midSorted = allCandidatesA
+          .filter(c => c.isMid && c.zugeteilt > 0)
+          .sort((a, b) => (b.rang || 999) - (a.rang || 999));
+        for (let c of midSorted) {
+          if (überschuss <= 0) break;
+          const mindest = mindestAmanda(c);
+          if (c.zugeteilt > mindest) {
+            const diff = c.zugeteilt - mindest;
+            c.zugeteilt = mindest;
+            überschuss -= diff;
+          }
+        }
+
+        // Phase 4: MID komplett streichen
+        if (überschuss > 0) {
+          for (let c of midSorted) {
+            if (überschuss <= 0) break;
+            if (c.zugeteilt > 0) {
+              überschuss -= c.zugeteilt;
+              c.zugeteilt = 0;
+            }
+          }
+        }
+      }
+
+      restBudgetA = budgetGA - allCandidatesA.reduce((s, c) => s + c.zugeteilt, 0);
+      const gestrichen = allCandidatesA.filter(c => c.zugeteilt === 0 && c.bedarf > 0).length;
+      Logger.log("📊 Nach Budget-Cap: " + ((budgetGA - restBudgetA)/1000).toFixed(1) + "kg / " + (budgetGA/1000).toFixed(1) + "kg" +
+        (gestrichen > 0 ? " | " + gestrichen + " Produkte gestrichen (Budget zu knapp)" : ""));
+    }
+  }
 
   // Nach Method-Reihenfolge sortieren, dann innerhalb nach Lager aufsteigend
   let budgetItemsA = allCandidatesA
@@ -3468,8 +3958,7 @@ function createBestellungAmanda() {
       return a.lager - b.lager;
     })
     .map(c => {
-      let fehlmenge = Math.max(0, c.bedarf - c.zugeteilt);
-      return [c.quality, c.method, c.länge, c.product, c.lager, c.unterwegs, c.ziel, c.zugeteilt, fehlmenge > 0 ? fehlmenge : ""];
+      return [c.quality, c.method, c.länge, c.product, c.lager, c.unterwegs, c.ziel, c.zugeteilt];
     });
 
   // Gruppenstruktur: Quality + Method nur in erster Zeile der Gruppe
@@ -3482,15 +3971,13 @@ function createBestellungAmanda() {
   });
 
   // ─── BUDGET-LISTE oben schreiben ───
-  let colCountA = 9;
-  let headerRowA = ["Quality", "Method", "Länge/Variante", "Farbcode", "Lager (g)", "Unterwegs (g)", "Ziel (g) Minimum", "Bestellung (g)", "Nächste Best. (g)"];
-  let budgetTitleA = "AMANDA (Russisch Glatt) – BUDGET-BESTELLUNG " + dateStr + "  |  Budget: " + (budgetGA/1000).toFixed(1) + " kg  |  Verbraucht: " + ((budgetGA - restBudgetA)/1000).toFixed(1) + " kg  |  " + CODE_VERSION;
+  let colCountA = 8;
+  let headerRowA = ["Quality", "Method", "Länge/Variante", "Farbcode", "Lager (g)", "Unterwegs (g)", "Ziel (g)", "Bestellung (g)"];
+  let budgetTitleA = "AMANDA (Russisch Glatt) – BUDGET-BESTELLUNG " + dateStr + "  |  Budget: " + (budgetGA/1000).toFixed(1) + " kg  |  Verbraucht: " + ((budgetGA - restBudgetA)/1000).toFixed(1) + " kg";
   let budgetTotalA = budgetItemsA.reduce((s, r) => s + (r[7] || 0), 0);
-  let nächsteTotalA = budgetItemsA.reduce((s, r) => s + (typeof r[8] === "number" ? r[8] : 0), 0);
   let budgetSubtotalA = Array(colCountA).fill("");
   budgetSubtotalA[0] = "Subtotal";
   budgetSubtotalA[7] = budgetTotalA;
-  budgetSubtotalA[8] = nächsteTotalA > 0 ? nächsteTotalA : "";
 
   let budgetAllRowsA = [
     [budgetTitleA, ...Array(colCountA - 1).fill("")],
@@ -3538,19 +4025,15 @@ function createBestellungAmanda() {
     else            bg = (i % 2 === 0) ? A_REST  : A_RESTB;
     sheet.getRange(i + 1, 1, 1, colCountA).setBackground(bg).setFontSize(10);
     if (isTop7) sheet.getRange(i + 1, 1, 1, colCountA).setFontWeight("bold");
-    let bedarf = r[7];
-    if (typeof bedarf === "number" && bedarf > 0) {
+    let bestellung = r[7];
+    if (typeof bestellung === "number" && bestellung > 0) {
       let bedarfBgA = isTop7 ? AC_TOP7 : (isMid ? AC_MID : AC_REST);
-      sheet.getRange(i + 1, colCountA).setBackground(bedarfBgA)
+      sheet.getRange(i + 1, 8).setBackground(bedarfBgA)
         .setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
     }
     let lager = r[4];
     if (typeof lager === "number" && lager === 0)
       sheet.getRange(i + 1, 5).setBackground("#db4437").setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
-    // "Nächste Best." orange hervorheben wenn Fehlmenge > 0
-    let nächste = r[8];
-    if (typeof nächste === "number" && nächste > 0)
-      sheet.getRange(i + 1, 9).setBackground("#ff9800").setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
   }
   sheet.getRange(budgetAllRowsA.length, 1, 1, colCountA)
     .setBackground("#2d2d2d").setFontColor("#ffffff").setFontWeight("bold").setFontSize(11)
@@ -3657,26 +4140,15 @@ function createBestellungAmanda() {
   sheet.getRange(18, 10).setValue("🔴 Lager = 0 (ausverkauft)").setFontSize(8)
     .setBackground("#fce4ec").setHorizontalAlignment("left");
 
-  // ── Hinweis: Nächste Bestellung ──
-  if (nächsteTotalA > 0) {
-    sheet.getRange(20, 10).setValue("📋 Nächste Bestellung").setFontWeight("bold").setFontSize(9)
-      .setBackground("#ff9800").setFontColor("#ffffff").setHorizontalAlignment("center");
-    sheet.getRange(21, 10).setValue((nächsteTotalA/1000).toFixed(1) + " kg Fehlmenge").setFontSize(10).setFontWeight("bold")
+  // MID-Cap Hinweis wenn Budget knapp
+  if (budgetKnappA) {
+    sheet.getRange(20, 10).setValue("⚠️ Budget knapp").setFontWeight("bold").setFontSize(9)
+      .setBackground("#e65100").setFontColor("#ffffff").setHorizontalAlignment("center");
+    sheet.getRange(21, 10).setValue("MID auf 60% gedeckelt").setFontSize(8)
       .setFontColor("#e65100").setHorizontalAlignment("center");
-    sheet.getRange(22, 10).setValue("muss in 2 Wochen mindestens").setFontSize(7)
-      .setFontColor("#555555").setHorizontalAlignment("left");
-    sheet.getRange(23, 10).setValue("nachbestellt werden (orange").setFontSize(7)
-      .setFontColor("#555555").setHorizontalAlignment("left");
-    sheet.getRange(24, 10).setValue("Spalte „Nächste Best.").setFontSize(7)
-      .setFontColor("#555555").setHorizontalAlignment("left");
-    if (budgetKnappA) {
-      sheet.getRange(25, 10).setValue("MID auf 60% gedeckelt weil").setFontSize(7)
-        .setFontColor("#555555").setHorizontalAlignment("left");
-      sheet.getRange(26, 10).setValue("Budget < Bedarf.").setFontSize(7)
-        .setFontColor("#555555").setHorizontalAlignment("left");
-    }
   }
 
+  // Budget in Properties speichern (wird beim nächsten Ausführen gelesen)
   PropertiesService.getScriptProperties().setProperty("BUDGET_AMANDA", String(budgetGA));
 
   Logger.log("✅ Bestellung Amanda erstellt. Budget-Liste: " + budgetItemsA.length + " Pos., Vollständig: " + rows.length + " Pos.");
@@ -4143,7 +4615,7 @@ function refreshTopseller() {
           const newKey = "lager|" + farbe + "|" + normGewicht;
           if (!vaProductData[newKey]) {
             vaProductData[newKey] = {
-              name: farbe + " [" + normGewicht + "g]",
+              name: produktTitel,  // Voller Produktname aus Inventar (für matchColor in Unterwegs-Lookup)
               handle: "clip-extensions",
               g90d: 0, g30d: 0, qty90d: 0,
               clipVariant: normGewicht
@@ -4954,17 +5426,17 @@ function getRangTS_cached_(data, quality, typ, farbe, clipVariant) {
 function getTopsellertierTS_cached_(data, quality, typ, farbe, clipVariant) {
   if (!data) return "REST";
   try {
+    function extractTier(val) { return val && typeof val === "object" ? val.tier : val; }
     if (typ === "Clip-ins" && clipVariant > 0) {
       const typKey = "Clip-ins " + clipVariant + "g";
       if (data[quality] && data[quality][typKey] && data[quality][typKey][farbe]) {
-        return data[quality][typKey][farbe];
+        return extractTier(data[quality][typKey][farbe]);
       }
       if (data[quality] && data[quality]["Clip-ins"] && data[quality]["Clip-ins"][farbe]) {
-        return data[quality]["Clip-ins"][farbe];
+        return extractTier(data[quality]["Clip-ins"][farbe]);
       }
       return "REST";
     }
-    function extractTier(val) { return val && typeof val === "object" ? val.tier : val; }
     if (data[quality] && data[quality][typ] && data[quality][typ][farbe]) {
       return extractTier(data[quality][typ][farbe]);
     }
@@ -5007,15 +5479,16 @@ function getTopsellertierTS_(quality, typ, farbe, clipVariant) {
   if (!raw) return "REST";
   try {
     const data = JSON.parse(raw);
+    function extractTier(val) { return val && typeof val === "object" ? val.tier : val; }
     // Clip-Ins: Lookup mit Variante (z.B. "Clip-ins 100g")
     if (typ === "Clip-ins" && clipVariant > 0) {
       const typKey = "Clip-ins " + clipVariant + "g";
       if (data[quality] && data[quality][typKey] && data[quality][typKey][farbe]) {
-        return data[quality][typKey][farbe];
+        return extractTier(data[quality][typKey][farbe]);
       }
       // Fallback: ohne Variante (alte Daten)
       if (data[quality] && data[quality]["Clip-ins"] && data[quality]["Clip-ins"][farbe]) {
-        return data[quality]["Clip-ins"][farbe];
+        return extractTier(data[quality]["Clip-ins"][farbe]);
       }
       return "REST";
     }
@@ -5965,7 +6438,22 @@ function getVerkaufsZielGrams_(quality, collLabel, tier, tierCounts, lieferzeitW
     if (!raw) return minZiel;
     let vd;
     try { vd = JSON.parse(raw); } catch(e) { return minZiel; }
-    const key = quality + "|" + collLabel;
+    // collLabel (collMapping.collName, z.B. "Tapes Wellig 45cm") → VERKAUFS_DATA-Label (z.B. "Tapes 45cm")
+    const COLLNAME_TO_VDLABEL = {
+      "Tapes Wellig 45cm": "Tapes 45cm", "Tapes Wellig 55cm": "Tapes 55cm",
+      "Tapes Wellig 65cm": "Tapes 65cm", "Tapes Wellig 85cm": "Tapes 85cm",
+      "Bondings wellig 65cm": "Bondings 65cm", "Bondings wellig 85cm": "Bondings 85cm",
+      "Usbekische Classic Tressen (Wellig)": "Classic Weft",
+      "Usbekische Genius Tressen (Wellig)": "Genius Weft",
+      "Standard Tapes Russisch": "Standard Tapes",
+      "Mini Tapes Glatt": "Minitapes",
+      "Russische Bondings (Glatt)": "Bondings",
+      "Russische Classic Tressen (Glatt)": "Classic Weft",
+      "Russische Genius Tressen (Glatt)": "Genius Weft",
+      "Russische Invisible Tressen (Glatt)": "Invisible Weft"
+    };
+    const vdLabel = COLLNAME_TO_VDLABEL[collLabel] || collLabel;
+    const key = quality + "|" + vdLabel;
     const entry = vd[key];
     if (!entry || (!entry.avgG3M && !entry.g30d)) return minZiel;
     const avgG3M = entry.avgG3M || 0;
@@ -6263,4 +6751,47 @@ function debugCollectionHandles() {
   }
   
   SpreadsheetApp.getUi().alert("Collection-Handles (auch in Logger):\n\n" + results.filter(r => r.toLowerCase().includes("85") || r.toLowerCase().includes("tape") || r.toLowerCase().includes("clip")).join("\n"));
+}
+
+// ==============================================================
+// WEB APP ENDPOINT — Called from Hairvenly Dashboard
+// ==============================================================
+
+function doPost(e) {
+  try {
+    var params = JSON.parse(e.postData.contents);
+    var supplier = String(params.supplier || "").toLowerCase();
+    var budgetG = Number(params.budgetG) || 20000;
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    if (supplier === "amanda") {
+      PropertiesService.getScriptProperties().setProperty("BUDGET_AMANDA", String(budgetG));
+      createBestellungAmanda();
+      var sheet = ss.getSheetByName("Vorschlag - Amanda");
+      var title = sheet ? String(sheet.getRange("A1").getValue()) : "";
+      return ContentService.createTextOutput(JSON.stringify({ ok: true, title: title }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (supplier === "china") {
+      PropertiesService.getScriptProperties().setProperty("BUDGET_CHINA", String(budgetG));
+      createBestellungChina();
+      var sheet = ss.getSheetByName("Vorschlag - China");
+      var title = sheet ? String(sheet.getRange("A1").getValue()) : "";
+      return ContentService.createTextOutput(JSON.stringify({ ok: true, title: title }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({ error: "Unknown supplier: " + supplier }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ error: String(err) }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet(e) {
+  return ContentService.createTextOutput(JSON.stringify({ status: "ok", message: "Hairvenly Stock Calculation API" }))
+    .setMimeType(ContentService.MimeType.JSON);
 }

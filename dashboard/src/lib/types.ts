@@ -84,6 +84,7 @@ export interface Supplier {
   overview_doc_label: string | null;
   overview_visible_to_supplier: boolean;
   sort_order: number;
+  regions: string[] | null;
   address: string | null;
   email: string | null;
   phone: string | null;
@@ -126,6 +127,7 @@ export interface Order {
   tracking_url: string | null;
   eta: string | null;
   order_date: string | null;
+  region: string | null;
   last_supplier_update: string | null;
   notes: string | null;
   created_at: string;
@@ -166,4 +168,51 @@ export interface OrderEvent {
   meta: Record<string, unknown> | null;
   actor_id: string | null;
   created_at: string;
+}
+
+// ---- Product Catalog ----
+
+export interface ProductMethod {
+  id: string;
+  supplier_id: string;
+  name: string;
+  sort_order: number;
+}
+
+export interface ProductLength {
+  id: string;
+  method_id: string;
+  value: string;
+  unit: string;
+  sort_order: number;
+}
+
+export interface ProductColor {
+  id: string;
+  length_id: string;
+  name_hairvenly: string;
+  name_supplier: string | null;
+  name_shopify: string | null;
+  sort_order: number;
+  updated_at: string | null;
+}
+
+export interface OrderItem {
+  id: string;
+  order_id: string;
+  color_id: string | null;
+  method_name: string;
+  length_value: string;
+  color_name: string;
+  quantity: number;
+  unit: string;
+}
+
+/** Full catalog tree loaded for the wizard */
+export interface CatalogMethod extends ProductMethod {
+  lengths: CatalogLength[];
+}
+
+export interface CatalogLength extends ProductLength {
+  colors: ProductColor[];
 }

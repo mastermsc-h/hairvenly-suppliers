@@ -13,6 +13,7 @@ import OverviewDoc from "./overview-doc";
 import SupplierCard from "./supplier-card";
 import SupplierList from "./supplier-list";
 import SupplierProfile from "./supplier-profile";
+import StatusDropdown from "./orders/[id]/status-dropdown";
 import { VolumeChart, DebtChart } from "./charts";
 import SupplierKgBars, { type SupplierKgRow } from "./supplier-kg-bars";
 import { publicAvatarUrl, publicOverviewUrl } from "@/lib/storage";
@@ -32,7 +33,7 @@ export default async function DashboardPage() {
       supabase
         .from("documents")
         .select("*")
-        .in("kind", ["supplier_invoice", "payment_proof", "customs_document", "waybill"]),
+        .in("kind", ["supplier_invoice", "payment_proof", "customs_document", "waybill", "order_overview"]),
       supabase.from("payments").select("paid_at, amount"),
     ]);
 
@@ -233,7 +234,11 @@ export default async function DashboardPage() {
                             })()}
                           </td>
                           <td className="px-5 py-2.5">
-                            <StatusBadge status={o.status} locale={locale} />
+                            {profile.is_admin ? (
+                              <StatusDropdown orderId={o.id} currentStatus={o.status} locale={locale} />
+                            ) : (
+                              <StatusBadge status={o.status} locale={locale} />
+                            )}
                           </td>
                           <td className="px-5 py-2.5 text-neutral-700">{date(o.eta)}</td>
                           <td className="px-5 py-2.5">
@@ -260,7 +265,11 @@ export default async function DashboardPage() {
                           <div className="min-w-0">
                             <div className="font-medium text-neutral-900 text-sm truncate">{o.label}</div>
                             <div className="flex items-center gap-2 mt-1">
-                              <StatusBadge status={o.status} locale={locale} />
+                              {profile.is_admin ? (
+                                <StatusDropdown orderId={o.id} currentStatus={o.status} locale={locale} />
+                              ) : (
+                                <StatusBadge status={o.status} locale={locale} />
+                              )}
                               {o.eta && <span className="text-xs text-neutral-500">{date(o.eta)}</span>}
                             </div>
                           </div>

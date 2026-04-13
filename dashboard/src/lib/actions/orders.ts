@@ -145,6 +145,19 @@ export async function updateOrder(orderId: string, formData: FormData) {
     );
   }
 
+  // Sync status change to Google Sheet (if sheet_url exists)
+  if (update.status) {
+    const { data: order } = await supabase.from("orders").select("sheet_url").eq("id", orderId).single();
+    if (order?.sheet_url) {
+      try {
+        const { updateSheetStatus } = await import("@/lib/google-sheets");
+        await updateSheetStatus(order.sheet_url, String(update.status));
+      } catch {
+        // Silent fail — sheet sync is best-effort
+      }
+    }
+  }
+
   revalidatePath(`/orders/${orderId}`);
   revalidatePath("/orders");
   return { ok: true };
@@ -274,4 +287,294 @@ export async function getSignedUrl(filePath: string) {
     .createSignedUrl(filePath, 60 * 10);
   if (error) return null;
   return data.signedUrl;
+}
+
+// ── Wizard Order Creation ───────────────────────────────────────
+
+interface WizardItem {
+  colorId: string | null;
+  methodName: string;
+  lengthValue: string;
+  colorName: string;
+  quantity: number;
+  unit: string;
+}
+
+export async function createWizardOrder(data: {
+  supplierId: string;
+  orderDate: string;
+  region: string | null;
+  notes: string;
+  items: WizardItem[];
+}): Promise<{ error?: string; orderId?: string }> {
+  const profile = await requireAdmin();
+  const supabase = await createClient();
+
+  if (!data.supplierId || !data.orderDate || data.items.length === 0) {
+    return { error: "Lieferant, Datum und mindestens ein Artikel erforderlich" };
+  }
+
+  // Get supplier name for auto-label
+  const { data: supplier } = await supabase
+    .from("suppliers")
+    .select("name, default_lead_weeks")
+    .eq("id", data.supplierId)
+    .single();
+
+  const dd = data.orderDate.slice(8, 10);
+  const mm = data.orderDate.slice(5, 7);
+  const yyyy = data.orderDate.slice(0, 4);
+  const regionLabel = data.region === "CN" ? "China" : data.region === "TR" ? "Türkei" : null;
+  const displayName = regionLabel ? `Eyfel Ebru (${regionLabel})` : (supplier?.name ?? "?");
+  const label = `${displayName} ${dd}-${mm}-${yyyy}`;
+
+  // Determine tags from methods
+  const tags = ["extensions"];
+
+  // Calculate total weight from items
+  const totalGrams = data.items.reduce((sum, i) => sum + i.quantity, 0);
+  const weightKg = Math.round(totalGrams / 10) / 100; // Round to 2 decimals
+
+  // Calculate ETA based on supplier lead times
+  const leadWeeks = data.region === "TR" ? 2 : data.region === "CN" ? 8 : (supplier?.default_lead_weeks ?? 6);
+  const etaDate = new Date(data.orderDate);
+  etaDate.setDate(etaDate.getDate() + leadWeeks * 7);
+  const eta = etaDate.toISOString().slice(0, 10);
+
+  // Auto-notes
+  const autoNote = "Durch Wizard erstellte Bestellung (KI-Automatisierung)";
+  const notes = data.notes ? `${data.notes}\n\n${autoNote}` : autoNote;
+
+  // Create order
+  const { data: order, error: orderErr } = await supabase
+    .from("orders")
+    .insert({
+      supplier_id: data.supplierId,
+      label,
+      order_date: data.orderDate,
+      region: data.region,
+      status: "draft",
+      tags,
+      weight_kg: weightKg,
+      package_count: 1,
+      eta,
+      notes,
+      created_by: profile.id,
+    })
+    .select("id")
+    .single();
+
+  if (orderErr || !order) return { error: orderErr?.message ?? "Fehler beim Erstellen" };
+
+  // Insert order items
+  const items = data.items.map((item) => ({
+    order_id: order.id,
+    color_id: item.colorId,
+    method_name: item.methodName,
+    length_value: item.lengthValue,
+    color_name: item.colorName,
+    quantity: item.quantity,
+    unit: item.unit,
+  }));
+
+  const { error: itemsErr } = await supabase.from("order_items").insert(items);
+  if (itemsErr) return { error: itemsErr.message };
+
+  // Log event
+  await logEvent(supabase, order.id, "note", `Bestellung via Wizard erstellt: ${data.items.length} Positionen`, profile.id);
+
+  revalidatePath("/orders");
+  revalidatePath("/");
+  return { orderId: order.id };
+}
+
+// ── Google Sheets Export ────────────────────────────────────────
+
+// ── PDF Generation + Upload ─────────────────────────────────────
+
+export async function generateAndUploadPDF(orderId: string): Promise<{ signedUrl?: string; error?: string }> {
+  const profile = await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: order } = await supabase.from("orders").select("*").eq("id", orderId).single();
+  if (!order) return { error: "Bestellung nicht gefunden" };
+
+  const { data: supplier } = await supabase.from("suppliers").select("name").eq("id", order.supplier_id).single();
+  if (!supplier) return { error: "Lieferant nicht gefunden" };
+
+  const { data: items } = await supabase.from("order_items").select("*").eq("order_id", orderId).order("created_at");
+  if (!items || items.length === 0) return { error: "Keine Bestellpositionen vorhanden" };
+
+  const { generateOrderPDF } = await import("@/lib/generate-pdf");
+
+  const regionLabel = order.region === "CN" ? "China" : order.region === "TR" ? "Türkei" : null;
+  const displayName = regionLabel ? `Eyfel Ebru (${regionLabel})` : supplier.name;
+  const pdfBuffer = generateOrderPDF(
+    displayName,
+    order.order_date ?? order.created_at.slice(0, 10),
+    items.map((i) => ({
+      methodName: i.method_name,
+      lengthValue: i.length_value,
+      colorName: i.color_name,
+      quantity: i.quantity,
+    })),
+  );
+
+  // Upload to Supabase storage
+  const safeName = `${order.label?.replace(/[^a-zA-Z0-9_-]/g, "_") ?? orderId}.pdf`;
+  const filePath = `${orderId}/${Date.now()}_${safeName}`;
+
+  const { error: uploadErr } = await supabase.storage
+    .from("order-files")
+    .upload(filePath, pdfBuffer, { contentType: "application/pdf", upsert: false });
+
+  if (uploadErr) return { error: `Upload fehlgeschlagen: ${uploadErr.message}` };
+
+  // Save as document with kind "order_overview"
+  await supabase.from("documents").insert({
+    order_id: orderId,
+    kind: "order_overview",
+    file_path: filePath,
+    file_name: safeName,
+    uploaded_by: profile.id,
+  });
+
+  await logEvent(supabase, orderId, "document", `Bestellübersicht-PDF erstellt und hochgeladen`, profile.id);
+
+  revalidatePath(`/orders/${orderId}`);
+
+  // Return signed URL for immediate viewing
+  const { data: signedData } = await supabase.storage
+    .from("order-files")
+    .createSignedUrl(filePath, 60 * 10);
+
+  return { signedUrl: signedData?.signedUrl };
+}
+
+export async function exportOrderToGoogleSheet(orderId: string): Promise<{ sheetUrl?: string; error?: string }> {
+  const profile = await requireAdmin();
+  const supabase = await createClient();
+
+  // Load order + supplier + items
+  const { data: order } = await supabase.from("orders").select("*").eq("id", orderId).single();
+  if (!order) return { error: "Bestellung nicht gefunden" };
+
+  const { data: supplier } = await supabase.from("suppliers").select("name").eq("id", order.supplier_id).single();
+  if (!supplier) return { error: "Lieferant nicht gefunden" };
+
+  const { data: items } = await supabase
+    .from("order_items")
+    .select("*")
+    .eq("order_id", orderId)
+    .order("created_at");
+
+  if (!items || items.length === 0) return { error: "Keine Bestellpositionen vorhanden" };
+
+  // Dynamic import to avoid loading googleapis on every request
+  const { exportOrderToSheet } = await import("@/lib/google-sheets");
+
+  // Use region for tab name: "China 07.04.2026" or "Türkei 07.04.2026"
+  const sheetName = order.region === "CN" ? "China"
+    : order.region === "TR" ? "Türkei"
+    : supplier.name;
+
+  const result = await exportOrderToSheet(
+    sheetName,
+    order.order_date ?? order.created_at.slice(0, 10),
+    items.map((i) => ({
+      methodName: i.method_name,
+      lengthValue: i.length_value,
+      colorName: i.color_name,
+      quantity: i.quantity,
+    })),
+    {
+      status: order.status,
+      weightKg: order.weight_kg ? Number(order.weight_kg) : undefined,
+      eta: order.eta ?? undefined,
+      notes: order.notes ?? undefined,
+    },
+  );
+
+  if ("error" in result) return { error: result.error };
+
+  // Save sheet URL to order
+  await supabase
+    .from("orders")
+    .update({ sheet_url: result.sheetUrl })
+    .eq("id", orderId);
+
+  // Log event
+  await logEvent(supabase, orderId, "note", `Bestellung nach Google Sheets exportiert`, profile.id);
+
+  revalidatePath(`/orders/${orderId}`);
+  return { sheetUrl: result.sheetUrl };
+}
+
+// ── Import Suggestions from Stock Sheet ─────────────────────────
+
+export async function importOrderSuggestions(supplierName: string): Promise<{
+  suggestions?: Array<{
+    method: string;
+    length: string;
+    colorCode: string;
+    stock: number;
+    inTransit: number;
+    target: number;
+    orderQty: number;
+  }>;
+  error?: string;
+}> {
+  await requireAdmin();
+
+  // Determine tab name based on supplier
+  const lower = supplierName.toLowerCase();
+  let tabName: string;
+  if (lower.includes("amanda")) {
+    tabName = "Vorschlag - Amanda";
+  } else if (lower.includes("eyfel") || lower.includes("china") || lower.includes("ebru")) {
+    tabName = "Vorschlag - China";
+  } else {
+    return { error: `Kein Bestellvorschlag für "${supplierName}" verfügbar` };
+  }
+
+  const { importSuggestions } = await import("@/lib/google-sheets");
+  const result = await importSuggestions(tabName);
+
+  if ("error" in result) return { error: result.error };
+  return { suggestions: result.rows };
+}
+
+// ── Suggestion Meta & Budget Trigger ────────────────────────────
+
+export async function getSuggestionMeta(supplierName: string): Promise<{
+  title?: string; budgetKg?: number; usedKg?: number; error?: string;
+}> {
+  await requireAdmin();
+
+  const lower = supplierName.toLowerCase();
+  const tabName = lower.includes("amanda") ? "Vorschlag - Amanda"
+    : (lower.includes("eyfel") || lower.includes("china") || lower.includes("ebru")) ? "Vorschlag - China"
+    : null;
+  if (!tabName) return { error: "Kein Vorschlag-Tab" };
+
+  const { readSuggestionMeta } = await import("@/lib/google-sheets");
+  const meta = await readSuggestionMeta(tabName);
+  if (!meta) return { error: "Konnte Metadaten nicht lesen" };
+  return { title: meta.title, budgetKg: meta.budgetKg, usedKg: meta.usedKg };
+}
+
+export async function triggerSuggestionGeneration(supplierName: string, budgetKg: number): Promise<{ error?: string; title?: string }> {
+  await requireAdmin();
+
+  const lower = supplierName.toLowerCase();
+  const supplier = lower.includes("amanda") ? "amanda" as const
+    : (lower.includes("eyfel") || lower.includes("china") || lower.includes("ebru")) ? "china" as const
+    : null;
+  if (!supplier) return { error: "Kein Vorschlag für diesen Lieferanten" };
+
+  const budgetGrams = Math.round(budgetKg * 1000);
+  const { triggerAppsScript } = await import("@/lib/google-sheets");
+  const result = await triggerAppsScript(supplier, budgetGrams);
+  if (!result.ok) return { error: result.error };
+  return { title: result.title };
 }
