@@ -222,23 +222,15 @@ export default async function DashboardPage() {
                             >
                               {o.label}
                             </Link>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              {(o.tags ?? []).map((tag: string) => (
-                                <span key={tag} className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium bg-neutral-100 text-neutral-500">
-                                  {tag}
-                                </span>
-                              ))}
-                              {(() => {
-                                const inv = (docsByOrder.get(o.id) ?? []).find(
-                                  (d) => d.kind === "supplier_invoice",
-                                );
-                                return inv ? (
-                                  <span className="text-[9px] text-neutral-300 truncate max-w-[150px]">
-                                    {inv.file_name}
+                            {(o.tags ?? []).length > 0 && (
+                              <div className="flex items-center gap-1 mt-0.5">
+                                {(o.tags as string[]).map((tag: string) => (
+                                  <span key={tag} className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium bg-neutral-100 text-neutral-500">
+                                    {tag}
                                   </span>
-                                ) : null;
-                              })()}
-                            </div>
+                                ))}
+                              </div>
+                            )}
                           </td>
                           <td className="px-5 py-2.5">
                             {profile.is_admin ? (
@@ -253,6 +245,12 @@ export default async function DashboardPage() {
                               <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} locale={locale} />
                               <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
                             </div>
+                            {(() => {
+                              const inv = (docsByOrder.get(o.id) ?? []).find((d) => d.kind === "supplier_invoice");
+                              return inv ? (
+                                <div className="text-[9px] text-neutral-400 truncate max-w-[180px] mt-0.5">{inv.file_name}</div>
+                              ) : null;
+                            })()}
                           </td>
                           <td className="px-5 py-2.5 text-right text-neutral-700">
                             {usd(o.invoice_total)}

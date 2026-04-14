@@ -71,9 +71,6 @@ export default function SupplierList({
       {ordered.map((item, idx) => (
         <div
           key={item.id}
-          draggable
-          onDragStart={(e) => handleDragStart(e, idx)}
-          onDragEnd={handleDragEnd}
           onDragOver={(e) => handleDragOver(e, idx)}
           onDrop={(e) => handleDrop(e, idx)}
           className={`relative group/drag transition-transform ${
@@ -82,8 +79,13 @@ export default function SupplierList({
               : ""
           } ${pending ? "opacity-70 pointer-events-none" : ""}`}
         >
-          {/* Drag handle */}
-          <div className="absolute left-0 top-0 bottom-0 z-10 flex items-center -ml-7 opacity-0 group-hover/drag:opacity-100 transition-opacity cursor-grab active:cursor-grabbing">
+          {/* Drag handle — only this element is draggable */}
+          <div
+            draggable
+            onDragStart={(e) => handleDragStart(e, idx)}
+            onDragEnd={handleDragEnd}
+            className="absolute left-0 top-0 bottom-0 z-10 flex items-center -ml-7 opacity-0 group-hover/drag:opacity-100 transition-opacity cursor-grab active:cursor-grabbing select-none"
+          >
             <GripVertical size={16} className="text-neutral-400" />
           </div>
           {item.node}

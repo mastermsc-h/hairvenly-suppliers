@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2, X, Plus } from "lucide-react";
 import { updateOrder, deleteOrder } from "@/lib/actions/orders";
-import { ORDER_STATUSES, type OrderWithTotals } from "@/lib/types";
+import { ORDER_STATUSES, TAG_OPTIONS, type OrderWithTotals } from "@/lib/types";
 import { t, type Locale } from "@/lib/i18n";
 
 export default function EditPanel({
@@ -18,8 +18,13 @@ export default function EditPanel({
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [tags, setTags] = useState<string[]>(order.tags ?? []);
+  const [customTag, setCustomTag] = useState("");
 
   function submit(formData: FormData) {
+    // Remove existing tags and add current ones
+    formData.delete("tags");
+    tags.forEach((tag) => formData.append("tags", tag));
     setError(null);
     start(async () => {
       const res = await updateOrder(order.id, formData);
@@ -162,6 +167,39 @@ export default function EditPanel({
           </Field>
         )}
       </div>
+
+      {isAdmin && (
+        <Field label="Tags">
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {TAG_OPTIONS.map((tag) => (
+              <button key={tag} type="button"
+                onClick={() => setTags((prev) => prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag])}
+                className={`px-2.5 py-1 rounded-full text-xs font-medium transition ${
+                  tags.includes(tag) ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                }`}>{tag}</button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {tags.filter((t) => !(TAG_OPTIONS as readonly string[]).includes(t)).map((tag) => (
+              <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">
+                {tag}
+                <button type="button" onClick={() => setTags((prev) => prev.filter((t) => t !== tag))} className="hover:text-red-600"><X size={10} /></button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-1.5">
+            <input value={customTag} onChange={(e) => setCustomTag(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (customTag.trim() && !tags.includes(customTag.trim())) { setTags((prev) => [...prev, customTag.trim()]); setCustomTag(""); } } }}
+              placeholder="Eigenen Tag hinzufügen..."
+              className="flex-1 rounded-lg border border-neutral-300 px-2.5 py-1.5 text-xs" />
+            <button type="button"
+              onClick={() => { if (customTag.trim() && !tags.includes(customTag.trim())) { setTags((prev) => [...prev, customTag.trim()]); setCustomTag(""); } }}
+              className="px-2 py-1.5 rounded-lg bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition">
+              <Plus size={12} />
+            </button>
+          </div>
+        </Field>
+      )}
 
       <Field label={t(locale, "order.field.notes")}>
         <textarea
