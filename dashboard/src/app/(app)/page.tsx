@@ -218,20 +218,27 @@ export default async function DashboardPage() {
                           <td className="px-5 py-2.5">
                             <Link
                               href={`/orders/${o.id}`}
-                              className="font-medium text-neutral-900 hover:text-indigo-700"
+                              className="font-medium text-indigo-700 hover:text-indigo-900 hover:underline"
                             >
                               {o.label}
                             </Link>
-                            {(() => {
-                              const inv = (docsByOrder.get(o.id) ?? []).find(
-                                (d) => d.kind === "supplier_invoice",
-                              );
-                              return inv ? (
-                                <div className="text-[10px] text-neutral-400 truncate max-w-[200px] leading-tight">
-                                  {inv.file_name}
-                                </div>
-                              ) : null;
-                            })()}
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              {(o.tags ?? []).map((tag: string) => (
+                                <span key={tag} className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium bg-neutral-100 text-neutral-500">
+                                  {tag}
+                                </span>
+                              ))}
+                              {(() => {
+                                const inv = (docsByOrder.get(o.id) ?? []).find(
+                                  (d) => d.kind === "supplier_invoice",
+                                );
+                                return inv ? (
+                                  <span className="text-[9px] text-neutral-300 truncate max-w-[150px]">
+                                    {inv.file_name}
+                                  </span>
+                                ) : null;
+                              })()}
+                            </div>
                           </td>
                           <td className="px-5 py-2.5">
                             {profile.is_admin ? (
@@ -263,7 +270,14 @@ export default async function DashboardPage() {
                       <Link key={o.id} href={`/orders/${o.id}`} className="block px-4 py-3 hover:bg-indigo-50/30 active:bg-indigo-50/50 transition">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <div className="font-medium text-neutral-900 text-sm truncate">{o.label}</div>
+                            <div className="font-medium text-indigo-700 text-sm truncate">{o.label}</div>
+                            {(o.tags ?? []).length > 0 && (
+                              <div className="flex gap-1 mt-0.5">
+                                {(o.tags as string[]).map((tag: string) => (
+                                  <span key={tag} className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium bg-neutral-100 text-neutral-500">{tag}</span>
+                                ))}
+                              </div>
+                            )}
                             <div className="flex items-center gap-2 mt-1">
                               {profile.is_admin ? (
                                 <StatusDropdown orderId={o.id} currentStatus={o.status} locale={locale} />

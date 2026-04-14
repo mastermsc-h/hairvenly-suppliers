@@ -264,10 +264,10 @@ function fetchShopifyInventoryData() {
     scriptProperties.deleteProperty("processedCollections");
     scriptProperties.deleteProperty("totalWeightMap");
     Logger.log("All collections processed.");
-    // ── Auto-Refresh-Kette: Dashboard → Verkaufsanalyse → Topseller → Bestellvorschläge ──────────
-    createDashboard();
+    // ── Auto-Refresh-Kette: Verkaufsanalyse → Topseller → Dashboard → Bestellvorschläge ──────────
     try { refreshVerkaufsanalyse(); } catch(e) { Logger.log("Auto-Refresh refreshVerkaufsanalyse Fehler: " + e.message); }
     try { refreshTopseller();       } catch(e) { Logger.log("Auto-Refresh refreshTopseller Fehler: " + e.message); }
+    createDashboard();
     // Flag setzen: Bestellvorschläge sollen empfohlenes Budget nutzen (nicht manuell gesetztes)
     PropertiesService.getScriptProperties().setProperty("AUTO_BUDGET", "true");
     try { createBestellungChina();  } catch(e) { Logger.log("Auto-Refresh createBestellungChina Fehler: " + e.message); }
@@ -392,7 +392,21 @@ function fetchInventoryLevel(shopName, accessToken, inventoryItemId) {
   const inventoryUrl = `https://${shopName}.myshopify.com/admin/api/2025-01/inventory_levels.json?inventory_item_ids=${inventoryItemId}`;
   try {
     let data = fetchWithRetry(inventoryUrl, accessToken);
-    return Math.max(data.inventory_levels && data.inventory_levels[0] ? data.inventory_levels[0].available || 0 : 0, 0);
+    if (!data.inventory_levels || data.inventory_levels.length === 0) return 0;
+    // Wenn mehrere Locations: die Location mit dem höchsten Bestand nehmen (= Hauptlager)
+    // NICHT summieren (eine Location könnte ein Fulfillment-Center mit alten Daten sein)
+    // Log bei mehreren Locations für Debugging
+    if (data.inventory_levels.length > 1) {
+      const levels = data.inventory_levels.map(l => "loc=" + l.location_id + ":avail=" + l.available);
+      Logger.log("[Inventory Multi-Location] item=" + inventoryItemId + " → " + levels.join(", "));
+    }
+    // Nimm den niedrigsten non-negative Wert wenn alle Locations 0 oder 1 haben,
+    // ansonsten die Summe aller positiven Werte
+    let total = 0;
+    for (let level of data.inventory_levels) {
+      total += Math.max(level.available || 0, 0);
+    }
+    return total;
   } catch (error) {
     Logger.log("Error fetching inventory level: " + error.message);
   }
@@ -447,6 +461,64 @@ function fetchWithRetry(url, accessToken) {
 // ==========================================
 // BESTELLUNGEN ABRUFEN (CHINA & AMANDA)
 // ==========================================
+
+/**
+ * DEBUG: Zeigt für jeden Tab die ersten 2 Zeilen, erkannten Status, Format und Item-Count.
+ * Über Menü "Hairvenly Tools" → "Debug Order Tabs" ausführen.
+ */
+function debugOrderTabs() {
+  let output = [];
+
+  // CHINA
+  let chinaSs = SpreadsheetApp.openById(CHINA_SHEET_ID);
+  for (let sheet of chinaSs.getSheets()) {
+    let sName = sheet.getName().trim();
+    let date = extractDateFromTabName(sName);
+    if (!date) continue;
+    let data = sheet.getRange(1, 1, Math.min(5, sheet.getLastRow()), Math.min(4, sheet.getLastColumn())).getValues();
+    let status = getOrderStatusFromTab(sheet);
+    let items = parseChinaOrderSheet(sheet);
+    output.push("CHINA | Tab: " + sName + " | Date: " + date + " | Status: " + status + " | Items: " + items.length +
+      "\n  Row1: " + JSON.stringify(data[0] || []) +
+      "\n  Row2: " + JSON.stringify(data[1] || []) +
+      "\n  Row3: " + JSON.stringify(data[2] || []) +
+      "\n  Row4: " + JSON.stringify(data[3] || []));
+  }
+
+  // AMANDA
+  let amandaSs = SpreadsheetApp.openById(AMANDA_SHEET_ID);
+  for (let sheet of amandaSs.getSheets()) {
+    let sName = sheet.getName().trim();
+    if (!sName.match(/Amanda|Sunny/i)) continue;
+    let date = extractDateFromTabName(sName);
+    if (!date) continue;
+    let data = sheet.getRange(1, 1, Math.min(5, sheet.getLastRow()), Math.min(4, sheet.getLastColumn())).getValues();
+    let status = getOrderStatusFromTab(sheet);
+    let items = parseAmandaOrderSheet(sheet);
+    output.push("AMANDA | Tab: " + sName + " | Date: " + date + " | Status: " + status + " | Items: " + items.length +
+      "\n  Row1: " + JSON.stringify(data[0] || []) +
+      "\n  Row2: " + JSON.stringify(data[1] || []) +
+      "\n  Row3: " + JSON.stringify(data[2] || []) +
+      "\n  Row4: " + JSON.stringify(data[3] || []));
+  }
+
+  let result = output.join("\n\n");
+  Logger.log(result);
+
+  // Schreibe auch ins DEBUG_VA Sheet für einfaches Lesen
+  let ss = SpreadsheetApp.getActiveSpreadsheet();
+  let debugSheet = ss.getSheetByName("DEBUG_VA");
+  if (debugSheet) {
+    let debugRow = debugSheet.getLastRow() + 2;
+    debugSheet.getRange(debugRow, 1).setValue("=== DEBUG ORDER TABS " + new Date().toLocaleString() + " ===");
+    let lines = result.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      debugSheet.getRange(debugRow + 1 + i, 1).setValue(lines[i]);
+    }
+  }
+
+  return result;
+}
 
 /**
  * Liest die Übersichtstabelle aus und gibt ein Set von Datums-Strings zurück,
@@ -530,22 +602,35 @@ function getActiveOrderDates() {
 function getOrderStatusFromTab(sheet) {
   try {
     let data = sheet.getRange(1, 1, 2, 4).getValues(); // Zeile 1-2, Spalte A-D
-    // Neues Format: Zeile 1 = Header (Bestellung, Status, Gewicht, Voraussichtliche Lieferung)
-    // Zeile 2 = Werte
-    let statusCell = String(data[1][1] || "").trim().toLowerCase(); // B2
+    let b1 = String(data[0][1] || "").trim().toLowerCase(); // B1
+    let b2 = String(data[1][1] || "").trim().toLowerCase(); // B2
+    let a1 = String(data[0][0] || "").trim().toLowerCase(); // A1
 
-    // Prüfe ob Zeile 1 tatsächlich den Header hat (Format-Erkennung)
-    let h0 = String(data[0][0] || "").trim().toLowerCase();
-    if (h0 !== "bestellung") {
-      // Altes Format ohne Status-Zeile → als aktiv behandeln (Fallback)
+    // Strategie: Flexibel erkennen ob Status vorhanden ist.
+    // 1) Wenn B1 "status" enthält → B2 ist der Status-Wert
+    // 2) Wenn A1 "bestellung" enthält → neues Format, B2 ist Status
+    // 3) Wenn B2 direkt einen bekannten Status-Wert enthält → nutze ihn
+    // 4) Sonst: altes Format ohne Status-Zeile → Fallback
+
+    let hasStatusRow = (b1.includes("status") || a1.includes("bestellung"));
+
+    // Auch ohne erkannten Header: prüfe ob B2 einen bekannten Status enthält
+    let statusVal = b2;
+    if (hasStatusRow || statusVal.includes("angekommen") || statusVal.includes("eingetroffen") ||
+        statusVal.includes("geliefert") || statusVal.includes("entwurf") ||
+        statusVal.includes("storniert") || statusVal.includes("storno") ||
+        statusVal.includes("unterwegs") || statusVal.includes("bestellt") || statusVal.includes("verzollung")) {
+
+      if (statusVal.includes("entwurf"))    return "entwurf";
+      if (statusVal.includes("storniert") || statusVal.includes("storno")) return "storniert";
+      if (statusVal.includes("angekommen") || statusVal.includes("abgekommen") || statusVal.includes("eingetroffen") || statusVal.includes("geliefert")) return "angekommen";
+
+      // "unterwegs", "bestellt", "verzollung", leer = aktiv
       return "aktiv";
     }
 
-    if (statusCell.includes("entwurf"))    return "entwurf";
-    if (statusCell.includes("storniert") || statusCell.includes("storno")) return "storniert";
-    if (statusCell.includes("angekommen") || statusCell.includes("eingetroffen") || statusCell.includes("geliefert")) return "angekommen";
-
-    // Alles andere (leer, "unterwegs", "bestellt", "verzollung", etc.) = aktiv
+    // Kein Status erkannt → altes Format, als aktiv behandeln
+    Logger.log("getOrderStatusFromTab: Kein Status erkannt für '" + sheet.getName() + "' (A1='" + a1 + "', B1='" + b1 + "', B2='" + b2 + "')");
     return "aktiv";
   } catch(e) {
     return "aktiv"; // Fehler → sicherheitshalber als aktiv
@@ -661,21 +746,32 @@ function parseChinaOrderSheet(sheet) {
   let currentType   = "";
   let currentLength = "";
 
-  // Format V3 erkennen: Zeile 1 Spalte A = "Bestellung" (mit Status-Zeile)
+  // Format V3 erkennen: B1 enthält "Status" = zuverlässiger Indikator für Status-Zeile
+  // NICHT A1 "bestellung" allein, da alte Tabs "Amanda & Sunny Bestellung..." in A1 haben!
   let row0a = String((data[0] || [])[0] || "").trim().toLowerCase();
-  let isV3 = (row0a === "bestellung");
+  let row0b = String((data[0] || [])[1] || "").trim().toLowerCase();
+  let isV3 = row0b.includes("status");
   let dataOffset = 0; // Wo die eigentlichen Daten anfangen
 
   if (isV3) {
-    // V3: Zeile 1-2 = Meta, Zeile 3 = leer, Zeile 4 = Header, ab Zeile 5 = Daten
-    for (let i = 2; i < Math.min(data.length, 8); i++) {
+    // V3: Zeile 1-2 = Meta/Status, dann Header-Zeile oder erste Datenzeile finden
+    for (let i = 2; i < Math.min(data.length, 10); i++) {
       let cellA = String(data[i][0] || "").trim().toLowerCase();
-      if (cellA.includes("typ") || cellA.includes("type") || cellA.includes("method") || cellA.includes("farbcode")) {
+      let cellC = String(data[i][2] || "").trim().toLowerCase();
+      // Header-Zeile erkennen (Typ/Type/Method/Farbcode etc.)
+      if (cellA.includes("typ") || cellA.includes("type") || cellA.includes("method") ||
+          cellA.includes("farbcode") || cellC.includes("farbcode") || cellC.includes("farbe") || cellC.includes("color")) {
         dataOffset = i + 1;
+        break;
+      }
+      // Erste Datenzeile erkennen (Tapes/Bondings/Genius/Invisible etc.)
+      if (cellA.includes("tapes") || cellA.includes("bondings") || cellA.includes("genius") || cellA.includes("invisible")) {
+        dataOffset = i;
         break;
       }
     }
     if (dataOffset === 0) dataOffset = 4; // Fallback
+    Logger.log('[China Parse V3] dataOffset=' + dataOffset + ' (A1="' + row0a + '", B1="' + row0b + '")');
   }
 
   // Format erkennen für nicht-V3: Wenn Zeile 1 Spalte C leer und Spalte B numerisch -> Format B (2-spaltig)
@@ -759,38 +855,70 @@ function parseAmandaOrderSheet(sheet) {
   let currentMethod = "";
   let currentLength = "";
 
-  // Format-Erkennung: Prüfe ob Zeile 1 Spalte A "Bestellung" ist (= V3 mit Status-Zeile)
+  // Format-Erkennung: B1 enthält "Status" = zuverlässiger V3-Indikator
+  // NICHT A1 "bestellung" allein, da alte Tabs "Amanda & Sunny Bestellung..." in A1 haben!
   let row0a = String((data[0] || [])[0] || "").trim().toLowerCase();
-  let isV3 = (row0a === "bestellung");
+  let row0b = String((data[0] || [])[1] || "").trim().toLowerCase();
+  let isV3 = row0b.includes("status");
 
   if (isV3) {
-    // FORMAT V3: Status-Header in Zeile 1-2, Daten-Header in Zeile 4 (Index 3), Daten ab Zeile 5 (Index 4)
-    // Finde die Header-Zeile (suche nach "Method" in Spalte A)
+    // FORMAT V3: Status-Header in Zeile 1-2, dann Header-Zeile finden, dann Daten
+    // Header kann V1 (Quality,Method,Length,Farbcode,Quantity) oder V2 (Method,Length,Farbcode,Quantity) sein
     let dataStartIdx = 4; // Standard: Zeile 5
-    for (let i = 2; i < Math.min(data.length, 8); i++) {
+    let isV3_V1 = false; // V1-Daten (5 Spalten) innerhalb V3?
+    for (let i = 2; i < Math.min(data.length, 10); i++) {
       let cellA = String(data[i][0] || "").trim().toLowerCase();
+      if (cellA === "quality" || cellA === "qualität") {
+        dataStartIdx = i + 1;
+        isV3_V1 = true; // 5-Spalten: A=Quality, B=Method, C=Length, D=Farbcode, E=Quantity
+        break;
+      }
       if (cellA === "method" || cellA === "methode") {
         dataStartIdx = i + 1;
+        isV3_V1 = false; // 4-Spalten: A=Method, B=Length, C=Farbcode, D=Quantity
         break;
       }
     }
-    for (let i = dataStartIdx; i < data.length; i++) {
-      let row = data[i];
-      let col0 = String(row[0]).trim();
-      let col1 = String(row[1]).trim();
-      let col2 = String(row[2]).trim();
-      let col3 = String(row[3]).trim();
+    Logger.log("[Amanda Parse V3] dataStartIdx=" + dataStartIdx + " isV1=" + isV3_V1 + " (A1='" + row0a + "', B1='" + row0b + "')");
 
-      if (col0.toLowerCase() === "subtotal" || col0.toLowerCase().includes("subtotal")) break;
-      if (col0 !== "") currentMethod = col0;
-      if (col1 !== "") currentLength = col1;
+    if (isV3_V1) {
+      // V3 mit V1-Daten: A=Quality, B=Method, C=Length/Variant, D=Farbcode, E=Quantity(g)
+      for (let i = dataStartIdx; i < data.length; i++) {
+        let row = data[i];
+        let col1 = String(row[1]).trim(); // Method
+        let col2 = String(row[2]).trim(); // Length
+        let col3 = String(row[3]).trim(); // Farbcode
+        let col4 = String(row[4] || "").trim(); // Quantity
 
-      let weight = parseFloat(col3.replace(/[^0-9.]/g, "")) || 0;
-      if (col2 !== "" && weight > 0) {
-        items.push({ method: currentMethod, length: currentLength, color: col2, weight: weight });
+        if (col1.toLowerCase().includes("subtotal")) break;
+        if (col1 !== "") currentMethod = col1;
+        if (col2 !== "") currentLength = col2;
+
+        let weight = parseFloat(col4.replace(/[^0-9.]/g, "")) || 0;
+        if (col3 !== "" && weight > 0) {
+          items.push({ method: currentMethod, length: currentLength, color: col3, weight: weight });
+        }
+      }
+    } else {
+      // V3 mit V2-Daten: A=Method, B=Length/Variant, C=Farbcode, D=Quantity(g)
+      for (let i = dataStartIdx; i < data.length; i++) {
+        let row = data[i];
+        let col0 = String(row[0]).trim();
+        let col1 = String(row[1]).trim();
+        let col2 = String(row[2]).trim();
+        let col3 = String(row[3]).trim();
+
+        if (col0.toLowerCase() === "subtotal" || col0.toLowerCase().includes("subtotal")) break;
+        if (col0 !== "") currentMethod = col0;
+        if (col1 !== "") currentLength = col1;
+
+        let weight = parseFloat(col3.replace(/[^0-9.]/g, "")) || 0;
+        if (col2 !== "" && weight > 0) {
+          items.push({ method: currentMethod, length: currentLength, color: col2, weight: weight });
+        }
       }
     }
-    Logger.log("[Amanda Parse] Sheet: " + sheet.getName() + " | format=V3(status) | dataStart=" + dataStartIdx + " | items=" + items.length);
+    Logger.log("[Amanda Parse] Sheet: " + sheet.getName() + " | format=V3(" + (isV3_V1 ? "5col" : "4col") + ") | dataStart=" + dataStartIdx + " | items=" + items.length);
   } else {
     // V1 oder V2: Header in Zeile 2 (Index 1)
     let headerRow = data[1] || [];
@@ -4896,12 +5024,13 @@ function refreshTopseller() {
   sheet.setColumnWidth(13, 95);  // Unterwegs (g)
   sheet.setColumnWidth(14, 30);  // Toggle-Spalte (schmal)
 
-  // ── Detailspalten: Breite + standardmäßig versteckt ──
+  // ── Detailspalten: Breite + standardmäßig SICHTBAR ──
   for (let i = 0; i < Math.max(maxDetailCols, 1); i++) {
     sheet.setColumnWidth(DETAIL_START_COL + i, 90);
   }
+  // Spalten standardmäßig sichtbar (Toggle-Checkbox ist true)
   if (maxDetailCols > 0) {
-    sheet.hideColumns(DETAIL_START_COL, maxDetailCols);
+    sheet.showColumns(DETAIL_START_COL, maxDetailCols);
   }
 
   // ── Toggle-Checkbox: col 14, row 2 (außerhalb der Haupttabellen-Merge) ──
@@ -4912,7 +5041,7 @@ function refreshTopseller() {
     .setBackground("#555555").setHorizontalAlignment("center");
   const toggleCell = sheet.getRange(2, 14);
   const checkboxRule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
-  toggleCell.setDataValidation(checkboxRule).setValue(false)
+  toggleCell.setDataValidation(checkboxRule).setValue(true)
     .setBackground("#f5f5f5").setHorizontalAlignment("center");
   // Metadaten: Anzahl Detailspalten für onEdit (als Notiz in col 14, row 1)
   sheet.getRange(1, 14).setNote("detailCols:" + maxDetailCols + ";startCol:" + DETAIL_START_COL);
@@ -4924,23 +5053,25 @@ function refreshTopseller() {
   const russischG30 = russischResult.totalGrams30;
   const totalG30 = welligG30 + russischG30;
 
-  // Hilfsdaten für Diagramm in Spalte O/P (15/16), außerhalb der Datentabelle (Spalten 1–13)
-  sheet.getRange(1, 15).setValue("Qualität");
-  sheet.getRange(2, 15).setValue("Usbekisch Wellig");
-  sheet.getRange(3, 15).setValue("Russisch Glatt");
-  sheet.getRange(1, 16).setValue("Verkauf 30 Tage (g)");
-  sheet.getRange(2, 16).setValue(welligG30);
-  sheet.getRange(3, 16).setValue(russischG30);
-
   // Kreisdiagramm erstellen
   const existingCharts = sheet.getCharts();
   for (const c of existingCharts) { sheet.removeChart(c); }
 
-  // Diagramm ab Spalte O (15), Zeile 1
+  // Chart + Übersicht NACH den Detailspalten platzieren (damit sie nicht überlappen)
+  const INFO_COL = DETAIL_START_COL + Math.max(maxDetailCols, 0) + 1; // Erste freie Spalte nach Details
+
+  // Hilfsdaten für Chart in INFO_COL schreiben (weiße Schrift = unsichtbar)
+  sheet.getRange(1, INFO_COL).setValue("Qualität").setFontColor("#ffffff");
+  sheet.getRange(2, INFO_COL).setValue("Usbekisch Wellig").setFontColor("#ffffff");
+  sheet.getRange(3, INFO_COL).setValue("Russisch Glatt").setFontColor("#ffffff");
+  sheet.getRange(1, INFO_COL + 1).setValue("Verkauf 30 Tage (g)").setFontColor("#ffffff");
+  sheet.getRange(2, INFO_COL + 1).setValue(welligG30).setFontColor("#ffffff");
+  sheet.getRange(3, INFO_COL + 1).setValue(russischG30).setFontColor("#ffffff");
+
   const chartBuilder = sheet.newChart()
     .setChartType(Charts.ChartType.PIE)
-    .addRange(sheet.getRange(1, 15, 3, 2))
-    .setPosition(1, 15, 0, 0)
+    .addRange(sheet.getRange(1, INFO_COL, 3, 2))
+    .setPosition(1, INFO_COL, 0, 0)
     .setOption("title", "Verkauf letzte 30 Tage: " + Math.round(totalG30 / 1000) + " kg gesamt")
     .setOption("pieSliceText", "percentage")
     .setOption("legend", { position: "right" })
@@ -4950,8 +5081,8 @@ function refreshTopseller() {
     .build();
   sheet.insertChart(chartBuilder);
 
-  // Übersichts-Textbox ab Spalte O/P (15/16), Zeile 14
-  const OV_COL = 15; // Spalte O
+  // Übersichts-Textbox direkt unterhalb Diagramm
+  const OV_COL = INFO_COL;
   const OV_ROW = 14; // Zeile 14 (direkt unterhalb Diagramm)
   sheet.getRange(OV_ROW, OV_COL, 1, 2).merge()
     .setValue("📊 Übersicht letzte 30 Tage")
@@ -4967,8 +5098,8 @@ function refreshTopseller() {
   sheet.getRange(OV_ROW + 5, OV_COL + 1).setValue("40 kg").setFontSize(9).setFontColor("#888888");
   sheet.getRange(OV_ROW + 6, OV_COL).setValue("Bedarf (2 Wochen):").setFontSize(9);
   sheet.getRange(OV_ROW + 6, OV_COL + 1).setValue(Math.round(totalG30 / 2 / 1000 * 10) / 10 + " kg").setFontSize(9).setFontWeight("bold").setFontColor(totalG30 / 2 > 40000 ? "#c62828" : "#2e7d32");
-  sheet.setColumnWidth(15, 130); // Spalte O (Chart/Übersicht)
-  sheet.setColumnWidth(16, 80);  // Spalte P
+  sheet.setColumnWidth(INFO_COL, 130);
+  sheet.setColumnWidth(INFO_COL + 1, 80);
 
   // ── Farblegende (Topseller-Tab) ──
   const LEG_ROW = OV_ROW + 8;
@@ -6651,6 +6782,7 @@ function onOpen() {
     .addItem('Lagerbestand abrufen (Shopify)', 'fetchShopifyInventoryData')
     .addSeparator()
     .addItem('🔍 Debug: VA-Produktdaten analysieren', 'debugVAProductData')
+    .addItem('🔍 Debug: Order Tabs analysieren', 'debugOrderTabs')
     .addToUi();
 }
 
@@ -6667,11 +6799,11 @@ function allesAktualisieren() {
     Logger.log('1/6 Shopify-Lagerbestand abrufen...');
     fetchShopifyInventoryData();
 
-    Logger.log('2/6 Topseller aktualisieren...');
-    refreshTopseller();
-
-    Logger.log('3/6 Verkaufsanalyse aktualisieren...');
+    Logger.log('2/6 Verkaufsanalyse aktualisieren...');
     refreshVerkaufsanalyse();
+
+    Logger.log('3/6 Topseller aktualisieren...');
+    refreshTopseller();
 
     Logger.log('4/6 Dashboard erstellen...');
     createDashboard();

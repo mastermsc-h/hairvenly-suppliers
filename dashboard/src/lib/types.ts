@@ -216,3 +216,69 @@ export interface CatalogMethod extends ProductMethod {
 export interface CatalogLength extends ProductLength {
   colors: ProductColor[];
 }
+
+// ---- Price Tables ----
+
+export interface PriceMethod {
+  name: string;
+  surcharge: number;
+}
+
+export interface SupplierPriceList {
+  id: string;
+  supplier_id: string;
+  name: string;
+  methods: PriceMethod[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SellingPriceTier {
+  brutto: number;
+  netto: number;
+  gewerbe: number;
+}
+
+export interface PriceLengthGroup {
+  id: string;
+  price_list_id: string;
+  label: string;
+  length_values: string[];
+  selling_prices: Record<string, SellingPriceTier>;
+  sort_order: number;
+}
+
+export interface PriceColorCategory {
+  id: string;
+  price_list_id: string;
+  name: string;
+  sort_order: number;
+}
+
+export interface PriceEntry {
+  id: string;
+  length_group_id: string;
+  color_category_id: string;
+  prices: Record<string, number>;
+}
+
+export interface PriceProductMapping {
+  id: string;
+  color_category_id: string;
+  product_color_id: string;
+}
+
+/** Hydrated price list with all nested data */
+export interface PriceListFull extends SupplierPriceList {
+  supplier_name: string;
+  length_groups: (PriceLengthGroup & {
+    entries: (PriceEntry & {
+      category: PriceColorCategory;
+      mapped_products: (PriceProductMapping & {
+        color: ProductColor;
+        method_name: string;
+        length_value: string;
+      })[];
+    })[];
+  })[];
+}

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import { signOut } from "@/lib/actions/auth";
 import { t, type Locale } from "@/lib/i18n";
-import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette } from "lucide-react";
+import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign } from "lucide-react";
+import SidebarGroup from "./sidebar-group";
 import LanguageSwitcher from "./language-switcher";
 import { MobileSidebarWrapper } from "./mobile-sidebar";
 
@@ -28,6 +29,51 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <div className="border-t border-neutral-200 my-2" />
             <NavLink href="/orders/wizard" icon={<FilePlus size={16} />} label={t(locale, "nav.wizard")} />
             <NavLink href="/catalog" icon={<Palette size={16} />} label={t(locale, "nav.catalog")} />
+            <NavLink href="/prices" icon={<DollarSign size={16} />} label={t(locale, "nav.prices")} />
+
+            <div className="border-t border-neutral-200 my-2" />
+            <SidebarGroup
+              label={t(locale, "nav.stock")}
+              icon={<Warehouse size={16} />}
+              href="/stock"
+              items={[
+                { href: "/stock/uzbek", label: t(locale, "nav.stock.uzbek") },
+                { href: "/stock/russian", label: t(locale, "nav.stock.russian") },
+                {
+                  href: "/stock/topseller",
+                  label: t(locale, "nav.stock.topseller"),
+                  children: [
+                    { href: "/stock/topseller/uzbek", label: t(locale, "nav.stock.uzbek") },
+                    { href: "/stock/topseller/russian", label: t(locale, "nav.stock.russian") },
+                  ],
+                },
+                {
+                  href: "/stock/zero",
+                  label: t(locale, "nav.stock.zero"),
+                  children: [
+                    { href: "/stock/zero/uzbek", label: t(locale, "nav.stock.uzbek") },
+                    { href: "/stock/zero/russian", label: t(locale, "nav.stock.russian") },
+                  ],
+                },
+                {
+                  href: "/stock/critical",
+                  label: t(locale, "nav.stock.critical"),
+                  children: [
+                    { href: "/stock/critical/uzbek", label: t(locale, "nav.stock.uzbek") },
+                    { href: "/stock/critical/russian", label: t(locale, "nav.stock.russian") },
+                  ],
+                },
+                {
+                  href: "/stock/transit",
+                  label: t(locale, "nav.stock.transit"),
+                  children: [
+                    { href: "/stock/transit/uzbek", label: t(locale, "nav.stock.uzbek") },
+                    { href: "/stock/transit/russian", label: t(locale, "nav.stock.russian") },
+                  ],
+                },
+                { href: "/stock/sales", label: t(locale, "nav.stock.sales") },
+              ]}
+            />
           </>
         )}
       </nav>

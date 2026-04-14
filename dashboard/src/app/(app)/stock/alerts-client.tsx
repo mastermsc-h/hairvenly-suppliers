@@ -1,0 +1,307 @@
+"use client";
+
+import { useState } from "react";
+import { Search, AlertTriangle, AlertCircle, Truck } from "lucide-react";
+import type { AlertProduct } from "@/lib/stock-sheets";
+import SyncBadge from "./sync-badge";
+
+type AlertMode = "zero" | "critical" | "transit";
+
+const MODE_CONFIG: Record<AlertMode, { icon: React.ReactNode; emptyText: string }> = {
+  zero: { icon: <AlertTriangle size={18} />, emptyText: "Keine Produkte mit Nullbestand" },
+  critical: { icon: <AlertCircle size={18} />, emptyText: "Keine Produkte mit kritischem Bestand" },
+  transit: { icon: <Truck size={18} />, emptyText: "Keine Produkte unterwegs" },
+};
+
+interface Props {
+  data: AlertProduct[];
+  title: string;
+  subtitle: string;
+  mode: AlertMode;
+  lastUpdated?: string | null;
+}
+
+type QuickFilter = "all" | "no_order" | "has_order" | "kritisch" | "niedrig";
+
+const QUICK_FILTERS: Record<AlertMode, { key: QuickFilter; label: string; description: string }[]> = {
+  zero: [
+    { key: "all", label: "Alle", description: "" },
+    { key: "no_order", label: "Ohne Bestellung", description: "Nicht bestellt" },
+    { key: "has_order", label: "Bestellt", description: "Bestellung unterwegs" },
+  ],
+  critical: [
+    { key: "all", label: "Alle", description: "" },
+    { key: "kritisch", label: "Kritisch (< 300g)", description: "" },
+    { key: "niedrig", label: "Niedrig (< 600g)", description: "" },
+    { key: "no_order", label: "Ohne Bestellung", description: "" },
+  ],
+  transit: [
+    { key: "all", label: "Alle", description: "" },
+  ],
+};
+
+export default function AlertsClient({ data, title, subtitle, mode, lastUpdated }: Props) {
+  const [query, setQuery] = useState("");
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
+  const config = MODE_CONFIG[mode];
+  const filters = QUICK_FILTERS[mode];
+
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const filterFn = (d: AlertProduct) => {
+    // Text search
+    if (words.length > 0) {
+      const combined = `${d.product} ${d.collection}`.toLowerCase();
+      if (!words.every((w) => combined.includes(w))) return false;
+    }
+    // Quick filter
+    if (quickFilter === "no_order") return d.unterwegsG === 0;
+    if (quickFilter === "has_order") return d.unterwegsG > 0;
+    if (quickFilter === "kritisch") return (d.stufe === "kritisch") || d.lagerG < 300;
+    if (quickFilter === "niedrig") return d.lagerG >= 300 && d.lagerG < 600;
+    return true;
+  };
+
+  const filtered = data.filter(filterFn);
+  const wellig = filtered.filter((d) => d.sheetKey === "wellig");
+  const glatt = filtered.filter((d) => d.sheetKey === "glatt");
+
+  // Counts for filter badges
+  const noOrderCount = data.filter((d) => d.unterwegsG === 0).length;
+  const hasOrderCount = data.filter((d) => d.unterwegsG > 0).length;
+
+  return (
+    <div className="p-4 md:p-8 space-y-6 max-w-7xl">
+      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-semibold text-neutral-900">{title}</h1>
+          <p className="text-sm text-neutral-500 mt-1">{subtitle}</p>
+        </div>
+        <SyncBadge lastUpdated={lastUpdated ?? null} />
+      </header>
+
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <KpiCard label="Gesamt" value={data.length.toString()} icon={config.icon} color="rose" />
+        <KpiCard label="Usbekisch Wellig" value={data.filter((d) => d.sheetKey === "wellig").length.toString()} icon={config.icon} color="indigo" />
+        <KpiCard label="Russisch Glatt" value={data.filter((d) => d.sheetKey === "glatt").length.toString()} icon={config.icon} color="emerald" />
+      </section>
+
+      {/* Search + Quick Filters */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1 max-w-md">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Produkt suchen..."
+            className="w-full pl-9 pr-3 py-2 rounded-lg border border-neutral-300 text-sm focus:ring-2 focus:ring-neutral-900 focus:outline-none"
+          />
+        </div>
+        {filters.length > 1 && (
+          <div className="flex flex-wrap gap-2">
+            {filters.map((f) => {
+              const count = f.key === "all" ? data.length : f.key === "no_order" ? noOrderCount : f.key === "has_order" ? hasOrderCount : f.key === "kritisch" ? data.filter((d) => d.lagerG < 300).length : data.filter((d) => d.lagerG >= 300 && d.lagerG < 600).length;
+              return (
+                <button
+                  key={f.key}
+                  onClick={() => setQuickFilter(f.key)}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition inline-flex items-center gap-1.5 ${
+                    quickFilter === f.key
+                      ? f.key === "no_order" ? "bg-red-600 text-white" : "bg-neutral-900 text-white"
+                      : f.key === "no_order" ? "bg-red-50 text-red-700 hover:bg-red-100 border border-red-200" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                  }`}
+                >
+                  {f.label}
+                  <span className={`text-xs ${quickFilter === f.key ? "opacity-70" : "opacity-50"}`}>({count})</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Filtered count indicator */}
+      {quickFilter !== "all" && (
+        <div className="text-sm text-neutral-500">
+          {filtered.length} von {data.length} Produkten angezeigt
+          <button onClick={() => setQuickFilter("all")} className="ml-2 text-indigo-600 hover:text-indigo-800 font-medium">Filter zurücksetzen</button>
+        </div>
+      )}
+
+      {wellig.length > 0 && (
+        <AlertSection
+          label="Usbekisch Wellig"
+          items={wellig}
+          accent="blue"
+          mode={mode}
+        />
+      )}
+      {glatt.length > 0 && (
+        <AlertSection
+          label="Russisch Glatt"
+          items={glatt}
+          accent="green"
+          mode={mode}
+        />
+      )}
+
+      {filtered.length === 0 && data.length > 0 && (
+        <div className="text-center py-12 text-neutral-400">
+          Keine Produkte für diesen Filter
+          <br />
+          <button onClick={() => { setQuickFilter("all"); setQuery(""); }} className="mt-2 text-indigo-600 hover:text-indigo-800 text-sm font-medium">
+            Alle anzeigen
+          </button>
+        </div>
+      )}
+
+      {data.length === 0 && (
+        <div className="text-center py-12 text-neutral-400">{config.emptyText}</div>
+      )}
+    </div>
+  );
+}
+
+function AlertSection({
+  label,
+  items,
+  accent,
+  mode,
+}: {
+  label: string;
+  items: AlertProduct[];
+  accent: "blue" | "green";
+  mode: AlertMode;
+}) {
+  const headerBg = accent === "blue" ? "bg-blue-600" : "bg-green-700";
+
+  return (
+    <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
+      <div className={`${headerBg} text-white px-4 py-2.5 font-semibold text-sm`}>
+        {label}
+        <span className="ml-2 font-normal opacity-80">({items.length} Produkte)</span>
+      </div>
+
+      {/* Mobile */}
+      <div className="md:hidden divide-y divide-neutral-100">
+        {items.map((item, i) => (
+          <div key={i} className="px-3 py-2">
+            <div className="flex justify-between items-start">
+              <div className="min-w-0">
+                <div className="text-xs font-medium text-neutral-900 truncate">
+                  {item.product}
+                  {item.variant && <span className="text-neutral-400 ml-1">[{item.variant}g]</span>}
+                </div>
+                <div className="text-[10px] text-neutral-500 mt-0.5">{item.collection}</div>
+              </div>
+              <div className="text-right shrink-0 ml-3">
+                <LagerBadge lagerG={item.lagerG} stufe={item.stufe} />
+              </div>
+            </div>
+            {item.unterwegsG > 0 && (
+              <div className="mt-2">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-cyan-50 text-cyan-700">
+                  <Truck size={10} /> {item.unterwegsG}g unterwegs
+                </span>
+                {item.perOrder.length > 0 && (
+                  <div className="mt-1 space-y-0.5">
+                    {item.perOrder.map((o, j) => (
+                      <div key={j} className="text-xs text-neutral-500">
+                        {o.name}: {o.menge}g {o.ankunft && `· ${o.ankunft}`}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop */}
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="bg-neutral-50/60 text-left text-[10px] uppercase text-neutral-500">
+            <tr>
+              <th className="px-2 py-1.5 font-medium">Kollektion</th>
+              <th className="px-2 py-1.5 font-medium">Produkt</th>
+              <th className="px-2 py-1.5 font-medium text-right">Lager</th>
+              <th className="px-2 py-1.5 font-medium text-right">Unterwegs</th>
+              <th className="px-2 py-1.5 font-medium">Bestellungen</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-neutral-100">
+            {items.map((item, i) => (
+              <tr
+                key={i}
+                className={`hover:bg-neutral-50 transition ${
+                  mode === "critical" && item.stufe === "kritisch" ? "bg-orange-50/30" :
+                  mode === "zero" && item.unterwegsG === 0 ? "bg-yellow-50/30" : ""
+                }`}
+              >
+                <td className="px-2 py-1 text-neutral-500">{item.collection}</td>
+                <td className="px-2 py-1 font-medium text-neutral-900 max-w-[250px] truncate" title={item.product}>
+                  {item.product}
+                  {item.variant && <span className="text-neutral-400 ml-1">[{item.variant}g]</span>}
+                </td>
+                <td className="px-2 py-1 text-right">
+                  <LagerBadge lagerG={item.lagerG} stufe={item.stufe} />
+                </td>
+                <td className="px-2 py-1 text-right">
+                  {item.unterwegsG > 0 ? (
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-cyan-50 text-cyan-700">
+                      {item.unterwegsG}g
+                    </span>
+                  ) : (
+                    <span className="text-neutral-300">–</span>
+                  )}
+                </td>
+                <td className="px-2 py-1">
+                  {item.perOrder.length > 0 ? (
+                    <div className="flex flex-wrap gap-0.5">
+                      {item.perOrder.map((o, j) => (
+                        <span
+                          key={j}
+                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-100"
+                          title={`${o.name}: ${o.menge}g${o.ankunft ? ` — ${o.ankunft}` : ""}`}
+                        >
+                          <span className="font-semibold">{o.menge}g</span>
+                          <span className="text-indigo-400">·</span>
+                          <span className="text-indigo-500 truncate max-w-[100px]">{o.name}</span>
+                          {o.ankunft && <span className="text-indigo-400 whitespace-nowrap">· {o.ankunft}</span>}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-red-300 font-medium">Keine Bestellung!</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function LagerBadge({ lagerG, stufe }: { lagerG: number; stufe?: "kritisch" | "niedrig" }) {
+  if (lagerG === 0) {
+    return <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">0g</span>;
+  }
+  const bg = stufe === "kritisch" ? "bg-orange-100 text-orange-700" : stufe === "niedrig" ? "bg-amber-100 text-amber-700" : "bg-neutral-100 text-neutral-700";
+  return <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${bg}`}>{lagerG}g</span>;
+}
+
+function KpiCard({ label, value, icon, color }: { label: string; value: string; icon: React.ReactNode; color: "indigo" | "rose" | "emerald" }) {
+  const colors = { indigo: "bg-indigo-50 text-indigo-600", rose: "bg-rose-50 text-rose-600", emerald: "bg-emerald-50 text-emerald-600" };
+  return (
+    <div className="bg-white rounded-2xl border border-neutral-200 p-5 shadow-sm">
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-neutral-500 uppercase tracking-wide">{label}</div>
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${colors[color]}`}>{icon}</div>
+      </div>
+      <div className="mt-2 text-2xl font-semibold text-neutral-900">{value}</div>
+    </div>
+  );
+}
