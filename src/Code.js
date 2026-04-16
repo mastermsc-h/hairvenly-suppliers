@@ -101,7 +101,7 @@ function fetchShopifyInventoryData() {
         "Russische Bondings (Glatt)",
         "Russische Classic Tressen (Glatt)",
         "Russische Genius Tressen (Glatt)",
-        "Russische Invisible Tressen (Glatt)",
+        "Russische Invisible Tressen (Glatt) | Butterfly Weft",
       ]
     },
     "ThirdSheet": {
@@ -264,22 +264,42 @@ function fetchShopifyInventoryData() {
     scriptProperties.deleteProperty("processedCollections");
     scriptProperties.deleteProperty("totalWeightMap");
     Logger.log("All collections processed.");
-    // ── Auto-Refresh-Kette: Verkaufsanalyse → Topseller → Dashboard → Bestellvorschläge ──────────
-    try { refreshVerkaufsanalyse(); } catch(e) { Logger.log("Auto-Refresh refreshVerkaufsanalyse Fehler: " + e.message); }
-    try { refreshTopseller();       } catch(e) { Logger.log("Auto-Refresh refreshTopseller Fehler: " + e.message); }
-    createDashboard();
-    // Flag setzen: Bestellvorschläge sollen empfohlenes Budget nutzen (nicht manuell gesetztes)
-    PropertiesService.getScriptProperties().setProperty("AUTO_BUDGET", "true");
-    try { createBestellungChina();  } catch(e) { Logger.log("Auto-Refresh createBestellungChina Fehler: " + e.message); }
-    try { createBestellungAmanda(); } catch(e) { Logger.log("Auto-Refresh createBestellungAmanda Fehler: " + e.message); }
-    PropertiesService.getScriptProperties().deleteProperty("AUTO_BUDGET");
-    Logger.log("✅ Auto-Refresh vollständig abgeschlossen (inkl. Bestellvorschläge).");
+    // ── Auto-Refresh-Kette: Jede Funktion als separater Trigger (6-Min-Limit pro Trigger!) ──────────
+    // Schritt 1: Verkaufsanalyse (startet sofort, plant danach Schritt 2)
+    Logger.log("🔗 Auto-Refresh-Kette: Starte Schritt 1 (Verkaufsanalyse) via Trigger...");
+    deleteExistingTriggers("autoChain_verkaufsanalyse");
+    ScriptApp.newTrigger("autoChain_verkaufsanalyse").timeBased().after(3000).create();
   }
 }
 
 function scheduleNextExecution() {
-  // WICHTIG: Keine Trigger löschen! .after()-Trigger sind einmalig und löschen sich selbst.
-  // deleteExistingTriggers() würde die permanenten Tages-Trigger (06:00/15:00) zerstören!
+  // Alte .after()-Trigger aufräumen (nur Einmal-Trigger, NICHT die permanenten Tages-Trigger)
+  ScriptApp.getProjectTriggers().forEach(trigger => {
+    if (trigger.getHandlerFunction() === "fetchShopifyInventoryData") {
+      // Nur Trigger ohne festes Timing löschen (= .after()-Einmal-Trigger)
+      // Permanente Trigger (atHour/everyDays) haben EventType CLOCK, die behalten wir
+      try {
+        let src = trigger.getTriggerSource();
+        // .after()-Trigger die disabled/abgelaufen sind → löschen
+        if (src === ScriptApp.TriggerSource.CLOCK) {
+          // Prüfe ob es ein everyDays-Trigger ist (den wollen wir behalten)
+          // Leider gibt GAS keine direkte Methode → wir löschen nur wenn > 5 fetchShopify-Trigger existieren
+        }
+      } catch(e) {}
+    }
+  });
+
+  // Sicherheitscheck: Wenn zu viele Trigger, alle fetchShopify-Trigger löschen und nur Tages-Trigger + neuen erstellen
+  let fetchTriggers = ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === "fetchShopifyInventoryData");
+  if (fetchTriggers.length > 6) {
+    Logger.log("⚠️ Zu viele fetchShopify-Trigger (" + fetchTriggers.length + "), räume auf...");
+    fetchTriggers.forEach(t => ScriptApp.deleteTrigger(t));
+    // Permanente Tages-Trigger neu erstellen
+    [9, 15].forEach(h => {
+      ScriptApp.newTrigger("fetchShopifyInventoryData").timeBased().atHour(h).everyDays(1).create();
+    });
+  }
+
   ScriptApp.newTrigger("fetchShopifyInventoryData").timeBased().after(2000).create();
   Logger.log("Scheduled next execution in a few seconds.");
 }
@@ -333,6 +353,71 @@ function deleteExistingTriggers(functionName) {
   ScriptApp.getProjectTriggers().forEach(trigger => {
     if (trigger.getHandlerFunction() === functionName) ScriptApp.deleteTrigger(trigger);
   });
+}
+
+/**
+ * Löscht ALLE Trigger im Projekt (Cleanup bei zu vielen deaktivierten Triggern).
+ * Danach setupAutoDailyRefresh() ausführen um saubere Trigger zu erstellen.
+ */
+function deleteAllTriggers() {
+  const triggers = ScriptApp.getProjectTriggers();
+  Logger.log("Lösche " + triggers.length + " Trigger...");
+  triggers.forEach(t => ScriptApp.deleteTrigger(t));
+  Logger.log("✅ Alle Trigger gelöscht. Jetzt setupAutoDailyRefresh() ausführen!");
+}
+
+// ==========================================
+// AUTO-REFRESH-KETTE (separierte Trigger)
+// Jede Funktion läuft in eigenem 6-Min-Fenster
+// Kette: Verkaufsanalyse → Topseller → Dashboard → China → Amanda
+// ==========================================
+
+function autoChain_cleanup_() {
+  // Alte Chain-Trigger aufräumen (falls welche hängen geblieben sind)
+  ["autoChain_verkaufsanalyse","autoChain_topseller","autoChain_dashboard","autoChain_china","autoChain_amanda"]
+    .forEach(fn => deleteExistingTriggers(fn));
+}
+
+function autoChain_verkaufsanalyse() {
+  autoChain_cleanup_(); // Alte Chains aufräumen
+  Logger.log("🔗 Auto-Chain Schritt 1/5: Verkaufsanalyse...");
+  try { refreshVerkaufsanalyse(); } catch(e) { Logger.log("❌ Verkaufsanalyse Fehler: " + e.message); }
+  // Nächsten Schritt planen
+  deleteExistingTriggers("autoChain_topseller");
+  ScriptApp.newTrigger("autoChain_topseller").timeBased().after(3000).create();
+  Logger.log("🔗 → Schritt 2 (Topseller) geplant");
+}
+
+function autoChain_topseller() {
+  Logger.log("🔗 Auto-Chain Schritt 2/5: Topseller...");
+  try { refreshTopseller(); } catch(e) { Logger.log("❌ Topseller Fehler: " + e.message); }
+  deleteExistingTriggers("autoChain_dashboard");
+  ScriptApp.newTrigger("autoChain_dashboard").timeBased().after(3000).create();
+  Logger.log("🔗 → Schritt 3 (Dashboard) geplant");
+}
+
+function autoChain_dashboard() {
+  Logger.log("🔗 Auto-Chain Schritt 3/5: Dashboard...");
+  try { createDashboard(); } catch(e) { Logger.log("❌ Dashboard Fehler: " + e.message); }
+  deleteExistingTriggers("autoChain_china");
+  PropertiesService.getScriptProperties().setProperty("AUTO_BUDGET", "true");
+  ScriptApp.newTrigger("autoChain_china").timeBased().after(3000).create();
+  Logger.log("🔗 → Schritt 4 (China) geplant");
+}
+
+function autoChain_china() {
+  Logger.log("🔗 Auto-Chain Schritt 4/5: Bestellung China...");
+  try { createBestellungChina(); } catch(e) { Logger.log("❌ China Fehler: " + e.message); }
+  deleteExistingTriggers("autoChain_amanda");
+  ScriptApp.newTrigger("autoChain_amanda").timeBased().after(3000).create();
+  Logger.log("🔗 → Schritt 5 (Amanda) geplant");
+}
+
+function autoChain_amanda() {
+  Logger.log("🔗 Auto-Chain Schritt 5/5: Bestellung Amanda...");
+  try { createBestellungAmanda(); } catch(e) { Logger.log("❌ Amanda Fehler: " + e.message); }
+  PropertiesService.getScriptProperties().deleteProperty("AUTO_BUDGET");
+  Logger.log("✅ Auto-Refresh-Kette vollständig abgeschlossen!");
 }
 
 function getOrCreateSheet(ss, sheetName) {
@@ -425,7 +510,8 @@ function extractWeightFromVariantOption(option) {
 
 function sanitizeWeightForCollection(collectionName, rawWeight) {
   const expectedWeights = {
-    "Russische Invisible Tressen (Glatt)": 50,
+    "Russische Invisible Tressen (Glatt) | Butterfly Weft": 50,
+    "Russische Invisible Tressen (Glatt)": 50,  // alter Name
     "Russische Tressen (Glatt)": 50,
     "Usbekische Genius Tressen (Wellig)": 50,
     "Usbekische Classic Tressen (Wellig)": 50,
@@ -1072,6 +1158,30 @@ function matchClipInWeight(itemLength, pUpper) {
  *  Beide Seiten (Bestellung + Produktname) werden damit identisch formatiert,
  *  egal ob Shopify Bindestriche oder Leerzeichen verwendet.
  */
+/**
+ * Extrahiert den vollständigen Farbnamen aus einem Produkttitel (bis Stopword).
+ * z.B. "TRESSEN #LATTE BROWN RU GLATT CLASSIC WEFT ♡" → "#LATTE BROWN"
+ * z.B. "#5P18A ASCHIG GESTRÄHNTES LICHTBLOND..." → "#5P18A ASCHIG GESTRÄHNTES LICHTBLOND"
+ */
+const COLOR_STOP_WORDS_ = new Set(["RU","US","RUSSISCH","RUSSISCHE","RUSSISCHES","USBEKISCH","USBEKISCHE",
+  "GLATT","GLATTES","GLATTE","WELLIG","WELLIGE","WELLIGES","TAPE","TAPES","BONDING","BONDINGS",
+  "TRESSEN","TRESSE","CLASSIC","GENIUS","INVISIBLE","WEFT","MINI","MINITAPE","MINITAPES",
+  "EXTENSIONS","EXTENSION","ECHTHAAR","CLIP","CLIP-IN","CLIP-INS","KERATIN","BUTTERFLY",
+  "45CM","55CM","60CM","65CM","85CM","1G","0.5G","HAAR","HAIR","STANDARD"]);
+function extractFullColor_(productName) {
+  const upper = (productName || "").toUpperCase();
+  const hashIdx = upper.indexOf("#");
+  if (hashIdx < 0) return "";
+  const afterHash = upper.substring(hashIdx).replace(/♡/g, "").trim();
+  const words = afterHash.split(/\s+/);
+  let colorParts = [words[0]];
+  for (let i = 1; i < words.length; i++) {
+    if (COLOR_STOP_WORDS_.has(words[i])) break;
+    colorParts.push(words[i]);
+  }
+  return colorParts.join(" ");
+}
+
 function normalizeColorStr_(s) {
   if (!s) return "";
   return s.toUpperCase()
@@ -1086,6 +1196,8 @@ function normalizeColorStr_(s) {
 function applyColorAliases_(s) {
   return s
     .replace(/\bNORWEGIAN\b/g, "NORVEGIAN")
+    .replace(/\bCAPPUCINO\b/g, "CAPPUCCINO")
+    .replace(/\bBISQUID\b/g, "BISCUIT")
     // MOCHA MELT (mit Leerzeichen) ist die kanonische Form
     .replace(/\bMOCHAMELT\b/g, "MOCHA MELT");
 }
@@ -2292,8 +2404,8 @@ function createBestellungChina() {
     let firstHash = produktUpper.indexOf("#");
     if (firstHash >= 0) colorRaw = produktUpper.substring(firstHash);
     if (!colorRaw) continue;
-    // Farbcode (erstes Wort ab #, z.B. "#2E", "#PEARL")
-    let colorOneWord = colorRaw.split(" ")[0];
+    // Farbcode: vollständiger Farbname bis Stopword (z.B. "#LATTE BROWN", "#2E")
+    let colorOneWord = extractFullColor_(produktUpper) || colorRaw.split(" ")[0];
     let tier = getTierChina(colorOneWord, mapping.typ);
     // < 150g Lager = unverkäuflich (Kunden kaufen min. ~150g) → wie ausverkauft behandeln
     if (tier === "KAUM" && lager >= 150) continue; // Genug Lager + keine Verkäufe → wirklich langsam
@@ -3065,9 +3177,7 @@ function createBestellungAmanda() {
       for (const vaKey in vaDataA) {
         const vp = vaDataA[vaKey];
         if (!vp.handle) continue;
-        let farbe = "";
-        const hIdx = (vp.name || "").indexOf("#");
-        if (hIdx >= 0) farbe = (vp.name || "").substring(hIdx).split(" ")[0].toUpperCase();
+        const farbe = extractFullColor_(vp.name || "");
         if (!farbe) continue;
         const lookupKey = vp.handle + "|" + farbe;
         // Höchste Velocity behalten (falls mehrere Einträge für gleiche Farbe)
@@ -3110,7 +3220,7 @@ function createBestellungAmanda() {
     { keyword: "BONDING",         method: "Bondings",       collKeyword: "BONDING",         collName: "Russische Bondings (Glatt)",          isInvisible: false },
     { keyword: "CLASSIC TRESSEN", method: "Classic Weft",   collKeyword: "CLASSIC",         collName: "Russische Classic Tressen (Glatt)",   isInvisible: false },
     { keyword: "GENIUS TRESSEN",  method: "Genius Weft",    collKeyword: "GENIUS",          collName: "Russische Genius Tressen (Glatt)",    isInvisible: false },
-    { keyword: "INVISIBLE TRESSEN",method: "Invisible Weft",collKeyword: "INVISIBLE",       collName: "Russische Invisible Tressen (Glatt)", isInvisible: true  },
+    { keyword: "INVISIBLE TRESSEN",method: "Invisible Weft",collKeyword: "INVISIBLE",       collName: "Russische Invisible Tressen (Glatt) | Butterfly Weft", isInvisible: true  },
   ];
 
   // ─── TIER-COUNTS vorberechnen (für proportionale Zielmengen) ───
@@ -3143,11 +3253,11 @@ function createBestellungAmanda() {
     let lager = invRow.totalWeight;
     let produktUpper = invRow.productUpper;
 
-    // Farbcode extrahieren (alles ab #)
+    // Farbcode extrahieren (vollständiger Farbname bis Stopword)
     let firstHash = produktUpper.indexOf("#");
     if (firstHash < 0) continue;
     let colorRaw = produktUpper.substring(firstHash);
-    let colorOneWord = colorRaw.split(" ")[0];
+    let colorOneWord = extractFullColor_(produktUpper) || colorRaw.split(" ")[0];
 
     // Tier bestimmen (dynamisch)
     let tier = getTierAmanda(colorOneWord, mapping.method, mapping.isInvisible);
@@ -3228,7 +3338,8 @@ function createBestellungAmanda() {
             "Russische Bondings (Glatt)": "Bondings",
             "Russische Classic Tressen (Glatt)": "Classic Weft",
             "Russische Genius Tressen (Glatt)": "Genius Weft",
-            "Russische Invisible Tressen (Glatt)": "Invisible Weft"
+            "Russische Invisible Tressen (Glatt) | Butterfly Weft": "Invisible Weft",
+            "Russische Invisible Tressen (Glatt)": "Invisible Weft"  // alter Name
           };
           const vdKeyA2 = "Russisch Glatt|" + (VD_KEY_MAP_A[mapping.collName] || mapping.collName);
           const vdEntryA2 = vdA2[vdKeyA2];
@@ -4758,6 +4869,7 @@ function refreshTopseller() {
     Logger.log("⚠️ Clip-Ins aus Lagerliste laden fehlgeschlagen: " + eLager.message);
   }
 
+
   // ── Schritt 1c: Inventar-Produkte ergänzen (nur exakter Collection-Name-Match) ──
   // Produkte ohne Verkäufe in 90 Tagen fehlen in VA_PRODUCT_DATA.
   // Das Inventar-Sheet wird durch fetchShopifyInventoryData direkt aus Shopify befüllt
@@ -4773,7 +4885,8 @@ function refreshTopseller() {
       "Russische Bondings (Glatt)":           "bondings-glatt",
       "Russische Classic Tressen (Glatt)":    "tressen-russisch-classic",
       "Russische Genius Tressen (Glatt)":     "tressen-russisch-genius",
-      "Russische Invisible Tressen (Glatt)":  "tressen-russisch-invisible",
+      "Russische Invisible Tressen (Glatt) | Butterfly Weft":  "tressen-russisch-invisible",
+      "Russische Invisible Tressen (Glatt)":  "tressen-russisch-invisible",  // alter Name (Fallback)
       "Tapes Wellig 45cm":                    "tapes-45cm",
       "Tapes Wellig 55cm":                    "tapes-55cm",
       "Tapes Wellig 65cm":                    "tapes-65cm",
@@ -4783,15 +4896,14 @@ function refreshTopseller() {
       "Usbekische Classic Tressen (Wellig)":  "tressen-usbekisch-classic",
       "Usbekische Genius Tressen (Wellig)":   "tressen-usbekisch-genius",
     };
-    // Bereits in VA_PRODUCT_DATA vorhandene Farben pro Handle sammeln
+    // Bereits in VA_PRODUCT_DATA vorhandene Farben pro Handle sammeln (vollständiger Farbname)
     const existingByHandle = {};
     for (const key in vaProductData) {
       const p = vaProductData[key];
       if (!p.handle || !p.name) continue;
       if (!existingByHandle[p.handle]) existingByHandle[p.handle] = new Set();
-      for (const t of p.name.split(" ")) {
-        if (t.startsWith("#")) { existingByHandle[p.handle].add(t.toUpperCase()); break; }
-      }
+      const fc = extractFullColor_(p.name);
+      if (fc) existingByHandle[p.handle].add(fc);
     }
     const LAGER_SHEETS = ["Russisch - GLATT", "Usbekisch - WELLIG"];
     let lagerHitsAll = 0;
@@ -4811,9 +4923,8 @@ function refreshTopseller() {
         // EXAKTES Collection-Matching (nicht Keyword-basiert)
         const handle = LAGER_EXACT_COLL_MAP[currentColl];
         if (!handle || handle === "clip-extensions") continue;
-        // Farbcode: erstes Wort ab #
-        let farbe = "";
-        for (const t of c1.split(" ")) { if (t.startsWith("#")) { farbe = t.toUpperCase(); break; } }
+        // Farbcode: vollständiger Farbname (z.B. "#LATTE BROWN", nicht nur "#LATTE")
+        const farbe = extractFullColor_(c1);
         if (!farbe) continue;
         // Prüfen ob diese Farbe unter diesem Handle BEREITS in VA_PRODUCT_DATA existiert
         if (existingByHandle[handle] && existingByHandle[handle].has(farbe)) continue;
@@ -4841,18 +4952,17 @@ function refreshTopseller() {
     const mapping = COLL_MAP[p.handle];
     if (!mapping) { skipped++; continue; }
     // Farbe aus Produktname extrahieren
-    // farbe     = erster #-Token (z.B. "#3T")          → Schlüssel für TOPSELLER_DATA & Lager-Lookup
+    // farbe     = vollständiger Farbname bis Stopword (z.B. "#LATTE BROWN") → Schlüssel für Lager-Lookup
     // fullFarbe = alles ab dem ersten "#" bis Zeilenende (z.B. "#3T Pearl White") → Anzeige im Topseller-Tab
-    let farbe = "";
+    let farbe = extractFullColor_(p.name || "");
     let fullFarbe = "";
     const hashPosC_ = (p.name || "").indexOf("#");
     if (hashPosC_ >= 0) {
-      const afterHash_ = (p.name || "").substring(hashPosC_).trim();
-      farbe     = afterHash_.split(" ")[0]; // Nur erster Token (#3T, #Pearl …)
-      fullFarbe = afterHash_;              // Vollständiger Farbname (#3T Pearl White, #Pearl White …)
+      fullFarbe = (p.name || "").substring(hashPosC_).replace(/♡/g, "").trim();
     }
     // Kein #-Farbcode: Produktname als Fallback verwenden (z.B. Clip-ins, Minitapes ohne Farbcode)
     if (!farbe) { farbe = (p.name || "Unbekannt").split(" - ")[0].trim(); fullFarbe = farbe; }
+    if (!fullFarbe) fullFarbe = farbe;
     // Clip-Ins: Variante (100g/150g/225g) als Länge verwenden für separate Ranglisten
     const clipVariantLänge = (mapping.typ === "Clip-ins" && p.clipVariant > 0) ? (p.clipVariant + "g") : (mapping.länge || "");
     // collName: exakter Collection-Name für getOrderedWeightForProduct (Unterwegs-Lookup)
@@ -4872,7 +4982,7 @@ function refreshTopseller() {
       "bondings-glatt":            "Russische Bondings (Glatt)",
       "tressen-russisch-classic":  "Russische Classic Tressen (Glatt)",
       "tressen-russisch-genius":   "Russische Genius Tressen (Glatt)",
-      "tressen-russisch-invisible":"Russische Invisible Tressen (Glatt)",
+      "tressen-russisch-invisible":"Russische Invisible Tressen (Glatt) | Butterfly Weft",
       "clip-extensions":           "Clip In Extensions Echthaar"
     };
     classified.push({
@@ -4946,7 +5056,8 @@ function refreshTopseller() {
       "Russische Bondings (Glatt)":          "bondings-glatt",
       "Russische Classic Tressen (Glatt)":   "tressen-russisch-classic",
       "Russische Genius Tressen (Glatt)":    "tressen-russisch-genius",
-      "Russische Invisible Tressen (Glatt)": "tressen-russisch-invisible",
+      "Russische Invisible Tressen (Glatt) | Butterfly Weft": "tressen-russisch-invisible",
+      "Russische Invisible Tressen (Glatt)": "tressen-russisch-invisible",  // alter Name (Fallback)
       "Clip In Extensions Echthaar":         "clip-extensions",
       "Clip Extensions":                     "clip-extensions",
       "Clip-In Extensions":                  "clip-extensions",
@@ -4964,11 +5075,8 @@ function refreshTopseller() {
       const coll = inv.collection; // EXAKT, nicht .toUpperCase()
       const handle = COLL_TO_HANDLE_TS[coll] || null;
       if (!handle) continue;
-      // Farbcode extrahieren
-      const prodUp = inv.productUpper;
-      const hashIdx = prodUp.indexOf("#");
-      if (hashIdx < 0) continue;
-      const farbe = prodUp.substring(hashIdx).split(" ")[0];
+      // Farbcode extrahieren (vollständiger Farbname, z.B. "#LATTE BROWN" statt nur "#LATTE")
+      const farbe = extractFullColor_(inv.productUpper || inv.product || "");
       if (!farbe) continue;
       // Clip-ins: mit Variante speichern
       if (handle === "clip-extensions" && inv.unitWeight > 0) {
@@ -6476,7 +6584,8 @@ function getVerkaufsZielGrams_(quality, collLabel, tier, tierCounts, lieferzeitW
           "Russische Bondings (Glatt)":            ["bondings-glatt"],
           "Russische Classic Tressen (Glatt)":     ["tressen-russisch-classic"],
           "Russische Genius Tressen (Glatt)":      ["tressen-russisch-genius"],
-          "Russische Invisible Tressen (Glatt)":   ["tressen-russisch-invisible"],
+          "Russische Invisible Tressen (Glatt) | Butterfly Weft":   ["tressen-russisch-invisible"],
+          "Russische Invisible Tressen (Glatt)":   ["tressen-russisch-invisible"],  // alter Name
           // China (Usbekisch Wellig)
           "Tapes Wellig 45cm":                    ["tapes-45cm"],
           "Tapes Wellig 55cm":                    ["tapes-55cm"],
@@ -6581,7 +6690,8 @@ function getVerkaufsZielGrams_(quality, collLabel, tier, tierCounts, lieferzeitW
       "Russische Bondings (Glatt)": "Bondings",
       "Russische Classic Tressen (Glatt)": "Classic Weft",
       "Russische Genius Tressen (Glatt)": "Genius Weft",
-      "Russische Invisible Tressen (Glatt)": "Invisible Weft"
+      "Russische Invisible Tressen (Glatt) | Butterfly Weft": "Invisible Weft",
+      "Russische Invisible Tressen (Glatt)": "Invisible Weft"  // alter Name
     };
     const vdLabel = COLLNAME_TO_VDLABEL[collLabel] || collLabel;
     const key = quality + "|" + vdLabel;
@@ -6641,7 +6751,7 @@ function countTiersForCollection_(invRows, quality, collLabel, typ, getTierFn, e
     if (!cUpper.includes(collKeyword.toUpperCase())) continue;
     const colorRaw = invRow.productUpper.substring(invRow.productUpper.indexOf("#"));
     if (!colorRaw) continue;
-    const colorOneWord = colorRaw.split(" ")[0];
+    const colorOneWord = extractFullColor_(invRow.productUpper) || colorRaw.split(" ")[0];
     if (seen.has(colorOneWord)) continue;
     seen.add(colorOneWord);
     const tier = getTierFn(colorOneWord, typ);
