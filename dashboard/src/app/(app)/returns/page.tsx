@@ -106,24 +106,15 @@ export default async function ReturnsPage() {
     .from("shopify_collection_sales")
     .select("month, collection_title, gross_revenue, order_count");
 
-  // Both v_returns_summary.month and shopify_monthly_revenue.month are now
-  // stored as text "YYYY-MM-01" to avoid timezone shifts. We still apply a
-  // safety normalizer in case any legacy data comes through.
+  // initiated_at / month columns are stored as DATE (no timezone). Extract
+  // year-month verbatim — previous "day > 20 → next month" compensation was
+  // wrong for DATE columns and caused refunds on the 21st-31st to be
+  // attributed to the following month.
   const normalizeMonth = (raw: unknown): string | null => {
     if (!raw) return null;
-    const s = String(raw);
-    const m = s.match(/^(\d{4})-(\d{2})/);
+    const m = String(raw).match(/^(\d{4})-(\d{2})/);
     if (!m) return null;
-    const dayMatch = s.match(/^\d{4}-\d{2}-(\d{2})/);
-    const day = dayMatch ? parseInt(dayMatch[1], 10) : 1;
-    let year = parseInt(m[1], 10);
-    let month = parseInt(m[2], 10);
-    // Compensate for TZ-shifted dates where day rolled back to end of previous month
-    if (day > 20) {
-      month += 1;
-      if (month > 12) { month = 1; year += 1; }
-    }
-    return `${year}-${String(month).padStart(2, "0")}-01`;
+    return `${m[1]}-${m[2]}-01`;
   };
 
   // Collections excluded from the "Extensions" series (non-extension products).
