@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 
 export type LoginState = { error?: string } | undefined;
 export type RegisterState = { error?: string; success?: boolean } | undefined;
@@ -96,7 +96,12 @@ export async function signOut() {
 }
 
 // Admin actions for user management
-export async function approveUser(userId: string, supplierId: string | null) {
+export async function approveUser(
+  userId: string,
+  supplierId: string | null,
+  role: string = "supplier",
+  deniedFeatures: string[] = [],
+) {
   const supabase = await createClient();
 
   // Verify caller is admin
@@ -109,9 +114,16 @@ export async function approveUser(userId: string, supplierId: string | null) {
     .single();
   if (!caller?.is_admin) return { error: "Nur Admins können Benutzer freigeben." };
 
+  const isAdmin = role === "admin";
   const { error } = await supabase
     .from("profiles")
-    .update({ approved: true, supplier_id: supplierId })
+    .update({
+      approved: true,
+      supplier_id: supplierId,
+      role,
+      is_admin: isAdmin || role === "employee",
+      denied_features: deniedFeatures,
+    })
     .eq("id", userId);
   if (error) return { error: error.message };
 
@@ -131,9 +143,79 @@ export async function rejectUser(userId: string) {
     .single();
   if (!caller?.is_admin) return { error: "Nur Admins." };
 
-  // Delete the auth user (cascades to profile)
-  const { error } = await supabase.auth.admin.deleteUser(userId);
+  // Delete the auth user (cascades to profile) — needs service role
+  const admin = createServiceClient();
+  const { error } = await admin.auth.admin.deleteUser(userId);
   if (error) return { error: error.message };
+
+  revalidatePath("/admin/users");
+  return { ok: true };
+}
+
+export async function createUser(formData: FormData) {
+  const supabase = await createClient();
+
+  // Verify caller is admin
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Nicht eingeloggt." };
+  const { data: caller } = await supabase
+    .from("profiles")
+    .select("is_admin")
+    .eq("id", user.id)
+    .single();
+  if (!caller?.is_admin) return { error: "Nur Admins können Benutzer anlegen." };
+
+  const username = String(formData.get("username") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim();
+  const displayName = String(formData.get("display_name") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+  const role = String(formData.get("role") ?? "employee").trim();
+  const supplierId = String(formData.get("supplier_id") ?? "").trim() || null;
+  const deniedFeaturesRaw = String(formData.get("denied_features") ?? "").trim();
+  const deniedFeatures = deniedFeaturesRaw ? deniedFeaturesRaw.split(",").filter(Boolean) : [];
+
+  if (!username || username.length < 3) return { error: "Benutzername muss mind. 3 Zeichen lang sein." };
+  if (!/^[a-zA-Z0-9_.-]+$/.test(username))
+    return { error: "Benutzername darf nur Buchstaben, Zahlen, Punkt, Bindestrich und Unterstrich enthalten." };
+  if (!email) return { error: "E-Mail ist erforderlich." };
+  if (!password || password.length < 6) return { error: "Passwort muss mind. 6 Zeichen lang sein." };
+
+  // Check username uniqueness
+  const { data: existing } = await supabase
+    .from("profiles")
+    .select("id")
+    .ilike("username", username)
+    .maybeSingle();
+  if (existing) return { error: "Benutzername ist bereits vergeben." };
+
+  // Create auth user (auto-confirmed, no email verification) — needs service role
+  const admin = createServiceClient();
+  const { data: newUser, error: createError } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { username, display_name: displayName || username },
+  });
+  if (createError) {
+    if (createError.message.includes("already been registered"))
+      return { error: "Diese E-Mail ist bereits registriert." };
+    return { error: createError.message };
+  }
+
+  // Update profile with role, approval, etc. — use service client (RLS bypass)
+  const { error: updateError } = await admin
+    .from("profiles")
+    .update({
+      username,
+      display_name: displayName || username,
+      approved: true,
+      role,
+      is_admin: role === "admin" || role === "employee",
+      supplier_id: role === "supplier" ? supplierId : null,
+      denied_features: role === "employee" ? deniedFeatures : [],
+    })
+    .eq("id", newUser.user.id);
+  if (updateError) return { error: updateError.message };
 
   revalidatePath("/admin/users");
   return { ok: true };
@@ -156,13 +238,49 @@ export async function updateUser(userId: string, formData: FormData) {
   const displayName = String(formData.get("display_name") ?? "").trim() || null;
   const language = String(formData.get("language") ?? "de").trim();
   const supplierId = String(formData.get("supplier_id") ?? "").trim() || null;
+  const role = String(formData.get("role") ?? "").trim() || undefined;
+  const deniedFeaturesRaw = String(formData.get("denied_features") ?? "").trim();
+  const deniedFeatures = deniedFeaturesRaw ? deniedFeaturesRaw.split(",").filter(Boolean) : [];
+
+  const updates: Record<string, unknown> = {
+    username,
+    display_name: displayName,
+    language,
+    supplier_id: supplierId,
+  };
+  if (role) {
+    updates.role = role;
+    updates.is_admin = role === "admin" || role === "employee";
+    updates.denied_features = deniedFeatures;
+  }
 
   const { error } = await supabase
     .from("profiles")
-    .update({ username, display_name: displayName, language, supplier_id: supplierId })
+    .update(updates)
     .eq("id", userId);
   if (error) return { error: error.message };
 
   revalidatePath("/admin/users");
+  return { ok: true };
+}
+
+export async function resetPassword(userId: string, newPassword: string) {
+  const supabase = await createClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Nicht eingeloggt." };
+  const { data: caller } = await supabase
+    .from("profiles")
+    .select("is_admin")
+    .eq("id", user.id)
+    .single();
+  if (!caller?.is_admin) return { error: "Nur Admins." };
+
+  if (!newPassword || newPassword.length < 6) return { error: "Passwort muss mind. 6 Zeichen lang sein." };
+
+  const admin = createServiceClient();
+  const { error } = await admin.auth.admin.updateUserById(userId, { password: newPassword });
+  if (error) return { error: error.message };
+
   return { ok: true };
 }

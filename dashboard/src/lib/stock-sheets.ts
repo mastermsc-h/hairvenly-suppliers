@@ -96,11 +96,11 @@ export interface VerkaufsanalyseRow {
 
 /** Extract a German timestamp like "DD.MM.YYYY HH:MM" from a string */
 function extractTimestamp(text: string): string | null {
-  // Match patterns like "13.04.2026 16:07" or "13.04.2026, 16:07"
-  const m = text.match(/(\d{2}\.\d{2}\.\d{4})[,\s]+(\d{2}:\d{2})/);
+  // Match patterns like "13.04.2026 16:07" or "14.4.2026, 22:02:33" (1 or 2 digit day/month)
+  const m = text.match(/(\d{1,2}\.\d{1,2}\.\d{4})[,\s]+(\d{1,2}:\d{2})/);
   if (m) return `${m[1]} ${m[2]}`;
   // Match just date
-  const d = text.match(/(\d{2}\.\d{2}\.\d{4})/);
+  const d = text.match(/(\d{1,2}\.\d{1,2}\.\d{4})/);
   if (d) return d[1];
   return null;
 }
@@ -264,6 +264,7 @@ export async function readTopseller(): Promise<{ sections: TopsSellerSection[]; 
 }
 
 // ── Read Dashboard Alerts (Nullbestand, Kritisch, Unterwegs) ───
+// Single source: Google Sheet "📊 Dashboard" tab.
 
 export async function readDashboardAlerts(): Promise<{
   nullbestand: AlertProduct[];
@@ -278,7 +279,7 @@ export async function readDashboardAlerts(): Promise<{
   // Read the entire dashboard tab
   const { data } = await sheets.spreadsheets.values.get({
     spreadsheetId: getStockSheetId(),
-    range: "'📊 Dashboard'!A1:Z500",
+    range: "'📊 Dashboard'!A1:Z1500",
     valueRenderOption: "UNFORMATTED_VALUE",
   });
 
@@ -388,7 +389,7 @@ export async function readDashboardAlerts(): Promise<{
 
     const item: AlertProduct = {
       collection: col0,
-      product: product.replace(/\s*\[\d+g\]/, ""),
+      product: product,
       variant,
       lagerG,
       sheetKey: currentSheetKey,
@@ -491,3 +492,4 @@ export async function readVerkaufsanalyse(): Promise<{ rows: VerkaufsanalyseRow[
 
   return { rows, lastUpdated };
 }
+
