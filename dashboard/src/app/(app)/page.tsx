@@ -199,12 +199,12 @@ export default async function DashboardPage() {
 
             const body =
               openOrders.length === 0 ? (
-                <>
+                <div>
                   <div className="px-4 md:px-5 py-6 text-center text-sm text-neutral-400 border-t border-neutral-100">
                     {t(locale, "dashboard.no_active_orders")}
                   </div>
                   {addBtn}
-                </>
+                </div>
               ) : (
                 <div className="border-t border-neutral-100">
                   {/* Desktop table */}
