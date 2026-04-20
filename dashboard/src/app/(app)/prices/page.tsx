@@ -1,4 +1,4 @@
-import { requireAdmin } from "@/lib/auth";
+import { requireFeature } from "@/lib/auth";
 import { loadPriceLists } from "@/lib/actions/prices";
 import { loadAllCatalogs } from "@/lib/actions/catalog";
 import { loadSupplierColors } from "@/lib/actions/prices";
@@ -6,7 +6,7 @@ import PriceTables from "./price-tables";
 import type { Locale } from "@/lib/i18n";
 
 export default async function PricesPage() {
-  const profile = await requireAdmin();
+  const profile = await requireFeature("prices");
   const locale = (profile.language ?? "de") as Locale;
   const priceLists = await loadPriceLists();
 

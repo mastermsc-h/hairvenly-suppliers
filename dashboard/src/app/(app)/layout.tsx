@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { requireProfile } from "@/lib/auth";
+import { requireProfile, hasFeature } from "@/lib/auth";
 import { signOut } from "@/lib/actions/auth";
 import { t, type Locale } from "@/lib/i18n";
-import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign } from "lucide-react";
+import type { FeatureKey } from "@/lib/types";
+import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw } from "lucide-react";
 import SidebarGroup from "./sidebar-group";
 import LanguageSwitcher from "./language-switcher";
 import { MobileSidebarWrapper } from "./mobile-sidebar";
@@ -10,6 +11,8 @@ import { MobileSidebarWrapper } from "./mobile-sidebar";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const profile = await requireProfile();
   const locale = (profile.language ?? "de") as Locale;
+
+  const has = (f: FeatureKey) => hasFeature(profile, f);
 
   const sidebarContent = (
     <>
@@ -21,59 +24,96 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <nav className="flex-1 p-3 space-y-1 text-sm">
         <NavLink href="/" icon={<LayoutDashboard size={16} />} label={t(locale, "nav.overview")} />
         <NavLink href="/orders" icon={<Package size={16} />} label={t(locale, "nav.orders")} />
-        {profile.is_admin && (
+        {profile.role !== "supplier" && (
           <>
-            <NavLink href="/admin/suppliers" icon={<Building2 size={16} />} label={t(locale, "nav.suppliers")} />
-            <NavLink href="/admin/users" icon={<Users size={16} />} label={t(locale, "nav.users")} />
+            {has("suppliers") && <NavLink href="/admin/suppliers" icon={<Building2 size={16} />} label={t(locale, "nav.suppliers")} />}
+            {has("users") && <NavLink href="/admin/users" icon={<Users size={16} />} label={t(locale, "nav.users")} />}
 
             <div className="border-t border-neutral-200 my-2" />
-            <NavLink href="/orders/wizard" icon={<FilePlus size={16} />} label={t(locale, "nav.wizard")} />
-            <NavLink href="/catalog" icon={<Palette size={16} />} label={t(locale, "nav.catalog")} />
-            <NavLink href="/prices" icon={<DollarSign size={16} />} label={t(locale, "nav.prices")} />
+            {has("wizard") && <NavLink href="/orders/wizard" icon={<FilePlus size={16} />} label={t(locale, "nav.wizard")} />}
+            {has("catalog") && <NavLink href="/catalog" icon={<Palette size={16} />} label={t(locale, "nav.catalog")} />}
+            {has("prices") && <NavLink href="/prices" icon={<DollarSign size={16} />} label={t(locale, "nav.prices")} />}
 
-            <div className="border-t border-neutral-200 my-2" />
-            <SidebarGroup
-              label={t(locale, "nav.stock")}
-              icon={<Warehouse size={16} />}
-              href="/stock"
-              items={[
-                { href: "/stock/uzbek", label: t(locale, "nav.stock.uzbek") },
-                { href: "/stock/russian", label: t(locale, "nav.stock.russian") },
-                {
-                  href: "/stock/topseller",
-                  label: t(locale, "nav.stock.topseller"),
-                  children: [
-                    { href: "/stock/topseller/uzbek", label: t(locale, "nav.stock.uzbek") },
-                    { href: "/stock/topseller/russian", label: t(locale, "nav.stock.russian") },
-                  ],
-                },
-                {
-                  href: "/stock/zero",
-                  label: t(locale, "nav.stock.zero"),
-                  children: [
-                    { href: "/stock/zero/uzbek", label: t(locale, "nav.stock.uzbek") },
-                    { href: "/stock/zero/russian", label: t(locale, "nav.stock.russian") },
-                  ],
-                },
-                {
-                  href: "/stock/critical",
-                  label: t(locale, "nav.stock.critical"),
-                  children: [
-                    { href: "/stock/critical/uzbek", label: t(locale, "nav.stock.uzbek") },
-                    { href: "/stock/critical/russian", label: t(locale, "nav.stock.russian") },
-                  ],
-                },
-                {
-                  href: "/stock/transit",
-                  label: t(locale, "nav.stock.transit"),
-                  children: [
-                    { href: "/stock/transit/uzbek", label: t(locale, "nav.stock.uzbek") },
-                    { href: "/stock/transit/russian", label: t(locale, "nav.stock.russian") },
-                  ],
-                },
-                { href: "/stock/sales", label: t(locale, "nav.stock.sales") },
-              ]}
-            />
+            {has("stock") && (
+              <>
+                <div className="border-t border-neutral-200 my-2" />
+                <SidebarGroup
+                  label={t(locale, "nav.stock")}
+                  icon={<Warehouse size={16} />}
+                  href="/stock"
+                  items={[
+                    { href: "/stock/uzbek", label: t(locale, "nav.stock.uzbek") },
+                    { href: "/stock/russian", label: t(locale, "nav.stock.russian") },
+                    {
+                      href: "/stock/topseller",
+                      label: t(locale, "nav.stock.topseller"),
+                      children: [
+                        { href: "/stock/topseller/uzbek", label: t(locale, "nav.stock.uzbek") },
+                        { href: "/stock/topseller/russian", label: t(locale, "nav.stock.russian") },
+                      ],
+                    },
+                    {
+                      href: "/stock/zero",
+                      label: t(locale, "nav.stock.zero"),
+                      children: [
+                        { href: "/stock/zero/uzbek", label: t(locale, "nav.stock.uzbek") },
+                        { href: "/stock/zero/russian", label: t(locale, "nav.stock.russian") },
+                      ],
+                    },
+                    {
+                      href: "/stock/critical",
+                      label: t(locale, "nav.stock.critical"),
+                      children: [
+                        { href: "/stock/critical/uzbek", label: t(locale, "nav.stock.uzbek") },
+                        { href: "/stock/critical/russian", label: t(locale, "nav.stock.russian") },
+                      ],
+                    },
+                    {
+                      href: "/stock/transit",
+                      label: t(locale, "nav.stock.transit"),
+                      children: [
+                        { href: "/stock/transit/uzbek", label: t(locale, "nav.stock.uzbek") },
+                        { href: "/stock/transit/russian", label: t(locale, "nav.stock.russian") },
+                      ],
+                    },
+                    { href: "/stock/sales", label: t(locale, "nav.stock.sales") },
+                    { href: "/stock/preorders", label: t(locale, "nav.stock.preorders") },
+                  ]}
+                />
+              </>
+            )}
+
+            {has("finances") && (
+              <>
+                <div className="border-t border-neutral-200 my-2" />
+                <SidebarGroup
+                  label={t(locale, "nav.finances")}
+                  icon={<Landmark size={16} />}
+                  href="/finances"
+                  items={[
+                    { href: "/finances/overview", label: t(locale, "nav.finances.overview") },
+                    { href: "/finances/bwa", label: t(locale, "nav.finances.bwa") },
+                    { href: "/finances/prepayments", label: t(locale, "nav.finances.prepayments") },
+                    { href: "/finances/transfers", label: t(locale, "nav.finances.transfers") },
+                  ]}
+                />
+              </>
+            )}
+
+            {has("returns") && (
+              <>
+                <div className="border-t border-neutral-200 my-2" />
+                <SidebarGroup
+                  label={t(locale, "nav.returns")}
+                  icon={<RotateCcw size={16} />}
+                  href="/returns"
+                  items={[
+                    { href: "/returns", label: t(locale, "nav.returns.list") },
+                    { href: "/returns/analytics", label: t(locale, "nav.returns.analytics") },
+                  ]}
+                />
+              </>
+            )}
           </>
         )}
       </nav>
@@ -88,7 +128,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             {profile.display_name || profile.username || profile.email}
           </div>
           <div className="text-xs text-neutral-500 mt-0.5">
-            {profile.is_admin ? t(locale, "nav.admin") : t(locale, "nav.supplier")}
+            {t(locale, `role.${profile.role}`)}
           </div>
         </div>
         <form action={signOut}>

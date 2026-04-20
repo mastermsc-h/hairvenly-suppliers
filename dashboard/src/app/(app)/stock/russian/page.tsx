@@ -1,7 +1,7 @@
 import { requireProfile } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
 import { t, type Locale } from "@/lib/i18n";
-import { readInventorySheet } from "@/lib/stock-sheets";
+import { readInventorySheet, readDashboardAlerts } from "@/lib/stock-sheets";
+import { loadCatalogLookup, extractShopifyColorKey } from "@/lib/catalog-lookup";
 import InventoryPageClient, { type InventoryWithTransit } from "../inventory-page";
 
 export const revalidate = 120;
@@ -11,18 +11,64 @@ export default async function RussianStockPage() {
   if (!profile.is_admin) return <div className="p-8 text-neutral-500">Nur für Admins.</div>;
   const locale = (profile.language ?? "de") as Locale;
 
-  const [inventoryResult, transitMap] = await Promise.all([
+  const [inventoryResult, alerts, catalog] = await Promise.all([
     readInventorySheet("Russisch - GLATT"),
-    loadTransitOrders("Amanda"),
+    readDashboardAlerts(),
+    loadCatalogLookup(),
   ]);
 
+  // Build transit lookup using Farbcode catalog as bridge:
+  // Dashboard unterwegs product (Shopify name) → extract color key → find Hairvenly name → match inventory
+  const transitByShopifyKey = buildTransitLookup(
+    alerts.unterwegs.filter((u) => u.sheetKey === "glatt"),
+  );
+
+  // Also build a catalog bridge: Shopify color key → all known Shopify color keys for same Hairvenly color
+  // This handles cases where the same Hairvenly color has different Shopify product names
+  const catalogBridge = new Map<string, Set<string>>();
+  for (const entry of catalog.all) {
+    if (!entry.shopifyName) continue;
+    const shopifyKey = extractShopifyColorKey(entry.shopifyName);
+    const hKey = entry.hairvenlyName.toUpperCase();
+    if (!catalogBridge.has(hKey)) catalogBridge.set(hKey, new Set());
+    catalogBridge.get(hKey)!.add(shopifyKey);
+  }
+
   const data: InventoryWithTransit[] = inventoryResult.rows.map((row) => {
-    const key = normalizeProductKey(row.product);
-    const orders = transitMap.get(key) ?? [];
+    const invKey = extractShopifyColorKey(row.product);
+
+    // Direct match first
+    let entries = transitByShopifyKey.get(invKey);
+
+    // If no direct match, try via catalog bridge
+    if (!entries) {
+      // Find Hairvenly name for this inventory product's color key
+      const catalogEntries = catalog.byShopify.get(invKey);
+      if (catalogEntries) {
+        for (const ce of catalogEntries) {
+          const hKey = ce.hairvenlyName.toUpperCase();
+          // Find all Shopify keys for this Hairvenly color
+          const allKeys = catalogBridge.get(hKey);
+          if (allKeys) {
+            for (const altKey of allKeys) {
+              entries = transitByShopifyKey.get(altKey);
+              if (entries) break;
+            }
+          }
+          if (entries) break;
+
+          // Also try the Hairvenly name directly as a transit key
+          entries = transitByShopifyKey.get("#" + hKey);
+          if (entries) break;
+        }
+      }
+    }
+
+    const matched = entries ?? [];
     return {
       ...row,
-      transitOrders: orders,
-      transitTotal: orders.reduce((s, o) => s + o.quantity, 0),
+      transitOrders: matched,
+      transitTotal: matched.reduce((s, e) => s + e.quantity, 0),
     };
   });
 
@@ -37,49 +83,26 @@ export default async function RussianStockPage() {
   );
 }
 
-function normalizeProductKey(product: string): string {
-  const upper = product.toUpperCase();
-  const hashIdx = upper.indexOf("#");
-  if (hashIdx >= 0) return upper.substring(hashIdx).split(" ")[0];
-  return upper.split(" ")[0];
-}
-
-async function loadTransitOrders(supplierNameFragment: string) {
-  const supabase = await createClient();
-  const { data: orders } = await supabase
-    .from("orders_with_totals")
-    .select("id, label, eta, status, supplier_id")
-    .not("status", "in", '("delivered","cancelled")')
-    .order("created_at", { ascending: false });
-
-  const { data: suppliers } = await supabase
-    .from("suppliers")
-    .select("id, name");
-
-  const supplierIds = (suppliers ?? [])
-    .filter((s) => s.name.toLowerCase().includes(supplierNameFragment.toLowerCase()))
-    .map((s) => s.id);
-
-  const activeOrders = (orders ?? []).filter((o) => supplierIds.includes(o.supplier_id));
-  if (activeOrders.length === 0) return new Map<string, { label: string; eta: string | null; quantity: number }[]>();
-
-  const orderIds = activeOrders.map((o) => o.id);
-  const { data: items } = await supabase
-    .from("order_items")
-    .select("order_id, color_name, quantity")
-    .in("order_id", orderIds);
-
+/**
+ * Build transit lookup from Dashboard alerts.
+ * Key: Shopify color key (extracted from product name) → transit entries.
+ */
+function buildTransitLookup(unterwegs: { product: string; perOrder: { name: string; ankunft: string; menge: number }[] }[]) {
   const map = new Map<string, { label: string; eta: string | null; quantity: number }[]>();
-  for (const item of items ?? []) {
-    const order = activeOrders.find((o) => o.id === item.order_id);
-    if (!order) continue;
-    const key = "#" + item.color_name.toUpperCase();
-    if (!map.has(key)) map.set(key, []);
-    map.get(key)!.push({
-      label: order.label,
-      eta: order.eta,
-      quantity: item.quantity,
-    });
+  for (const u of unterwegs) {
+    // Try both the full product name and the extracted color key
+    const fullKey = u.product.toUpperCase();
+    const colorKey = extractShopifyColorKey(u.product);
+
+    const entries = u.perOrder.map((o) => ({ label: o.name, eta: o.ankunft || null, quantity: o.menge }));
+
+    if (!map.has(fullKey)) map.set(fullKey, []);
+    map.get(fullKey)!.push(...entries);
+
+    if (colorKey !== fullKey) {
+      if (!map.has(colorKey)) map.set(colorKey, []);
+      map.get(colorKey)!.push(...entries);
+    }
   }
   return map;
 }

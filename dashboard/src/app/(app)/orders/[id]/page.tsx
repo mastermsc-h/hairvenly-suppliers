@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ExternalLink, Weight, Package as PackageIcon, DollarSign, CreditCard, Pencil, ChevronDown, FileSpreadsheet } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { requireProfile } from "@/lib/auth";
+import { requireProfile, hasFeature } from "@/lib/auth";
 import { usd, date, dateTime } from "@/lib/format";
 import {
   STATUS_LABELS,
@@ -131,13 +131,15 @@ export default async function OrderDetailPage({
             </span>
           )}
         </div>
-        <div className="mt-4">
-          <QuickDocs documents={docs} paidTotal={o.paid_total} locale={locale} />
-        </div>
+        {hasFeature(profile, "invoices") && (
+          <div className="mt-4">
+            <QuickDocs documents={docs} paidTotal={o.paid_total} locale={locale} hideFinancials={!hasFeature(profile, "invoices")} />
+          </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
+      <div className={`grid grid-cols-1 ${hasFeature(profile, "invoices") ? "lg:grid-cols-3" : ""} gap-6`}>
+        <div className={`${hasFeature(profile, "invoices") ? "lg:col-span-2" : ""} space-y-6`}>
           {/* Details + Edit */}
           <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
             <div className="flex items-center justify-between mb-4">
@@ -219,27 +221,35 @@ export default async function OrderDetailPage({
           )}
 
           {/* Documents */}
-          <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
-            <h2 className="text-sm font-medium text-neutral-700 mb-4">{t(locale, "order.documents_title")}</h2>
-            <DocumentUpload orderId={o.id} locale={locale} />
-            <ul className="mt-4 divide-y divide-neutral-100">
-              {docs.length === 0 && (
-                <li className="text-sm text-neutral-500 py-3">{t(locale, "order.no_documents_yet")}</li>
-              )}
-              {docs.map((d) => (
-                <DocumentItem
-                  key={d.id}
-                  orderId={o.id}
-                  doc={d}
-                  isAdmin={profile.is_admin}
-                  locale={locale}
-                  displayName={
-                    proofNumber.has(d.id) ? `${t(locale, "payment.number")} ${proofNumber.get(d.id)}` : undefined
-                  }
-                />
-              ))}
-            </ul>
-          </section>
+          {hasFeature(profile, "documents") && (() => {
+            const financialKinds = ["supplier_invoice", "payment_proof"];
+            const visibleDocs = hasFeature(profile, "invoices")
+              ? docs
+              : docs.filter((d) => !financialKinds.includes(d.kind));
+            return (
+              <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
+                <h2 className="text-sm font-medium text-neutral-700 mb-4">{t(locale, "order.documents_title")}</h2>
+                {hasFeature(profile, "invoices") && <DocumentUpload orderId={o.id} locale={locale} />}
+                <ul className="mt-4 divide-y divide-neutral-100">
+                  {visibleDocs.length === 0 && (
+                    <li className="text-sm text-neutral-500 py-3">{t(locale, "order.no_documents_yet")}</li>
+                  )}
+                  {visibleDocs.map((d) => (
+                    <DocumentItem
+                      key={d.id}
+                      orderId={o.id}
+                      doc={d}
+                      isAdmin={profile.is_admin}
+                      locale={locale}
+                      displayName={
+                        proofNumber.has(d.id) ? `${t(locale, "payment.number")} ${proofNumber.get(d.id)}` : undefined
+                      }
+                    />
+                  ))}
+                </ul>
+              </section>
+            );
+          })()}
 
           {/* Timeline */}
           <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
@@ -265,42 +275,44 @@ export default async function OrderDetailPage({
           </section>
         </div>
 
-        {/* Sidebar: Finance */}
-        <aside className="space-y-6">
-          <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
-            <h2 className="text-sm font-medium text-neutral-700 mb-4 flex items-center gap-1.5">
-              <DollarSign size={14} className="text-neutral-400" />
-              {t(locale, "order.finance")}
-            </h2>
-            <dl className="space-y-2 text-sm">
-              <Row label={t(locale, "order.invoice_amount")} value={usd(o.invoice_total)} />
-              <Row label={t(locale, "order.goods")} value={usd(o.goods_value)} />
-              <Row label={t(locale, "order.shipping")} value={usd(o.shipping_cost)} />
-              <Row label={t(locale, "order.customs")} value={usd(o.customs_duty)} />
-              <Row label={t(locale, "order.import_vat")} value={usd(o.import_vat)} />
-              <div className="pt-2 mt-2 border-t border-neutral-100" />
-              <Row label={t(locale, "order.landed_cost")} value={usd(o.landed_cost)} bold />
-              <Row label={t(locale, "order.paid")} value={usd(o.paid_total)} />
-              <Row label={t(locale, "order.remaining")} value={usd(o.remaining_balance)} bold />
-            </dl>
-          </section>
+        {/* Sidebar: Finance — hidden when invoices feature is denied */}
+        {hasFeature(profile, "invoices") && (
+          <aside className="space-y-6">
+            <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
+              <h2 className="text-sm font-medium text-neutral-700 mb-4 flex items-center gap-1.5">
+                <DollarSign size={14} className="text-neutral-400" />
+                {t(locale, "order.finance")}
+              </h2>
+              <dl className="space-y-2 text-sm">
+                <Row label={t(locale, "order.invoice_amount")} value={usd(o.invoice_total)} />
+                <Row label={t(locale, "order.goods")} value={usd(o.goods_value)} />
+                <Row label={t(locale, "order.shipping")} value={usd(o.shipping_cost)} />
+                <Row label={t(locale, "order.customs")} value={usd(o.customs_duty)} />
+                <Row label={t(locale, "order.import_vat")} value={usd(o.import_vat)} />
+                <div className="pt-2 mt-2 border-t border-neutral-100" />
+                <Row label={t(locale, "order.landed_cost")} value={usd(o.landed_cost)} bold />
+                <Row label={t(locale, "order.paid")} value={usd(o.paid_total)} />
+                <Row label={t(locale, "order.remaining")} value={usd(o.remaining_balance)} bold />
+              </dl>
+            </section>
 
-          <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
-            <h2 className="text-sm font-medium text-neutral-700 mb-4 flex items-center gap-1.5">
-              <CreditCard size={14} className="text-neutral-400" />
-              {t(locale, "order.payments")}
-            </h2>
-            {profile.is_admin && <PaymentForm orderId={o.id} locale={locale} />}
-            <ul className="mt-4 divide-y divide-neutral-100">
-              {pays.length === 0 && (
-                <li className="text-sm text-neutral-500 py-3">{t(locale, "order.no_payments_yet")}</li>
-              )}
-              {pays.map((p) => (
-                <PaymentItem key={p.id} orderId={o.id} payment={p} isAdmin={profile.is_admin} locale={locale} />
-              ))}
-            </ul>
-          </section>
-        </aside>
+            <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
+              <h2 className="text-sm font-medium text-neutral-700 mb-4 flex items-center gap-1.5">
+                <CreditCard size={14} className="text-neutral-400" />
+                {t(locale, "order.payments")}
+              </h2>
+              {profile.is_admin && <PaymentForm orderId={o.id} locale={locale} />}
+              <ul className="mt-4 divide-y divide-neutral-100">
+                {pays.length === 0 && (
+                  <li className="text-sm text-neutral-500 py-3">{t(locale, "order.no_payments_yet")}</li>
+                )}
+                {pays.map((p) => (
+                  <PaymentItem key={p.id} orderId={o.id} payment={p} isAdmin={profile.is_admin} locale={locale} />
+                ))}
+              </ul>
+            </section>
+          </aside>
+        )}
       </div>
     </div>
   );

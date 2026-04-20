@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Search, AlertTriangle, AlertCircle, Truck } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Search, AlertTriangle, AlertCircle, Truck, Package } from "lucide-react";
 import type { AlertProduct } from "@/lib/stock-sheets";
 import SyncBadge from "./sync-badge";
 
@@ -46,6 +46,29 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated 
   const config = MODE_CONFIG[mode];
   const filters = QUICK_FILTERS[mode];
 
+  // Collect unique order names for transit mode
+  const allOrderNames = useMemo(() => {
+    if (mode !== "transit") return [];
+    const names = new Set<string>();
+    for (const d of data) {
+      for (const o of d.perOrder) names.add(o.name);
+    }
+    return Array.from(names).sort();
+  }, [data, mode]);
+
+  const [activeOrders, setActiveOrders] = useState<Set<string>>(new Set(allOrderNames));
+  // Sync when allOrderNames changes (initial load)
+  const allOrdersActive = activeOrders.size === allOrderNames.length || activeOrders.size === 0;
+
+  const toggleOrder = (name: string) => {
+    setActiveOrders((prev) => {
+      const next = new Set(prev.size === 0 ? allOrderNames : prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const filterFn = (d: AlertProduct) => {
     // Text search
@@ -58,6 +81,11 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated 
     if (quickFilter === "has_order") return d.unterwegsG > 0;
     if (quickFilter === "kritisch") return (d.stufe === "kritisch") || d.lagerG < 300;
     if (quickFilter === "niedrig") return d.lagerG >= 300 && d.lagerG < 600;
+    // Order filter (transit mode): show product if it has at least one selected order
+    if (mode === "transit" && !allOrdersActive && activeOrders.size > 0) {
+      const hasSelectedOrder = d.perOrder.some((o) => activeOrders.has(o.name));
+      if (!hasSelectedOrder) return false;
+    }
     return true;
   };
 
@@ -120,11 +148,46 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated 
         )}
       </div>
 
+      {/* Order selection (transit mode) */}
+      {mode === "transit" && allOrderNames.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 items-center">
+          <span className="text-[10px] uppercase text-neutral-400 font-medium mr-1">Bestellungen:</span>
+          <button
+            onClick={() => setActiveOrders(allOrdersActive ? new Set() : new Set(allOrderNames))}
+            className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+              allOrdersActive ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+            }`}
+          >
+            Alle
+          </button>
+          {allOrderNames.map((name) => {
+            const active = allOrdersActive || activeOrders.has(name);
+            const count = data.filter((d) => d.perOrder.some((o) => o.name === name)).length;
+            const isChina = name.toLowerCase().includes("china");
+            const colorActive = isChina ? "bg-blue-600 text-white" : "bg-green-700 text-white";
+            const colorInactive = isChina ? "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100" : "bg-green-50 text-green-700 border border-green-200 hover:bg-green-100";
+            return (
+              <button
+                key={name}
+                onClick={() => toggleOrder(name)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition inline-flex items-center gap-1 ${
+                  active ? colorActive : colorInactive
+                }`}
+              >
+                <Package size={10} />
+                {name}
+                <span className="opacity-60">({count})</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Filtered count indicator */}
-      {quickFilter !== "all" && (
+      {(quickFilter !== "all" || (!allOrdersActive && activeOrders.size > 0)) && (
         <div className="text-sm text-neutral-500">
           {filtered.length} von {data.length} Produkten angezeigt
-          <button onClick={() => setQuickFilter("all")} className="ml-2 text-indigo-600 hover:text-indigo-800 font-medium">Filter zurücksetzen</button>
+          <button onClick={() => { setQuickFilter("all"); setActiveOrders(new Set(allOrderNames)); }} className="ml-2 text-indigo-600 hover:text-indigo-800 font-medium">Filter zurücksetzen</button>
         </div>
       )}
 
@@ -149,7 +212,7 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated 
         <div className="text-center py-12 text-neutral-400">
           Keine Produkte für diesen Filter
           <br />
-          <button onClick={() => { setQuickFilter("all"); setQuery(""); }} className="mt-2 text-indigo-600 hover:text-indigo-800 text-sm font-medium">
+          <button onClick={() => { setQuickFilter("all"); setQuery(""); setActiveOrders(new Set(allOrderNames)); }} className="mt-2 text-indigo-600 hover:text-indigo-800 text-sm font-medium">
             Alle anzeigen
           </button>
         </div>

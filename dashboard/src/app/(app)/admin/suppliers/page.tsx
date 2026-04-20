@@ -1,13 +1,11 @@
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { requireProfile } from "@/lib/auth";
+import { requireFeature } from "@/lib/auth";
 import type { Supplier } from "@/lib/types";
 import SupplierRow from "./supplier-row";
 import NewSupplierForm from "./new-supplier-form";
 
 export default async function SuppliersPage() {
-  const profile = await requireProfile();
-  if (!profile.is_admin) redirect("/");
+  const profile = await requireFeature("suppliers");
 
   const supabase = await createClient();
   const { data: suppliers } = await supabase

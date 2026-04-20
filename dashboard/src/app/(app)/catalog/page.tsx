@@ -1,4 +1,4 @@
-import { requireAdmin } from "@/lib/auth";
+import { requireFeature } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { t, type Locale } from "@/lib/i18n";
 import { loadAllCatalogs } from "@/lib/actions/catalog";
@@ -6,7 +6,7 @@ import CatalogEditor from "./catalog-editor";
 import type { Supplier } from "@/lib/types";
 
 export default async function CatalogPage() {
-  const profile = await requireAdmin();
+  const profile = await requireFeature("catalog");
   const locale = (profile.language ?? "de") as Locale;
 
   const supabase = await createClient();

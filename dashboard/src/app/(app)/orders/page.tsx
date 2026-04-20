@@ -6,6 +6,7 @@ import { usd, date } from "@/lib/format";
 import { type OrderWithTotals, type OrderDocument, type Supplier } from "@/lib/types";
 import { t, type Locale } from "@/lib/i18n";
 import QuickDocs from "./[id]/quick-docs";
+import TrackingLink from "../tracking-link";
 import DocIndicators from "./[id]/doc-indicators";
 
 export default async function OrdersPage() {
@@ -145,22 +146,7 @@ export default async function OrdersPage() {
                         {date(o.eta)}
                         {o.tracking_number && (
                           <div className="mt-0.5">
-                            {o.tracking_url ? (
-                              <a
-                                href={o.tracking_url}
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="text-[10px] text-blue-600 hover:underline truncate inline-block max-w-[140px]"
-                                title={o.tracking_number}
-                              >
-                                {o.tracking_number}
-                              </a>
-                            ) : (
-                              <span className="text-[10px] text-neutral-400 truncate inline-block max-w-[140px]" title={o.tracking_number}>
-                                {o.tracking_number}
-                              </span>
-                            )}
+                            <TrackingLink number={o.tracking_number} url={o.tracking_url} maxWidth={140} />
                           </div>
                         )}
                       </td>
@@ -202,20 +188,7 @@ export default async function OrdersPage() {
                         </div>
                         {o.tracking_number && (
                           <div className="mt-0.5">
-                            {o.tracking_url ? (
-                              <a
-                                href={o.tracking_url}
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="text-[10px] text-blue-600 hover:underline truncate inline-block max-w-[200px]"
-                                title={o.tracking_number}
-                              >
-                                {o.tracking_number}
-                              </a>
-                            ) : (
-                              <span className="text-[10px] text-neutral-400">{o.tracking_number}</span>
-                            )}
+                            <TrackingLink number={o.tracking_number} url={o.tracking_url} maxWidth={200} />
                           </div>
                         )}
                       </div>

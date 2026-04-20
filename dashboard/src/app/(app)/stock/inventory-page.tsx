@@ -91,7 +91,7 @@ export default function InventoryPageClient({ data, title, subtitle, lastUpdated
                               {r.transitOrders.map((o, i) => (
                                 <div key={i} className="flex justify-between text-xs py-0.5">
                                   <span className="text-neutral-700">{o.label}</span>
-                                  <span className="font-medium">{o.quantity}g {o.eta ? `· ${new Date(o.eta).toLocaleDateString("de-DE")}` : ""}</span>
+                                  <span className="font-medium">{o.quantity}g {o.eta ? `· ${o.eta}` : ""}</span>
                                 </div>
                               ))}
                             </div>

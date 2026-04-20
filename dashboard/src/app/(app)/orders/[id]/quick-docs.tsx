@@ -14,11 +14,13 @@ export default function QuickDocs({
   compact = false,
   paidTotal,
   locale = "de",
+  hideFinancials = false,
 }: {
   documents: OrderDocument[];
   compact?: boolean;
   paidTotal?: number | null;
   locale?: Locale;
+  hideFinancials?: boolean;
 }) {
   const overviews = documents.filter((d) => d.kind === "order_overview");
   const invoices = documents.filter((d) => d.kind === "supplier_invoice");
@@ -48,37 +50,41 @@ export default function QuickDocs({
           onPreview={setPreview}
         />
       )}
-      <div className="flex flex-col">
+      {!hideFinancials && (
+        <div className="flex flex-col">
+          <QuickGroup
+            icon={<Receipt size={14} />}
+            label={t(locale, "doc.open_invoice")}
+            shortLabel={t(locale, "doc.invoice_short")}
+            empty={t(locale, "doc.no_invoice")}
+            docs={invoices}
+            compact={compact}
+            mode="open"
+          />
+          {!compact && invoices.length > 0 && (
+            <div className="mt-1 text-[10px] text-neutral-400 max-w-[220px] truncate leading-tight">
+              {invoices.map((d) => d.file_name).join(", ")}
+            </div>
+          )}
+        </div>
+      )}
+      {!hideFinancials && (
         <QuickGroup
-          icon={<Receipt size={14} />}
-          label={t(locale, "doc.open_invoice")}
-          shortLabel={t(locale, "doc.invoice_short")}
-          empty={t(locale, "doc.no_invoice")}
-          docs={invoices}
+          icon={<FileText size={14} />}
+          label={t(locale, "doc.open_proof")}
+          shortLabel={t(locale, "doc.proof_short")}
+          empty={t(locale, "doc.no_proof")}
+          docs={proofs}
           compact={compact}
-          mode="open"
+          mode="preview"
+          onPreview={setPreview}
+          titleOverride={
+            paidTotal != null && paidTotal > 0
+              ? `${t(locale, "doc.already_paid")}: ${fmtUsd(Number(paidTotal))}`
+              : undefined
+          }
         />
-        {!compact && invoices.length > 0 && (
-          <div className="mt-1 text-[10px] text-neutral-400 max-w-[220px] truncate leading-tight">
-            {invoices.map((d) => d.file_name).join(", ")}
-          </div>
-        )}
-      </div>
-      <QuickGroup
-        icon={<FileText size={14} />}
-        label={t(locale, "doc.open_proof")}
-        shortLabel={t(locale, "doc.proof_short")}
-        empty={t(locale, "doc.no_proof")}
-        docs={proofs}
-        compact={compact}
-        mode="preview"
-        onPreview={setPreview}
-        titleOverride={
-          paidTotal != null && paidTotal > 0
-            ? `${t(locale, "doc.already_paid")}: ${fmtUsd(Number(paidTotal))}`
-            : undefined
-        }
-      />
+      )}
 
       {preview && (
         <Lightbox
