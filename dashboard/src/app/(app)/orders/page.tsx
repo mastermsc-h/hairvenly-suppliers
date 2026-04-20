@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { requireProfile } from "@/lib/auth";
+import { requireProfile, hasFeature } from "@/lib/auth";
 import { usd, date } from "@/lib/format";
 import { type OrderWithTotals, type OrderDocument, type Supplier } from "@/lib/types";
 import { t, type Locale } from "@/lib/i18n";
@@ -12,6 +12,8 @@ export default async function OrdersPage() {
   const profile = await requireProfile();
   const supabase = await createClient();
   const locale = (profile.language ?? "de") as Locale;
+  const showDocs = hasFeature(profile, "documents");
+  const showInvoices = hasFeature(profile, "invoices");
 
   const [{ data: orders }, { data: suppliers }, { data: documents }] = await Promise.all([
     supabase
@@ -105,9 +107,9 @@ export default async function OrdersPage() {
                     <th className="px-4 py-3 font-medium">{t(locale, "table.label")}</th>
                     <th className="px-4 py-3 font-medium">{t(locale, "table.status")}</th>
                     <th className="px-4 py-3 font-medium">{t(locale, "table.eta")}</th>
-                    <th className="px-4 py-3 font-medium">{t(locale, "table.documents")}</th>
-                    <th className="px-4 py-3 font-medium text-right">{t(locale, "table.invoice")}</th>
-                    <th className="px-4 py-3 font-medium text-right">{t(locale, "table.open")}</th>
+                    {showDocs && <th className="px-4 py-3 font-medium">{t(locale, "table.documents")}</th>}
+                    {showInvoices && <th className="px-4 py-3 font-medium text-right">{t(locale, "table.invoice")}</th>}
+                    {showInvoices && <th className="px-4 py-3 font-medium text-right">{t(locale, "table.open")}</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
@@ -125,7 +127,7 @@ export default async function OrdersPage() {
                             {o.description}
                           </div>
                         )}
-                        {(() => {
+                        {showDocs && (() => {
                           const inv = (docsByOrder.get(o.id) ?? []).find(
                             (d) => d.kind === "supplier_invoice",
                           );
@@ -139,19 +141,47 @@ export default async function OrdersPage() {
                       <td className="px-4 py-3">
                         <StatusBadge status={o.status} locale={locale} />
                       </td>
-                      <td className="px-4 py-3 text-neutral-700">{date(o.eta)}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} locale={locale} />
-                          <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
-                        </div>
+                      <td className="px-4 py-3 text-neutral-700">
+                        {date(o.eta)}
+                        {o.tracking_number && (
+                          <div className="mt-0.5">
+                            {o.tracking_url ? (
+                              <a
+                                href={o.tracking_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-[10px] text-blue-600 hover:underline truncate inline-block max-w-[140px]"
+                                title={o.tracking_number}
+                              >
+                                {o.tracking_number}
+                              </a>
+                            ) : (
+                              <span className="text-[10px] text-neutral-400 truncate inline-block max-w-[140px]" title={o.tracking_number}>
+                                {o.tracking_number}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
-                      <td className="px-4 py-3 text-right text-neutral-700">
-                        {usd(o.invoice_total)}
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium text-neutral-900">
-                        {usd(o.remaining_balance)}
-                      </td>
+                      {showDocs && (
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} locale={locale} hideFinancials={!showInvoices} />
+                            <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
+                          </div>
+                        </td>
+                      )}
+                      {showInvoices && (
+                        <td className="px-4 py-3 text-right text-neutral-700">
+                          {usd(o.invoice_total)}
+                        </td>
+                      )}
+                      {showInvoices && (
+                        <td className="px-4 py-3 text-right font-medium text-neutral-900">
+                          {usd(o.remaining_balance)}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -170,16 +200,38 @@ export default async function OrdersPage() {
                           <StatusBadge status={o.status} locale={locale} />
                           {o.eta && <span className="text-xs text-neutral-500">{date(o.eta)}</span>}
                         </div>
+                        {o.tracking_number && (
+                          <div className="mt-0.5">
+                            {o.tracking_url ? (
+                              <a
+                                href={o.tracking_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-[10px] text-blue-600 hover:underline truncate inline-block max-w-[200px]"
+                                title={o.tracking_number}
+                              >
+                                {o.tracking_number}
+                              </a>
+                            ) : (
+                              <span className="text-[10px] text-neutral-400">{o.tracking_number}</span>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <div className="text-right shrink-0">
-                        <div className="text-sm font-semibold text-neutral-900">{usd(o.remaining_balance)}</div>
-                        <div className="text-[10px] text-neutral-500">{usd(o.invoice_total)}</div>
+                      {showInvoices && (
+                        <div className="text-right shrink-0">
+                          <div className="text-sm font-semibold text-neutral-900">{usd(o.remaining_balance)}</div>
+                          <div className="text-[10px] text-neutral-500">{usd(o.invoice_total)}</div>
+                        </div>
+                      )}
+                    </div>
+                    {showDocs && (
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                        <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} locale={locale} hideFinancials={!showInvoices} />
+                        <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
                       </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                      <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} locale={locale} />
-                      <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
-                    </div>
+                    )}
                   </Link>
                 ))}
               </div>
