@@ -642,6 +642,7 @@ export default function ReturnsList({
   const [statusFilter, setStatusFilter] = useState<ReturnStatus | "all">("all");
   const [handlerFilter, setHandlerFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | "shopify" | "manual">("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -675,6 +676,12 @@ export default function ReturnsList({
         if (sourceFilter === "shopify" && !isShopify) return false;
         if (sourceFilter === "manual" && isShopify) return false;
       }
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        const order = (r.order_number ?? "").toLowerCase();
+        const customer = (r.customer_name ?? "").toLowerCase();
+        if (!order.includes(q) && !customer.includes(q)) return false;
+      }
       if (dateRange && r.initiated_at) {
         if (r.initiated_at < dateRange.from) return false;
         if (r.initiated_at > dateRange.to) return false;
@@ -682,7 +689,7 @@ export default function ReturnsList({
       if (dateRange && !r.initiated_at) return false;
       return true;
     });
-  }, [returns, typeFilter, statusFilter, handlerFilter, sourceFilter, dateRange]);
+  }, [returns, typeFilter, statusFilter, handlerFilter, sourceFilter, searchQuery, dateRange]);
 
   const handleSync = (from: string, to: string) => {
     startSync(async () => {
@@ -775,6 +782,19 @@ export default function ReturnsList({
           <option value="shopify">Nur Shopify</option>
           <option value="manual">Nur manuell</option>
         </select>
+        <div className="flex items-center gap-1.5 rounded-lg border border-neutral-300 px-3 py-2 text-sm min-w-[220px]">
+          <Search size={14} className="text-neutral-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Bestellnr. oder Kunde…"
+            className="flex-1 outline-none bg-transparent"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery("")} className="text-neutral-400 hover:text-neutral-700 text-xs">×</button>
+          )}
+        </div>
 
         {/* Date range filter */}
         <div className="flex items-center gap-2 border-l border-neutral-200 pl-3 ml-1">
