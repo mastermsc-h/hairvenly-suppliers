@@ -99,11 +99,12 @@ export default async function ReturnsPage() {
     .from("returns")
     .select("*", { count: "exact", head: true });
 
-  // Load monthly revenue snapshot (include order_count to detect incomplete months)
-  const { data: monthlyRevenue } = await supabase
-    .from("shopify_monthly_revenue")
-    .select("month, gross_revenue, order_count")
-    .order("month", { ascending: true });
+  // Load per-collection monthly sales (tax-exclusive netto basis).
+  // We aggregate two series: "extensions only" (KPI_EXCLUDED filtered out) and
+  // "all collections" (raw sum). The chart offers a toggle between both.
+  const { data: collectionSales } = await supabase
+    .from("shopify_collection_sales")
+    .select("month, collection_title, gross_revenue, order_count");
 
   // Both v_returns_summary.month and shopify_monthly_revenue.month are now
   // stored as text "YYYY-MM-01" to avoid timezone shifts. We still apply a
@@ -125,41 +126,71 @@ export default async function ReturnsPage() {
     return `${year}-${String(month).padStart(2, "0")}-01`;
   };
 
-  // Aggregate refunds per month via the SQL view (bypasses row limit)
-  const refundByMonth = new Map<string, number>();
+  // Collections excluded from the "Extensions" series (non-extension products).
+  const KPI_EXCLUDED = new Set([
+    "Extensions Zubehör", "Blessed Haarpflege", "Sonstige Haarpflege",
+    "Haarpflegeprodukte", "Accessoires", "Unassigned",
+    "Newest Products", "Newest", "Neuste Produkte",
+    "Hairvenly Extension Schulungen", "Best Selling Products",
+  ]);
+
+  // Monthly revenue — extensions-only + all
+  const revenueExt = new Map<string, number>();
+  const revenueAll = new Map<string, number>();
+  const orderCountMap = new Map<string, number>();
+  for (const row of (collectionSales ?? []) as { month: string; collection_title: string; gross_revenue: number | string; order_count: number | string }[]) {
+    const monthKey = normalizeMonth(row.month);
+    if (!monthKey) continue;
+    const val = Number(row.gross_revenue);
+    revenueAll.set(monthKey, (revenueAll.get(monthKey) ?? 0) + val);
+    if (!KPI_EXCLUDED.has(row.collection_title)) {
+      revenueExt.set(monthKey, (revenueExt.get(monthKey) ?? 0) + val);
+    }
+    orderCountMap.set(monthKey, (orderCountMap.get(monthKey) ?? 0) + Number(row.order_count ?? 0));
+  }
+
+  // Monthly refunds — extensions-only (from return_items.collection_title + returns.initiated_at)
+  // + all (from v_returns_summary)
+  const refundAll = new Map<string, number>();
   for (const row of (monthlyRefundsRaw ?? []) as { month: string; total_refund: number | string | null }[]) {
     const key = normalizeMonth(row.month);
     if (!key) continue;
-    refundByMonth.set(key, (refundByMonth.get(key) ?? 0) + Number(row.total_refund ?? 0));
+    refundAll.set(key, (refundAll.get(key) ?? 0) + Number(row.total_refund ?? 0));
+  }
+  const refundExt = new Map<string, number>();
+  const returnInitiatedByReturnId = new Map<string, string>();
+  for (const r of returnsAll) {
+    if (r.initiated_at) returnInitiatedByReturnId.set(r.id, r.initiated_at);
+  }
+  for (const it of itemsAll) {
+    const init = returnInitiatedByReturnId.get(it.return_id);
+    if (!init) continue;
+    const key = normalizeMonth(init);
+    if (!key) continue;
+    if (it.collection_title && KPI_EXCLUDED.has(it.collection_title)) continue;
+    refundExt.set(key, (refundExt.get(key) ?? 0) + Number(it.refund_amount ?? 0));
   }
 
-  const monthlyChartData: MonthlyData[] = [];
-  const revenueMap = new Map<string, number>();
-  const orderCountMap = new Map<string, number>();
-  for (const row of (monthlyRevenue ?? []) as { month: string; gross_revenue: number | string; order_count: number | string }[]) {
-    const monthKey = normalizeMonth(row.month);
-    if (!monthKey) continue;
-    revenueMap.set(monthKey, Number(row.gross_revenue));
-    orderCountMap.set(monthKey, Number(row.order_count));
-  }
-  // Detect incomplete months: drop any leading month whose order count is
-  // less than 30% of the median → likely partial data from sync start.
+  // Detect incomplete months by order count (uses all-sales order_count)
   const orderCounts = Array.from(orderCountMap.values()).filter((n) => n > 0).sort((a, b) => a - b);
   const median = orderCounts.length > 0 ? orderCounts[Math.floor(orderCounts.length / 2)] : 0;
   const minExpected = median * 0.3;
 
-  // Merge month keys from both revenue and refunds
-  const allMonths = Array.from(new Set<string>([...revenueMap.keys(), ...refundByMonth.keys()])).sort();
+  const allMonths = Array.from(new Set<string>([
+    ...revenueAll.keys(), ...refundAll.keys(), ...refundExt.keys(),
+  ])).sort();
+  const monthlyChartData: MonthlyData[] = [];
   let skipLeading = true;
   for (const m of allMonths) {
     const oc = orderCountMap.get(m) ?? 0;
-    // Skip leading months that have suspiciously low order count (incomplete sync)
     if (skipLeading && oc > 0 && oc < minExpected) continue;
     skipLeading = false;
     monthlyChartData.push({
       month: m,
-      revenue: revenueMap.get(m) ?? 0,
-      refund: refundByMonth.get(m) ?? 0,
+      revenueExt: revenueExt.get(m) ?? 0,
+      revenueAll: revenueAll.get(m) ?? 0,
+      refundExt: refundExt.get(m) ?? 0,
+      refundAll: refundAll.get(m) ?? 0,
     });
   }
 

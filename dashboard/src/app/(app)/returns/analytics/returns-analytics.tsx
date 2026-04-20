@@ -371,6 +371,9 @@ export default function ReturnsAnalytics({
 }) {
   // ── Period selector — all metrics respect this ─────────────
   const [period, setPeriod] = useState<PeriodKey>("all");
+  // Mode toggle: "ext" excludes non-extension collections (default),
+  // "all" includes every collection (accessories, care products, etc.).
+  const [scopeMode, setScopeMode] = useState<"ext" | "all">("ext");
   const range = useMemo(() => periodRange(period), [period]);
   const inRange = (d: string | null | undefined): boolean => {
     if (!range) return true;
@@ -393,11 +396,12 @@ export default function ReturnsAnalytics({
     });
   }, [collectionSales, range]);
   const filteredTotalRevenue = useMemo(() => {
-    const EXCLUDED = new Set([
+    const EXCLUDED = scopeMode === "ext" ? new Set([
       "Extensions Zubehör", "Blessed Haarpflege", "Sonstige Haarpflege",
       "Haarpflegeprodukte", "Accessoires", "Unassigned",
       "Newest Products", "Newest", "Neuste Produkte",
-    ]);
+      "Hairvenly Extension Schulungen", "Best Selling Products",
+    ]) : new Set<string>();
     if (!range) {
       return filteredSales.filter((s) => !EXCLUDED.has(s.collection_title))
         .reduce((sum, s) => sum + s.revenue, 0);
@@ -430,13 +434,13 @@ export default function ReturnsAnalytics({
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   // ── KPIs ───────────────────────────────────────────────────
-  // Collections to exclude from KPI totals (non-extension products).
-  // Must mirror EXCLUDED_FROM_TOTALS on the server page.
-  const KPI_EXCLUDED = new Set([
+  // Collections to exclude from KPI totals when mode is "ext".
+  const KPI_EXCLUDED = scopeMode === "ext" ? new Set([
     "Extensions Zubehör", "Blessed Haarpflege", "Sonstige Haarpflege",
     "Haarpflegeprodukte", "Accessoires", "Unassigned",
     "Newest Products", "Newest", "Neuste Produkte",
-  ]);
+    "Hairvenly Extension Schulungen", "Best Selling Products",
+  ]) : new Set<string>();
 
   // Gross refund € = sum of per-item refund_amount (subtotalSet basis = gross sales basis)
   // filtered to same collection set as totalRevenue.
@@ -639,6 +643,27 @@ export default function ReturnsAnalytics({
     <div className="space-y-6">
       {/* Period selector */}
       <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-neutral-500 uppercase tracking-wide mr-1">Umfang:</span>
+        <div className="inline-flex rounded-full border border-neutral-200 p-0.5 bg-neutral-50 mr-3">
+          <button
+            type="button"
+            onClick={() => setScopeMode("ext")}
+            className={`text-xs font-medium px-3 py-1 rounded-full transition ${
+              scopeMode === "ext" ? "bg-neutral-900 text-white" : "text-neutral-600 hover:text-neutral-900"
+            }`}
+          >
+            Nur Extensions
+          </button>
+          <button
+            type="button"
+            onClick={() => setScopeMode("all")}
+            className={`text-xs font-medium px-3 py-1 rounded-full transition ${
+              scopeMode === "all" ? "bg-neutral-900 text-white" : "text-neutral-600 hover:text-neutral-900"
+            }`}
+          >
+            Gesamt
+          </button>
+        </div>
         <span className="text-xs font-medium text-neutral-500 uppercase tracking-wide mr-1">Zeitraum:</span>
         {(["all", "12m", "3m", "30d", "14d"] as PresetPeriod[]).map((p) => (
           <button

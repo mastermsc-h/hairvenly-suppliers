@@ -97,6 +97,27 @@ export interface Supplier {
   created_at: string;
 }
 
+export type UserRole = "admin" | "employee" | "supplier";
+
+export const FEATURE_KEYS = [
+  "prices",
+  "debt",
+  "invoices",
+  "documents",
+  "overview_docs",
+  "suppliers",
+  "users",
+  "wizard",
+  "catalog",
+  "stock",
+  "charts",
+  "supplier_kg",
+  "finances",
+  "returns",
+] as const;
+
+export type FeatureKey = (typeof FEATURE_KEYS)[number];
+
 export interface Profile {
   id: string;
   email: string;
@@ -106,6 +127,8 @@ export interface Profile {
   approved: boolean;
   language: string;
   supplier_id: string | null;
+  role: UserRole;
+  denied_features: string[];
 }
 
 export interface Order {
@@ -266,6 +289,94 @@ export interface PriceProductMapping {
   id: string;
   color_category_id: string;
   product_color_id: string;
+}
+
+// ---- Returns / Exchanges / Complaints ----
+
+export type ReturnType = "return" | "exchange" | "complaint";
+export type ReturnStatus = "open" | "in_progress" | "resolved" | "cancelled";
+
+export const RETURN_TYPES: ReturnType[] = ["return", "exchange", "complaint"];
+export const RETURN_STATUSES: ReturnStatus[] = ["open", "in_progress", "resolved", "cancelled"];
+
+export const RETURN_REASONS = [
+  "farbe_nicht_gepasst",
+  "sonstiges",
+  "ohne_grundangabe",
+  "zu_viel_bestellt",
+  "nicht_mehr_benoetigt",
+  "falsche_farbe",
+  "nicht_mehr_gefallen",
+  "komplett_zurueck",
+] as const;
+
+export type ReturnReason = (typeof RETURN_REASONS)[number];
+
+export const PRODUCT_TYPES = [
+  "Tapes",
+  "Bondings",
+  "Clip ins",
+  "Ponytails",
+  "Mini Tapes",
+  "Classic Tressen",
+  "Genius Tressen",
+  "Invisible Tressen",
+] as const;
+
+export const LENGTHS = ["45cm", "55cm", "63cm", "65cm", "85cm"] as const;
+export const ORIGINS = ["US", "RU"] as const;
+export const WEIGHTS = ["25g", "50g", "75g", "100g", "125g", "130g", "150g", "175g", "200g", "225g", "250g", "350g"] as const;
+export const HANDLERS = ["ibo", "ceylan", "Larissa"] as const;
+
+export interface Return {
+  id: string;
+  shopify_order_id: string | null;
+  shopify_return_id: string | null;
+  order_number: string | null;
+  customer_name: string;
+  return_type: ReturnType;
+  reason: string | null;
+  status: ReturnStatus;
+  handler: string | null;
+  notes: string | null;
+  resolution: string | null;
+  resolution_result: string | null;
+  refund_amount: number | null;
+  initiated_at: string | null;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string | null;
+  created_by: string | null;
+}
+
+export interface ReturnItem {
+  id: string;
+  return_id: string;
+  product_type: string | null;
+  color: string | null;
+  length: string | null;
+  origin: string | null;
+  weight: string | null;
+  quality: string | null;
+  exchange_product: string | null;
+  exchange_weight: string | null;
+  exchange_tracking: string | null;
+  collection_title: string | null;
+  quantity: number | null;
+  refund_amount: number | null;
+}
+
+export interface ReturnEvent {
+  id: string;
+  return_id: string;
+  event_type: string;
+  message: string;
+  actor_id: string | null;
+  created_at: string;
+}
+
+export interface ReturnWithItems extends Return {
+  items: ReturnItem[];
 }
 
 /** Hydrated price list with all nested data */
