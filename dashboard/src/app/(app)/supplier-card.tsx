@@ -60,8 +60,8 @@ export default function SupplierCard({
       </div>
       {open && (
         <div>
-          {body}
-          {footer}
+          <div key="body">{body}</div>
+          {footer ? <div key="footer">{footer}</div> : null}
         </div>
       )}
     </div>
