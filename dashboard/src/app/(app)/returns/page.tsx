@@ -149,14 +149,9 @@ export default async function ReturnsPage() {
     orderCountMap.set(monthKey, (orderCountMap.get(monthKey) ?? 0) + Number(row.order_count ?? 0));
   }
 
-  // Monthly refunds — extensions-only (from return_items.collection_title + returns.initiated_at)
-  // + all (from v_returns_summary)
+  // Monthly refunds — both series aggregated from the SAME source
+  // (return_items) so Gesamt is always ≥ Extensions-only.
   const refundAll = new Map<string, number>();
-  for (const row of (monthlyRefundsRaw ?? []) as { month: string; total_refund: number | string | null }[]) {
-    const key = normalizeMonth(row.month);
-    if (!key) continue;
-    refundAll.set(key, (refundAll.get(key) ?? 0) + Number(row.total_refund ?? 0));
-  }
   const refundExt = new Map<string, number>();
   const returnInitiatedByReturnId = new Map<string, string>();
   for (const r of returnsAll) {
@@ -167,9 +162,15 @@ export default async function ReturnsPage() {
     if (!init) continue;
     const key = normalizeMonth(init);
     if (!key) continue;
-    if (it.collection_title && KPI_EXCLUDED.has(it.collection_title)) continue;
-    refundExt.set(key, (refundExt.get(key) ?? 0) + Number(it.refund_amount ?? 0));
+    const val = Number(it.refund_amount ?? 0);
+    refundAll.set(key, (refundAll.get(key) ?? 0) + val);
+    if (!(it.collection_title && KPI_EXCLUDED.has(it.collection_title))) {
+      refundExt.set(key, (refundExt.get(key) ?? 0) + val);
+    }
   }
+  // monthlyRefundsRaw is still loaded but no longer used — kept alive to
+  // avoid dead-data warning; remove the query if future cleanup is done.
+  void monthlyRefundsRaw;
 
   // Detect incomplete months by order count (uses all-sales order_count)
   const orderCounts = Array.from(orderCountMap.values()).filter((n) => n > 0).sort((a, b) => a - b);

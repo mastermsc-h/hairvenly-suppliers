@@ -641,6 +641,7 @@ export default function ReturnsList({
   const [typeFilter, setTypeFilter] = useState<RType | "all">("all");
   const [statusFilter, setStatusFilter] = useState<ReturnStatus | "all">("all");
   const [handlerFilter, setHandlerFilter] = useState<string>("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "shopify" | "manual">("all");
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -669,6 +670,11 @@ export default function ReturnsList({
       if (typeFilter !== "all" && r.return_type !== typeFilter) return false;
       if (statusFilter !== "all" && r.status !== statusFilter) return false;
       if (handlerFilter !== "all" && r.handler !== handlerFilter) return false;
+      if (sourceFilter !== "all") {
+        const isShopify = Boolean(r.shopify_refund_id || r.shopify_return_id);
+        if (sourceFilter === "shopify" && !isShopify) return false;
+        if (sourceFilter === "manual" && isShopify) return false;
+      }
       if (dateRange && r.initiated_at) {
         if (r.initiated_at < dateRange.from) return false;
         if (r.initiated_at > dateRange.to) return false;
@@ -676,7 +682,7 @@ export default function ReturnsList({
       if (dateRange && !r.initiated_at) return false;
       return true;
     });
-  }, [returns, typeFilter, statusFilter, handlerFilter, dateRange]);
+  }, [returns, typeFilter, statusFilter, handlerFilter, sourceFilter, dateRange]);
 
   const handleSync = (from: string, to: string) => {
     startSync(async () => {
@@ -762,6 +768,12 @@ export default function ReturnsList({
           {HANDLERS.map((h) => (
             <option key={h} value={h}>{h}</option>
           ))}
+        </select>
+        <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as "all" | "shopify" | "manual")}
+          className="rounded-lg border border-neutral-300 px-3 py-2 text-sm">
+          <option value="all">Alle Quellen</option>
+          <option value="shopify">Nur Shopify</option>
+          <option value="manual">Nur manuell</option>
         </select>
 
         {/* Date range filter */}

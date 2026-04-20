@@ -332,6 +332,7 @@ export interface Return {
   id: string;
   shopify_order_id: string | null;
   shopify_return_id: string | null;
+  shopify_refund_id: string | null;
   order_number: string | null;
   customer_name: string;
   return_type: ReturnType;
