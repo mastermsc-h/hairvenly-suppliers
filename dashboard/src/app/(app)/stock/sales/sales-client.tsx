@@ -165,7 +165,7 @@ function SalesTable({ rows, title, headerBg }: { rows: VerkaufsanalyseRow[]; tit
           </thead>
           <tbody className="divide-y divide-neutral-100">
             {rows.map((row, i) => (
-              <tr key={i} className="hover:bg-neutral-50 transition">
+              <tr key={i} className="hover:bg-indigo-100 hover:shadow-[inset_3px_0_0_0_rgb(79_70_229)] transition">
                 <td className="px-2 py-1 font-medium text-neutral-900">{row.collection}</td>
                 <td className="px-2 py-1 text-center text-neutral-500">{row.gPerUnit || "–"}</td>
                 <td className="px-2 py-1 text-right text-neutral-700">{row.avg12mKg > 0 ? row.avg12mKg.toFixed(2) : "–"}</td>

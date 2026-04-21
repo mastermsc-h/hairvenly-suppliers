@@ -570,6 +570,25 @@ export const messages: Record<Locale, Record<string, string>> = {
     "returns.sync_report_skipped": "Bereits vorhanden",
     "returns.sync_report_refund": "Erstattungssumme",
     "returns.sync_close": "Schließen",
+
+    // Customs CH
+    "nav.customs_ch": "Zoll Schweiz",
+    "customs_ch.title": "Zollpapiere Schweiz",
+    "customs_ch.subtitle": "CN23-Zollinhaltserklärung für Bestellungen in die Schweiz (letzte 60 Tage).",
+    "customs_ch.orders_count": "Bestellungen",
+    "customs_ch.show_fulfilled": "Erledigte einblenden",
+    "customs_ch.empty": "Keine Bestellungen in die Schweiz gefunden.",
+    "customs_ch.col_order": "Bestellung",
+    "customs_ch.col_date": "Datum",
+    "customs_ch.col_customer": "Kunde",
+    "customs_ch.col_city": "Ort",
+    "customs_ch.col_items": "Stück",
+    "customs_ch.col_value": "Wert",
+    "customs_ch.col_status": "Status",
+    "customs_ch.download": "CN23 PDF",
+    "customs_ch.status_open": "Offen",
+    "customs_ch.status_fulfilled": "Versendet",
+    "customs_ch.hint": "Das PDF enthält alle Pflichtangaben. Stempel/Unterschrift wird vor Versand manuell ergänzt.",
   },
 
   en: {
@@ -1140,6 +1159,25 @@ export const messages: Record<Locale, Record<string, string>> = {
     "returns.sync_report_skipped": "Already existed",
     "returns.sync_report_refund": "Refund total",
     "returns.sync_close": "Close",
+
+    // Customs CH
+    "nav.customs_ch": "Customs (CH)",
+    "customs_ch.title": "Swiss Customs Documents",
+    "customs_ch.subtitle": "CN23 customs declaration for orders shipping to Switzerland (last 60 days).",
+    "customs_ch.orders_count": "orders",
+    "customs_ch.show_fulfilled": "Show fulfilled",
+    "customs_ch.empty": "No orders to Switzerland found.",
+    "customs_ch.col_order": "Order",
+    "customs_ch.col_date": "Date",
+    "customs_ch.col_customer": "Customer",
+    "customs_ch.col_city": "City",
+    "customs_ch.col_items": "Items",
+    "customs_ch.col_value": "Value",
+    "customs_ch.col_status": "Status",
+    "customs_ch.download": "CN23 PDF",
+    "customs_ch.status_open": "Open",
+    "customs_ch.status_fulfilled": "Fulfilled",
+    "customs_ch.hint": "The PDF contains all required information. Stamp/signature is added manually before dispatch.",
   },
 
   tr: {
@@ -1710,6 +1748,25 @@ export const messages: Record<Locale, Record<string, string>> = {
     "returns.sync_report_skipped": "Zaten mevcut",
     "returns.sync_report_refund": "Geri ödeme toplamı",
     "returns.sync_close": "Kapat",
+
+    // Customs CH
+    "nav.customs_ch": "Gümrük (İsviçre)",
+    "customs_ch.title": "İsviçre Gümrük Belgeleri",
+    "customs_ch.subtitle": "İsviçre'ye gönderilen siparişler için CN23 gümrük beyannamesi (son 60 gün).",
+    "customs_ch.orders_count": "sipariş",
+    "customs_ch.show_fulfilled": "Gönderilenleri göster",
+    "customs_ch.empty": "İsviçre'ye sipariş bulunamadı.",
+    "customs_ch.col_order": "Sipariş",
+    "customs_ch.col_date": "Tarih",
+    "customs_ch.col_customer": "Müşteri",
+    "customs_ch.col_city": "Şehir",
+    "customs_ch.col_items": "Adet",
+    "customs_ch.col_value": "Tutar",
+    "customs_ch.col_status": "Durum",
+    "customs_ch.download": "CN23 PDF",
+    "customs_ch.status_open": "Açık",
+    "customs_ch.status_fulfilled": "Gönderildi",
+    "customs_ch.hint": "PDF tüm zorunlu bilgileri içerir. Kaşe/imza sevkiyattan önce manuel olarak eklenir.",
   },
 };
 

@@ -143,9 +143,9 @@ BEGIN
   INSERT INTO price_length_groups (price_list_id, label, length_values, selling_prices, sort_order) VALUES (
     v_list_id, '65cm', '{"65cm"}',
     '{
-      "TRESSEN": {"brutto": 1950, "netto": 1638.7, "gewerbe": 1500},
-      "Genius Weft": {"brutto": 1950, "netto": 1638.7, "gewerbe": 1500},
-      "BONDINGS": {"brutto": 1950, "netto": 1638.7, "gewerbe": 1500},
+      "TRESSEN": {"brutto": 1990, "netto": 1672.27, "gewerbe": 1500},
+      "Genius Weft": {"brutto": 2200, "netto": 1848.74, "gewerbe": 1700},
+      "BONDINGS": {"brutto": 1990, "netto": 1672.27, "gewerbe": 1500},
       "Tape": {"brutto": 1990, "netto": 1672.3, "gewerbe": 1500},
       "Invisible Tape": {"brutto": 2500, "netto": 2100.8, "gewerbe": 2020}
     }'::jsonb,

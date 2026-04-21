@@ -22,6 +22,7 @@
 - **Produktkatalog:** Sync aus Shopify-Sheets + Bestell-Sheets, 3-fach Mapping (Hairvenly/Lieferant/Shopify), CRUD
 - **Lieferanten:** CRUD, Banking, Avatar, Drag-to-reorder
 - **Benutzer:** Registrierung, Approval, Multi-Language
+- **Retouren:** Rücksendungen, Umtausch, Reklamationen — Shopify Returns/Refunds Sync, manuelle CRUD-Eingabe, Filterable Tabelle mit Typ/Status/Bearbeiter-Filtern, Analytics mit KPIs & Recharts (Trend, Gründe-Pie, Produkt-Bar, Bearbeiter-Workload)
 
 ## Datei-Konventionen
 - Pages: `src/app/(app)/[bereich]/page.tsx`
@@ -38,14 +39,29 @@
 - Labels: `text-xs font-medium text-neutral-600 uppercase tracking-wide`
 - Sidebar NavLink: `flex items-center gap-2 px-3 py-2 rounded-lg`
 
+## Rollen & Berechtigungen
+- **Admin**: Sieht alles, denied_features ignoriert
+- **Mitarbeiter (employee)**: is_admin=true in DB (voller Datenzugriff), aber UI-Features einzeln steuerbar via denied_features
+- **Lieferant (supplier)**: Nur eigene Bestellungen (RLS), minimale Sidebar
+- Feature-Keys: prices, debt, suppliers, users, wizard, catalog, stock, charts, supplier_kg, finances, returns
+- hasFeature(profile, key): Auth-Helper fuer Feature-Checks
+- requireFeature(key): Server-Guard fuer Seiten
+
 ## Sidebar-Struktur (aktuelle Reihenfolge)
-1. Übersicht
-2. Bestellungen
-3. Lieferanten (admin)
-4. Benutzer (admin)
+1. Übersicht (alle)
+2. Bestellungen (alle)
+3. Lieferanten (feature: suppliers)
+4. Benutzer (nur admin)
 5. --- Separator ---
-6. Neue Bestellung (admin)
-7. Produktkatalog (admin)
+6. Neue Bestellung (feature: wizard)
+7. Produktkatalog (feature: catalog)
+8. Preistabellen (feature: prices)
+9. --- Separator ---
+10. Produktlager (feature: stock)
+11. --- Separator ---
+12. Finanzen (feature: finances)
+13. --- Separator ---
+14. Retouren (feature: returns) — Übersicht + Analyse
 
 ## Lieferanten
 - Amanda (6 Wochen Lieferzeit)
@@ -54,7 +70,7 @@
 
 ## Supabase
 - URL: xzisnlkqiomvmbslwhvg.supabase.co
-- Tabellen: suppliers, profiles, orders, payments, documents, order_events, orders_with_totals (view), product_methods, product_lengths, product_colors, order_items
+- Tabellen: suppliers, profiles, orders, payments, documents, order_events, orders_with_totals (view), product_methods, product_lengths, product_colors, order_items, returns, return_items, return_events, v_returns_summary, v_returns_by_reason, v_returns_by_product (views)
 
 ## Google Sheets Integration
 - Amanda Bestell-Sheet: env GOOGLE_SHEET_AMANDA
@@ -68,6 +84,7 @@
 - **WhatsApp-Benachrichtigungen:** Mitarbeiter benachrichtigen wenn Bestellungen fällig sind (via Twilio oder WhatsApp Business API)
 - **Finanzen:** BWA-Analyse, EÜR, Schulden/Rücklagen-Übersicht, Steuerzahlungen
 - **Shopify-Integration:** Live-Daten direkt aus Shopify statt über Sheets
+- **Retouren-Management:** Rücksendungen, Umtausch, Reklamationen — Daten aus Shopify Returns/Refunds API + manuelle Anreicherung (Grund, Typ, Bearbeiter, Umtausch-Details, Reklamations-Lösung). KPIs: Rückgabequote, häufigste Gründe, Produkt-/Lieferanten-Analyse. DB: returns + return_items + return_events Tabellen
 
 ## Datenquellen für Lagerbestand
 - **Shopify-Daten** stehen im Google Sheet "Stock calculation" (env GOOGLE_SHEET_STOCK)

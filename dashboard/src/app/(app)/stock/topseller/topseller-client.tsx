@@ -194,6 +194,13 @@ function TopsellerSectionView({ section, query, stockFilter, activeTiers }: { se
         if (!allTiersActive) filtered = filtered.filter((i) => activeTiers.has(i.tier));
 
         if (filtered.length === 0 && (q || stockFilter !== "all" || !allTiersActive)) return null;
+
+        const progLabel = `${section.forecastDays}T Verbr.`;
+
+        // Sums — only 30T and Lager
+        const sum30 = filtered.reduce((s, i) => s + (i.verkauft30d || 0), 0);
+        const sumLager = filtered.reduce((s, i) => s + (i.lagerG || 0), 0);
+
         return (
           <div key={group.label} className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
             <div className="px-4 py-2.5 bg-neutral-50 border-b border-neutral-100 font-medium text-sm text-neutral-700">
@@ -210,7 +217,7 @@ function TopsellerSectionView({ section, query, stockFilter, activeTiers }: { se
                     <th className="px-2 py-1.5 font-medium text-right">90T</th>
                     <th className="px-2 py-1.5 font-medium text-right">30T</th>
                     <th className="px-2 py-1.5 font-medium text-right">Stk</th>
-                    <th className="px-2 py-1.5 font-medium text-right">45T Progn.</th>
+                    <th className="px-2 py-1.5 font-medium text-right">{progLabel}</th>
                     <th className="px-2 py-1.5 font-medium text-center">Tier</th>
                     <th className="px-2 py-1.5 font-medium text-right">Ziel</th>
                     <th className="px-2 py-1.5 font-medium text-right">Lager</th>
@@ -236,6 +243,28 @@ function TopsellerSectionView({ section, query, stockFilter, activeTiers }: { se
                     <TopsellerRow key={i} item={item} orderCount={orderHeaders.length} />
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr className="bg-neutral-100 font-semibold text-neutral-800 border-t-2 border-neutral-300 text-[11px]">
+                    <td className="px-2 py-1.5" />
+                    <td className="px-2 py-1.5" colSpan={2}>Summe</td>
+                    <td className="px-2 py-1.5" />
+                    <td className="px-2 py-1.5 text-right">{sum30.toLocaleString("de-DE")}</td>
+                    <td className="px-2 py-1.5" />
+                    <td className="px-2 py-1.5" />
+                    <td className="px-2 py-1.5" />
+                    <td className="px-2 py-1.5" />
+                    <td className="px-2 py-1.5 text-right">{sumLager.toLocaleString("de-DE")}</td>
+                    <td className="px-2 py-1.5" />
+                    {orderHeaders.length > 0 && (
+                      <>
+                        <td className="w-px bg-neutral-200" />
+                        {orderHeaders.map((_, i) => (
+                          <td key={i} className="px-1.5 py-1.5" />
+                        ))}
+                      </>
+                    )}
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </div>
@@ -271,7 +300,7 @@ function TopsellerRow({ item, orderCount }: { item: TopsSellerItem; orderCount: 
   })();
 
   return (
-    <tr className={`${tierBg} hover:bg-neutral-50/50 transition`}>
+    <tr className={`${tierBg} hover:bg-indigo-100 hover:shadow-[inset_3px_0_0_0_rgb(79_70_229)] transition`}>
       <td className="px-2 py-1 text-neutral-400 font-mono text-[10px]">{item.rang}</td>
       <td className="px-2 py-1 font-medium text-neutral-900 max-w-[140px] truncate" title={item.farbe}>{shortFarbe}</td>
       <td className="px-2 py-1 text-neutral-500">{item.laenge || "–"}</td>

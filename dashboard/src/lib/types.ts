@@ -114,6 +114,7 @@ export const FEATURE_KEYS = [
   "supplier_kg",
   "finances",
   "returns",
+  "customs_ch",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

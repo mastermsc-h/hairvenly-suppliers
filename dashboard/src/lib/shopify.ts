@@ -212,6 +212,179 @@ export async function fetchOrdersByTag(tag: string, limit = 50): Promise<Shopify
   return res.data?.orders.edges.map((e) => e.node) ?? [];
 }
 
+// ── Fetch orders by shipping country (CN23 / customs) ────────
+
+export interface ShopifyCustomsLineItem {
+  title: string;
+  quantity: number;
+  // Per-unit weight — Shopify returns grams via `variant.weight` + `weightUnit`.
+  grams: number;
+}
+
+export interface ShopifyCustomsOrder {
+  id: string; // GID (gid://shopify/Order/<numeric>)
+  numericId: string; // numeric id only (for URLs)
+  name: string; // "#1234"
+  createdAt: string;
+  displayFulfillmentStatus: string;
+  displayFinancialStatus: string;
+  shippingAddress: {
+    name: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    address1: string | null;
+    address2: string | null;
+    zip: string | null;
+    city: string | null;
+    country: string | null;
+    countryCode: string | null;
+  } | null;
+  subtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
+  totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
+  lineItems: ShopifyCustomsLineItem[];
+  totalQuantity: number;
+  totalNetGrams: number;
+}
+
+interface CustomsOrderNode {
+  id: string;
+  name: string;
+  createdAt: string;
+  displayFulfillmentStatus: string;
+  displayFinancialStatus: string;
+  shippingAddress: {
+    name: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    address1: string | null;
+    address2: string | null;
+    zip: string | null;
+    city: string | null;
+    country: string | null;
+    countryCode: string | null;
+  } | null;
+  subtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
+  totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
+  lineItems: {
+    edges: {
+      node: {
+        title: string;
+        quantity: number;
+        variant: { weight: number | null; weightUnit: string | null } | null;
+      };
+    }[];
+  };
+}
+
+function gramsFromVariant(weight: number | null, unit: string | null): number {
+  if (!weight || !unit) return 0;
+  switch (unit.toUpperCase()) {
+    case "GRAMS":
+    case "G":
+      return weight;
+    case "KILOGRAMS":
+    case "KG":
+      return weight * 1000;
+    case "POUNDS":
+    case "LB":
+      return weight * 453.592;
+    case "OUNCES":
+    case "OZ":
+      return weight * 28.3495;
+    default:
+      return weight;
+  }
+}
+
+function mapCustomsOrder(node: CustomsOrderNode): ShopifyCustomsOrder {
+  const lineItems: ShopifyCustomsLineItem[] = node.lineItems.edges.map((e) => ({
+    title: e.node.title,
+    quantity: e.node.quantity,
+    grams: gramsFromVariant(e.node.variant?.weight ?? null, e.node.variant?.weightUnit ?? null),
+  }));
+  const totalQuantity = lineItems.reduce((s, li) => s + li.quantity, 0);
+  const totalNetGrams = lineItems.reduce((s, li) => s + li.grams * li.quantity, 0);
+  const numericId = node.id.split("/").pop() ?? node.id;
+  return {
+    id: node.id,
+    numericId,
+    name: node.name,
+    createdAt: node.createdAt,
+    displayFulfillmentStatus: node.displayFulfillmentStatus,
+    displayFinancialStatus: node.displayFinancialStatus,
+    shippingAddress: node.shippingAddress,
+    subtotalPriceSet: node.subtotalPriceSet,
+    totalPriceSet: node.totalPriceSet,
+    lineItems,
+    totalQuantity,
+    totalNetGrams,
+  };
+}
+
+const CUSTOMS_ORDER_FIELDS = `
+  id
+  name
+  createdAt
+  displayFulfillmentStatus
+  displayFinancialStatus
+  shippingAddress {
+    name firstName lastName address1 address2 zip city country countryCode
+  }
+  subtotalPriceSet { shopMoney { amount currencyCode } }
+  totalPriceSet { shopMoney { amount currencyCode } }
+  lineItems(first: 50) {
+    edges { node {
+      title
+      quantity
+      variant { weight weightUnit }
+    } }
+  }
+`;
+
+/**
+ * Fetch recent orders shipping to a specific country (ISO-2 code, e.g. "CH").
+ * Returns unfulfilled + paid orders from the last `daysBack` days.
+ */
+export async function fetchOrdersByCountry(
+  countryCode: string,
+  daysBack = 60,
+  limit = 100,
+): Promise<ShopifyCustomsOrder[]> {
+  const since = new Date();
+  since.setDate(since.getDate() - daysBack);
+  const sinceStr = since.toISOString().slice(0, 10);
+
+  const query = `
+    query customsOrders($q: String!, $first: Int!) {
+      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: true) {
+        edges { node { ${CUSTOMS_ORDER_FIELDS} } }
+      }
+    }
+  `;
+
+  const q = `shipping_address_country_code:${countryCode} AND created_at:>=${sinceStr}`;
+
+  const res = await shopifyGraphQL<{ orders: { edges: { node: CustomsOrderNode }[] } }>(
+    query,
+    { q, first: limit },
+  );
+
+  return (res.data?.orders.edges ?? []).map((e) => mapCustomsOrder(e.node));
+}
+
+/** Fetch one order by numeric id (for PDF generation). */
+export async function fetchOrderForCustoms(numericId: string): Promise<ShopifyCustomsOrder | null> {
+  const gid = `gid://shopify/Order/${numericId}`;
+  const query = `
+    query customsOrder($id: ID!) {
+      order(id: $id) { ${CUSTOMS_ORDER_FIELDS} }
+    }
+  `;
+  const res = await shopifyGraphQL<{ order: CustomsOrderNode | null }>(query, { id: gid });
+  if (!res.data?.order) return null;
+  return mapCustomsOrder(res.data.order);
+}
+
 // ── Fetch returns from Shopify Returns API ───────────────────
 
 export interface ShopifyReturn {

@@ -297,7 +297,7 @@ function AlertSection({
             {items.map((item, i) => (
               <tr
                 key={i}
-                className={`hover:bg-neutral-50 transition ${
+                className={`hover:bg-indigo-100 hover:shadow-[inset_3px_0_0_0_rgb(79_70_229)] transition ${
                   mode === "critical" && item.stufe === "kritisch" ? "bg-orange-50/30" :
                   mode === "zero" && item.unterwegsG === 0 ? "bg-yellow-50/30" : ""
                 }`}

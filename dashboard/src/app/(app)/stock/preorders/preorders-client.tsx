@@ -149,7 +149,7 @@ export default function PreordersClient({ candidates, preorders, locale }: Props
           <button
             onClick={handleRemove}
             disabled={isPending || selectedWithShopify === 0}
-            className="inline-flex items-center gap-2 border border-neutral-300 text-neutral-700 font-medium rounded-lg px-4 py-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-neutral-50 transition"
+            className="inline-flex items-center gap-2 border border-neutral-300 text-neutral-700 font-medium rounded-lg px-4 py-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-indigo-100 hover:shadow-[inset_3px_0_0_0_rgb(79_70_229)] transition"
           >
             {removePending ? (
               <RefreshCw size={14} className="animate-spin" />
@@ -227,7 +227,7 @@ export default function PreordersClient({ candidates, preorders, locale }: Props
                 {filtered.map((c, i) => (
                   <tr
                     key={`${c.product}-${c.collection}-${i}`}
-                    className={`border-b border-neutral-100 hover:bg-neutral-50 transition ${
+                    className={`border-b border-neutral-100 hover:bg-indigo-100 hover:shadow-[inset_3px_0_0_0_rgb(79_70_229)] transition ${
                       selected.has(i) ? "bg-neutral-50" : ""
                     }`}
                   >
@@ -327,7 +327,7 @@ export default function PreordersClient({ candidates, preorders, locale }: Props
               </thead>
               <tbody>
                 {preorders.map((o) => (
-                  <tr key={o.id} className="border-b border-neutral-100 hover:bg-neutral-50 transition">
+                  <tr key={o.id} className="border-b border-neutral-100 hover:bg-indigo-100 hover:shadow-[inset_3px_0_0_0_rgb(79_70_229)] transition">
                     <td className="py-2.5 px-2 font-medium text-neutral-900">{o.name}</td>
                     <td className="py-2.5 px-2 text-neutral-600">{o.customer}</td>
                     <td className="py-2.5 px-2 text-neutral-600">

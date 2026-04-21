@@ -143,7 +143,7 @@ function GroupRows<T extends Record<string, any>>({
       {group.rows.map((row, i) => (
         <tr
           key={i}
-          className={`hover:bg-neutral-50 transition ${rowClassName?.(row) ?? ""}`}
+          className={`hover:bg-indigo-100 hover:shadow-[inset_3px_0_0_0_rgb(79_70_229)] transition ${rowClassName?.(row) ?? ""}`}
         >
           {columns.map((col) => (
             <td

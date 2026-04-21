@@ -42,6 +42,7 @@ export interface TopsSellerSection {
   totalGrams: number;
   totalGrams30: number;
   orderHeaders: string[]; // Names of active orders (e.g. "China 07.04.2026\nca. Ankunft: ...")
+  forecastDays: number; // e.g. 45 or 60 — from "45 Tage Verbrauch" column header
 }
 
 export interface TopsSellerGroup {
@@ -162,7 +163,7 @@ export async function readTopseller(): Promise<{ sections: TopsSellerSection[]; 
   // Read wider range to capture detail order columns (start at col 15 = O)
   const { data } = await sheets.spreadsheets.values.get({
     spreadsheetId: getStockSheetId(),
-    range: "'Topseller'!A1:Z500",
+    range: "'Topseller'!A1:Z1500",
     valueRenderOption: "UNFORMATTED_VALUE",
   });
 
@@ -183,14 +184,14 @@ export async function readTopseller(): Promise<{ sections: TopsSellerSection[]; 
 
     // Detect main section headers: "USBEKISCH WELLIG" or "RUSSISCH GLATT"
     if (merged.toUpperCase().includes("USBEKISCH WELLIG") && merged.includes("Topseller")) {
-      currentSection = { quality: "Usbekisch Wellig", sections: [], totalGrams: 0, totalGrams30: 0, orderHeaders: [] };
+      currentSection = { quality: "Usbekisch Wellig", sections: [], totalGrams: 0, totalGrams30: 0, orderHeaders: [], forecastDays: 60 };
       sections.push(currentSection);
       if (!lastUpdated) lastUpdated = extractTimestamp(merged);
       inHeader = false;
       continue;
     }
     if (merged.toUpperCase().includes("RUSSISCH GLATT") && merged.includes("Topseller")) {
-      currentSection = { quality: "Russisch Glatt", sections: [], totalGrams: 0, totalGrams30: 0, orderHeaders: [] };
+      currentSection = { quality: "Russisch Glatt", sections: [], totalGrams: 0, totalGrams30: 0, orderHeaders: [], forecastDays: 45 };
       sections.push(currentSection);
       inHeader = false;
       continue;
@@ -221,8 +222,14 @@ export async function readTopseller(): Promise<{ sections: TopsSellerSection[]; 
       continue;
     }
 
-    // Skip column header row
-    if (inHeader && (col0 === "Rang" || col1 === "Farbcode")) {
+    // Skip column header row (V1 "Farbcode", V2 "Produkt")
+    if (inHeader && (col0 === "Rang" || col1 === "Farbcode" || col1 === "Produkt")) {
+      // Extract forecast days from column header (e.g. "45 Tage Verbrauch" or "60 Tage Verbrauch")
+      if (currentSection) {
+        const forecastHeader = String(row[6] ?? "");
+        const match = forecastHeader.match(/(\d+)\s*Tage/i);
+        if (match) currentSection.forecastDays = parseInt(match[1]);
+      }
       inHeader = false;
       continue;
     }

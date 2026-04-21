@@ -3,7 +3,7 @@ import { requireProfile, hasFeature } from "@/lib/auth";
 import { signOut } from "@/lib/actions/auth";
 import { t, type Locale } from "@/lib/i18n";
 import type { FeatureKey } from "@/lib/types";
-import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw } from "lucide-react";
+import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText } from "lucide-react";
 import SidebarGroup from "./sidebar-group";
 import LanguageSwitcher from "./language-switcher";
 import { MobileSidebarWrapper } from "./mobile-sidebar";
@@ -111,6 +111,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                     { href: "/returns", label: t(locale, "nav.returns.list") },
                     { href: "/returns/analytics", label: t(locale, "nav.returns.analytics") },
                   ]}
+                />
+              </>
+            )}
+
+            {has("customs_ch") && (
+              <>
+                <div className="border-t border-neutral-200 my-2" />
+                <NavLink
+                  href="/customs-ch"
+                  icon={<FileText size={16} />}
+                  label={t(locale, "nav.customs_ch")}
                 />
               </>
             )}
