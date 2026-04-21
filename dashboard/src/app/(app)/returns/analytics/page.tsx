@@ -27,18 +27,19 @@ export default async function ReturnsAnalyticsPage() {
   }
 
   async function fetchAllItemsWithType() {
-    const all: { product_type: string | null; length: string | null; origin: string | null; quantity: number | null; refund_amount: number | null; collection_title: string | null; returns: { return_type: string; initiated_at: string | null; reason: string | null } | null }[] = [];
+    const all: { return_id: string; product_type: string | null; length: string | null; origin: string | null; quantity: number | null; refund_amount: number | null; collection_title: string | null; returns: { return_type: string; initiated_at: string | null; reason: string | null } | null }[] = [];
     const pageSize = 1000;
     for (let from = 0; from < 100000; from += pageSize) {
       const { data } = await supabase
         .from("return_items")
-        .select("product_type, length, origin, quantity, refund_amount, collection_title, returns!inner(return_type, initiated_at, reason)")
+        .select("return_id, product_type, length, origin, quantity, refund_amount, collection_title, returns!inner(return_type, initiated_at, reason)")
         .not("product_type", "is", null)
         .range(from, from + pageSize - 1);
       if (!data || data.length === 0) break;
-      for (const row of data as unknown as Array<{ product_type: string | null; length: string | null; origin: string | null; quantity: number | null; refund_amount: number | string | null; collection_title: string | null; returns: { return_type: string; initiated_at: string | null; reason: string | null } | { return_type: string; initiated_at: string | null; reason: string | null }[] | null }>) {
+      for (const row of data as unknown as Array<{ return_id: string; product_type: string | null; length: string | null; origin: string | null; quantity: number | null; refund_amount: number | string | null; collection_title: string | null; returns: { return_type: string; initiated_at: string | null; reason: string | null } | { return_type: string; initiated_at: string | null; reason: string | null }[] | null }>) {
         const joined = Array.isArray(row.returns) ? row.returns[0] : row.returns;
         all.push({
+          return_id: row.return_id,
           product_type: row.product_type,
           length: row.length,
           origin: row.origin,
@@ -72,6 +73,7 @@ export default async function ReturnsAnalyticsPage() {
 
   // Flatten joined data into a simple shape
   const itemsByType = itemsWithType.map((i) => ({
+    return_id: i.return_id,
     product_type: i.product_type ?? "",
     length: i.length ?? "",
     origin: i.origin ?? "",

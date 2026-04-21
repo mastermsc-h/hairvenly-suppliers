@@ -41,6 +41,7 @@ interface ReasonRow {
 }
 
 interface ItemByTypeRow {
+  return_id?: string;
   product_type: string;
   length?: string;
   origin?: string;
@@ -606,10 +607,19 @@ export default function ReturnsAnalytics({
     .sort((a, b) => b.count - a.count);
 
   // Period selector — filters ALL metrics and charts
-  // Breakdown: products within the selected category (memoized)
+  // Breakdown: products within the selected category (memoized).
+  // Counts UNIQUE orders (return_id) per product, not line-item quantity —
+  // so a single return with 4× of a variant counts as 1 order, not 4.
   const categoryProductBreakdown = useMemo(() => {
     if (!selectedCategory) return [];
-    const productMap = new Map<string, { name: string; return: number; exchange: number; complaint: number; total: number }>();
+    type Entry = {
+      name: string;
+      return: Set<string>;
+      exchange: Set<string>;
+      complaint: Set<string>;
+      total: Set<string>;
+    };
+    const productMap = new Map<string, Entry>();
     for (const item of filteredItems) {
       let cat: string | null;
       if (item.collection_title && item.collection_title.trim()) {
@@ -620,16 +630,30 @@ export default function ReturnsAnalytics({
       }
       if (cat !== selectedCategory) continue;
       const name = (item.product_type || "—").trim();
-      const qty = Math.max(1, item.quantity ?? 1);
-      const existing = productMap.get(name) ?? { name, return: 0, exchange: 0, complaint: 0, total: 0 };
+      const rid = item.return_id ?? `${name}-fallback-${item.initiated_at ?? ""}`;
+      const existing = productMap.get(name) ?? {
+        name,
+        return: new Set<string>(),
+        exchange: new Set<string>(),
+        complaint: new Set<string>(),
+        total: new Set<string>(),
+      };
       const key = item.return_type as "return" | "exchange" | "complaint";
       if (key === "return" || key === "exchange" || key === "complaint") {
-        existing[key] += qty;
+        existing[key].add(rid);
       }
-      existing.total += qty;
+      existing.total.add(rid);
       productMap.set(name, existing);
     }
-    return Array.from(productMap.values()).sort((a, b) => b.total - a.total);
+    return Array.from(productMap.values())
+      .map((e) => ({
+        name: e.name,
+        return: e.return.size,
+        exchange: e.exchange.size,
+        complaint: e.complaint.size,
+        total: e.total.size,
+      }))
+      .sort((a, b) => b.total - a.total);
   }, [selectedCategory, filteredItems]);
 
   const tooltipStyle = {
@@ -1034,7 +1058,21 @@ export default function ReturnsAnalytics({
                 <h2 className="text-lg font-semibold text-neutral-900 mt-1">{selectedCategory}</h2>
                 <p className="text-xs text-neutral-500 mt-1">
                   {categoryProductBreakdown.length} {categoryProductBreakdown.length === 1 ? "Produkt" : "Produkte"} ·
-                  {" "}{categoryProductBreakdown.reduce((sum, p) => sum + p.total, 0)} Retouren gesamt
+                  {" "}{(() => {
+                    const uniqueOrders = new Set<string>();
+                    for (const item of filteredItems) {
+                      let cat: string | null;
+                      if (item.collection_title && item.collection_title.trim()) {
+                        cat = normalizeCollectionName(item.collection_title);
+                        if (!cat) cat = normalizeCollectionName(categorize(item));
+                      } else {
+                        cat = normalizeCollectionName(categorize(item));
+                      }
+                      if (cat !== selectedCategory) continue;
+                      if (item.return_id) uniqueOrders.add(item.return_id);
+                    }
+                    return uniqueOrders.size;
+                  })()} Bestellungen gesamt
                 </p>
               </div>
               <button
