@@ -31,6 +31,7 @@ export default function SidebarGroup({ label, icon, href, items }: SidebarGroupP
         {href ? (
           <Link
             href={href}
+            onClick={() => setOpen(true)}
             className={`flex-1 flex items-center gap-2 px-3 py-2 text-neutral-700 hover:bg-neutral-100 rounded-lg transition ${
               isExactMatch ? "bg-neutral-100 font-medium" : ""
             }`}
@@ -91,6 +92,7 @@ function SubGroup({ item, pathname }: { item: SidebarItem; pathname: string }) {
       <div className="flex items-center">
         <Link
           href={item.href}
+          onClick={() => setOpen(true)}
           className={`flex-1 px-3 py-1.5 text-sm rounded-md transition ${
             isSelfActive
               ? "bg-neutral-100 text-neutral-900 font-medium"
