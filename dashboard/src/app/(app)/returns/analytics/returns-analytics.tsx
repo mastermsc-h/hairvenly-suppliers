@@ -1095,7 +1095,7 @@ export default function ReturnsAnalytics({
                       <th className="px-3 py-2 font-medium text-right">Rücksendung</th>
                       <th className="px-3 py-2 font-medium text-right">Umtausch</th>
                       <th className="px-3 py-2 font-medium text-right">Reklamation</th>
-                      <th className="px-4 py-2 font-medium text-right">Gesamt</th>
+                      <th className="px-4 py-2 font-medium text-right">Bestellungen</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-100">
