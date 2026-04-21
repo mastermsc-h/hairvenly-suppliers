@@ -12,7 +12,6 @@ import {
   LENGTHS,
   ORIGINS,
   WEIGHTS,
-  HANDLERS,
 } from "@/lib/types";
 import { t, type Locale } from "@/lib/i18n";
 import { createReturn, updateReturn, deleteReturn, syncReturnsFromShopify, importFromRetourenSheet, syncShopifyCollectionSales, backfillReturnCollections, refineStoredCollections, type SyncReport, type SheetImportReport } from "@/lib/actions/returns";
@@ -642,13 +641,11 @@ export default function ReturnsList({
   employees: { id: string; name: string }[];
   syncInfo?: { lastSyncAt: string | null; coverageFrom: string | null; coverageTo: string | null };
 }) {
-  // Dropdown options: DB employees + legacy hardcoded names so historical
-  // entries like "ibo" / "ceylan" / "Larissa" keep rendering cleanly.
+  // Dropdown options: only approved non-supplier profiles (admins +
+  // Mitarbeiter) from the Benutzer page. Historical handler strings on
+  // existing rows still render via r.handler text.
   const employeeNames = useMemo(() => {
-    const set = new Set<string>();
-    for (const e of employees) set.add(e.name);
-    for (const h of HANDLERS) set.add(h);
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
+    return employees.map((e) => e.name).sort((a, b) => a.localeCompare(b));
   }, [employees]);
   const [typeFilter, setTypeFilter] = useState<RType | "all">("all");
   const [statusFilter, setStatusFilter] = useState<ReturnStatus | "all">("all");
