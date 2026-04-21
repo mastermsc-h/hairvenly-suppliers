@@ -400,12 +400,14 @@ function ReturnFormDialog({
   onClose,
   catalogColors,
   shopifyProductTitles,
+  handlerOptions,
 }: {
   locale: Locale;
   editReturn?: ReturnWithItems | null;
   onClose: () => void;
   catalogColors: string[];
   shopifyProductTitles: string[];
+  handlerOptions: string[];
 }) {
   const [pending, startTransition] = useTransition();
   const [itemCount, setItemCount] = useState(editReturn?.items.length || 1);
@@ -481,7 +483,7 @@ function ReturnFormDialog({
                 <select name="handler" defaultValue={editReturn?.handler ?? ""}
                   className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 focus:outline-none">
                   <option value="">—</option>
-                  {HANDLERS.map((h) => (
+                  {handlerOptions.map((h) => (
                     <option key={h} value={h}>{h}</option>
                   ))}
                 </select>
@@ -629,6 +631,7 @@ export default function ReturnsList({
   isAdmin,
   catalogColors,
   shopifyProductTitles,
+  employees,
   syncInfo,
 }: {
   returns: ReturnWithItems[];
@@ -636,8 +639,17 @@ export default function ReturnsList({
   isAdmin: boolean;
   catalogColors: string[];
   shopifyProductTitles: string[];
+  employees: { id: string; name: string }[];
   syncInfo?: { lastSyncAt: string | null; coverageFrom: string | null; coverageTo: string | null };
 }) {
+  // Dropdown options: DB employees + legacy hardcoded names so historical
+  // entries like "ibo" / "ceylan" / "Larissa" keep rendering cleanly.
+  const employeeNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of employees) set.add(e.name);
+    for (const h of HANDLERS) set.add(h);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [employees]);
   const [typeFilter, setTypeFilter] = useState<RType | "all">("all");
   const [statusFilter, setStatusFilter] = useState<ReturnStatus | "all">("all");
   const [handlerFilter, setHandlerFilter] = useState<string>("all");
@@ -772,7 +784,7 @@ export default function ReturnsList({
         <select value={handlerFilter} onChange={(e) => setHandlerFilter(e.target.value)}
           className="rounded-lg border border-neutral-300 px-3 py-2 text-sm">
           <option value="all">{t(locale, "returns.all_handlers")}</option>
-          {HANDLERS.map((h) => (
+          {employeeNames.map((h) => (
             <option key={h} value={h}>{h}</option>
           ))}
         </select>
@@ -953,8 +965,12 @@ export default function ReturnsList({
                           <div className="font-medium text-neutral-900 text-sm">{r.customer_name}</div>
                         )}
                         {(r.notes || r.resolution) && (
-                          <div className="mt-1 space-y-0.5">
-                            {r.notes && <div className="text-[11px] text-neutral-400 italic">{r.notes}</div>}
+                          <div className="mt-1.5 space-y-1">
+                            {r.notes && (
+                              <div className="text-xs text-neutral-600 bg-amber-50 border-l-2 border-amber-300 px-2 py-1 rounded whitespace-pre-wrap">
+                                <span className="font-medium text-amber-700">📝 Notiz:</span> {r.notes}
+                              </div>
+                            )}
                             {r.resolution && <div className="text-[11px] text-purple-600">{t(locale, "returns.resolution")}: {r.resolution}</div>}
                           </div>
                         )}
@@ -1025,7 +1041,7 @@ export default function ReturnsList({
                             className="bg-neutral-100 text-neutral-700"
                             options={[
                               { value: "", label: "—" },
-                              ...HANDLERS.map((h) => ({ value: h, label: h })),
+                              ...employeeNames.map((h) => ({ value: h, label: h })),
                             ]}
                             onChange={(v) => handleInlineUpdate(r, "handler", v)}
                           />
@@ -1109,6 +1125,11 @@ export default function ReturnsList({
                       onToggle={() => setExpandedId(expandedId === r.id ? null : r.id)}
                     />
                   )}
+                  {r.notes && (
+                    <div className="text-xs text-neutral-600 bg-amber-50 border-l-2 border-amber-300 px-2 py-1 rounded whitespace-pre-wrap">
+                      <span className="font-medium text-amber-700">📝 Notiz:</span> {r.notes}
+                    </div>
+                  )}
                   {isAdmin && (
                     <div className="flex gap-2 pt-1">
                       <button onClick={() => { setEditReturn(r); setShowForm(true); }}
@@ -1136,6 +1157,7 @@ export default function ReturnsList({
           onClose={() => { setShowForm(false); setEditReturn(null); }}
           catalogColors={catalogColors}
           shopifyProductTitles={shopifyProductTitles}
+          handlerOptions={employeeNames}
         />
       )}
 

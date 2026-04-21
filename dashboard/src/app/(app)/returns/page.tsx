@@ -62,6 +62,7 @@ export default async function ReturnsPage() {
     { data: lastSyncEvent },
     { data: syncCoverage },
     { data: monthlyRefundsRaw },
+    { data: employeeProfiles },
   ] = await Promise.all([
     fetchAllReturns(),
     fetchAllItems(),
@@ -82,6 +83,13 @@ export default async function ReturnsPage() {
       .limit(1),
     // Pre-aggregated monthly refund totals via view (no row limit issues)
     supabase.from("v_returns_summary").select("month, total_refund"),
+    // Employees (admins + Mitarbeiter) — anyone whose role is not "supplier"
+    supabase
+      .from("profiles")
+      .select("id, display_name, username, email, role")
+      .neq("role", "supplier")
+      .eq("approved", true)
+      .order("display_name", { ascending: true }),
   ]);
 
   const returns = returnsAll;
@@ -222,6 +230,12 @@ export default async function ReturnsPage() {
   }
   const productTitles = Array.from(productTitleSet).sort();
 
+  // Employees available as Bearbeiter in the handler dropdown
+  const employees = (employeeProfiles ?? []).map((p) => ({
+    id: p.id as string,
+    name: (p.display_name || p.username || p.email || p.id) as string,
+  }));
+
   return (
     <div className="p-4 md:p-8 space-y-6 max-w-7xl">
       <header>
@@ -241,6 +255,7 @@ export default async function ReturnsPage() {
         isAdmin={profile.is_admin}
         catalogColors={colors}
         shopifyProductTitles={productTitles}
+        employees={employees}
         syncInfo={syncInfo}
       />
     </div>
