@@ -1,9 +1,10 @@
 "use client";
 
-import { useActionState, useState, useMemo } from "react";
+import { useActionState, useState, useMemo, useEffect } from "react";
 import { createOrder } from "@/lib/actions/orders";
 import { TAG_OPTIONS, type Supplier } from "@/lib/types";
 import { t, type Locale } from "@/lib/i18n";
+import { buildOrderLabel } from "@/lib/order-label";
 
 type State = { error?: string } | undefined;
 
@@ -24,17 +25,25 @@ export default function NewOrderForm({
   const today = new Date().toISOString().slice(0, 10);
   const [supplierId, setSupplierId] = useState(preselectedSupplierId ?? "");
   const [orderDate, setOrderDate] = useState(today);
+  const [region, setRegion] = useState<string>("");
   const [labelOverride, setLabelOverride] = useState("");
 
-  const autoLabel = useMemo(() => {
-    const sup = suppliers.find((s) => s.id === supplierId);
-    if (!sup || !orderDate) return "";
-    const d = new Date(orderDate + "T00:00:00");
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const yyyy = d.getFullYear();
-    return `${sup.name} ${dd}-${mm}-${yyyy}`;
-  }, [supplierId, orderDate, suppliers]);
+  const selectedSupplier = suppliers.find((s) => s.id === supplierId);
+  const supplierRegions = selectedSupplier?.regions ?? [];
+  const hasRegions = supplierRegions.length > 0;
+
+  // Auto-select first region when a supplier with regions is chosen
+  useEffect(() => {
+    if (hasRegions && !region) {
+      setRegion(supplierRegions.includes("CN") ? "CN" : supplierRegions[0]);
+    }
+    if (!hasRegions && region) setRegion("");
+  }, [hasRegions, supplierRegions, region]);
+
+  const autoLabel = useMemo(
+    () => buildOrderLabel(selectedSupplier?.name, region || null, orderDate),
+    [selectedSupplier, region, orderDate],
+  );
 
   const effectiveLabel = labelOverride || autoLabel;
 
@@ -58,6 +67,28 @@ export default function NewOrderForm({
           ))}
         </select>
       </Field>
+
+      {hasRegions && (
+        <Field label="Region" required>
+          <div className="flex gap-2">
+            {supplierRegions.map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setRegion(r)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+                  region === r
+                    ? "bg-neutral-900 text-white border-neutral-900"
+                    : "bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-50"
+                }`}
+              >
+                {r === "CN" ? "China" : r === "TR" ? "Türkei" : r}
+              </button>
+            ))}
+          </div>
+          <input type="hidden" name="region" value={region} />
+        </Field>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <Field label={t(locale, "new_order.order_date")} required>

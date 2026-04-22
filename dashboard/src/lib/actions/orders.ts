@@ -34,22 +34,18 @@ export async function createOrder(_prev: unknown, formData: FormData) {
 
   const supplierId = String(formData.get("supplier_id"));
   const orderDate = str(formData.get("order_date"));
+  const region = str(formData.get("region"));
   let label = String(formData.get("label") ?? "").trim();
 
-  // Auto-generate label from supplier name + order_date if label is empty
+  // Auto-generate label from supplier name + region + order_date if label is empty
   if (!label && supplierId && orderDate) {
     const { data: sup } = await supabase
       .from("suppliers")
       .select("name")
       .eq("id", supplierId)
       .single();
-    if (sup) {
-      const d = new Date(orderDate + "T00:00:00");
-      const dd = String(d.getDate()).padStart(2, "0");
-      const mm = String(d.getMonth() + 1).padStart(2, "0");
-      const yyyy = d.getFullYear();
-      label = `${sup.name} ${dd}-${mm}-${yyyy}`;
-    }
+    const { buildOrderLabel } = await import("@/lib/order-label");
+    label = buildOrderLabel(sup?.name, region, orderDate);
   }
 
   const payload = {
@@ -69,6 +65,7 @@ export async function createOrder(_prev: unknown, formData: FormData) {
     tracking_url: str(formData.get("tracking_url")),
     eta: str(formData.get("eta")),
     order_date: orderDate,
+    region: region || null,
     notes: str(formData.get("notes")),
     status: "draft" as const,
   };
@@ -321,12 +318,8 @@ export async function createWizardOrder(data: {
     .eq("id", data.supplierId)
     .single();
 
-  const dd = data.orderDate.slice(8, 10);
-  const mm = data.orderDate.slice(5, 7);
-  const yyyy = data.orderDate.slice(0, 4);
-  const regionLabel = data.region === "CN" ? "China" : data.region === "TR" ? "Türkei" : null;
-  const displayName = regionLabel ? `Eyfel Ebru (${regionLabel})` : (supplier?.name ?? "?");
-  const label = `${displayName} ${dd}-${mm}-${yyyy}`;
+  const { buildOrderLabel } = await import("@/lib/order-label");
+  const label = buildOrderLabel(supplier?.name, data.region, data.orderDate);
 
   // Determine tags from methods
   const tags = ["extensions"];
