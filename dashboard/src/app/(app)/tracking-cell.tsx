@@ -58,20 +58,22 @@ export default function TrackingCell({
   if (!number && !editing) {
     if (!canEdit) return null;
     return (
-      <button
-        type="button"
-        onClick={(e) => { stop(e); setEditing(true); }}
-        className="text-[10px] text-neutral-400 hover:text-indigo-600 inline-flex items-center gap-0.5 mt-0.5"
-      >
-        <Plus size={10} /> {t(locale, "order.add_tracking")}
-      </button>
+      <div className="mt-0.5">
+        <button
+          type="button"
+          onClick={(e) => { stop(e); setEditing(true); }}
+          className="text-[10px] text-neutral-400 hover:text-indigo-600 inline-flex items-center gap-0.5"
+        >
+          <Plus size={10} /> {t(locale, "order.add_tracking")}
+        </button>
+      </div>
     );
   }
 
   // Display (has tracking)
   if (number && !editing) {
     return (
-      <div className="mt-0.5 inline-flex items-center gap-1">
+      <div className="mt-0.5 flex items-center gap-1">
         {url ? (
           <a
             href={url}
@@ -112,8 +114,8 @@ export default function TrackingCell({
     <div
       ref={wrapRef}
       onClick={stop}
-      className="mt-0.5 inline-flex flex-col gap-1 bg-white border border-neutral-300 rounded-md p-1.5 shadow-sm"
-      style={{ minWidth: 200 }}
+      className="mt-0.5 flex flex-col gap-1 bg-white border border-neutral-300 rounded-md p-1.5 shadow-sm"
+      style={{ minWidth: 200, maxWidth: 260 }}
     >
       <input
         autoFocus

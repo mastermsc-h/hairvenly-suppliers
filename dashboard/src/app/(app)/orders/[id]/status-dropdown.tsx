@@ -36,6 +36,7 @@ export default function StatusDropdown({ orderId, currentStatus, locale }: {
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   // Close on outside click
@@ -49,11 +50,18 @@ export default function StatusDropdown({ orderId, currentStatus, locale }: {
 
   const handleChange = (status: string) => {
     if (status === currentStatus) { setOpen(false); return; }
+    setError(null);
     const fd = new FormData();
     fd.set("status", status);
     startTransition(async () => {
-      await updateOrder(orderId, fd);
-      setOpen(false);
+      const res = await updateOrder(orderId, fd);
+      if (res?.error) {
+        setError(res.error);
+        // Keep dropdown open so user can see feedback
+        setTimeout(() => setError(null), 4000);
+      } else {
+        setOpen(false);
+      }
     });
   };
 
@@ -62,7 +70,7 @@ export default function StatusDropdown({ orderId, currentStatus, locale }: {
   return (
     <div className="relative" ref={ref}>
       <button
-        onClick={() => setOpen(!open)}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(!open); }}
         disabled={pending}
         className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition ${colors.bg} ${colors.text} hover:opacity-80 disabled:opacity-50`}
       >
@@ -72,14 +80,17 @@ export default function StatusDropdown({ orderId, currentStatus, locale }: {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-neutral-200 rounded-xl shadow-lg py-1 min-w-[200px]">
+        <div
+          className="absolute right-0 top-full mt-1 z-50 bg-white border border-neutral-200 rounded-xl shadow-lg py-1 min-w-[200px]"
+          onClick={(e) => e.stopPropagation()}
+        >
           {STATUSES.map((status) => {
             const sc = STATUS_COLORS[status] ?? STATUS_COLORS.draft;
             const isCurrent = status === currentStatus;
             return (
               <button
                 key={status}
-                onClick={() => handleChange(status)}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleChange(status); }}
                 className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left hover:bg-neutral-50 transition ${isCurrent ? "font-semibold" : ""}`}
               >
                 <span className={`w-2 h-2 rounded-full ${sc.dot}`} />
@@ -88,6 +99,11 @@ export default function StatusDropdown({ orderId, currentStatus, locale }: {
               </button>
             );
           })}
+          {error && (
+            <div className="px-3 py-2 mt-1 border-t border-red-100 bg-red-50 text-[11px] text-red-700">
+              {error}
+            </div>
+          )}
         </div>
       )}
     </div>
