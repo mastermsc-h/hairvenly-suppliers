@@ -255,7 +255,7 @@ export default async function DashboardPage() {
                             )}
                           </td>
                           <td className="px-5 py-2.5">
-                            {profile.is_admin ? (
+                            {canEditOrder ? (
                               <StatusDropdown orderId={o.id} currentStatus={o.status} locale={locale} />
                             ) : (
                               <StatusBadge status={o.status} locale={locale} />
@@ -323,7 +323,7 @@ export default async function DashboardPage() {
                               </div>
                             )}
                             <div className="flex items-center gap-2 mt-1">
-                              {profile.is_admin ? (
+                              {canEditOrder ? (
                                 <StatusDropdown orderId={o.id} currentStatus={o.status} locale={locale} />
                               ) : (
                                 <StatusBadge status={o.status} locale={locale} />

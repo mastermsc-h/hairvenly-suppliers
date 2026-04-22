@@ -123,7 +123,7 @@ export default async function OrderDetailPage({
               {sup?.name} · {t(locale, "order.created")} {dateTime(o.created_at)}
             </p>
           </div>
-          {profile.is_admin ? (
+          {profile.is_admin || profile.role === "supplier" ? (
             <StatusDropdown orderId={o.id} currentStatus={o.status} locale={locale} />
           ) : (
             <span className="inline-flex px-3 py-1 rounded-full text-xs font-medium bg-neutral-100 text-neutral-700 self-start shrink-0">

@@ -9,6 +9,7 @@ import QuickDocs from "./[id]/quick-docs";
 import TrackingLink from "../tracking-link";
 import TrackingCell from "../tracking-cell";
 import NotesCell from "../notes-cell";
+import StatusDropdown from "./[id]/status-dropdown";
 import DocIndicators from "./[id]/doc-indicators";
 
 export default async function OrdersPage() {
@@ -152,7 +153,11 @@ export default async function OrdersPage() {
                         })()}
                       </td>
                       <td className="px-4 py-3">
-                        <StatusBadge status={o.status} locale={locale} />
+                        {canEditOrder ? (
+                          <StatusDropdown orderId={o.id} currentStatus={o.status} locale={locale} />
+                        ) : (
+                          <StatusBadge status={o.status} locale={locale} />
+                        )}
                       </td>
                       <td className="px-4 py-3 text-neutral-700 align-top">
                         {date(o.eta)}
@@ -206,7 +211,11 @@ export default async function OrdersPage() {
                           <div className="text-xs text-neutral-500 truncate">{o.description}</div>
                         )}
                         <div className="flex items-center gap-2 mt-1">
-                          <StatusBadge status={o.status} locale={locale} />
+                          {canEditOrder ? (
+                            <StatusDropdown orderId={o.id} currentStatus={o.status} locale={locale} />
+                          ) : (
+                            <StatusBadge status={o.status} locale={locale} />
+                          )}
                           {o.eta && <span className="text-xs text-neutral-500">{date(o.eta)}</span>}
                         </div>
                         <TrackingCell
