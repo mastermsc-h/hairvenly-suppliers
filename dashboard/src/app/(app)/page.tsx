@@ -24,13 +24,21 @@ export default async function DashboardPage() {
   const supabase = await createClient();
   const locale = (profile.language ?? "de") as Locale;
 
+  const isSupplierRole = profile.role === "supplier";
+  const mySupplierId = profile.supplier_id;
+
+  // Build scoped queries: suppliers only see their own data
+  let ordersQuery = supabase.from("orders_with_totals").select("*");
+  let suppliersQuery = supabase.from("suppliers").select("*");
+  if (isSupplierRole && mySupplierId) {
+    ordersQuery = ordersQuery.eq("supplier_id", mySupplierId);
+    suppliersQuery = suppliersQuery.eq("id", mySupplierId);
+  }
+
   const [{ data: orders }, { data: suppliers }, { data: documents }, { data: payments }] =
     await Promise.all([
-      supabase
-        .from("orders_with_totals")
-        .select("*")
-        .order("created_at", { ascending: false }),
-      supabase.from("suppliers").select("*").order("sort_order").order("name"),
+      ordersQuery.order("created_at", { ascending: false }),
+      suppliersQuery.order("sort_order").order("name"),
       supabase
         .from("documents")
         .select("*")
@@ -75,8 +83,10 @@ export default async function DashboardPage() {
     12,
   );
 
-  const showInvoices = hasFeature(profile, "invoices");
-  const showDocs = hasFeature(profile, "documents");
+  // Suppliers always see their own financial data and documents
+  const showInvoices = hasFeature(profile, "invoices") || isSupplierRole;
+  const showDocs = hasFeature(profile, "documents") || isSupplierRole;
+  const showDebt = hasFeature(profile, "debt") || isSupplierRole;
 
   return (
     <div className="p-4 md:p-8 space-y-6 md:space-y-8 max-w-7xl">
@@ -92,7 +102,7 @@ export default async function DashboardPage() {
           icon={<Package size={18} />}
           color="indigo"
         />
-        {hasFeature(profile, "debt") && (
+        {showDebt && (
           <Stat
             label={profile.is_admin ? t(locale, "dashboard.open_debt") : t(locale, "dashboard.open_amount")}
             value={usd(totalOpen)}

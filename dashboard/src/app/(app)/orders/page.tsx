@@ -13,15 +13,23 @@ export default async function OrdersPage() {
   const profile = await requireProfile();
   const supabase = await createClient();
   const locale = (profile.language ?? "de") as Locale;
-  const showDocs = hasFeature(profile, "documents");
-  const showInvoices = hasFeature(profile, "invoices");
+  const isSupplierRole = profile.role === "supplier";
+  const mySupplierId = profile.supplier_id;
+  // Suppliers always see their own documents and invoices
+  const showDocs = hasFeature(profile, "documents") || isSupplierRole;
+  const showInvoices = hasFeature(profile, "invoices") || isSupplierRole;
+
+  // Scope queries to own supplier for supplier role
+  let ordersQuery = supabase.from("orders_with_totals").select("*");
+  let suppliersQuery = supabase.from("suppliers").select("*");
+  if (isSupplierRole && mySupplierId) {
+    ordersQuery = ordersQuery.eq("supplier_id", mySupplierId);
+    suppliersQuery = suppliersQuery.eq("id", mySupplierId);
+  }
 
   const [{ data: orders }, { data: suppliers }, { data: documents }] = await Promise.all([
-    supabase
-      .from("orders_with_totals")
-      .select("*")
-      .order("created_at", { ascending: false }),
-    supabase.from("suppliers").select("*").order("sort_order").order("name"),
+    ordersQuery.order("created_at", { ascending: false }),
+    suppliersQuery.order("sort_order").order("name"),
     supabase
       .from("documents")
       .select("*")
