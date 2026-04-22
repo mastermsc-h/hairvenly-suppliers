@@ -148,6 +148,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     // Document kinds
     "doc.kind.supplier_invoice": "Rechnung",
     "doc.kind.order_overview": "Bestellübersicht",
+    "doc.kind.packing_details": "Paketübersicht",
     "doc.kind.customs_document": "Zolldokumente",
     "doc.kind.waybill": "Waybill",
     "doc.kind.payment_proof": "Zahlungsnachweis",
@@ -741,6 +742,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     // Document kinds
     "doc.kind.supplier_invoice": "Invoice",
     "doc.kind.order_overview": "Order overview",
+    "doc.kind.packing_details": "Packing Details",
     "doc.kind.customs_document": "Customs documents",
     "doc.kind.waybill": "Waybill",
     "doc.kind.payment_proof": "Payment proof",
@@ -1333,6 +1335,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     // Document kinds
     "doc.kind.supplier_invoice": "Fatura",
     "doc.kind.order_overview": "Sipariş özeti",
+    "doc.kind.packing_details": "Paket detayları",
     "doc.kind.customs_document": "Gümrük belgeleri",
     "doc.kind.waybill": "İrsaliye",
     "doc.kind.payment_proof": "Ödeme kanıtı",

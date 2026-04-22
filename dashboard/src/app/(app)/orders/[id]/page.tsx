@@ -75,6 +75,11 @@ export default async function OrderDetailPage({
   const evs = (events ?? []) as OrderEvent[];
   const items = (orderItems ?? []) as OrderItem[];
 
+  // Suppliers see everything about their own orders (finance + documents)
+  const isSupplier = profile.role === "supplier";
+  const canSeeFinance = hasFeature(profile, "invoices") || isSupplier;
+  const canSeeDocs = hasFeature(profile, "documents") || isSupplier;
+
   // Group order items by method + length
   const itemGroups: { label: string; items: OrderItem[] }[] = [];
   const groupMap = new Map<string, OrderItem[]>();
@@ -131,15 +136,15 @@ export default async function OrderDetailPage({
             </span>
           )}
         </div>
-        {hasFeature(profile, "invoices") && (
+        {canSeeFinance && (
           <div className="mt-4">
-            <QuickDocs documents={docs} paidTotal={o.paid_total} remainingBalance={o.remaining_balance} locale={locale} hideFinancials={!hasFeature(profile, "invoices")} />
+            <QuickDocs documents={docs} paidTotal={o.paid_total} remainingBalance={o.remaining_balance} locale={locale} hideFinancials={!canSeeFinance} />
           </div>
         )}
       </div>
 
-      <div className={`grid grid-cols-1 ${hasFeature(profile, "invoices") ? "lg:grid-cols-3" : ""} gap-6`}>
-        <div className={`${hasFeature(profile, "invoices") ? "lg:col-span-2" : ""} space-y-6`}>
+      <div className={`grid grid-cols-1 ${canSeeFinance ? "lg:grid-cols-3" : ""} gap-6`}>
+        <div className={`${canSeeFinance ? "lg:col-span-2" : ""} space-y-6`}>
           {/* Details + Edit */}
           <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
             <div className="flex items-center justify-between mb-4">
@@ -221,15 +226,15 @@ export default async function OrderDetailPage({
           )}
 
           {/* Documents */}
-          {hasFeature(profile, "documents") && (() => {
+          {canSeeDocs && (() => {
             const financialKinds = ["supplier_invoice", "payment_proof"];
-            const visibleDocs = hasFeature(profile, "invoices")
+            const visibleDocs = canSeeFinance
               ? docs
               : docs.filter((d) => !financialKinds.includes(d.kind));
             return (
               <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
                 <h2 className="text-sm font-medium text-neutral-700 mb-4">{t(locale, "order.documents_title")}</h2>
-                {hasFeature(profile, "invoices") && <DocumentUpload orderId={o.id} locale={locale} />}
+                {canSeeFinance && <DocumentUpload orderId={o.id} locale={locale} />}
                 <ul className="mt-4 divide-y divide-neutral-100">
                   {visibleDocs.length === 0 && (
                     <li className="text-sm text-neutral-500 py-3">{t(locale, "order.no_documents_yet")}</li>
@@ -275,8 +280,8 @@ export default async function OrderDetailPage({
           </section>
         </div>
 
-        {/* Sidebar: Finance — hidden when invoices feature is denied */}
-        {hasFeature(profile, "invoices") && (
+        {/* Sidebar: Finance — visible to admins, employees with invoices feature, and suppliers (own orders) */}
+        {canSeeFinance && (
           <aside className="space-y-6">
             <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
               <h2 className="text-sm font-medium text-neutral-700 mb-4 flex items-center gap-1.5">

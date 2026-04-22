@@ -38,6 +38,7 @@ export const STATUS_LABELS: Record<OrderStatus, string> = {
 export type DocumentKind =
   | "supplier_invoice"
   | "order_overview"
+  | "packing_details"
   | "customs_document"
   | "waybill"
   | "payment_proof"
@@ -50,6 +51,7 @@ export type DocumentKind =
 export const DOCUMENT_KIND_LABELS: Record<DocumentKind, string> = {
   supplier_invoice: "Rechnung",
   order_overview: "Bestellübersicht",
+  packing_details: "Paketübersicht",
   customs_document: "Zolldokumente",
   waybill: "Waybill",
   payment_proof: "Zahlungsnachweis",
@@ -64,12 +66,14 @@ export const DOCUMENT_KIND_LABELS: Record<DocumentKind, string> = {
 export const DOCUMENT_QUICK_KINDS: DocumentKind[] = [
   "supplier_invoice",
   "order_overview",
+  "packing_details",
   "customs_document",
   "waybill",
   "payment_proof",
   "shipping_document",
   "other",
 ];
+
 
 export const TAG_OPTIONS = ["extensions", "kleber", "zubehör", "werkzeug", "sonstiges"] as const;
 export type Tag = (typeof TAG_OPTIONS)[number];
