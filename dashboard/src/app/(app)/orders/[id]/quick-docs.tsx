@@ -13,12 +13,14 @@ export default function QuickDocs({
   documents,
   compact = false,
   paidTotal,
+  remainingBalance,
   locale = "de",
   hideFinancials = false,
 }: {
   documents: OrderDocument[];
   compact?: boolean;
   paidTotal?: number | null;
+  remainingBalance?: number | null;
   locale?: Locale;
   hideFinancials?: boolean;
 }) {
@@ -33,6 +35,13 @@ export default function QuickDocs({
     ...d,
     file_name: `${t(locale, "payment.number")} ${proofNumber.get(d.id)}`,
   }));
+
+  // If only 1 payment proof exists AND invoice isn't fully paid yet,
+  // show "Zahlung 1" to indicate this is a partial payment.
+  const notFullyPaid = remainingBalance != null && Number(remainingBalance) > 0.009;
+  const showProofNumber = proofs.length === 1 && notFullyPaid;
+  const proofLabel = showProofNumber ? proofs[0].file_name : t(locale, "doc.open_proof");
+  const proofShortLabel = showProofNumber ? proofs[0].file_name : t(locale, "doc.proof_short");
 
   const [preview, setPreview] = useState<{ url: string; title: string; isImage: boolean } | null>(null);
 
@@ -71,8 +80,8 @@ export default function QuickDocs({
       {!hideFinancials && (
         <QuickGroup
           icon={<FileText size={14} />}
-          label={t(locale, "doc.open_proof")}
-          shortLabel={t(locale, "doc.proof_short")}
+          label={proofLabel}
+          shortLabel={proofShortLabel}
           empty={t(locale, "doc.no_proof")}
           docs={proofs}
           compact={compact}

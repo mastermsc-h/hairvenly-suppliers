@@ -133,7 +133,7 @@ export default async function OrderDetailPage({
         </div>
         {hasFeature(profile, "invoices") && (
           <div className="mt-4">
-            <QuickDocs documents={docs} paidTotal={o.paid_total} locale={locale} hideFinancials={!hasFeature(profile, "invoices")} />
+            <QuickDocs documents={docs} paidTotal={o.paid_total} remainingBalance={o.remaining_balance} locale={locale} hideFinancials={!hasFeature(profile, "invoices")} />
           </div>
         )}
       </div>

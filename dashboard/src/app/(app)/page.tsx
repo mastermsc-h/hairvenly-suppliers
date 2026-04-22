@@ -268,7 +268,7 @@ export default async function DashboardPage() {
                           {showDocs && (
                             <td className="px-5 py-2.5">
                               <div className="flex flex-wrap items-center gap-1.5">
-                                <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} locale={locale} hideFinancials={!showInvoices} />
+                                <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} remainingBalance={o.remaining_balance} locale={locale} hideFinancials={!showInvoices} />
                                 <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
                               </div>
                               {(() => {
@@ -330,7 +330,7 @@ export default async function DashboardPage() {
                         </div>
                         {showDocs && (
                           <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                            <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} locale={locale} hideFinancials={!showInvoices} />
+                            <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} remainingBalance={o.remaining_balance} locale={locale} hideFinancials={!showInvoices} />
                             <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
                           </div>
                         )}
