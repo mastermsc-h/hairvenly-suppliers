@@ -44,7 +44,7 @@ export default async function DashboardPage() {
       supabase
         .from("documents")
         .select("*")
-        .in("kind", ["supplier_invoice", "payment_proof", "customs_document", "waybill", "order_overview"]),
+        .in("kind", ["supplier_invoice", "payment_proof", "customs_document", "waybill", "order_overview", "packing_details"]),
       supabase.from("payments").select("paid_at, amount"),
     ]);
 

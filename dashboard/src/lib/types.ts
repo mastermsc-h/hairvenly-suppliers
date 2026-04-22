@@ -51,7 +51,7 @@ export type DocumentKind =
 export const DOCUMENT_KIND_LABELS: Record<DocumentKind, string> = {
   supplier_invoice: "Rechnung",
   order_overview: "Bestellübersicht",
-  packing_details: "Paketübersicht",
+  packing_details: "Lieferschein",
   customs_document: "Zolldokumente",
   waybill: "Waybill",
   payment_proof: "Zahlungsnachweis",

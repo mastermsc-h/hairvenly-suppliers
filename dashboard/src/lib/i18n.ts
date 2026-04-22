@@ -148,7 +148,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     // Document kinds
     "doc.kind.supplier_invoice": "Rechnung",
     "doc.kind.order_overview": "Bestellübersicht",
-    "doc.kind.packing_details": "Paketübersicht",
+    "doc.kind.packing_details": "Lieferschein",
     "doc.kind.customs_document": "Zolldokumente",
     "doc.kind.waybill": "Waybill",
     "doc.kind.payment_proof": "Zahlungsnachweis",

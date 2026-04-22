@@ -37,7 +37,7 @@ export default async function OrdersPage() {
     supabase
       .from("documents")
       .select("*")
-      .in("kind", ["supplier_invoice", "payment_proof", "customs_document", "waybill"]),
+      .in("kind", ["supplier_invoice", "payment_proof", "customs_document", "waybill", "order_overview", "packing_details"]),
   ]);
 
   const list = (orders ?? []) as OrderWithTotals[];
