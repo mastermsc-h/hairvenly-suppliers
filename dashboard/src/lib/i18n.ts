@@ -596,7 +596,7 @@ export const messages: Record<Locale, Record<string, string>> = {
 
   en: {
     // Navigation
-    "nav.overview": "Overview",
+    "nav.overview": "Order",
     "nav.orders": "Orders",
     "nav.users": "Users",
     "nav.logout": "Log out",
