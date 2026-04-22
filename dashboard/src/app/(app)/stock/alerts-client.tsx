@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Search, AlertTriangle, AlertCircle, Truck, Package } from "lucide-react";
+import Link from "next/link";
+import { Search, AlertTriangle, AlertCircle, Truck, Package, ExternalLink } from "lucide-react";
 import type { AlertProduct } from "@/lib/stock-sheets";
 import SyncBadge from "./sync-badge";
 
@@ -19,6 +20,11 @@ interface Props {
   subtitle: string;
   mode: AlertMode;
   lastUpdated?: string | null;
+  /**
+   * Map from stock-sheet order name (e.g. "Amanda 07.04.2026") to the
+   * matching orders table id. Used to link the badge to the order detail page.
+   */
+  orderIdByName?: Record<string, string>;
 }
 
 type QuickFilter = "all" | "no_order" | "has_order" | "kritisch" | "niedrig";
@@ -40,7 +46,7 @@ const QUICK_FILTERS: Record<AlertMode, { key: QuickFilter; label: string; descri
   ],
 };
 
-export default function AlertsClient({ data, title, subtitle, mode, lastUpdated }: Props) {
+export default function AlertsClient({ data, title, subtitle, mode, lastUpdated, orderIdByName }: Props) {
   const [query, setQuery] = useState("");
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
   const config = MODE_CONFIG[mode];
@@ -57,16 +63,24 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated 
   }, [data, mode]);
 
   const [activeOrders, setActiveOrders] = useState<Set<string>>(new Set(allOrderNames));
-  // Sync when allOrderNames changes (initial load)
-  const allOrdersActive = activeOrders.size === allOrderNames.length || activeOrders.size === 0;
+  // True when every order name is currently selected.
+  const allOrdersActive = allOrderNames.length > 0 && activeOrders.size === allOrderNames.length;
+  const noOrdersActive = activeOrders.size === 0;
 
   const toggleOrder = (name: string) => {
     setActiveOrders((prev) => {
-      const next = new Set(prev.size === 0 ? allOrderNames : prev);
+      const next = new Set(prev);
       if (next.has(name)) next.delete(name);
       else next.add(name);
       return next;
     });
+  };
+
+  const toggleAll = () => {
+    // Click: if everything selected → deselect all; otherwise select all.
+    setActiveOrders((prev) =>
+      prev.size === allOrderNames.length ? new Set() : new Set(allOrderNames),
+    );
   };
 
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -81,8 +95,10 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated 
     if (quickFilter === "has_order") return d.unterwegsG > 0;
     if (quickFilter === "kritisch") return (d.stufe === "kritisch") || d.lagerG < 300;
     if (quickFilter === "niedrig") return d.lagerG >= 300 && d.lagerG < 600;
-    // Order filter (transit mode): show product if it has at least one selected order
-    if (mode === "transit" && !allOrdersActive && activeOrders.size > 0) {
+    // Order filter (transit mode): show product only if it has at least one selected order.
+    // If all are selected → show everything. If none are selected → hide everything.
+    if (mode === "transit" && allOrderNames.length > 0 && !allOrdersActive) {
+      if (noOrdersActive) return false;
       const hasSelectedOrder = d.perOrder.some((o) => activeOrders.has(o.name));
       if (!hasSelectedOrder) return false;
     }
@@ -153,7 +169,7 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated 
         <div className="flex flex-wrap gap-1.5 items-center">
           <span className="text-[10px] uppercase text-neutral-400 font-medium mr-1">Bestellungen:</span>
           <button
-            onClick={() => setActiveOrders(allOrdersActive ? new Set() : new Set(allOrderNames))}
+            onClick={toggleAll}
             className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
               allOrdersActive ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
             }`}
@@ -161,30 +177,46 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated 
             Alle
           </button>
           {allOrderNames.map((name) => {
-            const active = allOrdersActive || activeOrders.has(name);
+            const active = activeOrders.has(name);
             const count = data.filter((d) => d.perOrder.some((o) => o.name === name)).length;
             const isChina = name.toLowerCase().includes("china");
             const colorActive = isChina ? "bg-blue-600 text-white" : "bg-green-700 text-white";
             const colorInactive = isChina ? "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100" : "bg-green-50 text-green-700 border border-green-200 hover:bg-green-100";
+            const orderId = orderIdByName?.[name];
             return (
-              <button
+              <span
                 key={name}
-                onClick={() => toggleOrder(name)}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition inline-flex items-center gap-1 ${
+                className={`rounded-md text-xs font-medium transition inline-flex items-center overflow-hidden ${
                   active ? colorActive : colorInactive
                 }`}
               >
-                <Package size={10} />
-                {name}
-                <span className="opacity-60">({count})</span>
-              </button>
+                <button
+                  onClick={() => toggleOrder(name)}
+                  className="px-2.5 py-1 inline-flex items-center gap-1 hover:opacity-90"
+                  title={active ? "Filter entfernen" : "Filter hinzufügen"}
+                >
+                  <Package size={10} />
+                  {name}
+                  <span className="opacity-60">({count})</span>
+                </button>
+                {orderId && (
+                  <Link
+                    href={`/orders/${orderId}`}
+                    onClick={(e) => e.stopPropagation()}
+                    title="Bestellung öffnen"
+                    className={`px-1.5 py-1 border-l ${active ? "border-white/25 hover:bg-black/10" : isChina ? "border-blue-200 hover:bg-blue-100" : "border-green-200 hover:bg-green-100"}`}
+                  >
+                    <ExternalLink size={11} />
+                  </Link>
+                )}
+              </span>
             );
           })}
         </div>
       )}
 
       {/* Filtered count indicator */}
-      {(quickFilter !== "all" || (!allOrdersActive && activeOrders.size > 0)) && (
+      {(quickFilter !== "all" || (!allOrdersActive && mode === "transit")) && (
         <div className="text-sm text-neutral-500">
           {filtered.length} von {data.length} Produkten angezeigt
           <button onClick={() => { setQuickFilter("all"); setActiveOrders(new Set(allOrderNames)); }} className="ml-2 text-indigo-600 hover:text-indigo-800 font-medium">Filter zurücksetzen</button>
