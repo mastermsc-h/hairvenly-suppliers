@@ -236,7 +236,7 @@ export default async function DashboardPage() {
                     </thead>
                     <tbody className="divide-y divide-neutral-100">
                       {openOrders.map((o) => (
-                        <tr key={o.id} className="hover:bg-indigo-50/30 transition">
+                        <tr key={o.id} className="odd:bg-white even:bg-neutral-50/60 hover:bg-indigo-50/40 transition">
                           <td className="px-5 py-2.5">
                             <Link
                               href={`/orders/${o.id}`}
@@ -311,7 +311,7 @@ export default async function DashboardPage() {
                   {/* Mobile card list */}
                   <div className="md:hidden divide-y divide-neutral-100">
                     {openOrders.map((o) => (
-                      <Link key={`mobile-${o.id}`} href={`/orders/${o.id}`} className="block px-4 py-3 hover:bg-indigo-50/30 active:bg-indigo-50/50 transition">
+                      <Link key={`mobile-${o.id}`} href={`/orders/${o.id}`} className="block px-4 py-3 odd:bg-white even:bg-neutral-50/60 hover:bg-indigo-50/40 active:bg-indigo-50/60 transition">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <div className="font-medium text-indigo-700 text-sm truncate">{o.label}</div>
