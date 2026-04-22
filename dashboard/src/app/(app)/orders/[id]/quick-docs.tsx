@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { FileText, Receipt, X, ClipboardList } from "lucide-react";
+import { FileText, Receipt, X, ClipboardList, Package as PackageIcon } from "lucide-react";
 import { getSignedUrl } from "@/lib/actions/orders";
 import type { OrderDocument } from "@/lib/types";
 import { t, type Locale } from "@/lib/i18n";
@@ -25,6 +25,7 @@ export default function QuickDocs({
   hideFinancials?: boolean;
 }) {
   const overviews = documents.filter((d) => d.kind === "order_overview");
+  const packings = documents.filter((d) => d.kind === "packing_details");
   const invoices = documents.filter((d) => d.kind === "supplier_invoice");
   const proofsRaw = documents.filter((d) => d.kind === "payment_proof");
   const proofNumber = new Map<string, number>();
@@ -57,6 +58,20 @@ export default function QuickDocs({
           compact={compact}
           mode="preview"
           onPreview={setPreview}
+          colorClass="text-indigo-600 border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50"
+        />
+      )}
+      {packings.length > 0 && (
+        <QuickGroup
+          icon={<PackageIcon size={14} />}
+          label={t(locale, "doc.kind.packing_details")}
+          shortLabel={t(locale, "doc.kind.packing_details")}
+          empty=""
+          docs={packings}
+          compact={compact}
+          mode="preview"
+          onPreview={setPreview}
+          colorClass="text-amber-700 border-amber-200 bg-amber-50/40 hover:bg-amber-50"
         />
       )}
       {!hideFinancials && (
@@ -69,6 +84,7 @@ export default function QuickDocs({
             docs={invoices}
             compact={compact}
             mode="open"
+            colorClass="text-emerald-700 border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50"
           />
           {!compact && invoices.length > 0 && (
             <div className="mt-1 text-[10px] text-neutral-400 max-w-[220px] truncate leading-tight">
@@ -87,6 +103,7 @@ export default function QuickDocs({
           compact={compact}
           mode="preview"
           onPreview={setPreview}
+          colorClass="text-blue-700 border-blue-200 bg-blue-50/40 hover:bg-blue-50"
           titleOverride={
             paidTotal != null && paidTotal > 0
               ? `${t(locale, "doc.already_paid")}: ${fmtUsd(Number(paidTotal))}`
@@ -175,6 +192,7 @@ function QuickGroup({
   titleOverride,
   mode = "open",
   onPreview,
+  colorClass,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -185,19 +203,26 @@ function QuickGroup({
   titleOverride?: string;
   mode?: "open" | "preview";
   onPreview?: (p: { url: string; title: string; isImage: boolean }) => void;
+  colorClass?: string;
 }) {
   const tooltip = titleOverride ?? label;
   const [loading, setLoading] = useState(false);
 
   const baseClass = compact
-    ? "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs"
-    : "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium";
+    ? "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs border"
+    : "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border";
+
+  // If a colorClass is provided, use it for both border + icon/text tint.
+  // Otherwise fall back to neutral.
+  const filledClass = colorClass
+    ? `${baseClass} bg-white ${colorClass}`
+    : `${baseClass} bg-white border-neutral-300 text-neutral-700 hover:bg-neutral-50`;
 
   if (docs.length === 0) {
     if (compact) return null;
     return (
       <span
-        className={`${baseClass} border border-dashed border-neutral-300 text-neutral-400`}
+        className={`${baseClass} border-dashed border-neutral-300 text-neutral-400`}
       >
         {icon} {empty}
       </span>
@@ -238,7 +263,7 @@ function QuickGroup({
           onClick={(e) => handleClick(e, docs[0])}
           disabled={loading}
           title={titleOverride ? undefined : tooltip}
-          className={`${baseClass} bg-white border border-neutral-300 text-neutral-700 hover:bg-neutral-50 disabled:opacity-50`}
+          className={`${filledClass} disabled:opacity-50`}
         >
           {icon} {compact ? shortLabel : label}
         </button>
@@ -251,7 +276,7 @@ function QuickGroup({
     <details className="relative group" onClick={(e) => e.stopPropagation()}>
       <summary
         title={titleOverride ? undefined : tooltip}
-        className={`list-none cursor-pointer ${baseClass} bg-white border border-neutral-300 text-neutral-700 hover:bg-neutral-50`}
+        className={`list-none cursor-pointer ${filledClass}`}
       >
         {icon} {compact ? shortLabel : label} ({docs.length})
       </summary>
