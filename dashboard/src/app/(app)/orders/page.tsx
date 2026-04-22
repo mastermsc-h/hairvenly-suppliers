@@ -7,6 +7,8 @@ import { type OrderWithTotals, type OrderDocument, type Supplier } from "@/lib/t
 import { t, type Locale } from "@/lib/i18n";
 import QuickDocs from "./[id]/quick-docs";
 import TrackingLink from "../tracking-link";
+import TrackingCell from "../tracking-cell";
+import NotesCell from "../notes-cell";
 import DocIndicators from "./[id]/doc-indicators";
 
 export default async function OrdersPage() {
@@ -18,6 +20,7 @@ export default async function OrdersPage() {
   // Suppliers always see their own documents and invoices
   const showDocs = hasFeature(profile, "documents") || isSupplierRole;
   const showInvoices = hasFeature(profile, "invoices") || isSupplierRole;
+  const canEditOrder = profile.is_admin || isSupplierRole;
 
   // Scope queries to own supplier for supplier role
   let ordersQuery = supabase.from("orders_with_totals").select("*");
@@ -119,6 +122,7 @@ export default async function OrdersPage() {
                     {showDocs && <th className="px-4 py-3 font-medium">{t(locale, "table.documents")}</th>}
                     {showInvoices && <th className="px-4 py-3 font-medium text-right">{t(locale, "table.invoice")}</th>}
                     {showInvoices && <th className="px-4 py-3 font-medium text-right">{t(locale, "table.open")}</th>}
+                    <th className="px-4 py-3 font-medium">{t(locale, "table.notes")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
@@ -150,13 +154,16 @@ export default async function OrdersPage() {
                       <td className="px-4 py-3">
                         <StatusBadge status={o.status} locale={locale} />
                       </td>
-                      <td className="px-4 py-3 text-neutral-700">
+                      <td className="px-4 py-3 text-neutral-700 align-top">
                         {date(o.eta)}
-                        {o.tracking_number && (
-                          <div className="mt-0.5">
-                            <TrackingLink number={o.tracking_number} url={o.tracking_url} maxWidth={140} />
-                          </div>
-                        )}
+                        <TrackingCell
+                          orderId={o.id}
+                          number={o.tracking_number}
+                          url={o.tracking_url}
+                          canEdit={canEditOrder}
+                          maxWidth={140}
+                          locale={locale}
+                        />
                       </td>
                       {showDocs && (
                         <td className="px-4 py-3">
@@ -176,6 +183,14 @@ export default async function OrdersPage() {
                           {usd(o.remaining_balance)}
                         </td>
                       )}
+                      <td className="px-4 py-3 align-top">
+                        <NotesCell
+                          orderId={o.id}
+                          notes={o.notes}
+                          canEdit={canEditOrder}
+                          locale={locale}
+                        />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -194,11 +209,14 @@ export default async function OrdersPage() {
                           <StatusBadge status={o.status} locale={locale} />
                           {o.eta && <span className="text-xs text-neutral-500">{date(o.eta)}</span>}
                         </div>
-                        {o.tracking_number && (
-                          <div className="mt-0.5">
-                            <TrackingLink number={o.tracking_number} url={o.tracking_url} maxWidth={200} />
-                          </div>
-                        )}
+                        <TrackingCell
+                          orderId={o.id}
+                          number={o.tracking_number}
+                          url={o.tracking_url}
+                          canEdit={canEditOrder}
+                          maxWidth={200}
+                          locale={locale}
+                        />
                       </div>
                       {showInvoices && (
                         <div className="text-right shrink-0">
@@ -213,6 +231,14 @@ export default async function OrdersPage() {
                         <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
                       </div>
                     )}
+                    <div className="mt-2">
+                      <NotesCell
+                        orderId={o.id}
+                        notes={o.notes}
+                        canEdit={canEditOrder}
+                        locale={locale}
+                      />
+                    </div>
                   </Link>
                 ))}
               </div>

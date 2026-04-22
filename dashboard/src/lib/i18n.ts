@@ -48,6 +48,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     "table.documents": "Dokumente",
     "table.invoice": "Rechnung",
     "table.open": "Offen",
+    "table.notes": "Notizen",
+    "order.add_tracking": "Tracking hinzufügen",
+    "notes.add": "Notiz hinzufügen",
 
     // Order detail
     "order.details": "Bestelldetails",
@@ -574,7 +577,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     // Customs CH
     "nav.customs_ch": "Zoll Schweiz",
     "customs_ch.title": "Zollpapiere Schweiz",
-    "customs_ch.subtitle": "CN23-Zollinhaltserklärung für Bestellungen in die Schweiz (letzte 60 Tage).",
+    "customs_ch.subtitle": "CN23-Zollinhaltserklärung für Bestellungen in die Schweiz (letzte 180 Tage).",
     "customs_ch.orders_count": "Bestellungen",
     "customs_ch.show_fulfilled": "Erledigte einblenden",
     "customs_ch.empty": "Keine Bestellungen in die Schweiz gefunden.",
@@ -638,6 +641,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     "table.documents": "Documents",
     "table.invoice": "Invoice",
     "table.open": "Open",
+    "table.notes": "Notes",
+    "order.add_tracking": "Add tracking",
+    "notes.add": "Add note",
 
     // Order detail
     "order.details": "Order details",
@@ -1163,7 +1169,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     // Customs CH
     "nav.customs_ch": "Customs (CH)",
     "customs_ch.title": "Swiss Customs Documents",
-    "customs_ch.subtitle": "CN23 customs declaration for orders shipping to Switzerland (last 60 days).",
+    "customs_ch.subtitle": "CN23 customs declaration for orders shipping to Switzerland (last 180 days).",
     "customs_ch.orders_count": "orders",
     "customs_ch.show_fulfilled": "Show fulfilled",
     "customs_ch.empty": "No orders to Switzerland found.",
@@ -1227,6 +1233,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     "table.documents": "Belgeler",
     "table.invoice": "Fatura",
     "table.open": "Açık",
+    "table.notes": "Notlar",
+    "order.add_tracking": "Takip ekle",
+    "notes.add": "Not ekle",
 
     // Order detail
     "order.details": "Sipariş detayları",
@@ -1752,7 +1761,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     // Customs CH
     "nav.customs_ch": "Gümrük (İsviçre)",
     "customs_ch.title": "İsviçre Gümrük Belgeleri",
-    "customs_ch.subtitle": "İsviçre'ye gönderilen siparişler için CN23 gümrük beyannamesi (son 60 gün).",
+    "customs_ch.subtitle": "İsviçre'ye gönderilen siparişler için CN23 gümrük beyannamesi (son 180 gün).",
     "customs_ch.orders_count": "sipariş",
     "customs_ch.show_fulfilled": "Gönderilenleri göster",
     "customs_ch.empty": "İsviçre'ye sipariş bulunamadı.",
