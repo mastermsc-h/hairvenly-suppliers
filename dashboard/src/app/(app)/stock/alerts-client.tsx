@@ -229,6 +229,7 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
           items={wellig}
           accent="blue"
           mode={mode}
+          orderIdByName={orderIdByName}
         />
       )}
       {glatt.length > 0 && (
@@ -237,6 +238,7 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
           items={glatt}
           accent="green"
           mode={mode}
+          orderIdByName={orderIdByName}
         />
       )}
 
@@ -262,11 +264,13 @@ function AlertSection({
   items,
   accent,
   mode,
+  orderIdByName,
 }: {
   label: string;
   items: AlertProduct[];
   accent: "blue" | "green";
   mode: AlertMode;
+  orderIdByName?: Record<string, string>;
 }) {
   const headerBg = accent === "blue" ? "bg-blue-600" : "bg-green-700";
 
@@ -300,11 +304,21 @@ function AlertSection({
                 </span>
                 {item.perOrder.length > 0 && (
                   <div className="mt-1 space-y-0.5">
-                    {item.perOrder.map((o, j) => (
-                      <div key={j} className="text-xs text-neutral-500">
-                        {o.name}: {o.menge}g {o.ankunft && `· ${o.ankunft}`}
-                      </div>
-                    ))}
+                    {item.perOrder.map((o, j) => {
+                      const orderId = orderIdByName?.[o.name];
+                      const line = (
+                        <>
+                          {o.name}: {o.menge}g {o.ankunft && `· ${o.ankunft}`}
+                        </>
+                      );
+                      return orderId ? (
+                        <Link key={j} href={`/orders/${orderId}`} className="block text-xs text-indigo-600 hover:underline">
+                          {line}
+                        </Link>
+                      ) : (
+                        <div key={j} className="text-xs text-neutral-500">{line}</div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -354,18 +368,40 @@ function AlertSection({
                 <td className="px-2 py-1">
                   {item.perOrder.length > 0 ? (
                     <div className="flex flex-wrap gap-0.5">
-                      {item.perOrder.map((o, j) => (
-                        <span
-                          key={j}
-                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-100"
-                          title={`${o.name}: ${o.menge}g${o.ankunft ? ` — ${o.ankunft}` : ""}`}
-                        >
-                          <span className="font-semibold">{o.menge}g</span>
-                          <span className="text-indigo-400">·</span>
-                          <span className="text-indigo-500 truncate max-w-[100px]">{o.name}</span>
-                          {o.ankunft && <span className="text-indigo-400 whitespace-nowrap">· {o.ankunft}</span>}
-                        </span>
-                      ))}
+                      {item.perOrder.map((o, j) => {
+                        const orderId = orderIdByName?.[o.name];
+                        const content = (
+                          <>
+                            <span className="font-semibold">{o.menge}g</span>
+                            <span className="text-indigo-400">·</span>
+                            <span className="text-indigo-500 truncate max-w-[100px]">{o.name}</span>
+                            {o.ankunft && <span className="text-indigo-400 whitespace-nowrap">· {o.ankunft}</span>}
+                          </>
+                        );
+                        const tooltip = `${o.name}: ${o.menge}g${o.ankunft ? ` — ${o.ankunft}` : ""}${orderId ? " · Bestellung öffnen" : ""}`;
+                        const baseClass = "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium border";
+                        if (orderId) {
+                          return (
+                            <Link
+                              key={j}
+                              href={`/orders/${orderId}`}
+                              title={tooltip}
+                              className={`${baseClass} bg-indigo-50 text-indigo-700 border-indigo-100 hover:bg-indigo-100 hover:border-indigo-300 transition`}
+                            >
+                              {content}
+                            </Link>
+                          );
+                        }
+                        return (
+                          <span
+                            key={j}
+                            className={`${baseClass} bg-indigo-50 text-indigo-700 border-indigo-100`}
+                            title={tooltip}
+                          >
+                            {content}
+                          </span>
+                        );
+                      })}
                     </div>
                   ) : (
                     <span className="text-[10px] text-red-300 font-medium">Keine Bestellung!</span>
