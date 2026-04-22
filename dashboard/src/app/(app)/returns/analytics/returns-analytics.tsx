@@ -608,16 +608,17 @@ export default function ReturnsAnalytics({
 
   // Period selector — filters ALL metrics and charts
   // Breakdown: products within the selected category (memoized).
-  // Counts UNIQUE orders (return_id) per product, not line-item quantity —
-  // so a single return with 4× of a variant counts as 1 order, not 4.
+  // Rücksendung/Umtausch/Reklamation columns = Mengen (quantity sum) so a
+  // return of 4×25g reads as 4 Stück. Bestellungen column = unique
+  // return_ids so the same case reads as 1 Bestellung.
   const categoryProductBreakdown = useMemo(() => {
     if (!selectedCategory) return [];
     type Entry = {
       name: string;
-      return: Set<string>;
-      exchange: Set<string>;
-      complaint: Set<string>;
-      total: Set<string>;
+      return: number;
+      exchange: number;
+      complaint: number;
+      orderIds: Set<string>;
     };
     const productMap = new Map<string, Entry>();
     for (const item of filteredItems) {
@@ -630,30 +631,31 @@ export default function ReturnsAnalytics({
       }
       if (cat !== selectedCategory) continue;
       const name = (item.product_type || "—").trim();
+      const qty = Math.max(1, item.quantity ?? 1);
       const rid = item.return_id ?? `${name}-fallback-${item.initiated_at ?? ""}`;
       const existing = productMap.get(name) ?? {
         name,
-        return: new Set<string>(),
-        exchange: new Set<string>(),
-        complaint: new Set<string>(),
-        total: new Set<string>(),
+        return: 0,
+        exchange: 0,
+        complaint: 0,
+        orderIds: new Set<string>(),
       };
       const key = item.return_type as "return" | "exchange" | "complaint";
       if (key === "return" || key === "exchange" || key === "complaint") {
-        existing[key].add(rid);
+        existing[key] += qty;
       }
-      existing.total.add(rid);
+      existing.orderIds.add(rid);
       productMap.set(name, existing);
     }
     return Array.from(productMap.values())
       .map((e) => ({
         name: e.name,
-        return: e.return.size,
-        exchange: e.exchange.size,
-        complaint: e.complaint.size,
-        total: e.total.size,
+        return: e.return,
+        exchange: e.exchange,
+        complaint: e.complaint,
+        orders: e.orderIds.size,
       }))
-      .sort((a, b) => b.total - a.total);
+      .sort((a, b) => b.orders - a.orders);
   }, [selectedCategory, filteredItems]);
 
   const tooltipStyle = {
@@ -1114,7 +1116,7 @@ export default function ReturnsAnalytics({
                           {p.complaint > 0 ? p.complaint : "—"}
                         </td>
                         <td className="px-4 py-2 text-right font-semibold text-neutral-900 tabular-nums">
-                          {p.total}
+                          {p.orders}
                         </td>
                       </tr>
                     ))}
