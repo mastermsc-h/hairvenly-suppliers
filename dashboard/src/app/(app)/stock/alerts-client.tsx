@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { Search, AlertTriangle, AlertCircle, Truck, Package, ExternalLink } from "lucide-react";
 import type { AlertProduct } from "@/lib/stock-sheets";
+import type { OrderMeta } from "@/lib/order-name-map";
 import SyncBadge from "./sync-badge";
 
 type AlertMode = "zero" | "critical" | "transit";
@@ -21,10 +22,10 @@ interface Props {
   mode: AlertMode;
   lastUpdated?: string | null;
   /**
-   * Map from stock-sheet order name (e.g. "Amanda 07.04.2026") to the
-   * matching orders table id. Used to link the badge to the order detail page.
+   * Map from stock-sheet order name (e.g. "Amanda 07.04.2026") to order meta
+   * (id + tracking). Used to link badges and display tracking info.
    */
-  orderIdByName?: Record<string, string>;
+  orderIdByName?: Record<string, OrderMeta>;
 }
 
 type QuickFilter = "all" | "no_order" | "has_order" | "kritisch" | "niedrig";
@@ -182,7 +183,7 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
             const isChina = name.toLowerCase().includes("china");
             const colorActive = isChina ? "bg-blue-600 text-white" : "bg-green-700 text-white";
             const colorInactive = isChina ? "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100" : "bg-green-50 text-green-700 border border-green-200 hover:bg-green-100";
-            const orderId = orderIdByName?.[name];
+            const meta = orderIdByName?.[name];
             return (
               <span
                 key={name}
@@ -199,9 +200,24 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
                   {name}
                   <span className="opacity-60">({count})</span>
                 </button>
-                {orderId && (
+                {meta?.trackingUrl && (
+                  <a
+                    href={meta.trackingUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    title={meta.trackingNumber ? `Sendung verfolgen: ${meta.trackingNumber}` : "Sendung verfolgen"}
+                    className={`px-1.5 py-1 border-l bg-yellow-400 text-yellow-900 border-yellow-500 hover:bg-yellow-300 inline-flex items-center gap-1`}
+                  >
+                    <Truck size={11} />
+                    {meta.trackingNumber && (
+                      <span className="font-mono text-[10px] max-w-[70px] truncate">{meta.trackingNumber}</span>
+                    )}
+                  </a>
+                )}
+                {meta?.id && (
                   <Link
-                    href={`/orders/${orderId}`}
+                    href={`/orders/${meta.id}`}
                     onClick={(e) => e.stopPropagation()}
                     title="Bestellung öffnen"
                     className={`px-1.5 py-1 border-l ${active ? "border-white/25 hover:bg-black/10" : isChina ? "border-blue-200 hover:bg-blue-100" : "border-green-200 hover:bg-green-100"}`}
@@ -270,7 +286,7 @@ function AlertSection({
   items: AlertProduct[];
   accent: "blue" | "green";
   mode: AlertMode;
-  orderIdByName?: Record<string, string>;
+  orderIdByName?: Record<string, OrderMeta>;
 }) {
   const headerBg = accent === "blue" ? "bg-blue-600" : "bg-green-700";
 
@@ -305,18 +321,32 @@ function AlertSection({
                 {item.perOrder.length > 0 && (
                   <div className="mt-1 space-y-0.5">
                     {item.perOrder.map((o, j) => {
-                      const orderId = orderIdByName?.[o.name];
+                      const meta = orderIdByName?.[o.name];
                       const line = (
                         <>
                           {o.name}: {o.menge}g {o.ankunft && `· ${o.ankunft}`}
                         </>
                       );
-                      return orderId ? (
-                        <Link key={j} href={`/orders/${orderId}`} className="block text-xs text-indigo-600 hover:underline">
-                          {line}
-                        </Link>
-                      ) : (
-                        <div key={j} className="text-xs text-neutral-500">{line}</div>
+                      return (
+                        <div key={j} className="flex items-center gap-1.5 flex-wrap">
+                          {meta?.id ? (
+                            <Link href={`/orders/${meta.id}`} className="text-xs text-indigo-600 hover:underline">{line}</Link>
+                          ) : (
+                            <div className="text-xs text-neutral-500">{line}</div>
+                          )}
+                          {meta?.trackingUrl && (
+                            <a
+                              href={meta.trackingUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={meta.trackingNumber ? `Sendung: ${meta.trackingNumber}` : "Sendung verfolgen"}
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-yellow-400 text-yellow-900 text-[10px] font-medium hover:bg-yellow-300"
+                            >
+                              <Truck size={9} />
+                              {meta.trackingNumber && <span className="font-mono">{meta.trackingNumber}</span>}
+                            </a>
+                          )}
+                        </div>
                       );
                     })}
                   </div>
@@ -369,7 +399,7 @@ function AlertSection({
                   {item.perOrder.length > 0 ? (
                     <div className="flex flex-wrap gap-0.5">
                       {item.perOrder.map((o, j) => {
-                        const orderId = orderIdByName?.[o.name];
+                        const meta = orderIdByName?.[o.name];
                         const content = (
                           <>
                             <span className="font-semibold">{o.menge}g</span>
@@ -378,27 +408,36 @@ function AlertSection({
                             {o.ankunft && <span className="text-indigo-400 whitespace-nowrap">· {o.ankunft}</span>}
                           </>
                         );
-                        const tooltip = `${o.name}: ${o.menge}g${o.ankunft ? ` — ${o.ankunft}` : ""}${orderId ? " · Bestellung öffnen" : ""}`;
+                        const tooltip = `${o.name}: ${o.menge}g${o.ankunft ? ` — ${o.ankunft}` : ""}${meta?.id ? " · Bestellung öffnen" : ""}`;
                         const baseClass = "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium border";
-                        if (orderId) {
-                          return (
-                            <Link
-                              key={j}
-                              href={`/orders/${orderId}`}
-                              title={tooltip}
-                              className={`${baseClass} bg-indigo-50 text-indigo-700 border-indigo-100 hover:bg-indigo-100 hover:border-indigo-300 transition`}
-                            >
-                              {content}
-                            </Link>
-                          );
-                        }
-                        return (
-                          <span
-                            key={j}
-                            className={`${baseClass} bg-indigo-50 text-indigo-700 border-indigo-100`}
+                        const badge = meta?.id ? (
+                          <Link
+                            href={`/orders/${meta.id}`}
                             title={tooltip}
+                            className={`${baseClass} bg-indigo-50 text-indigo-700 border-indigo-100 hover:bg-indigo-100 hover:border-indigo-300 transition`}
                           >
                             {content}
+                          </Link>
+                        ) : (
+                          <span className={`${baseClass} bg-indigo-50 text-indigo-700 border-indigo-100`} title={tooltip}>
+                            {content}
+                          </span>
+                        );
+                        return (
+                          <span key={j} className="inline-flex items-center gap-0.5">
+                            {badge}
+                            {meta?.trackingUrl && (
+                              <a
+                                href={meta.trackingUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={meta.trackingNumber ? `Sendung: ${meta.trackingNumber}` : "Sendung verfolgen"}
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-yellow-400 text-yellow-900 text-[10px] font-medium hover:bg-yellow-300 border border-yellow-500"
+                              >
+                                <Truck size={9} />
+                                {meta.trackingNumber && <span className="font-mono">{meta.trackingNumber}</span>}
+                              </a>
+                            )}
                           </span>
                         );
                       })}
