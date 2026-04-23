@@ -99,7 +99,7 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
     }
   }
 
-  // Proxy: parse sheet name into (family + canonical date) and look up.
+  // Proxy: extract family + date from ANY position in the string, then look up.
   return new Proxy(map, {
     get(target, prop: string) {
       if (typeof prop !== "string") return undefined;
@@ -109,15 +109,19 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
       const n = normalize(prop);
       if (target[n]) return target[n];
 
-      // 2) Parse "Supplier DD<sep>MM<sep>YYYY" or "Supplier DD<sep>MM"
-      //    separators: . - / (any combination)
-      const m = prop.match(
-        /^([\wÀ-ÿ]+(?:\s+[\wÀ-ÿ()+-]+)*?)\s+(\d{1,2})[.\-\/\s](\d{1,2})(?:[.\-\/\s](\d{2,4}))?/i,
-      );
-      if (!m) return undefined;
+      // 2) Extract family: first "word-ish" token from the string.
+      //    Accept anything up to the first whitespace or digit.
+      const famMatch = prop.trim().match(/^([^\d\s.\-\/]+)/);
+      const fam = famMatch ? famMatch[1].toLowerCase() : "";
 
-      const [, supplierRaw, dd, mm, yyyy] = m;
-      const fam = supplierRaw.trim().split(/\s+/)[0].toLowerCase();
+      // 3) Extract date: find "DD<sep>MM(<sep>YYYY)?" anywhere in the string.
+      //    Separators: . - / (any combination, even mixed).
+      const dateMatch = prop.match(
+        /(\d{1,2})[.\-\/](\d{1,2})(?:[.\-\/](\d{2,4}))?/,
+      );
+      if (!dateMatch || !fam) return undefined;
+
+      const [, dd, mm, yyyy] = dateMatch;
       const ddN = dd.padStart(2, "0");
       const mmN = mm.padStart(2, "0");
 
@@ -125,23 +129,21 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
       if (yyyy) {
         tryYears.push(yyyy.length === 2 ? `20${yyyy}` : yyyy);
       } else {
-        // No year — try current year ± 1 (orders might span year boundary)
         const y = new Date().getFullYear();
         tryYears.push(String(y), String(y - 1), String(y + 1));
       }
 
-      // Primary: DD.MM interpretation (German format, as in stock sheet)
+      // Primary: DD.MM interpretation (German format)
       for (const y of tryYears) {
         const key = `${fam}|${y}-${mmN}-${ddN}`;
         if (target[key]) return target[key];
       }
 
-      // 3) No-year fallback key (primary interpretation)
+      // No-year fallback
       const noYear = `${fam}|${mmN}-${ddN}`;
       if (target[noYear]) return target[noYear];
 
-      // 4) Last resort: try swapped DD/MM (in case sheet uses MM.DD format somewhere)
-      //    Only valid if both values are <= 12
+      // DD/MM swap fallback (only if both ≤ 12 and not equal)
       if (parseInt(ddN, 10) <= 12 && parseInt(mmN, 10) <= 12 && ddN !== mmN) {
         for (const y of tryYears) {
           const key = `${fam}|${y}-${ddN}-${mmN}`;
@@ -149,6 +151,15 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
         }
         const noYearSwap = `${fam}|${ddN}-${mmN}`;
         if (target[noYearSwap]) return target[noYearSwap];
+      }
+
+      // Last resort: match by date alone, ignoring family (in case supplier
+      // is named differently in DB vs sheet)
+      for (const y of tryYears) {
+        // Scan all keys for any family with this date
+        for (const k of Object.keys(target)) {
+          if (k.endsWith(`|${y}-${mmN}-${ddN}`)) return target[k];
+        }
       }
 
       return undefined;
