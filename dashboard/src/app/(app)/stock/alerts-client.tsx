@@ -207,12 +207,9 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
                     rel="noreferrer"
                     onClick={(e) => e.stopPropagation()}
                     title={meta.trackingNumber ? `Sendung verfolgen: ${meta.trackingNumber}` : "Sendung verfolgen"}
-                    className={`px-1.5 py-1 border-l bg-yellow-400 text-yellow-900 border-yellow-500 hover:bg-yellow-300 inline-flex items-center gap-1`}
+                    className="px-1.5 py-1 border-l bg-yellow-400 text-yellow-900 border-yellow-500 hover:bg-yellow-300 inline-flex items-center"
                   >
                     <Truck size={11} />
-                    {meta.trackingNumber && (
-                      <span className="font-mono text-[10px] max-w-[70px] truncate">{meta.trackingNumber}</span>
-                    )}
                   </a>
                 )}
                 {meta?.id && (
@@ -328,7 +325,7 @@ function AlertSection({
                         </>
                       );
                       return (
-                        <div key={j} className="flex items-center gap-1.5 flex-wrap">
+                        <div key={j} className="flex items-center gap-1">
                           {meta?.id ? (
                             <Link href={`/orders/${meta.id}`} className="text-xs text-indigo-600 hover:underline">{line}</Link>
                           ) : (
@@ -339,11 +336,10 @@ function AlertSection({
                               href={meta.trackingUrl}
                               target="_blank"
                               rel="noreferrer"
-                              title={meta.trackingNumber ? `Sendung: ${meta.trackingNumber}` : "Sendung verfolgen"}
-                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-yellow-400 text-yellow-900 text-[10px] font-medium hover:bg-yellow-300"
+                              title={meta.trackingNumber ? `Sendung verfolgen: ${meta.trackingNumber}` : "Sendung verfolgen"}
+                              className="inline-flex items-center px-1 py-0.5 rounded bg-yellow-400 text-yellow-900 hover:bg-yellow-300"
                             >
-                              <Truck size={9} />
-                              {meta.trackingNumber && <span className="font-mono">{meta.trackingNumber}</span>}
+                              <Truck size={10} />
                             </a>
                           )}
                         </div>
@@ -400,6 +396,7 @@ function AlertSection({
                     <div className="flex flex-wrap gap-0.5">
                       {item.perOrder.map((o, j) => {
                         const meta = orderIdByName?.[o.name];
+                        const tooltip = `${o.name}: ${o.menge}g${o.ankunft ? ` — ${o.ankunft}` : ""}${meta?.id ? " · Bestellung öffnen" : ""}`;
                         const content = (
                           <>
                             <span className="font-semibold">{o.menge}g</span>
@@ -408,34 +405,34 @@ function AlertSection({
                             {o.ankunft && <span className="text-indigo-400 whitespace-nowrap">· {o.ankunft}</span>}
                           </>
                         );
-                        const tooltip = `${o.name}: ${o.menge}g${o.ankunft ? ` — ${o.ankunft}` : ""}${meta?.id ? " · Bestellung öffnen" : ""}`;
-                        const baseClass = "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium border";
-                        const badge = meta?.id ? (
-                          <Link
-                            href={`/orders/${meta.id}`}
-                            title={tooltip}
-                            className={`${baseClass} bg-indigo-50 text-indigo-700 border-indigo-100 hover:bg-indigo-100 hover:border-indigo-300 transition`}
-                          >
-                            {content}
-                          </Link>
-                        ) : (
-                          <span className={`${baseClass} bg-indigo-50 text-indigo-700 border-indigo-100`} title={tooltip}>
-                            {content}
-                          </span>
-                        );
                         return (
-                          <span key={j} className="inline-flex items-center gap-0.5">
-                            {badge}
+                          <span
+                            key={j}
+                            className="inline-flex items-stretch rounded overflow-hidden border border-indigo-100 hover:border-indigo-300 transition"
+                          >
+                            {meta?.id ? (
+                              <Link
+                                href={`/orders/${meta.id}`}
+                                title={tooltip}
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition"
+                              >
+                                {content}
+                              </Link>
+                            ) : (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-indigo-50 text-indigo-700" title={tooltip}>
+                                {content}
+                              </span>
+                            )}
                             {meta?.trackingUrl && (
                               <a
                                 href={meta.trackingUrl}
                                 target="_blank"
                                 rel="noreferrer"
-                                title={meta.trackingNumber ? `Sendung: ${meta.trackingNumber}` : "Sendung verfolgen"}
-                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-yellow-400 text-yellow-900 text-[10px] font-medium hover:bg-yellow-300 border border-yellow-500"
+                                onClick={(e) => e.stopPropagation()}
+                                title={meta.trackingNumber ? `Sendung verfolgen: ${meta.trackingNumber}` : "Sendung verfolgen"}
+                                className="inline-flex items-center px-1 bg-yellow-400 text-yellow-900 hover:bg-yellow-300 border-l border-yellow-500"
                               >
-                                <Truck size={9} />
-                                {meta.trackingNumber && <span className="font-mono">{meta.trackingNumber}</span>}
+                                <Truck size={10} />
                               </a>
                             )}
                           </span>

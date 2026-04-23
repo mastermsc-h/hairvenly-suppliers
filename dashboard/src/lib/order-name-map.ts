@@ -24,11 +24,13 @@ export interface OrderMeta {
 export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
   const supabase = await createClient();
 
+  // Include ALL orders (not just active) — sheet transit data may lag behind
+  // DB status changes. We want to link badges even for delivered/cancelled orders.
   const [{ data: orders }, { data: suppliers }] = await Promise.all([
     supabase
       .from("orders")
-      .select("id, label, supplier_id, order_date, tracking_number, tracking_url")
-      .not("status", "in", '("delivered","cancelled")'),
+      .select("id, label, supplier_id, order_date, tracking_number, tracking_url, status")
+      .order("order_date", { ascending: false }),
     supabase.from("suppliers").select("id, name, regions"),
   ]);
 
@@ -68,7 +70,8 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
     tracking_url: string | null;
   };
 
-  // Build keys: "family|YYYY-MM-DD" → OrderMeta (canonical date = ISO)
+  // Build keys: "family|YYYY-MM-DD" → OrderMeta (canonical date = ISO).
+  // Orders are sorted DESC, so first occurrence of a key wins (= newest order).
   for (const o of orders as Row[]) {
     const meta: OrderMeta = {
       id: o.id,
@@ -80,16 +83,19 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
     if (iso) {
       const families = supplierFamilies.get(o.supplier_id) ?? new Set<string>();
       for (const fam of families) {
-        map[`${fam}|${iso}`] = meta;
+        const kFull = `${fam}|${iso}`;
+        if (!map[kFull]) map[kFull] = meta;
         // Also short key (no year) for abbreviated sheet names
         const [, mm, dd] = iso.split("-");
-        map[`${fam}|${mm}-${dd}`] = meta;
+        const kShort = `${fam}|${mm}-${dd}`;
+        if (!map[kShort]) map[kShort] = meta;
       }
     }
 
     if (o.label) {
-      map[o.label] = meta;
-      map[normalize(o.label)] = meta;
+      if (!map[o.label]) map[o.label] = meta;
+      const nkey = normalize(o.label);
+      if (!map[nkey]) map[nkey] = meta;
     }
   }
 
@@ -124,15 +130,26 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
         tryYears.push(String(y), String(y - 1), String(y + 1));
       }
 
+      // Primary: DD.MM interpretation (German format, as in stock sheet)
       for (const y of tryYears) {
-        const iso = `${y}-${mmN}-${ddN}`;
-        const key = `${fam}|${iso}`;
+        const key = `${fam}|${y}-${mmN}-${ddN}`;
         if (target[key]) return target[key];
       }
 
-      // 3) No-year fallback key
+      // 3) No-year fallback key (primary interpretation)
       const noYear = `${fam}|${mmN}-${ddN}`;
       if (target[noYear]) return target[noYear];
+
+      // 4) Last resort: try swapped DD/MM (in case sheet uses MM.DD format somewhere)
+      //    Only valid if both values are <= 12
+      if (parseInt(ddN, 10) <= 12 && parseInt(mmN, 10) <= 12 && ddN !== mmN) {
+        for (const y of tryYears) {
+          const key = `${fam}|${y}-${ddN}-${mmN}`;
+          if (target[key]) return target[key];
+        }
+        const noYearSwap = `${fam}|${ddN}-${mmN}`;
+        if (target[noYearSwap]) return target[noYearSwap];
+      }
 
       return undefined;
     },
