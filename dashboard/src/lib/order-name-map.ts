@@ -104,6 +104,9 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
     get(target, prop: string) {
       if (typeof prop !== "string") return undefined;
 
+      // Normalize whitespace (collapse multiple spaces, trim)
+      prop = prop.replace(/\s+/g, " ").trim();
+
       // 1) Direct hit (label or normalized label)
       if (target[prop]) return target[prop];
       const n = normalize(prop);
@@ -153,18 +156,53 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
         if (target[noYearSwap]) return target[noYearSwap];
       }
 
-      // Last resort: match by date alone, ignoring family (in case supplier
+      // Last resort A: match by date alone, ignoring family (in case supplier
       // is named differently in DB vs sheet)
       for (const y of tryYears) {
-        // Scan all keys for any family with this date
         for (const k of Object.keys(target)) {
           if (k.endsWith(`|${y}-${mmN}-${ddN}`)) return target[k];
+          if (k.endsWith(`|${y}-${ddN}-${mmN}`)) return target[k];
         }
+      }
+
+      // Last resort B: ±1 day tolerance (timezone edge cases)
+      for (const y of tryYears) {
+        const variations = [
+          shiftDay(`${y}-${mmN}-${ddN}`, -1),
+          shiftDay(`${y}-${mmN}-${ddN}`, 1),
+        ];
+        for (const v of variations) {
+          const key = `${fam}|${v}`;
+          if (target[key]) return target[key];
+        }
+      }
+
+      // Last resort C: label contains the date string (any format)
+      const datePatterns = [
+        `${ddN}.${mmN}.${tryYears[0]}`,
+        `${ddN}-${mmN}-${tryYears[0]}`,
+        `${ddN}/${mmN}/${tryYears[0]}`,
+      ];
+      for (const k of Object.keys(target)) {
+        const lk = k.toLowerCase();
+        if (!lk.startsWith(fam)) continue;
+        if (datePatterns.some((p) => lk.includes(p))) return target[k];
       }
 
       return undefined;
     },
   }) as Record<string, OrderMeta>;
+}
+
+/** Shift ISO date by N days (positive or negative). Returns ISO string. */
+function shiftDay(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
 }
 
 /**
