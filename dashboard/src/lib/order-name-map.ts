@@ -14,11 +14,12 @@ export interface OrderMeta {
  *
  * Stock sheets use names like:
  *   - "Amanda 07.04.2026"
- *   - "China 10.03.2026"
+ *   - "Amanda 07-04-2026"
+ *   - "China 10/03/2026"
  *   - "Amanda 03.02" (abbreviated, no year — assume current year)
  *
- * Primary matching: by (supplier family + order_date) — not by label string.
- * This is robust regardless of how the user named the order in our DB.
+ * Primary matching: by (supplier family + canonical date YYYY-MM-DD).
+ * Separator-agnostic: accepts `.`, `-`, `/`, ` ` between date parts.
  */
 export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
   const supabase = await createClient();
@@ -34,7 +35,7 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
   const map: Record<string, OrderMeta> = {};
   if (!orders || orders.length === 0) return map;
 
-  // Supplier lookup: id → family keys (china|eyfel|ebru or amanda)
+  // Supplier lookup: id → family keys
   const supplierFamilies = new Map<string, Set<string>>();
   for (const s of suppliers ?? []) {
     const lname = (s.name ?? "").toLowerCase();
@@ -43,10 +44,9 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
     if (lname.includes("eyfel") || lname.includes("ebru")) {
       families.add("eyfel");
       families.add("ebru");
-      // Eyfel = China in stock sheet
-      families.add("china");
+      families.add("china"); // Eyfel = China in stock sheet
     }
-    // Region-based hints
+    if (lname.includes("aria")) families.add("aria");
     for (const r of s.regions ?? []) {
       const lr = String(r).toLowerCase();
       if (lr === "cn" || lr === "china") families.add("china");
@@ -59,7 +59,6 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
     supplierFamilies.set(s.id, families);
   }
 
-  // Build keys: "family|DD.MM.YYYY" → OrderMeta
   type Row = {
     id: string;
     label: string | null;
@@ -68,6 +67,8 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
     tracking_number: string | null;
     tracking_url: string | null;
   };
+
+  // Build keys: "family|YYYY-MM-DD" → OrderMeta (canonical date = ISO)
   for (const o of orders as Row[]) {
     const meta: OrderMeta = {
       id: o.id,
@@ -75,14 +76,14 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
       trackingUrl: o.tracking_url,
     };
 
-    if (o.order_date) {
-      const [yyyy, mm, dd] = o.order_date.split("-");
-      if (yyyy && mm && dd) {
-        const families = supplierFamilies.get(o.supplier_id) ?? new Set<string>();
-        for (const fam of families) {
-          map[`${fam}|${dd}.${mm}.${yyyy}`] = meta;
-          map[`${fam}|${dd}.${mm}`] = meta;
-        }
+    const iso = toIsoDate(o.order_date);
+    if (iso) {
+      const families = supplierFamilies.get(o.supplier_id) ?? new Set<string>();
+      for (const fam of families) {
+        map[`${fam}|${iso}`] = meta;
+        // Also short key (no year) for abbreviated sheet names
+        const [, mm, dd] = iso.split("-");
+        map[`${fam}|${mm}-${dd}`] = meta;
       }
     }
 
@@ -92,41 +93,77 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
     }
   }
 
-  // Proxy: parse "Supplier DD.MM.YYYY" from the sheet name and look up.
+  // Proxy: parse sheet name into (family + canonical date) and look up.
   return new Proxy(map, {
     get(target, prop: string) {
       if (typeof prop !== "string") return undefined;
 
+      // 1) Direct hit (label or normalized label)
       if (target[prop]) return target[prop];
       const n = normalize(prop);
       if (target[n]) return target[n];
 
-      const m = prop.match(/^([\wÀ-ÿ]+)\s+(\d{1,2})[.\-\/](\d{1,2})(?:[.\-\/](\d{2,4}))?/i);
+      // 2) Parse "Supplier DD<sep>MM<sep>YYYY" or "Supplier DD<sep>MM"
+      //    separators: . - / (any combination)
+      const m = prop.match(
+        /^([\wÀ-ÿ]+(?:\s+[\wÀ-ÿ()+-]+)*?)\s+(\d{1,2})[.\-\/\s](\d{1,2})(?:[.\-\/\s](\d{2,4}))?/i,
+      );
       if (!m) return undefined;
 
       const [, supplierRaw, dd, mm, yyyy] = m;
-      const fam = supplierRaw.toLowerCase();
+      const fam = supplierRaw.trim().split(/\s+/)[0].toLowerCase();
       const ddN = dd.padStart(2, "0");
       const mmN = mm.padStart(2, "0");
 
+      const tryYears: string[] = [];
       if (yyyy) {
-        const yyyyN = yyyy.length === 2 ? `20${yyyy}` : yyyy;
-        const key = `${fam}|${ddN}.${mmN}.${yyyyN}`;
+        tryYears.push(yyyy.length === 2 ? `20${yyyy}` : yyyy);
+      } else {
+        // No year — try current year ± 1 (orders might span year boundary)
+        const y = new Date().getFullYear();
+        tryYears.push(String(y), String(y - 1), String(y + 1));
+      }
+
+      for (const y of tryYears) {
+        const iso = `${y}-${mmN}-${ddN}`;
+        const key = `${fam}|${iso}`;
         if (target[key]) return target[key];
       }
 
-      const thisYear = new Date().getFullYear();
-      for (const y of [thisYear, thisYear - 1, thisYear + 1]) {
-        const key = `${fam}|${ddN}.${mmN}.${y}`;
-        if (target[key]) return target[key];
-      }
-
-      const noYear = `${fam}|${ddN}.${mmN}`;
+      // 3) No-year fallback key
+      const noYear = `${fam}|${mmN}-${ddN}`;
       if (target[noYear]) return target[noYear];
 
       return undefined;
     },
   }) as Record<string, OrderMeta>;
+}
+
+/**
+ * Convert any date string to ISO "YYYY-MM-DD".
+ * Accepts:
+ *   - "2026-03-03" (ISO from Postgres — passthrough)
+ *   - "03.03.2026" / "03-03-2026" / "03/03/2026" (DE format)
+ *   - "3.3.26" (short)
+ */
+function toIsoDate(input: string | null): string | null {
+  if (!input) return null;
+  const s = input.trim();
+
+  // Already ISO: "YYYY-MM-DD..."
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+
+  // DE format: "DD<sep>MM<sep>YYYY" or "DD<sep>MM<sep>YY"
+  const de = s.match(/^(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})/);
+  if (de) {
+    const dd = de[1].padStart(2, "0");
+    const mm = de[2].padStart(2, "0");
+    const yyyy = de[3].length === 2 ? `20${de[3]}` : de[3];
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  return null;
 }
 
 function normalize(s: string) {
