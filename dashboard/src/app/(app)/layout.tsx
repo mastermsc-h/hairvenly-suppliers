@@ -7,6 +7,7 @@ import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, 
 import SidebarGroup from "./sidebar-group";
 import LanguageSwitcher from "./language-switcher";
 import { MobileSidebarWrapper } from "./mobile-sidebar";
+import TopProgress from "./top-progress";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const profile = await requireProfile();
@@ -167,6 +168,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen flex bg-neutral-50">
+      <TopProgress />
       {/* Desktop sidebar — hidden on mobile */}
       <aside className="hidden md:flex w-60 border-r border-neutral-200 bg-white flex-col shrink-0">
         {sidebarContent}

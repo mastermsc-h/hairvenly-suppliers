@@ -30,3 +30,15 @@ input::placeholder,
 textarea::placeholder {
   color: #9ca3af;
 }
+
+/* Top progress bar animation (for page navigation) */
+@keyframes progress-advance {
+  0%   { width: 0%; }
+  30%  { width: 45%; }
+  60%  { width: 75%; }
+  85%  { width: 90%; }
+  100% { width: 95%; }
+}
+.progress-bar-active {
+  animation: progress-advance 8s cubic-bezier(0.1, 0.3, 0.2, 1) forwards;
+}
