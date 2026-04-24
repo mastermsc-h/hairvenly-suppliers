@@ -125,9 +125,39 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
       </header>
 
       <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <KpiCard label="Gesamt" value={data.length.toString()} icon={config.icon} color="rose" />
-        <KpiCard label="Usbekisch Wellig" value={data.filter((d) => d.sheetKey === "wellig").length.toString()} icon={config.icon} color="indigo" />
-        <KpiCard label="Russisch Glatt" value={data.filter((d) => d.sheetKey === "glatt").length.toString()} icon={config.icon} color="emerald" />
+        {(() => {
+          const welligItems = data.filter((d) => d.sheetKey === "wellig");
+          const glattItems = data.filter((d) => d.sheetKey === "glatt");
+          const totalKg = data.reduce((s, d) => s + d.unterwegsG, 0) / 1000;
+          const welligKg = welligItems.reduce((s, d) => s + d.unterwegsG, 0) / 1000;
+          const glattKg = glattItems.reduce((s, d) => s + d.unterwegsG, 0) / 1000;
+          const showKg = mode === "transit";
+          return (
+            <>
+              <KpiCard
+                label="Gesamt"
+                value={data.length.toString()}
+                sub={showKg ? `${totalKg.toFixed(2)} kg unterwegs` : undefined}
+                icon={config.icon}
+                color="rose"
+              />
+              <KpiCard
+                label="Usbekisch Wellig"
+                value={welligItems.length.toString()}
+                sub={showKg ? `${welligKg.toFixed(2)} kg unterwegs` : undefined}
+                icon={config.icon}
+                color="indigo"
+              />
+              <KpiCard
+                label="Russisch Glatt"
+                value={glattItems.length.toString()}
+                sub={showKg ? `${glattKg.toFixed(2)} kg unterwegs` : undefined}
+                icon={config.icon}
+                color="emerald"
+              />
+            </>
+          );
+        })()}
       </section>
 
       {/* Search + Quick Filters */}
@@ -460,7 +490,7 @@ function LagerBadge({ lagerG, stufe }: { lagerG: number; stufe?: "kritisch" | "n
   return <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${bg}`}>{lagerG}g</span>;
 }
 
-function KpiCard({ label, value, icon, color }: { label: string; value: string; icon: React.ReactNode; color: "indigo" | "rose" | "emerald" }) {
+function KpiCard({ label, value, sub, icon, color }: { label: string; value: string; sub?: string; icon: React.ReactNode; color: "indigo" | "rose" | "emerald" }) {
   const colors = { indigo: "bg-indigo-50 text-indigo-600", rose: "bg-rose-50 text-rose-600", emerald: "bg-emerald-50 text-emerald-600" };
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 p-5 shadow-sm">
@@ -469,6 +499,7 @@ function KpiCard({ label, value, icon, color }: { label: string; value: string; 
         <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${colors[color]}`}>{icon}</div>
       </div>
       <div className="mt-2 text-2xl font-semibold text-neutral-900">{value}</div>
+      {sub && <div className="text-[11px] text-neutral-500 mt-0.5">{sub}</div>}
     </div>
   );
 }
