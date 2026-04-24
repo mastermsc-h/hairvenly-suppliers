@@ -43,12 +43,14 @@ export function MobileDrawer({
       <aside className="absolute left-0 top-0 bottom-0 w-64 bg-white shadow-xl flex flex-col animate-in slide-in-from-left duration-200">
         <button
           onClick={onClose}
-          className="absolute top-3 right-3 w-8 h-8 rounded-lg flex items-center justify-center text-neutral-500 hover:bg-neutral-100"
+          className="absolute top-3 right-3 z-10 w-8 h-8 rounded-lg flex items-center justify-center text-neutral-500 hover:bg-neutral-100 bg-white/80 backdrop-blur"
           aria-label="Close"
         >
           <X size={18} />
         </button>
-        {children}
+        <div className="flex-1 overflow-y-auto overscroll-contain">
+          {children}
+        </div>
       </aside>
     </div>
   );
