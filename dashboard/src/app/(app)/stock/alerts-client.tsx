@@ -128,30 +128,35 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
         {(() => {
           const welligItems = data.filter((d) => d.sheetKey === "wellig");
           const glattItems = data.filter((d) => d.sheetKey === "glatt");
-          const totalKg = data.reduce((s, d) => s + d.unterwegsG, 0) / 1000;
-          const welligKg = welligItems.reduce((s, d) => s + d.unterwegsG, 0) / 1000;
-          const glattKg = glattItems.reduce((s, d) => s + d.unterwegsG, 0) / 1000;
-          const showKg = mode === "transit";
+          // Pick relevant kg metric per mode:
+          //   transit / zero  → kg unterwegs (für zero-stock: Nachschub)
+          //   critical        → kg Lager (aktueller Restbestand)
+          const useLagerKg = mode === "critical";
+          const valueFor = (d: AlertProduct) => (useLagerKg ? d.lagerG : d.unterwegsG);
+          const totalKg = data.reduce((s, d) => s + valueFor(d), 0) / 1000;
+          const welligKg = welligItems.reduce((s, d) => s + valueFor(d), 0) / 1000;
+          const glattKg = glattItems.reduce((s, d) => s + valueFor(d), 0) / 1000;
+          const kgLabel = useLagerKg ? "kg Lager" : "kg unterwegs";
           return (
             <>
               <KpiCard
                 label="Gesamt"
                 value={data.length.toString()}
-                sub={showKg ? `${totalKg.toFixed(2)} kg unterwegs` : undefined}
+                sub={`${totalKg.toFixed(2)} ${kgLabel}`}
                 icon={config.icon}
                 color="rose"
               />
               <KpiCard
                 label="Usbekisch Wellig"
                 value={welligItems.length.toString()}
-                sub={showKg ? `${welligKg.toFixed(2)} kg unterwegs` : undefined}
+                sub={`${welligKg.toFixed(2)} ${kgLabel}`}
                 icon={config.icon}
                 color="indigo"
               />
               <KpiCard
                 label="Russisch Glatt"
                 value={glattItems.length.toString()}
-                sub={showKg ? `${glattKg.toFixed(2)} kg unterwegs` : undefined}
+                sub={`${glattKg.toFixed(2)} ${kgLabel}`}
                 icon={config.icon}
                 color="emerald"
               />
