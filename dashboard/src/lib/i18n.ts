@@ -227,6 +227,7 @@ export const messages: Record<Locale, Record<string, string>> = {
 
     // Supplier nav
     "nav.suppliers": "Lieferanten",
+    "nav.settings": "Einstellungen",
     "nav.wizard": "Neue Bestellung",
     "nav.catalog": "Farbcodes",
     "nav.prices": "Preistabellen",
@@ -821,6 +822,7 @@ export const messages: Record<Locale, Record<string, string>> = {
 
     // Supplier nav
     "nav.suppliers": "Suppliers",
+    "nav.settings": "Settings",
     "nav.wizard": "New Order",
     "nav.catalog": "Color Codes",
     "nav.prices": "Price Tables",
@@ -1414,6 +1416,7 @@ export const messages: Record<Locale, Record<string, string>> = {
 
     // Supplier nav
     "nav.suppliers": "Tedarikçiler",
+    "nav.settings": "Ayarlar",
     "nav.wizard": "Yeni Sipariş",
     "nav.catalog": "Renk Kodları",
     "nav.prices": "Fiyat Tabloları",

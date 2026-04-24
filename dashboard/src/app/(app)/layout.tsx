@@ -3,7 +3,7 @@ import { requireProfile, hasFeature } from "@/lib/auth";
 import { signOut } from "@/lib/actions/auth";
 import { t, type Locale } from "@/lib/i18n";
 import type { FeatureKey } from "@/lib/types";
-import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText } from "lucide-react";
+import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings } from "lucide-react";
 import SidebarGroup from "./sidebar-group";
 import LanguageSwitcher from "./language-switcher";
 import { MobileSidebarWrapper } from "./mobile-sidebar";
@@ -21,14 +21,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <div className="text-xs text-neutral-500">Lieferanten-Dashboard</div>
       </div>
 
-      <nav className="flex-1 p-3 space-y-1 text-sm">
+      <nav className="p-3 space-y-1 text-sm">
         <NavLink href="/" icon={<LayoutDashboard size={16} />} label={t(locale, "nav.overview")} />
         <NavLink href="/orders" icon={<Package size={16} />} label={t(locale, "nav.orders")} />
         {profile.role !== "supplier" && (
           <>
-            {has("suppliers") && <NavLink href="/admin/suppliers" icon={<Building2 size={16} />} label={t(locale, "nav.suppliers")} />}
-            {has("users") && <NavLink href="/admin/users" icon={<Users size={16} />} label={t(locale, "nav.users")} />}
-
             <div className="border-t border-neutral-200 my-2" />
             {has("wizard") && <NavLink href="/orders/wizard" icon={<FilePlus size={16} />} label={t(locale, "nav.wizard")} />}
             {has("catalog") && <NavLink href="/catalog" icon={<Palette size={16} />} label={t(locale, "nav.catalog")} />}
@@ -122,6 +119,20 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                   href="/customs-ch"
                   icon={<FileText size={16} />}
                   label={t(locale, "nav.customs_ch")}
+                />
+              </>
+            )}
+
+            {(has("suppliers") || has("users")) && (
+              <>
+                <div className="border-t border-neutral-200 my-2" />
+                <SidebarGroup
+                  label={t(locale, "nav.settings")}
+                  icon={<Settings size={16} />}
+                  items={[
+                    ...(has("suppliers") ? [{ href: "/admin/suppliers", label: t(locale, "nav.suppliers") }] : []),
+                    ...(has("users") ? [{ href: "/admin/users", label: t(locale, "nav.users") }] : []),
+                  ]}
                 />
               </>
             )}
