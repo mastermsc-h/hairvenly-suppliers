@@ -471,26 +471,35 @@ export async function syncReturnsFromShopify(fromDate?: string, toDate?: string)
     // ignore - revenue is non-critical
   }
 
-  // Collection sales (more expensive — fetches line items) with same window
+  // Collection sales (more expensive — fetches line items) with same window.
+  // Upsert + cleanup pattern: if the fetch or chunk fails mid-flight, the
+  // previous good rows stay intact instead of being deleted.
   try {
+    const syncStartedAt = new Date().toISOString();
     const collRows = await fetchMonthlyCollectionSales(revenueFromMonth, revenueTo);
     if (collRows.length > 0) {
-      const uniqueMonths = Array.from(new Set(collRows.map((r) => r.month)));
-      await supabase.from("shopify_collection_sales").delete().in("month", uniqueMonths);
+      const payload = collRows.map((r) => ({
+        month: r.month,
+        collection_title: r.collection,
+        gross_revenue: r.revenue,
+        order_count: r.orderCount,
+        item_count: r.itemCount,
+        synced_at: syncStartedAt,
+      }));
       const chunkSize = 500;
-      for (let i = 0; i < collRows.length; i += chunkSize) {
-        const chunk = collRows.slice(i, i + chunkSize);
-        await supabase.from("shopify_collection_sales").insert(
-          chunk.map((r) => ({
-            month: r.month,
-            collection_title: r.collection,
-            gross_revenue: r.revenue,
-            order_count: r.orderCount,
-            item_count: r.itemCount,
-            synced_at: new Date().toISOString(),
-          })),
-        );
+      for (let i = 0; i < payload.length; i += chunkSize) {
+        const chunk = payload.slice(i, i + chunkSize);
+        const { error } = await supabase
+          .from("shopify_collection_sales")
+          .upsert(chunk, { onConflict: "month,collection_title" });
+        if (error) throw error;
       }
+      const uniqueMonths = Array.from(new Set(collRows.map((r) => r.month)));
+      await supabase
+        .from("shopify_collection_sales")
+        .delete()
+        .in("month", uniqueMonths)
+        .lt("synced_at", syncStartedAt);
     }
   } catch {
     // ignore - collection sales is non-critical
@@ -533,30 +542,46 @@ export async function syncShopifyCollectionSales(
   }
   const effectiveTo = toDate ?? new Date().toISOString().slice(0, 10);
 
+  const syncStartedAt = new Date().toISOString();
+
   try {
+    // 1. Fetch EVERYTHING into memory first. If the Shopify fetch fails
+    //    (timeout, rate limit) we bail out without touching existing rows.
     const rows = await fetchMonthlyCollectionSales(effectiveFrom, effectiveTo);
-
-    // Clear existing rows in the affected month range so stale entries don't linger
-    if (rows.length > 0) {
-      const uniqueMonths = Array.from(new Set(rows.map((r) => r.month)));
-      await supabase.from("shopify_collection_sales").delete().in("month", uniqueMonths);
+    if (rows.length === 0) {
+      return { synced: 0, fromDate: effectiveFrom, toDate: effectiveTo };
     }
 
-    // Batch insert
+    // 2. Upsert instead of delete+insert. Primary key (month, collection_title)
+    //    makes this safe to retry. If the insert chunk aborts mid-flight,
+    //    previously upserted rows remain current and the still-old rows keep
+    //    their older synced_at — no data loss.
+    const payload = rows.map((r) => ({
+      month: r.month,
+      collection_title: r.collection,
+      gross_revenue: r.revenue,
+      order_count: r.orderCount,
+      item_count: r.itemCount,
+      synced_at: syncStartedAt,
+    }));
     const chunkSize = 500;
-    for (let i = 0; i < rows.length; i += chunkSize) {
-      const chunk = rows.slice(i, i + chunkSize);
-      await supabase.from("shopify_collection_sales").insert(
-        chunk.map((r) => ({
-          month: r.month,
-          collection_title: r.collection,
-          gross_revenue: r.revenue,
-          order_count: r.orderCount,
-          item_count: r.itemCount,
-          synced_at: new Date().toISOString(),
-        })),
-      );
+    for (let i = 0; i < payload.length; i += chunkSize) {
+      const chunk = payload.slice(i, i + chunkSize);
+      const { error } = await supabase
+        .from("shopify_collection_sales")
+        .upsert(chunk, { onConflict: "month,collection_title" });
+      if (error) throw error;
     }
+
+    // 3. Only after ALL chunks succeeded, clean up stale rows (collections
+    //    that no longer appear in the period). These would have a synced_at
+    //    older than this run.
+    const uniqueMonths = Array.from(new Set(rows.map((r) => r.month)));
+    await supabase
+      .from("shopify_collection_sales")
+      .delete()
+      .in("month", uniqueMonths)
+      .lt("synced_at", syncStartedAt);
 
     revalidatePath("/returns");
     revalidatePath("/returns/analytics");
