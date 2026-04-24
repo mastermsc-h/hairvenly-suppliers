@@ -1,68 +1,33 @@
 import { requireProfile } from "@/lib/auth";
 import { t, type Locale } from "@/lib/i18n";
 import { readInventorySheet, readDashboardAlerts } from "@/lib/stock-sheets";
-import { loadCatalogLookup, extractShopifyColorKey } from "@/lib/catalog-lookup";
 import InventoryPageClient, { type InventoryWithTransit } from "../inventory-page";
 
-export const revalidate = 120;
+export const revalidate = 60;
 
 export default async function RussianStockPage() {
   const profile = await requireProfile();
   if (!profile.is_admin) return <div className="p-8 text-neutral-500">Nur für Admins.</div>;
   const locale = (profile.language ?? "de") as Locale;
 
-  const [inventoryResult, alerts, catalog] = await Promise.all([
+  const [inventoryResult, alerts] = await Promise.all([
     readInventorySheet("Russisch - GLATT"),
     readDashboardAlerts(),
-    loadCatalogLookup(),
   ]);
 
-  // Build transit lookup using Farbcode catalog as bridge:
-  // Dashboard unterwegs product (Shopify name) → extract color key → find Hairvenly name → match inventory
   const transitByShopifyKey = buildTransitLookup(
     alerts.unterwegs.filter((u) => u.sheetKey === "glatt"),
   );
 
-  // Also build a catalog bridge: Shopify color key → all known Shopify color keys for same Hairvenly color
-  // This handles cases where the same Hairvenly color has different Shopify product names
-  const catalogBridge = new Map<string, Set<string>>();
-  for (const entry of catalog.all) {
-    if (!entry.shopifyName) continue;
-    const shopifyKey = extractShopifyColorKey(entry.shopifyName);
-    const hKey = entry.hairvenlyName.toUpperCase();
-    if (!catalogBridge.has(hKey)) catalogBridge.set(hKey, new Set());
-    catalogBridge.get(hKey)!.add(shopifyKey);
-  }
-
   const data: InventoryWithTransit[] = inventoryResult.rows.map((row) => {
-    const invKey = extractShopifyColorKey(row.product);
+    // Match primarily by full product name (Shopify name — unique per product).
+    // For clip-ins: include variant (100g/150g/225g) since same name has 3 rows.
+    const isClipIn = row.collection.toUpperCase().includes("CLIP");
+    const fullKey = row.product.toUpperCase();
+    const variantKey = isClipIn && row.unitWeight > 0 ? `${fullKey}|${row.unitWeight}` : null;
 
-    // Direct match first
-    let entries = transitByShopifyKey.get(invKey);
-
-    // If no direct match, try via catalog bridge
-    if (!entries) {
-      // Find Hairvenly name for this inventory product's color key
-      const catalogEntries = catalog.byShopify.get(invKey);
-      if (catalogEntries) {
-        for (const ce of catalogEntries) {
-          const hKey = ce.hairvenlyName.toUpperCase();
-          // Find all Shopify keys for this Hairvenly color
-          const allKeys = catalogBridge.get(hKey);
-          if (allKeys) {
-            for (const altKey of allKeys) {
-              entries = transitByShopifyKey.get(altKey);
-              if (entries) break;
-            }
-          }
-          if (entries) break;
-
-          // Also try the Hairvenly name directly as a transit key
-          entries = transitByShopifyKey.get("#" + hKey);
-          if (entries) break;
-        }
-      }
-    }
+    let entries = variantKey ? transitByShopifyKey.get(variantKey) : undefined;
+    if (!entries) entries = transitByShopifyKey.get(fullKey);
 
     const matched = entries ?? [];
     return {
@@ -85,23 +50,26 @@ export default async function RussianStockPage() {
 
 /**
  * Build transit lookup from Dashboard alerts.
- * Key: Shopify color key (extracted from product name) → transit entries.
+ * Key: full product name (uppercase, variant suffix removed) → transit entries.
+ * For clip-ins: "PRODUCT|VARIANT" e.g. "#EBONY ...|100".
+ * This ensures each product matches ONLY its own transit orders
+ * (not accumulated across methods/lengths with same color code).
  */
-function buildTransitLookup(unterwegs: { product: string; perOrder: { name: string; ankunft: string; menge: number }[] }[]) {
+function buildTransitLookup(unterwegs: { product: string; variant: string | null; perOrder: { name: string; ankunft: string; menge: number }[] }[]) {
   const map = new Map<string, { label: string; eta: string | null; quantity: number }[]>();
   for (const u of unterwegs) {
-    // Try both the full product name and the extracted color key
-    const fullKey = u.product.toUpperCase();
-    const colorKey = extractShopifyColorKey(u.product);
-
     const entries = u.perOrder.map((o) => ({ label: o.name, eta: o.ankunft || null, quantity: o.menge }));
+    // Remove "[100g]" variant suffix from product name (Dashboard appends it for clip-ins)
+    const cleanProduct = u.product.replace(/\s*\[\d+g\]\s*$/, "").trim().toUpperCase();
 
-    if (!map.has(fullKey)) map.set(fullKey, []);
-    map.get(fullKey)!.push(...entries);
-
-    if (colorKey !== fullKey) {
-      if (!map.has(colorKey)) map.set(colorKey, []);
-      map.get(colorKey)!.push(...entries);
+    if (u.variant) {
+      // Clip-ins: variant-specific key
+      const vKey = `${cleanProduct}|${u.variant}`;
+      if (!map.has(vKey)) map.set(vKey, []);
+      map.get(vKey)!.push(...entries);
+    } else {
+      if (!map.has(cleanProduct)) map.set(cleanProduct, []);
+      map.get(cleanProduct)!.push(...entries);
     }
   }
   return map;

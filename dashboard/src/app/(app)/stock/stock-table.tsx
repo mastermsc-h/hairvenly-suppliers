@@ -130,13 +130,24 @@ function GroupRows<T extends Record<string, any>>({
   rowClassName?: (row: T) => string;
   alignClass: (a?: string) => string;
 }) {
+  // Sum "totalWeight" (or any numeric field named totalWeight) for group footer
+  const totalWeight = group.rows.reduce((s, r) => {
+    const v = (r as Record<string, unknown>).totalWeight;
+    return s + (typeof v === "number" ? v : 0);
+  }, 0);
+  const transitTotal = group.rows.reduce((s, r) => {
+    const v = (r as Record<string, unknown>).transitTotal;
+    return s + (typeof v === "number" ? v : 0);
+  }, 0);
+  const showFooter = groupBy && group.key && (totalWeight > 0 || transitTotal > 0);
+
   return (
     <>
       {groupBy && group.key && (
-        <tr className="bg-indigo-50 border-t-2 border-indigo-200">
-          <td colSpan={columns.length} className="px-2 py-2 font-bold text-indigo-800 text-xs uppercase tracking-wide">
+        <tr className="bg-indigo-600 text-white sticky top-0 z-10 shadow-md">
+          <td colSpan={columns.length} className="px-3 py-2.5 font-bold text-sm uppercase tracking-wide">
             {group.key}
-            <span className="ml-2 font-medium text-indigo-400">({group.rows.length})</span>
+            <span className="ml-2 font-semibold text-indigo-200">({group.rows.length})</span>
           </td>
         </tr>
       )}
@@ -155,6 +166,26 @@ function GroupRows<T extends Record<string, any>>({
           ))}
         </tr>
       ))}
+      {showFooter && (
+        <tr className="bg-indigo-50/60 border-t border-indigo-200 font-semibold text-indigo-900">
+          <td className="px-3 py-1.5 text-[10px] uppercase tracking-wide">Summe</td>
+          {columns.slice(1).map((col) => {
+            const isTotal = String(col.key) === "totalWeight";
+            const isTransit = String(col.key) === "transitTotal";
+            let content: React.ReactNode = "";
+            if (isTotal) {
+              content = <>{(totalWeight / 1000).toFixed(2)} kg</>;
+            } else if (isTransit && transitTotal > 0) {
+              content = <span className="text-cyan-700">{(transitTotal / 1000).toFixed(2)} kg</span>;
+            }
+            return (
+              <td key={String(col.key)} className={`px-2 py-1.5 ${alignClass(col.align)}`}>
+                {content}
+              </td>
+            );
+          })}
+        </tr>
+      )}
     </>
   );
 }
