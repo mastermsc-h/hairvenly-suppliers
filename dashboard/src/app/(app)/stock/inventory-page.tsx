@@ -2,7 +2,7 @@
 
 import { Package, AlertTriangle, Scale } from "lucide-react";
 import StockSearch from "./stock-search";
-import StockTable from "./stock-table";
+import StockTable, { slugify } from "./stock-table";
 import SyncBadge from "./sync-badge";
 import type { InventoryRow } from "@/lib/stock-sheets";
 
@@ -30,6 +30,28 @@ export default function InventoryPageClient({ data, title, subtitle, lastUpdated
   const totalProducts = data.length;
   const zeroCount = data.filter((r) => r.quantity === 0).length;
 
+  // Build category list for quick-jump nav: { name, slug, count, kg }
+  const categories = (() => {
+    const map = new Map<string, { rows: InventoryWithTransit[] }>();
+    for (const row of data) {
+      const key = row.collection;
+      if (!map.has(key)) map.set(key, { rows: [] });
+      map.get(key)!.rows.push(row);
+    }
+    return Array.from(map.entries()).map(([name, g]) => ({
+      name,
+      slug: slugify(name),
+      count: g.rows.length,
+      kg: g.rows.reduce((s, r) => s + r.totalWeight, 0) / 1000,
+    }));
+  })();
+
+  const scrollToCat = (slug: string) => {
+    if (typeof window === "undefined") return;
+    const el = document.getElementById(`cat-${slug}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return (
     <div className="p-4 md:p-8 space-y-6 max-w-7xl">
       <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -45,6 +67,26 @@ export default function InventoryPageClient({ data, title, subtitle, lastUpdated
         <KpiCard label="Produkte" value={totalProducts.toString()} icon={<Package size={18} />} color="emerald" />
         <KpiCard label="Nullbestand" value={zeroCount.toString()} icon={<AlertTriangle size={18} />} color="rose" />
       </section>
+
+      {/* Category quick-nav */}
+      {categories.length > 1 && (
+        <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-3">
+          <div className="text-[10px] uppercase text-neutral-400 font-medium mb-2 px-1">Kategorien</div>
+          <div className="flex flex-wrap gap-1.5">
+            {categories.map((c) => (
+              <button
+                key={c.slug}
+                onClick={() => scrollToCat(c.slug)}
+                className="px-2.5 py-1 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 hover:border-indigo-300 transition inline-flex items-center gap-1.5"
+                title={`Zu ${c.name} springen`}
+              >
+                <span>{c.name}</span>
+                <span className="text-indigo-400 font-normal">({c.count}) · {c.kg.toFixed(1)} kg</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-neutral-100">

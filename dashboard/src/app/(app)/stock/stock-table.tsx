@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
 interface Column<T> {
@@ -116,6 +116,82 @@ export default function StockTable<T extends Record<string, any>>({
   );
 }
 
+function sumField<T>(rows: T[], field: string): number {
+  return rows.reduce((s, r) => {
+    const v = (r as Record<string, unknown>)[field];
+    return s + (typeof v === "number" ? v : 0);
+  }, 0);
+}
+
+export function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function SumRow<T extends Record<string, any>>({
+  rows,
+  columns,
+  label,
+  alignClass,
+  variant,
+}: {
+  rows: T[];
+  columns: { key: keyof T; label: string; align?: string; className?: string }[];
+  label: string;
+  alignClass: (a?: string) => string;
+  variant: "sub" | "group";
+}) {
+  const totalWeight = sumField(rows, "totalWeight");
+  const transitTotal = sumField(rows, "transitTotal");
+  const bg = variant === "sub" ? "bg-neutral-100/70 border-t border-neutral-200" : "bg-indigo-50/60 border-t border-indigo-200";
+  const text = variant === "sub" ? "text-neutral-700" : "text-indigo-900";
+  return (
+    <tr className={`${bg} font-semibold ${text}`}>
+      <td className="px-3 py-1.5 text-[10px] uppercase tracking-wide">{label}</td>
+      {columns.slice(1).map((col) => {
+        const isTotal = String(col.key) === "totalWeight";
+        const isTransit = String(col.key) === "transitTotal";
+        let content: React.ReactNode = "";
+        if (isTotal) content = <>{(totalWeight / 1000).toFixed(2)} kg</>;
+        else if (isTransit && transitTotal > 0) content = <span className="text-cyan-700">{(transitTotal / 1000).toFixed(2)} kg</span>;
+        return (
+          <td key={String(col.key)} className={`px-2 py-1.5 ${alignClass(col.align)}`}>
+            {content}
+          </td>
+        );
+      })}
+    </tr>
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function Row<T extends Record<string, any>>({
+  row,
+  columns,
+  rowClassName,
+  alignClass,
+}: {
+  row: T;
+  columns: { key: keyof T; label: string; align?: string; render?: (value: T[keyof T], row: T) => React.ReactNode; className?: string }[];
+  rowClassName?: (row: T) => string;
+  alignClass: (a?: string) => string;
+}) {
+  return (
+    <tr className={`hover:bg-indigo-100 hover:shadow-[inset_3px_0_0_0_rgb(79_70_229)] transition ${rowClassName?.(row) ?? ""}`}>
+      {columns.map((col) => (
+        <td key={String(col.key)} className={`px-2 py-1 ${alignClass(col.align)} ${col.className ?? ""}`}>
+          {col.render ? col.render(row[col.key], row) : String(row[col.key] ?? "")}
+        </td>
+      ))}
+    </tr>
+  );
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function GroupRows<T extends Record<string, any>>({
   group,
@@ -130,61 +206,60 @@ function GroupRows<T extends Record<string, any>>({
   rowClassName?: (row: T) => string;
   alignClass: (a?: string) => string;
 }) {
-  // Sum "totalWeight" (or any numeric field named totalWeight) for group footer
-  const totalWeight = group.rows.reduce((s, r) => {
-    const v = (r as Record<string, unknown>).totalWeight;
-    return s + (typeof v === "number" ? v : 0);
-  }, 0);
-  const transitTotal = group.rows.reduce((s, r) => {
-    const v = (r as Record<string, unknown>).transitTotal;
-    return s + (typeof v === "number" ? v : 0);
-  }, 0);
+  const totalWeight = sumField(group.rows, "totalWeight");
+  const transitTotal = sumField(group.rows, "transitTotal");
   const showFooter = groupBy && group.key && (totalWeight > 0 || transitTotal > 0);
+
+  // Detect clip-in collection — sub-group by unitWeight (100/150/225)
+  const isClipIn = group.key.toUpperCase().includes("CLIP");
+  const hasVariants = isClipIn && group.rows.some((r) => {
+    const uw = (r as Record<string, unknown>).unitWeight;
+    return typeof uw === "number" && uw > 0;
+  });
+
+  let body: React.ReactNode;
+  if (hasVariants) {
+    const subGroups = new Map<number, T[]>();
+    for (const row of group.rows) {
+      const uw = (row as { unitWeight?: number }).unitWeight ?? 0;
+      if (!subGroups.has(uw)) subGroups.set(uw, []);
+      subGroups.get(uw)!.push(row);
+    }
+    const sorted = Array.from(subGroups.entries()).sort((a, b) => a[0] - b[0]);
+    body = sorted.map(([weight, rows]) => (
+      <React.Fragment key={weight}>
+        <tr className="bg-indigo-100/60 border-t border-indigo-200">
+          <td colSpan={columns.length} className="px-3 py-1.5 font-semibold text-[11px] uppercase tracking-wide text-indigo-700">
+            {weight}g Variante <span className="ml-1 font-normal text-indigo-400">({rows.length})</span>
+          </td>
+        </tr>
+        {rows.map((row, i) => (
+          <Row key={i} row={row} columns={columns} rowClassName={rowClassName} alignClass={alignClass} />
+        ))}
+        <SumRow rows={rows} columns={columns} label={`Summe ${weight}g`} alignClass={alignClass} variant="sub" />
+      </React.Fragment>
+    ));
+  } else {
+    body = group.rows.map((row, i) => (
+      <Row key={i} row={row} columns={columns} rowClassName={rowClassName} alignClass={alignClass} />
+    ));
+  }
+
+  const slug = slugify(group.key);
 
   return (
     <>
       {groupBy && group.key && (
-        <tr className="bg-indigo-600 text-white sticky top-0 z-10 shadow-md">
+        <tr id={`cat-${slug}`} className="bg-indigo-600 text-white sticky top-0 z-10 shadow-md scroll-mt-4">
           <td colSpan={columns.length} className="px-3 py-2.5 font-bold text-sm uppercase tracking-wide">
             {group.key}
             <span className="ml-2 font-semibold text-indigo-200">({group.rows.length})</span>
           </td>
         </tr>
       )}
-      {group.rows.map((row, i) => (
-        <tr
-          key={i}
-          className={`hover:bg-indigo-100 hover:shadow-[inset_3px_0_0_0_rgb(79_70_229)] transition ${rowClassName?.(row) ?? ""}`}
-        >
-          {columns.map((col) => (
-            <td
-              key={String(col.key)}
-              className={`px-2 py-1 ${alignClass(col.align)} ${col.className ?? ""}`}
-            >
-              {col.render ? col.render(row[col.key], row) : String(row[col.key] ?? "")}
-            </td>
-          ))}
-        </tr>
-      ))}
+      {body}
       {showFooter && (
-        <tr className="bg-indigo-50/60 border-t border-indigo-200 font-semibold text-indigo-900">
-          <td className="px-3 py-1.5 text-[10px] uppercase tracking-wide">Summe</td>
-          {columns.slice(1).map((col) => {
-            const isTotal = String(col.key) === "totalWeight";
-            const isTransit = String(col.key) === "transitTotal";
-            let content: React.ReactNode = "";
-            if (isTotal) {
-              content = <>{(totalWeight / 1000).toFixed(2)} kg</>;
-            } else if (isTransit && transitTotal > 0) {
-              content = <span className="text-cyan-700">{(transitTotal / 1000).toFixed(2)} kg</span>;
-            }
-            return (
-              <td key={String(col.key)} className={`px-2 py-1.5 ${alignClass(col.align)}`}>
-                {content}
-              </td>
-            );
-          })}
-        </tr>
+        <SumRow rows={group.rows} columns={columns} label="Gesamt" alignClass={alignClass} variant="group" />
       )}
     </>
   );
