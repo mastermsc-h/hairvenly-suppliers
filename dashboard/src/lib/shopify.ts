@@ -1138,9 +1138,11 @@ interface PackOrderNode {
   createdAt: string;
   displayFinancialStatus: string;
   displayFulfillmentStatus: string;
-  customer: { firstName: string | null; lastName: string | null; displayName: string | null; email: string | null } | null;
+  email: string | null;
   shippingAddress: {
     name: string | null;
+    firstName: string | null;
+    lastName: string | null;
     address1: string | null;
     zip: string | null;
     city: string | null;
@@ -1163,34 +1165,22 @@ interface PackOrderNode {
       };
     }[];
   };
-  fulfillmentOrders: {
-    edges: {
-      node: {
-        id: string;
-        status: string;
-        lineItems: {
-          edges: {
-            node: {
-              id: string;
-              lineItem: { id: string; title: string };
-              remainingQuantity: number;
-            };
-          }[];
-        };
-      };
-    }[];
-  };
   packQrMetafield: { value: string } | null;
 }
 
+// Hinweis: customer + fulfillmentOrders fields requirieren read_customers und
+// read_*_fulfillment_orders scopes. Ohne diese liefert die GraphQL-API ACCESS_DENIED
+// → Query failed komplett. Daher hier weggelassen.
+// Customer-Name ziehen wir aus shippingAddress.name als Fallback.
+// Auto-Fulfill in fulfillOrderInShopify holt fulfillmentOrders separat wenn nötig.
 const PACK_ORDER_FIELDS = `
   id
   name
   createdAt
   displayFinancialStatus
   displayFulfillmentStatus
-  customer { firstName lastName displayName email }
-  shippingAddress { name address1 zip city country }
+  email
+  shippingAddress { name firstName lastName address1 zip city country }
   lineItems(first: 50) {
     edges { node {
       title
@@ -1206,34 +1196,12 @@ const PACK_ORDER_FIELDS = `
       }
     } }
   }
-  fulfillmentOrders(first: 5) {
-    edges { node {
-      id
-      status
-      lineItems(first: 50) {
-        edges { node {
-          id
-          lineItem { id title }
-          remainingQuantity
-        } }
-      }
-    } }
-  }
   packQrMetafield: metafield(namespace: "custom", key: "pack_qr_svg") { value }
 `;
 
 function mapPackOrder(node: PackOrderNode): PackOrder {
   const numericId = node.id.split("/").pop() ?? node.id;
   const numberClean = node.name.replace(/^#/, "");
-
-  // Build a map from line-item-title -> fulfillmentOrderLineItem id, so we can later
-  // call fulfillmentCreate with the correct GIDs.
-  const folMap = new Map<string, string>(); // line title → fulfillmentOrderLineItem GID
-  for (const foEdge of node.fulfillmentOrders.edges) {
-    for (const liEdge of foEdge.node.lineItems.edges) {
-      folMap.set(liEdge.node.lineItem.title, liEdge.node.id);
-    }
-  }
 
   const lineItems: PackOrderLineItem[] = node.lineItems.edges.map((e) => {
     const v = e.node.variant;
@@ -1247,14 +1215,15 @@ function mapPackOrder(node: PackOrderNode): PackOrder {
       variantId: v?.id ?? null,
       inventoryItemId: v?.inventoryItem?.id ?? null,
       imageUrl,
-      fulfillmentOrderLineItemId: folMap.get(e.node.title) ?? null,
+      fulfillmentOrderLineItemId: null, // wird separat geholt für Auto-Fulfill
     };
   });
 
-  const customer = node.customer;
+  // Customer-Name aus shippingAddress (read_customers scope nicht verfügbar)
+  const sa = node.shippingAddress;
   const customerName =
-    customer?.displayName ??
-    [customer?.firstName, customer?.lastName].filter(Boolean).join(" ").trim() ??
+    sa?.name ??
+    [sa?.firstName, sa?.lastName].filter(Boolean).join(" ").trim() ??
     null;
 
   return {
@@ -1266,14 +1235,19 @@ function mapPackOrder(node: PackOrderNode): PackOrder {
     displayFinancialStatus: node.displayFinancialStatus,
     displayFulfillmentStatus: node.displayFulfillmentStatus,
     customerName: customerName || null,
-    customerEmail: customer?.email ?? null,
-    shippingAddress: node.shippingAddress,
+    customerEmail: node.email ?? null,
+    shippingAddress: node.shippingAddress
+      ? {
+          name: node.shippingAddress.name,
+          address1: node.shippingAddress.address1,
+          zip: node.shippingAddress.zip,
+          city: node.shippingAddress.city,
+          country: node.shippingAddress.country,
+        }
+      : null,
     lineItems,
     totalQuantity: lineItems.reduce((s, li) => s + li.quantity, 0),
-    fulfillmentOrders: node.fulfillmentOrders.edges.map((e) => ({
-      id: e.node.id,
-      status: e.node.status,
-    })),
+    fulfillmentOrders: [], // werden separat geholt im Auto-Fulfill Workflow
     hasPackQr: !!(node.packQrMetafield && node.packQrMetafield.value && node.packQrMetafield.value.length > 0),
   };
 }
