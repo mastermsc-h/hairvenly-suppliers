@@ -42,6 +42,31 @@
   .method-clipin   { background: #7c3aed; }
   .method-ponytail { background: #be185d; }
 
+  .tag-length {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 1.2px;
+    color: #fff;
+    background: #475569;
+    margin-bottom: 4px;
+    margin-left: 4px;
+  }
+  .tag-origin {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 1.2px;
+    color: #fff;
+    background: #0f172a;
+    margin-bottom: 4px;
+    margin-left: 4px;
+  }
+
   .addresses { display: flex; gap: 60px; margin: 24px 0; }
   .address-block { flex: 1; }
   .address-label { font-size: 11px; letter-spacing: 1px; font-weight: 700; color: #555; }
@@ -132,6 +157,21 @@
         {% assign method_class = "method-ponytail" %}
       {% endif %}
 
+      {% assign length_label = "" %}
+      {% if upper_title contains "45CM" %}{% assign length_label = "45cm" %}
+      {% elsif upper_title contains "55CM" %}{% assign length_label = "55cm" %}
+      {% elsif upper_title contains "65CM" %}{% assign length_label = "65cm" %}
+      {% elsif upper_title contains "75CM" %}{% assign length_label = "75cm" %}
+      {% elsif upper_title contains "85CM" %}{% assign length_label = "85cm" %}
+      {% endif %}
+
+      {% assign origin_label = "" %}
+      {% if upper_title contains "RU GLATT" or upper_title contains "RUSSISCH" %}
+        {% assign origin_label = "RU" %}
+      {% elsif upper_title contains "US WELLIG" or upper_title contains "USBEKISCH" %}
+        {% assign origin_label = "US" %}
+      {% endif %}
+
       <tr>
         <td class="col-image">
           {% if line_item.image %}
@@ -139,9 +179,11 @@
           {% endif %}
         </td>
         <td>
-          {% if method_label != "" %}
-            <div><span class="method-badge {{ method_class }}">{{ method_label }}</span></div>
-          {% endif %}
+          <div>
+            {% if method_label != "" %}<span class="method-badge {{ method_class }}">{{ method_label }}</span>{% endif %}
+            {% if length_label != "" %}<span class="tag-length">{{ length_label }}</span>{% endif %}
+            {% if origin_label != "" %}<span class="tag-origin">{{ origin_label }}</span>{% endif %}
+          </div>
           <div class="item-title">{{ line_item.title }}</div>
           {% if line_item.variant.title != blank and line_item.variant.title != "Default Title" %}
             <div class="item-variant">{{ line_item.variant.title }}</div>
