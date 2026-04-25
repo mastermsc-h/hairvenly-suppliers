@@ -1064,6 +1064,38 @@ export async function fetchMonthlyRevenue(
     .sort((a, b) => a.month.localeCompare(b.month));
 }
 
+// ── Order Metafield Setter (für Pack-QR) ──────────────────────
+
+/**
+ * Setzt ein Metafield auf einer Order. Owner-ID = Order-GID.
+ * Wird genutzt um QR-SVG inline im Lieferschein-Liquid einzubinden.
+ */
+export async function setOrderMetafield(
+  orderGid: string,
+  namespace: string,
+  key: string,
+  type: string,
+  value: string,
+): Promise<void> {
+  const query = `
+    mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        metafields { id namespace key }
+        userErrors { field message }
+      }
+    }
+  `;
+  const res = await shopifyGraphQL<{
+    metafieldsSet: { userErrors: { field: string[]; message: string }[] };
+  }>(query, {
+    metafields: [{ ownerId: orderGid, namespace, key, type, value }],
+  });
+  const errors = res.data?.metafieldsSet.userErrors ?? [];
+  if (errors.length > 0) {
+    throw new Error(`Order metafield set failed: ${errors.map((e) => e.message).join(", ")}`);
+  }
+}
+
 // ── Pack-Verifikations-System: Order-Fetching für /pack ───────
 
 export interface PackOrderLineItem {
@@ -1097,6 +1129,7 @@ export interface PackOrder {
   lineItems: PackOrderLineItem[];
   totalQuantity: number;
   fulfillmentOrders: { id: string; status: string }[]; // für Auto-Fulfill
+  hasPackQr: boolean;             // ob custom.pack_qr_svg metafield bereits gesetzt ist
 }
 
 interface PackOrderNode {
@@ -1147,6 +1180,7 @@ interface PackOrderNode {
       };
     }[];
   };
+  packQrMetafield: { value: string } | null;
 }
 
 const PACK_ORDER_FIELDS = `
@@ -1185,6 +1219,7 @@ const PACK_ORDER_FIELDS = `
       }
     } }
   }
+  packQrMetafield: metafield(namespace: "custom", key: "pack_qr_svg") { value }
 `;
 
 function mapPackOrder(node: PackOrderNode): PackOrder {
@@ -1239,6 +1274,7 @@ function mapPackOrder(node: PackOrderNode): PackOrder {
       id: e.node.id,
       status: e.node.status,
     })),
+    hasPackQr: !!(node.packQrMetafield && node.packQrMetafield.value && node.packQrMetafield.value.length > 0),
   };
 }
 

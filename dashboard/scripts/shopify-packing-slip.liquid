@@ -12,9 +12,11 @@
   WICHTIG: Variable `pack_base_url` weiter unten ggf. anpassen.
 {% endcomment %}
 
-{% assign pack_base_url = "https://suppliers.hairvenly.de" %}
 {% assign order_number_clean = order.name | remove: "#" %}
-{% assign qr_image_url = pack_base_url | append: "/api/qr/" | append: order_number_clean | append: ".svg" %}
+{% comment %}
+  Pack-QR wird vom Dashboard erzeugt und als Order-Metafield (custom.pack_qr_svg)
+  abgelegt. Inline-SVG umgeht Shopifys html2pdf-Whitelist (lädt nur cdn.shopify.com).
+{% endcomment %}
 
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1f1f1f; }
@@ -24,6 +26,7 @@
   .header-right { text-align: right; }
   .pack-qr { display: block; width: 90px; height: 90px; margin-left: auto; }
   .pack-qr-label { font-size: 8px; color: #999; text-align: center; margin-top: 2px; letter-spacing: 1px; }
+  .header-right svg { width: 90px !important; height: 90px !important; display: block; margin-left: auto; }
   .order-number { font-size: 14px; font-weight: 600; margin-top: 8px; }
 
   .method-badge {
@@ -90,8 +93,16 @@
     <h1>{{ shop.name | upcase }}</h1>
   </div>
   <div class="header-right">
-    <img src="{{ qr_image_url }}" width="90" height="90" alt="" style="display:block;margin-left:auto;" />
-    <div class="pack-qr-label">{{ order.name }}</div>
+    {% if order.metafields.custom.pack_qr_svg != blank %}
+      <div style="display:inline-block;width:90px;height:90px;">
+        {{ order.metafields.custom.pack_qr_svg }}
+      </div>
+      <div class="pack-qr-label">{{ order.name }}</div>
+    {% else %}
+      <div class="pack-qr-label" style="font-size:11px;color:#999;margin-top:6px;">
+        QR wird beim n&auml;chsten Dashboard-Aufruf generiert
+      </div>
+    {% endif %}
     <div class="order-number">Bestellung {{ order.name }}</div>
     <div style="font-size: 12px; color: #555;">{{ order.created_at | date: "%d. %B %Y" }}</div>
   </div>

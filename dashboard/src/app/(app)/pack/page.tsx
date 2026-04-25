@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { t, type Locale } from "@/lib/i18n";
 import { fetchUnfulfilledPaidOrders, type PackOrder } from "@/lib/shopify";
 import { createClient } from "@/lib/supabase/server";
+import { ensureOrderPackQr } from "@/lib/actions/pack";
 import PackList from "./pack-list";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +26,15 @@ export default async function PackPage() {
     orders = await fetchUnfulfilledPaidOrders(100);
   } catch (e) {
     errorMessage = e instanceof Error ? e.message : String(e);
+  }
+
+  // Für jede Order ohne Pack-QR-Metafield: parallel generieren + setzen.
+  // SVG wird inline ins Lieferschein-Liquid gerendert (kein externer Request).
+  const ordersWithoutQr = orders.filter((o) => !o.hasPackQr);
+  if (ordersWithoutQr.length > 0) {
+    await Promise.allSettled(
+      ordersWithoutQr.map((o) => ensureOrderPackQr(o.name, o.id)),
+    );
   }
 
   // Pack-Status aus Supabase laden und mit Shopify-Orders mergen

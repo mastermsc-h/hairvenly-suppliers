@@ -1,13 +1,45 @@
 "use server";
 
+import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import {
   fetchOrderForPack,
   fulfillOrderInShopify,
+  setOrderMetafield,
   type PackOrderLineItem,
 } from "@/lib/shopify";
 import { revalidatePath } from "next/cache";
+
+const PACK_BASE_URL = "https://suppliers.hairvenly.de";
+
+/**
+ * Generiert ein QR-SVG für die Pack-Modus-URL der Order und speichert es als
+ * Order-Metafield "custom.pack_qr_svg". Wird vom Lieferschein-Liquid inline
+ * gerendert (kein externer Image-Request -> umgeht html2pdf-whitelist).
+ *
+ * Idempotent: kann mehrfach aufgerufen werden, setzt einfach den Wert neu.
+ */
+export async function ensureOrderPackQr(
+  orderName: string,
+  orderGid: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const cleanName = orderName.replace(/^#/, "");
+    const packUrl = `${PACK_BASE_URL}/pack/${cleanName}`;
+    const svg = await QRCode.toString(packUrl, {
+      type: "svg",
+      margin: 2,
+      width: 180,
+      errorCorrectionLevel: "M",
+      color: { dark: "#000000", light: "#FFFFFF" },
+    });
+    await setOrderMetafield(orderGid, "custom", "pack_qr_svg", "multi_line_text_field", svg);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
 
 interface ExpectedItem {
   variantId: string | null;
