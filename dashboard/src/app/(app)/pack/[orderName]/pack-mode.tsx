@@ -105,19 +105,19 @@ export default function PackMode({
   const [isPending, startTransition] = useTransition();
   const [fulfillError, setFulfillError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  // Pro Item: Manual-Confirm Form aufgeklappt + 4 Checkbox-States
-  const [manualForms, setManualForms] = useState<Record<number, { open: boolean; checks: [boolean, boolean, boolean, boolean] }>>({});
+  // Pro Item: Manual-Confirm Form aufgeklappt + Checkbox-States (5: Methode/Länge/Herkunft/Farbe/Menge)
+  const [manualForms, setManualForms] = useState<Record<number, { open: boolean; checks: boolean[] }>>({});
 
   function setManualOpen(idx: number, open: boolean) {
     setManualForms((prev) => ({
       ...prev,
-      [idx]: { open, checks: prev[idx]?.checks ?? [false, false, false, false] },
+      [idx]: { open, checks: prev[idx]?.checks ?? [false, false, false, false, false] },
     }));
   }
   function toggleManualCheck(idx: number, checkIdx: number) {
     setManualForms((prev) => {
-      const cur = prev[idx] ?? { open: true, checks: [false, false, false, false] as [boolean, boolean, boolean, boolean] };
-      const newChecks = [...cur.checks] as [boolean, boolean, boolean, boolean];
+      const cur = prev[idx] ?? { open: true, checks: [false, false, false, false, false] };
+      const newChecks = [...cur.checks];
       newChecks[checkIdx] = !newChecks[checkIdx];
       return { ...prev, [idx]: { ...cur, checks: newChecks } };
     });
@@ -156,7 +156,7 @@ export default function PackMode({
             // Form schließen + checks zurücksetzen
             setManualForms((prev) => ({
               ...prev,
-              [idx]: { open: false, checks: [false, false, false, false] },
+              [idx]: { open: false, checks: [false, false, false, false, false] },
             }));
           } else {
             playBeep(false);
@@ -417,36 +417,46 @@ export default function PackMode({
                               <X size={14} />
                             </button>
                           </div>
-                          <div className="space-y-1.5 text-xs">
-                            {[
+                          {(() => {
+                            const rows = [
                               { label: "Methode", value: attrs.method.label || "korrekt" },
                               { label: "Länge", value: attrs.length || "korrekt" },
                               { label: "Herkunft", value: attrs.origin || "korrekt" },
                               { label: "Farbe", value: attrs.color || "korrekt" },
-                            ].map((row, ci) => (
-                              <label key={ci} className="flex items-center gap-2 cursor-pointer text-amber-900">
-                                <input
-                                  type="checkbox"
-                                  checked={manualForms[idx]?.checks[ci] ?? false}
-                                  onChange={() => toggleManualCheck(idx, ci)}
-                                  className="w-4 h-4 accent-amber-600"
-                                />
-                                <span className="font-medium">{row.label}:</span>
-                                <span className="font-bold">{row.value}</span>
-                              </label>
-                            ))}
-                          </div>
-                          <button
-                            onClick={() => handleManualConfirm(idx)}
-                            disabled={
-                              isPending ||
-                              !(manualForms[idx]?.checks ?? []).every(Boolean)
-                            }
-                            className="mt-3 w-full flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            <Check size={14} />
-                            Manuell bestätigen
-                          </button>
+                              ...(it.variantTitle && it.variantTitle !== "Default Title"
+                                ? [{ label: "Variante", value: it.variantTitle }]
+                                : []),
+                              { label: "Menge", value: `${it.quantity}×` },
+                            ];
+                            const checks = manualForms[idx]?.checks ?? [];
+                            const allChecked = rows.every((_, ci) => checks[ci] === true);
+                            return (
+                              <>
+                                <div className="space-y-1.5 text-xs">
+                                  {rows.map((row, ci) => (
+                                    <label key={ci} className="flex items-center gap-2 cursor-pointer text-amber-900">
+                                      <input
+                                        type="checkbox"
+                                        checked={checks[ci] ?? false}
+                                        onChange={() => toggleManualCheck(idx, ci)}
+                                        className="w-4 h-4 accent-amber-600"
+                                      />
+                                      <span className="font-medium">{row.label}:</span>
+                                      <span className="font-bold">{row.value}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                                <button
+                                  onClick={() => handleManualConfirm(idx)}
+                                  disabled={isPending || !allChecked}
+                                  className="mt-3 w-full flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                  <Check size={14} />
+                                  Manuell bestätigen
+                                </button>
+                              </>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>

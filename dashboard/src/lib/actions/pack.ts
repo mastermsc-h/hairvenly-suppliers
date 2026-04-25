@@ -284,27 +284,40 @@ export async function recordManualConfirm(
   }
 
   const alreadyConfirmed = scannedCounts[counterKey] ?? 0;
+  const remaining = item.quantity - alreadyConfirmed;
   let status: "match" | "overflow";
-  if (alreadyConfirmed >= item.quantity) {
-    status = "overflow";
-  } else {
-    status = "match";
-    scannedCounts[counterKey] = alreadyConfirmed + 1;
-  }
 
   const variantNumeric = item.variantId
     ? parseInt(item.variantId.split("/").pop() ?? "", 10)
     : null;
 
-  await supabase.from("pack_scans").insert({
-    session_id: sessionId,
-    scanned_barcode: counterKey,
-    matched_variant_id: variantNumeric && Number.isFinite(variantNumeric) ? variantNumeric : null,
-    matched_title: item.title,
-    status,
-    scan_method: "manual",
-    scanned_by: profile.id,
-  });
+  if (remaining <= 0) {
+    // schon vollständig — eine overflow-row loggen
+    status = "overflow";
+    await supabase.from("pack_scans").insert({
+      session_id: sessionId,
+      scanned_barcode: counterKey,
+      matched_variant_id: variantNumeric && Number.isFinite(variantNumeric) ? variantNumeric : null,
+      matched_title: item.title,
+      status,
+      scan_method: "manual",
+      scanned_by: profile.id,
+    });
+  } else {
+    // alle verbleibenden Mengen auf einmal als manuell bestätigt eintragen
+    status = "match";
+    const rows = Array.from({ length: remaining }, () => ({
+      session_id: sessionId,
+      scanned_barcode: counterKey,
+      matched_variant_id: variantNumeric && Number.isFinite(variantNumeric) ? variantNumeric : null,
+      matched_title: item.title,
+      status: "match" as const,
+      scan_method: "manual" as const,
+      scanned_by: profile.id,
+    }));
+    await supabase.from("pack_scans").insert(rows);
+    scannedCounts[counterKey] = item.quantity;
+  }
 
   if (session.status === "open") {
     await supabase
