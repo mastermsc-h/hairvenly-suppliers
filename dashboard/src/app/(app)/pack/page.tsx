@@ -1,10 +1,10 @@
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { t, type Locale } from "@/lib/i18n";
-import { fetchUnfulfilledPaidOrders, fetchRecentPaidOrders, type PackOrder } from "@/lib/shopify";
+import { fetchUnfulfilledPaidOrders, type PackOrder } from "@/lib/shopify";
 import { createClient } from "@/lib/supabase/server";
-import { ensureOrderPackQr } from "@/lib/actions/pack";
 import PackList from "./pack-list";
+import BackfillButton from "./backfill-button";
 
 export const dynamic = "force-dynamic";
 
@@ -22,23 +22,10 @@ export default async function PackPage() {
 
   let orders: PackOrder[] = [];
   let errorMessage: string | null = null;
+  let fetchedCount = 0;
   try {
-    // Pack-Liste: nur unfulfilled+paid (FIFO)
-    // QR-Backfill: alle paid orders der letzten 30 Tage (auch bereits versendete,
-    // damit auch nachträgliche Lieferschein-Drucke einen QR haben).
-    const [unfulfilled, recentPaid] = await Promise.all([
-      fetchUnfulfilledPaidOrders(100),
-      fetchRecentPaidOrders(30, 250).catch(() => [] as PackOrder[]),
-    ]);
-    orders = unfulfilled;
-
-    // QR für ALLE recent paid orders ohne metafield generieren (parallel)
-    const ordersWithoutQr = recentPaid.filter((o) => !o.hasPackQr);
-    if (ordersWithoutQr.length > 0) {
-      await Promise.allSettled(
-        ordersWithoutQr.map((o) => ensureOrderPackQr(o.name, o.id)),
-      );
-    }
+    orders = await fetchUnfulfilledPaidOrders(100);
+    fetchedCount = orders.length;
   } catch (e) {
     errorMessage = e instanceof Error ? e.message : String(e);
   }
@@ -78,18 +65,29 @@ export default async function PackPage() {
     };
   });
 
+  // Anzahl orders ohne QR (von der aktuellen Liste) — Hinweis für Backfill-Button
+  const ordersWithoutQrInList = orders.filter((o) => !o.hasPackQr).length;
+
   return (
     <div className="p-4 md:p-8 space-y-6 max-w-7xl">
-      <header>
-        <h1 className="text-2xl font-semibold text-neutral-900">
-          {t(locale, "shipping.title")}
-        </h1>
-        <p className="text-sm text-neutral-500 mt-1">{t(locale, "shipping.subtitle")}</p>
+      <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-neutral-900">
+            {t(locale, "shipping.title")}
+          </h1>
+          <p className="text-sm text-neutral-500 mt-1">{t(locale, "shipping.subtitle")}</p>
+          <p className="text-xs text-neutral-400 mt-1">
+            Shopify-Fetch: <strong>{fetchedCount}</strong> Bestellungen geladen
+            {ordersWithoutQrInList > 0 ? ` · ${ordersWithoutQrInList} ohne QR-Metafield` : " · alle haben QR"}
+          </p>
+        </div>
+        <BackfillButton />
       </header>
 
       {errorMessage ? (
         <div className="bg-red-50 border border-red-200 text-red-800 rounded-2xl p-4 text-sm">
-          {errorMessage}
+          <div className="font-medium mb-1">Fehler beim Laden:</div>
+          <pre className="whitespace-pre-wrap">{errorMessage}</pre>
         </div>
       ) : (
         <PackList orders={ordersWithStatus} locale={locale} />
