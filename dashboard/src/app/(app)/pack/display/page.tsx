@@ -48,7 +48,7 @@ export default async function PackDisplayPage() {
                 id: session.id,
                 orderName: session.order_name,
                 status: session.status,
-                expectedItems: (session.expected_items as Array<{ barcode: string | null; title: string; quantity: number; imageUrl: string | null }>) ?? [],
+                expectedItems: (session.expected_items as Array<{ barcode: string | null; title: string; variantTitle: string | null; quantity: number; imageUrl: string | null }>) ?? [],
                 packedBy,
                 startedAt: session.started_at,
                 finishedAt: session.finished_at,

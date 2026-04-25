@@ -10,6 +10,7 @@ interface ExpectedItem {
   variantId: string | null;
   barcode: string | null;
   title: string;
+  variantTitle: string | null;
   quantity: number;
   imageUrl: string | null;
 }
@@ -365,6 +366,11 @@ export default function PackMode({
                       </div>
 
                       <div className="text-sm text-neutral-700 line-clamp-2">{it.title}</div>
+                      {it.variantTitle && it.variantTitle !== "Default Title" && (
+                        <div className="text-sm font-semibold text-neutral-900 mt-1">
+                          Variante: <span className="text-emerald-700">{it.variantTitle}</span>
+                        </div>
+                      )}
                       {it.barcode ? (
                         <div className="text-xs text-neutral-500 font-mono mt-1">
                           EAN: {it.barcode}
@@ -391,7 +397,7 @@ export default function PackMode({
                             onClick={() => setManualOpen(idx, true)}
                             className="text-[11px] text-amber-700 hover:text-amber-900 hover:underline"
                           >
-                            QR nicht vorhanden
+                            QR nicht vorhanden?
                           </button>
                         )}
                       </div>

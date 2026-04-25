@@ -14,6 +14,7 @@ interface ExpectedItem {
   variantId: string | null;
   barcode: string | null;
   title: string;
+  variantTitle: string | null;
   quantity: number;
   imageUrl: string | null;
 }

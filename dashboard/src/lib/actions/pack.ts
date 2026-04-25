@@ -45,6 +45,7 @@ interface ExpectedItem {
   variantId: string | null;
   barcode: string | null;
   title: string;
+  variantTitle: string | null;
   quantity: number;
   imageUrl: string | null;
 }
@@ -54,6 +55,7 @@ function toExpected(items: PackOrderLineItem[]): ExpectedItem[] {
     variantId: li.variantId,
     barcode: li.barcode,
     title: li.title,
+    variantTitle: li.variantTitle,
     quantity: li.quantity,
     imageUrl: li.imageUrl,
   }));

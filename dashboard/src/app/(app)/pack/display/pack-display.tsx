@@ -8,6 +8,7 @@ import { CheckCircle2, ScanLine, Send, Package2 } from "lucide-react";
 interface ExpectedItem {
   barcode: string | null;
   title: string;
+  variantTitle: string | null;
   quantity: number;
   imageUrl: string | null;
 }
@@ -243,6 +244,11 @@ export default function PackDisplay({
                         )}
                       </div>
                       <div className="text-base text-neutral-300 mt-1 line-clamp-2">{it.title}</div>
+                      {it.variantTitle && it.variantTitle !== "Default Title" && (
+                        <div className="text-base font-bold text-emerald-300 mt-1">
+                          Variante: {it.variantTitle}
+                        </div>
+                      )}
                     </div>
                     <div className={`text-5xl font-black shrink-0 ${done ? "text-emerald-400" : "text-neutral-500"}`}>
                       {got}/{it.quantity}
