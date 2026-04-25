@@ -79,11 +79,18 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
   // Existierende Session?
   const { data: existing } = await supabase
     .from("pack_sessions")
-    .select("id, status, expected_items, shopify_order_id")
+    .select("id, status, expected_items, shopify_order_id, packed_by")
     .eq("order_name", cleanName)
     .maybeSingle();
 
   if (existing) {
+    // Falls noch kein Bearbeiter zugeordnet, aktuellen User setzen
+    if (!existing.packed_by) {
+      await supabase
+        .from("pack_sessions")
+        .update({ packed_by: profile.id })
+        .eq("id", existing.id);
+    }
     return {
       sessionId: existing.id,
       status: existing.status,
@@ -107,6 +114,7 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
       shopify_order_id: Number.isFinite(numericId) ? numericId : null,
       status: "open",
       expected_items: expected,
+      packed_by: profile.id, // Bearbeiter sofort setzen
     })
     .select("id, status")
     .single();
@@ -338,6 +346,27 @@ export async function completePackSession(sessionId: string): Promise<{
 
   revalidatePath("/pack");
   revalidatePath(`/pack/${session.order_name.replace(/^#/, "")}`);
+  return { success: true };
+}
+
+/**
+ * Notizen einer Pack-Session speichern (z.B. "Karton beschädigt", Reklamations-Hinweis).
+ */
+export async function savePackSessionNotes(
+  sessionId: string,
+  notes: string,
+): Promise<{ success: boolean; error?: string }> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) {
+    return { success: false, error: "Forbidden" };
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("pack_sessions")
+    .update({ notes: notes.trim() || null })
+    .eq("id", sessionId);
+  if (error) return { success: false, error: error.message };
+  revalidatePath(`/pack/archive`);
   return { success: true };
 }
 

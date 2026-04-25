@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Search, Package2, ArrowRight, RefreshCw } from "lucide-react";
+import { Search, Package2, ArrowRight, RefreshCw, ExternalLink } from "lucide-react";
 import { t, type Locale } from "@/lib/i18n";
 import type { PackOrderWithStatus } from "./page";
 import { useRouter } from "next/navigation";
+
+const SHOPIFY_STORE_HANDLE = "339520-3";
 
 const statusBadge: Record<PackOrderWithStatus["packStatus"], string> = {
   open: "bg-neutral-100 text-neutral-700 border-neutral-300",
@@ -25,9 +27,13 @@ export default function PackList({
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {
+    // Sortiere nach createdAt aufsteigend (älteste zuerst, FIFO)
+    const sorted = [...orders].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
     const q = query.trim().toLowerCase();
-    if (!q) return orders;
-    return orders.filter((o) => {
+    if (!q) return sorted;
+    return sorted.filter((o) => {
       const haystack = [
         o.name,
         o.numberClean,
@@ -38,6 +44,8 @@ export default function PackList({
       return haystack.includes(q);
     });
   }, [orders, query]);
+
+  const localeStr = locale === "de" ? "de-DE" : locale === "tr" ? "tr-TR" : "en-US";
 
   return (
     <div className="space-y-4">
@@ -84,17 +92,42 @@ export default function PackList({
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((o) => (
-                  <tr key={o.id} className="border-t border-neutral-100 hover:bg-neutral-50">
-                    <td className="px-4 py-3 font-medium text-neutral-900">{o.name}</td>
+                {filtered.map((o, idx) => (
+                  <tr
+                    key={o.id}
+                    className={`border-t border-neutral-100 transition hover:bg-amber-50 ${
+                      idx % 2 === 1 ? "bg-neutral-50/60" : "bg-white"
+                    }`}
+                  >
+                    <td className="px-4 py-3 font-medium text-neutral-900">
+                      <div className="flex items-center gap-2">
+                        <span>{o.name}</span>
+                        <a
+                          href={`https://admin.shopify.com/store/${SHOPIFY_STORE_HANDLE}/orders/${o.numericId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-neutral-400 hover:text-neutral-700 transition"
+                          title="In Shopify öffnen"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink size={13} />
+                        </a>
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-neutral-700">
-                      {new Date(o.createdAt).toLocaleString(locale === "de" ? "de-DE" : locale === "tr" ? "tr-TR" : "en-US", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      <div>
+                        {new Date(o.createdAt).toLocaleDateString(localeStr, {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                        })}
+                      </div>
+                      <div className="text-xs text-neutral-500">
+                        {new Date(o.createdAt).toLocaleTimeString(localeStr, {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-neutral-700">
                       <div>{o.customerName ?? "—"}</div>
