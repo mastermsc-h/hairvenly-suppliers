@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { recordPackScan, completePackSession, uploadPackPhoto } from "@/lib/actions/pack";
+import { recordPackScan, recordManualConfirm, completePackSession, uploadPackPhoto } from "@/lib/actions/pack";
 import { t, type Locale } from "@/lib/i18n";
-import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine } from "lucide-react";
+import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check } from "lucide-react";
 import CameraScanner from "./camera-scanner";
 
 interface ExpectedItem {
@@ -19,16 +19,39 @@ type FlashState = { kind: "match" | "mismatch" | "overflow" | null; message?: st
 const PHOTO_TYPES = ["products_invoice", "products_in_box", "package_on_scale"] as const;
 type PhotoType = (typeof PHOTO_TYPES)[number];
 
-function detectMethod(title: string): { label: string; cls: string } {
+function detectAttributes(title: string): {
+  method: { label: string; cls: string };
+  length: string;
+  origin: string;
+  color: string;
+} {
   const upper = title.toUpperCase();
-  if (upper.includes("BONDING")) return { label: "BONDINGS", cls: "bg-orange-700" };
-  if (upper.includes("MINI TAPE") || upper.includes("MINI-TAPE"))
-    return { label: "MINI-TAPES", cls: "bg-blue-700" };
-  if (upper.includes("TAPE")) return { label: "TAPES", cls: "bg-blue-700" };
-  if (upper.includes("TRESSE")) return { label: "TRESSEN", cls: "bg-green-700" };
-  if (upper.includes("CLIP")) return { label: "CLIP-IN", cls: "bg-violet-600" };
-  if (upper.includes("PONYTAIL")) return { label: "PONYTAIL", cls: "bg-pink-700" };
-  return { label: "", cls: "" };
+  let method = { label: "", cls: "" };
+  if (upper.includes("BONDING")) method = { label: "BONDINGS", cls: "bg-orange-700" };
+  else if (upper.includes("MINI TAPE") || upper.includes("MINI-TAPE"))
+    method = { label: "MINI-TAPES", cls: "bg-blue-700" };
+  else if (upper.includes("TAPE")) method = { label: "TAPES", cls: "bg-blue-700" };
+  else if (upper.includes("TRESSE")) method = { label: "TRESSEN", cls: "bg-green-700" };
+  else if (upper.includes("CLIP")) method = { label: "CLIP-IN", cls: "bg-violet-600" };
+  else if (upper.includes("PONYTAIL")) method = { label: "PONYTAIL", cls: "bg-pink-700" };
+
+  let length = "";
+  for (const cm of [45, 55, 65, 75, 85]) {
+    if (upper.includes(`${cm}CM`)) {
+      length = `${cm}cm`;
+      break;
+    }
+  }
+
+  let origin = "";
+  if (upper.includes("RU GLATT") || upper.includes("RUSSISCH")) origin = "RU";
+  else if (upper.includes("US WELLIG") || upper.includes("USBEKISCH")) origin = "US";
+
+  let color = "";
+  const colorMatch = title.match(/#([A-Z0-9/]+(?:T[A-Z0-9]+)?)/i);
+  if (colorMatch) color = "#" + colorMatch[1];
+
+  return { method, length, origin, color };
 }
 
 function playBeep(success: boolean) {
@@ -96,8 +119,34 @@ export default function PackMode({
   }, [flash]);
 
   const isComplete = useMemo(() => {
-    return expectedItems.every((e) => (counts[e.barcode ?? ""] ?? 0) >= e.quantity);
+    return expectedItems.every((e, idx) => {
+      const key = e.barcode || `manual:${idx}`;
+      return (counts[key] ?? 0) >= e.quantity;
+    });
   }, [counts, expectedItems]);
+
+  const handleManualConfirm = useCallback(
+    (idx: number) => {
+      startTransition(async () => {
+        try {
+          const res = await recordManualConfirm(sessionId, idx);
+          setCounts(res.scannedCounts);
+          if (res.status === "match") {
+            playBeep(true);
+            setFlash({ kind: "match", message: res.matchedTitle });
+            if (status === "open") setStatus("in_progress");
+          } else {
+            playBeep(false);
+            setFlash({ kind: "overflow", message: t(locale, "shipping.scan_overflow") });
+          }
+        } catch (err) {
+          playBeep(false);
+          setFlash({ kind: "mismatch", message: err instanceof Error ? err.message : "Fehler" });
+        }
+      });
+    },
+    [sessionId, status, locale],
+  );
 
   const allPhotosUploaded = PHOTO_TYPES.every((p) => !!photos[p]);
   const canFulfill = isComplete && allPhotosUploaded && status !== "shipped";
@@ -240,18 +289,19 @@ export default function PackMode({
             <div className="text-xs font-medium text-neutral-600 uppercase tracking-wide mb-3">
               {t(locale, "shipping.expected_items")}
             </div>
-            <div className="space-y-3">
+            <div className="space-y-4">
               {expectedItems.map((it, idx) => {
-                const got = counts[it.barcode ?? ""] ?? 0;
+                const counterKey = it.barcode || `manual:${idx}`;
+                const got = counts[counterKey] ?? 0;
                 const done = got >= it.quantity;
-                const method = detectMethod(it.title);
+                const attrs = detectAttributes(it.title);
                 return (
                   <div
                     key={idx}
-                    className={`flex items-center gap-4 p-3 rounded-xl border-2 transition ${
+                    className={`flex flex-col md:flex-row gap-4 p-4 rounded-xl border-2 transition ${
                       done
-                        ? "border-emerald-300 bg-emerald-50"
-                        : "border-neutral-200 bg-neutral-50"
+                        ? "border-emerald-400 bg-emerald-50"
+                        : "border-neutral-200 bg-white"
                     }`}
                   >
                     {it.imageUrl ? (
@@ -259,36 +309,74 @@ export default function PackMode({
                       <img
                         src={it.imageUrl}
                         alt=""
-                        className="w-16 h-16 rounded-lg object-cover bg-white"
+                        className="w-24 h-24 rounded-lg object-cover bg-white shrink-0"
                       />
                     ) : (
-                      <div className="w-16 h-16 rounded-lg bg-neutral-200" />
+                      <div className="w-24 h-24 rounded-lg bg-neutral-200 shrink-0" />
                     )}
+
                     <div className="flex-1 min-w-0">
-                      {method.label && (
-                        <span
-                          className={`inline-block ${method.cls} text-white text-xs font-bold px-2 py-0.5 rounded mr-2 tracking-wider`}
-                        >
-                          {method.label}
-                        </span>
-                      )}
-                      <div className="text-sm font-medium text-neutral-900 truncate">
-                        {it.title}
+                      {/* Große Tags */}
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {attrs.method.label && (
+                          <span
+                            className={`inline-block ${attrs.method.cls} text-white text-base md:text-lg font-bold px-3 py-1 rounded tracking-wider`}
+                          >
+                            {attrs.method.label}
+                          </span>
+                        )}
+                        {attrs.length && (
+                          <span className="inline-block bg-slate-700 text-white text-base md:text-lg font-bold px-3 py-1 rounded tracking-wider">
+                            {attrs.length}
+                          </span>
+                        )}
+                        {attrs.origin && (
+                          <span className="inline-block bg-slate-900 text-white text-base md:text-lg font-bold px-3 py-1 rounded tracking-wider">
+                            {attrs.origin}
+                          </span>
+                        )}
+                        {attrs.color && (
+                          <span className="inline-block bg-amber-600 text-white text-base md:text-lg font-bold px-3 py-1 rounded font-mono">
+                            {attrs.color}
+                          </span>
+                        )}
                       </div>
-                      {it.barcode && (
-                        <div className="text-xs text-neutral-500 font-mono mt-0.5">
+
+                      <div className="text-sm text-neutral-700 line-clamp-2">{it.title}</div>
+                      {it.barcode ? (
+                        <div className="text-xs text-neutral-500 font-mono mt-1">
                           EAN: {it.barcode}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-amber-700 font-medium mt-1">
+                          ⚠ Kein Barcode hinterlegt — bitte manuell bestätigen
                         </div>
                       )}
                     </div>
-                    <div
-                      className={`text-2xl font-bold ${
-                        done ? "text-emerald-600" : "text-neutral-400"
-                      }`}
-                    >
-                      {got} / {it.quantity}
+
+                    {/* Counter + Confirm-Button */}
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div
+                        className={`text-3xl font-black ${
+                          done ? "text-emerald-600" : "text-neutral-400"
+                        }`}
+                      >
+                        {got}/{it.quantity}
+                      </div>
+                      {done ? (
+                        <CheckCircle2 className="text-emerald-500" size={32} />
+                      ) : (
+                        <button
+                          onClick={() => handleManualConfirm(idx)}
+                          disabled={isPending}
+                          className="flex items-center gap-1 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition disabled:opacity-50"
+                          title="Manuell als korrekt bestätigen"
+                        >
+                          <Check size={16} />
+                          Bestätigen
+                        </button>
+                      )}
                     </div>
-                    {done && <CheckCircle2 className="text-emerald-500" size={28} />}
                   </div>
                 );
               })}

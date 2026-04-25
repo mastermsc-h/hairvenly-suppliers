@@ -239,6 +239,91 @@ export async function recordPackScan(
 }
 
 /**
+ * Manuelle Bestätigung eines Items (für Produkte ohne Barcode auf der Packung).
+ * Erhöht den Counter für das angegebene expected_item.
+ */
+export async function recordManualConfirm(
+  sessionId: string,
+  itemIndex: number,
+): Promise<{
+  status: "match" | "overflow";
+  matchedTitle?: string;
+  scannedCounts: Record<string, number>;
+  isComplete: boolean;
+}> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) throw new Error("Forbidden");
+
+  const supabase = await createClient();
+
+  const { data: session, error: sErr } = await supabase
+    .from("pack_sessions")
+    .select("id, status, expected_items")
+    .eq("id", sessionId)
+    .single();
+  if (sErr || !session) throw new Error("Session nicht gefunden");
+
+  const expected = (session.expected_items as ExpectedItem[]) ?? [];
+  const item = expected[itemIndex];
+  if (!item) throw new Error("Item-Index ungültig");
+
+  // Use barcode if available, otherwise pseudo-id `manual:${index}`
+  const counterKey = item.barcode || `manual:${itemIndex}`;
+
+  // Vorherige matches zählen (egal ob scan oder manual)
+  const { data: prevScans } = await supabase
+    .from("pack_scans")
+    .select("scanned_barcode, status")
+    .eq("session_id", sessionId)
+    .eq("status", "match");
+  const scannedCounts: Record<string, number> = {};
+  for (const s of prevScans ?? []) {
+    scannedCounts[s.scanned_barcode] = (scannedCounts[s.scanned_barcode] ?? 0) + 1;
+  }
+
+  const alreadyConfirmed = scannedCounts[counterKey] ?? 0;
+  let status: "match" | "overflow";
+  if (alreadyConfirmed >= item.quantity) {
+    status = "overflow";
+  } else {
+    status = "match";
+    scannedCounts[counterKey] = alreadyConfirmed + 1;
+  }
+
+  const variantNumeric = item.variantId
+    ? parseInt(item.variantId.split("/").pop() ?? "", 10)
+    : null;
+
+  await supabase.from("pack_scans").insert({
+    session_id: sessionId,
+    scanned_barcode: counterKey,
+    matched_variant_id: variantNumeric && Number.isFinite(variantNumeric) ? variantNumeric : null,
+    matched_title: item.title,
+    status,
+    scan_method: "manual",
+    scanned_by: profile.id,
+  });
+
+  if (session.status === "open") {
+    await supabase
+      .from("pack_sessions")
+      .update({
+        status: "in_progress",
+        started_at: new Date().toISOString(),
+        packed_by: profile.id,
+      })
+      .eq("id", sessionId);
+  }
+
+  const isComplete = expected.every((e, idx) => {
+    const key = e.barcode || `manual:${idx}`;
+    return (scannedCounts[key] ?? 0) >= e.quantity;
+  });
+
+  return { status, matchedTitle: item.title, scannedCounts, isComplete };
+}
+
+/**
  * Markiert die Session als verifiziert (alle Scans + Fotos OK).
  * Triggert Auto-Fulfill in Shopify (Variante A: sofort nach Pack-Verify).
  */
@@ -278,7 +363,7 @@ export async function completePackSession(sessionId: string): Promise<{
     };
   }
 
-  // Scan-Check: alle erwarteten Items vollständig
+  // Scan-Check: alle erwarteten Items vollständig (barcode + manual confirms)
   const expected = (session.expected_items as ExpectedItem[]) ?? [];
   const { data: matchScans } = await supabase
     .from("pack_scans")
@@ -289,13 +374,14 @@ export async function completePackSession(sessionId: string): Promise<{
   for (const s of matchScans ?? []) {
     counts[s.scanned_barcode] = (counts[s.scanned_barcode] ?? 0) + 1;
   }
-  const incomplete = expected.filter(
-    (e) => (counts[e.barcode ?? ""] ?? 0) < e.quantity,
-  );
+  const incomplete = expected.filter((e, idx) => {
+    const key = e.barcode || `manual:${idx}`;
+    return (counts[key] ?? 0) < e.quantity;
+  });
   if (incomplete.length > 0) {
     return {
       success: false,
-      error: `Nicht alle Items gescannt: ${incomplete.map((e) => e.title).join(", ")}`,
+      error: `Nicht alle Items bestätigt: ${incomplete.map((e) => e.title).join(", ")}`,
     };
   }
 

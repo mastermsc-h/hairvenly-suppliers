@@ -22,16 +22,38 @@ interface DisplaySession {
   finishedAt: string | null;
 }
 
-function detectMethod(title: string): { label: string; cls: string } {
+function detectAttributes(title: string): {
+  method: { label: string; cls: string };
+  length: string;
+  origin: string;
+  color: string;
+} {
   const upper = title.toUpperCase();
-  if (upper.includes("BONDING")) return { label: "BONDINGS", cls: "bg-orange-600" };
-  if (upper.includes("MINI TAPE") || upper.includes("MINI-TAPE"))
-    return { label: "MINI-TAPES", cls: "bg-blue-600" };
-  if (upper.includes("TAPE")) return { label: "TAPES", cls: "bg-blue-600" };
-  if (upper.includes("TRESSE")) return { label: "TRESSEN", cls: "bg-green-600" };
-  if (upper.includes("CLIP")) return { label: "CLIP-IN", cls: "bg-violet-500" };
-  if (upper.includes("PONYTAIL")) return { label: "PONYTAIL", cls: "bg-pink-600" };
-  return { label: "", cls: "" };
+  let method = { label: "", cls: "" };
+  if (upper.includes("BONDING")) method = { label: "BONDINGS", cls: "bg-orange-600" };
+  else if (upper.includes("MINI TAPE") || upper.includes("MINI-TAPE"))
+    method = { label: "MINI-TAPES", cls: "bg-blue-600" };
+  else if (upper.includes("TAPE")) method = { label: "TAPES", cls: "bg-blue-600" };
+  else if (upper.includes("TRESSE")) method = { label: "TRESSEN", cls: "bg-green-600" };
+  else if (upper.includes("CLIP")) method = { label: "CLIP-IN", cls: "bg-violet-500" };
+  else if (upper.includes("PONYTAIL")) method = { label: "PONYTAIL", cls: "bg-pink-600" };
+
+  let length = "";
+  for (const cm of [45, 55, 65, 75, 85]) {
+    if (upper.includes(`${cm}CM`)) {
+      length = `${cm}cm`;
+      break;
+    }
+  }
+  let origin = "";
+  if (upper.includes("RU GLATT") || upper.includes("RUSSISCH")) origin = "RU";
+  else if (upper.includes("US WELLIG") || upper.includes("USBEKISCH")) origin = "US";
+
+  let color = "";
+  const colorMatch = title.match(/#([A-Z0-9/]+(?:T[A-Z0-9]+)?)/i);
+  if (colorMatch) color = "#" + colorMatch[1];
+
+  return { method, length, origin, color };
 }
 
 export default function PackDisplay({
@@ -49,7 +71,10 @@ export default function PackDisplay({
 
   const isComplete = useMemo(() => {
     if (!session) return false;
-    return session.expectedItems.every((e) => (counts[e.barcode ?? ""] ?? 0) >= e.quantity);
+    return session.expectedItems.every((e, idx) => {
+      const key = e.barcode || `manual:${idx}`;
+      return (counts[key] ?? 0) >= e.quantity;
+    });
   }, [session, counts]);
 
   // Realtime: pack_sessions + pack_scans
@@ -175,9 +200,10 @@ export default function PackDisplay({
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {session.expectedItems.map((it, idx) => {
-                const got = counts[it.barcode ?? ""] ?? 0;
+                const counterKey = it.barcode || `manual:${idx}`;
+                const got = counts[counterKey] ?? 0;
                 const done = got >= it.quantity;
-                const m = detectMethod(it.title);
+                const a = detectAttributes(it.title);
                 return (
                   <div
                     key={idx}
@@ -189,24 +215,39 @@ export default function PackDisplay({
                   >
                     {it.imageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={it.imageUrl} alt="" className="w-24 h-24 rounded-lg object-cover bg-white" />
+                      <img src={it.imageUrl} alt="" className="w-28 h-28 rounded-lg object-cover bg-white shrink-0" />
                     ) : (
-                      <div className="w-24 h-24 rounded-lg bg-neutral-800" />
+                      <div className="w-28 h-28 rounded-lg bg-neutral-800 shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">
-                      {m.label && (
-                        <span
-                          className={`inline-block ${m.cls} text-white text-base font-bold px-3 py-1 rounded mr-2 tracking-widest`}
-                        >
-                          {m.label}
-                        </span>
-                      )}
-                      <div className="text-xl font-semibold text-white mt-2 line-clamp-2">{it.title}</div>
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {a.method.label && (
+                          <span className={`inline-block ${a.method.cls} text-white text-lg font-bold px-3 py-1 rounded tracking-widest`}>
+                            {a.method.label}
+                          </span>
+                        )}
+                        {a.length && (
+                          <span className="inline-block bg-slate-600 text-white text-lg font-bold px-3 py-1 rounded tracking-wider">
+                            {a.length}
+                          </span>
+                        )}
+                        {a.origin && (
+                          <span className="inline-block bg-slate-800 text-white text-lg font-bold px-3 py-1 rounded tracking-wider">
+                            {a.origin}
+                          </span>
+                        )}
+                        {a.color && (
+                          <span className="inline-block bg-amber-500 text-white text-lg font-bold px-3 py-1 rounded font-mono">
+                            {a.color}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-base text-neutral-300 mt-1 line-clamp-2">{it.title}</div>
                     </div>
-                    <div className={`text-5xl font-black ${done ? "text-emerald-400" : "text-neutral-500"}`}>
+                    <div className={`text-5xl font-black shrink-0 ${done ? "text-emerald-400" : "text-neutral-500"}`}>
                       {got}/{it.quantity}
                     </div>
-                    {done && <CheckCircle2 className="text-emerald-400" size={48} />}
+                    {done && <CheckCircle2 className="text-emerald-400 shrink-0" size={48} />}
                   </div>
                 );
               })}
