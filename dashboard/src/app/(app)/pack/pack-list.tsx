@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Search, Package2, ArrowRight, RefreshCw, ExternalLink } from "lucide-react";
+import { Search, Package2, ArrowRight, RefreshCw, ArrowDown, ArrowUp } from "lucide-react";
 import { t, type Locale } from "@/lib/i18n";
 import type { PackOrderWithStatus } from "./page";
 import { useRouter } from "next/navigation";
@@ -25,12 +25,14 @@ export default function PackList({
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
+  // Standard: neueste oben (descending). Klick auf Datum-Header toggelt.
+  const [sortDesc, setSortDesc] = useState(true);
 
   const filtered = useMemo(() => {
-    // Sortiere nach createdAt aufsteigend (älteste zuerst, FIFO)
-    const sorted = [...orders].sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-    );
+    const sorted = [...orders].sort((a, b) => {
+      const diff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      return sortDesc ? -diff : diff;
+    });
     const q = query.trim().toLowerCase();
     if (!q) return sorted;
     return sorted.filter((o) => {
@@ -43,7 +45,7 @@ export default function PackList({
       ].join(" ").toLowerCase();
       return haystack.includes(q);
     });
-  }, [orders, query]);
+  }, [orders, query, sortDesc]);
 
   const localeStr = locale === "de" ? "de-DE" : locale === "tr" ? "tr-TR" : "en-US";
 
@@ -84,7 +86,15 @@ export default function PackList({
               <thead>
                 <tr className="bg-neutral-50 text-neutral-600 text-xs uppercase tracking-wide">
                   <th className="text-left px-4 py-3 font-medium">{t(locale, "shipping.col_order")}</th>
-                  <th className="text-left px-4 py-3 font-medium">{t(locale, "shipping.col_date")}</th>
+                  <th className="text-left px-4 py-3 font-medium">
+                    <button
+                      onClick={() => setSortDesc((d) => !d)}
+                      className="flex items-center gap-1 hover:text-neutral-900 transition uppercase tracking-wide"
+                    >
+                      {t(locale, "shipping.col_date")}
+                      {sortDesc ? <ArrowDown size={12} /> : <ArrowUp size={12} />}
+                    </button>
+                  </th>
                   <th className="text-left px-4 py-3 font-medium">{t(locale, "shipping.col_customer")}</th>
                   <th className="text-left px-4 py-3 font-medium">{t(locale, "shipping.col_items")}</th>
                   <th className="text-left px-4 py-3 font-medium">{t(locale, "shipping.col_status")}</th>
@@ -99,20 +109,16 @@ export default function PackList({
                       idx % 2 === 1 ? "bg-neutral-50/60" : "bg-white"
                     }`}
                   >
-                    <td className="px-4 py-3 font-medium text-neutral-900">
-                      <div className="flex items-center gap-2">
-                        <span>{o.name}</span>
-                        <a
-                          href={`https://admin.shopify.com/store/${SHOPIFY_STORE_HANDLE}/orders/${o.numericId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-neutral-400 hover:text-neutral-700 transition"
-                          title="In Shopify öffnen"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <ExternalLink size={13} />
-                        </a>
-                      </div>
+                    <td className="px-4 py-3 font-medium">
+                      <a
+                        href={`https://admin.shopify.com/store/${SHOPIFY_STORE_HANDLE}/orders/${o.numericId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-neutral-900 hover:text-blue-700 hover:underline transition"
+                        title="In Shopify öffnen"
+                      >
+                        {o.name}
+                      </a>
                     </td>
                     <td className="px-4 py-3 text-neutral-700">
                       <div>

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { recordPackScan, recordManualConfirm, completePackSession, uploadPackPhoto } from "@/lib/actions/pack";
 import { t, type Locale } from "@/lib/i18n";
-import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check } from "lucide-react";
+import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X } from "lucide-react";
 import CameraScanner from "./camera-scanner";
 
 interface ExpectedItem {
@@ -104,6 +104,23 @@ export default function PackMode({
   const [isPending, startTransition] = useTransition();
   const [fulfillError, setFulfillError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Pro Item: Manual-Confirm Form aufgeklappt + 4 Checkbox-States
+  const [manualForms, setManualForms] = useState<Record<number, { open: boolean; checks: [boolean, boolean, boolean, boolean] }>>({});
+
+  function setManualOpen(idx: number, open: boolean) {
+    setManualForms((prev) => ({
+      ...prev,
+      [idx]: { open, checks: prev[idx]?.checks ?? [false, false, false, false] },
+    }));
+  }
+  function toggleManualCheck(idx: number, checkIdx: number) {
+    setManualForms((prev) => {
+      const cur = prev[idx] ?? { open: true, checks: [false, false, false, false] as [boolean, boolean, boolean, boolean] };
+      const newChecks = [...cur.checks] as [boolean, boolean, boolean, boolean];
+      newChecks[checkIdx] = !newChecks[checkIdx];
+      return { ...prev, [idx]: { ...cur, checks: newChecks } };
+    });
+  }
 
   // Autofocus aufs Eingabefeld nach jedem Scan
   useEffect(() => {
@@ -135,6 +152,11 @@ export default function PackMode({
             playBeep(true);
             setFlash({ kind: "match", message: res.matchedTitle });
             if (status === "open") setStatus("in_progress");
+            // Form schließen + checks zurücksetzen
+            setManualForms((prev) => ({
+              ...prev,
+              [idx]: { open: false, checks: [false, false, false, false] },
+            }));
           } else {
             playBeep(false);
             setFlash({ kind: "overflow", message: t(locale, "shipping.scan_overflow") });
@@ -354,27 +376,72 @@ export default function PackMode({
                       )}
                     </div>
 
-                    {/* Counter + Confirm-Button */}
-                    <div className="flex items-center gap-3 shrink-0">
-                      <div
-                        className={`text-3xl font-black ${
-                          done ? "text-emerald-600" : "text-neutral-400"
-                        }`}
-                      >
-                        {got}/{it.quantity}
-                      </div>
-                      {done ? (
-                        <CheckCircle2 className="text-emerald-500" size={32} />
-                      ) : (
-                        <button
-                          onClick={() => handleManualConfirm(idx)}
-                          disabled={isPending}
-                          className="flex items-center gap-1 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition disabled:opacity-50"
-                          title="Manuell als korrekt bestätigen"
+                    {/* Counter + (optional) Manual-Form */}
+                    <div className="flex items-start gap-3 shrink-0">
+                      <div className="flex flex-col items-end gap-1">
+                        <div
+                          className={`text-3xl font-black ${
+                            done ? "text-emerald-600" : "text-neutral-400"
+                          }`}
                         >
-                          <Check size={16} />
-                          Bestätigen
-                        </button>
+                          {got}/{it.quantity}
+                        </div>
+                        {!done && !(manualForms[idx]?.open) && (
+                          <button
+                            onClick={() => setManualOpen(idx, true)}
+                            className="text-[11px] text-amber-700 hover:text-amber-900 hover:underline"
+                          >
+                            QR nicht vorhanden
+                          </button>
+                        )}
+                      </div>
+                      {done && <CheckCircle2 className="text-emerald-500 mt-1" size={32} />}
+
+                      {!done && manualForms[idx]?.open && (
+                        <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 w-72">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="text-xs font-bold text-amber-900 uppercase tracking-wide">
+                              Manuell bestätigen
+                            </div>
+                            <button
+                              onClick={() => setManualOpen(idx, false)}
+                              className="text-amber-700 hover:text-amber-900"
+                              aria-label="Schließen"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                          <div className="space-y-1.5 text-xs">
+                            {[
+                              { label: "Methode", value: attrs.method.label || "korrekt" },
+                              { label: "Länge", value: attrs.length || "korrekt" },
+                              { label: "Herkunft", value: attrs.origin || "korrekt" },
+                              { label: "Farbe", value: attrs.color || "korrekt" },
+                            ].map((row, ci) => (
+                              <label key={ci} className="flex items-center gap-2 cursor-pointer text-amber-900">
+                                <input
+                                  type="checkbox"
+                                  checked={manualForms[idx]?.checks[ci] ?? false}
+                                  onChange={() => toggleManualCheck(idx, ci)}
+                                  className="w-4 h-4 accent-amber-600"
+                                />
+                                <span className="font-medium">{row.label}:</span>
+                                <span className="font-bold">{row.value}</span>
+                              </label>
+                            ))}
+                          </div>
+                          <button
+                            onClick={() => handleManualConfirm(idx)}
+                            disabled={
+                              isPending ||
+                              !(manualForms[idx]?.checks ?? []).every(Boolean)
+                            }
+                            className="mt-3 w-full flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <Check size={14} />
+                            Manuell bestätigen
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
