@@ -39,6 +39,7 @@ export async function updateSession(request: NextRequest) {
     path.startsWith("/pending") ||
     path.startsWith("/_next") ||
     path.startsWith("/api/qr") ||  // covers /api/qr und /api/qr/[order]
+    path.startsWith("/api/webhooks/") ||  // shopify ruft webhooks ohne login auf
     path === "/favicon.ico";
 
   if (!user && !isPublic) {
