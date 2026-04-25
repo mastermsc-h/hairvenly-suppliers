@@ -86,16 +86,21 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
     .maybeSingle();
 
   if (existing) {
-    // Falls noch kein Bearbeiter zugeordnet, aktuellen User setzen
-    if (!existing.packed_by) {
-      await supabase
-        .from("pack_sessions")
-        .update({ packed_by: profile.id })
-        .eq("id", existing.id);
+    // Bei status=open → sofort auf in_progress setzen (Display switcht beim Page-Open)
+    const updates: Record<string, unknown> = {};
+    if (!existing.packed_by) updates.packed_by = profile.id;
+    if (existing.status === "open") {
+      updates.status = "in_progress";
+      updates.started_at = new Date().toISOString();
+    } else {
+      // Status update um updated_at zu triggern → Display switcht zu dieser Session
+      updates.updated_at = new Date().toISOString();
     }
+    await supabase.from("pack_sessions").update(updates).eq("id", existing.id);
+
     return {
       sessionId: existing.id,
-      status: existing.status,
+      status: existing.status === "open" ? "in_progress" : existing.status,
       expectedItems: (existing.expected_items as ExpectedItem[]) ?? [],
     };
   }
@@ -114,9 +119,10 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
     .insert({
       order_name: cleanName,
       shopify_order_id: Number.isFinite(numericId) ? numericId : null,
-      status: "open",
+      status: "in_progress", // sofort aktiv damit Display switcht
+      started_at: new Date().toISOString(),
       expected_items: expected,
-      packed_by: profile.id, // Bearbeiter sofort setzen
+      packed_by: profile.id,
     })
     .select("id, status")
     .single();

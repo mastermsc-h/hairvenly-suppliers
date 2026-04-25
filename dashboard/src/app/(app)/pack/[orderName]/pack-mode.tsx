@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import {
   recordPackScan,
   recordManualConfirm,
@@ -10,8 +11,9 @@ import {
   fetchSessionScans,
 } from "@/lib/actions/pack";
 import { t, type Locale } from "@/lib/i18n";
-import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X, RotateCcw, History } from "lucide-react";
+import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X, RotateCcw, History, Package2 } from "lucide-react";
 import CameraScanner from "./camera-scanner";
+import OrderQrScanner from "../order-qr-scanner";
 
 interface ExpectedItem {
   variantId: string | null;
@@ -150,8 +152,19 @@ export default function PackMode({
   }, [sessionId]);
 
   useEffect(() => {
-    refreshHistory();
-  }, [refreshHistory]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const scans = await fetchSessionScans(sessionId, 50);
+        if (!cancelled) setScanHistory(scans);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
 
   // Big-success Flash auto-clear
   useEffect(() => {
@@ -659,6 +672,16 @@ export default function PackMode({
                 {t(locale, "shipping.fulfill_success")}
               </div>
               <div className="text-sm text-blue-700 mt-1">{orderName}</div>
+              <div className="flex flex-col md:flex-row items-stretch justify-center gap-3 mt-5">
+                <OrderQrScanner buttonLabel="Nächste Bestellung scannen" />
+                <Link
+                  href="/pack"
+                  className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700 transition"
+                >
+                  <Package2 size={16} />
+                  Zur Versand-Liste
+                </Link>
+              </div>
             </div>
           )}
         </div>

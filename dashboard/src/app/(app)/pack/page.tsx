@@ -5,6 +5,7 @@ import { fetchUnfulfilledPaidOrders, type PackOrder } from "@/lib/shopify";
 import { createClient } from "@/lib/supabase/server";
 import PackList from "./pack-list";
 import BackfillButton from "./backfill-button";
+import OrderQrScanner from "./order-qr-scanner";
 
 export const dynamic = "force-dynamic";
 
@@ -81,7 +82,10 @@ export default async function PackPage() {
             {ordersWithoutQrInList > 0 ? ` · ${ordersWithoutQrInList} ohne QR-Metafield` : " · alle haben QR"}
           </p>
         </div>
-        <BackfillButton />
+        <div className="flex items-center gap-2 flex-wrap">
+          <OrderQrScanner />
+          <BackfillButton />
+        </div>
       </header>
 
       {errorMessage ? (

@@ -137,14 +137,57 @@ export default function PackDisplay({
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "pack_scans" },
-        (payload) => {
+        async (payload) => {
           const row = payload.new as {
             session_id: string;
             scanned_barcode: string;
             status: string;
             matched_title: string | null;
           };
-          if (!session || row.session_id !== session.id) return;
+          // Falls Scan zu einer anderen Session als der aktuell angezeigten gehört:
+          // Session-Refetch (Display switcht zur neuesten aktiven Session).
+          if (!session || row.session_id !== session.id) {
+            const { data: rows } = await supabase
+              .from("pack_sessions")
+              .select(
+                "id, order_name, status, expected_items, started_at, finished_at, packed_by, profiles:packed_by(display_name, username)",
+              )
+              .in("status", ["in_progress", "verified"])
+              .order("updated_at", { ascending: false })
+              .limit(1);
+            const newSession = rows?.[0];
+            if (newSession) {
+              const profileRel = (newSession as { profiles?: { display_name?: string | null; username?: string | null } | null }).profiles;
+              setSession({
+                id: newSession.id,
+                orderName: newSession.order_name,
+                status: newSession.status,
+                expectedItems: (newSession.expected_items as ExpectedItem[]) ?? [],
+                packedBy: profileRel?.display_name || profileRel?.username || null,
+                startedAt: newSession.started_at,
+                finishedAt: newSession.finished_at,
+              });
+              const { data: scans } = await supabase
+                .from("pack_scans")
+                .select("scanned_barcode")
+                .eq("session_id", newSession.id)
+                .eq("status", "match");
+              const c: Record<string, number> = {};
+              for (const s of scans ?? []) c[s.scanned_barcode] = (c[s.scanned_barcode] ?? 0) + 1;
+              setCounts(c);
+            }
+            // Trotzdem Flash zeigen damit das Live-Feedback klar ist
+            if (row.status === "match") {
+              setFlash("match");
+              setBigSuccessTitle(row.matched_title || "OK");
+            } else if (row.status === "mismatch" || row.status === "overflow") {
+              setFlash("mismatch");
+            }
+            setTimeout(() => setFlash(null), row.status === "match" ? 600 : 1500);
+            return;
+          }
+
+          // Scan zur aktuell angezeigten Session
           if (row.status === "match") {
             setCounts((prev) => ({ ...prev, [row.scanned_barcode]: (prev[row.scanned_barcode] ?? 0) + 1 }));
             setFlash("match");
