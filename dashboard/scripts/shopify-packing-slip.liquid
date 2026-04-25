@@ -14,8 +14,7 @@
 
 {% assign pack_base_url = "https://suppliers.hairvenly.de" %}
 {% assign order_number_clean = order.name | remove: "#" %}
-{% assign pack_url = pack_base_url | append: "/pack/" | append: order_number_clean %}
-{% assign qr_image_url = pack_base_url | append: "/api/qr?size=240&text=" | append: pack_url %}
+{% assign qr_image_url = pack_base_url | append: "/api/qr/" | append: order_number_clean | append: ".svg" %}
 
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1f1f1f; }

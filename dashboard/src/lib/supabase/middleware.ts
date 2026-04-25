@@ -38,7 +38,7 @@ export async function updateSession(request: NextRequest) {
     isAuthRoute ||
     path.startsWith("/pending") ||
     path.startsWith("/_next") ||
-    path.startsWith("/api/qr") ||
+    path.startsWith("/api/qr") ||  // covers /api/qr und /api/qr/[order]
     path === "/favicon.ico";
 
   if (!user && !isPublic) {
