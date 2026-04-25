@@ -1298,6 +1298,29 @@ export async function fetchUnfulfilledPaidOrders(limit = 100): Promise<PackOrder
   return res.data?.orders.edges.map((e) => mapPackOrder(e.node)) ?? [];
 }
 
+/**
+ * Fetch alle bezahlten Orders der letzten N Tage — egal ob fulfilled oder nicht.
+ * Wird genutzt für QR-Backfill (auch alte/fulfilled orders sollen QR im Lieferschein haben).
+ */
+export async function fetchRecentPaidOrders(daysBack = 30, limit = 250): Promise<PackOrder[]> {
+  const since = new Date();
+  since.setDate(since.getDate() - daysBack);
+  const sinceStr = since.toISOString().slice(0, 10);
+  const query = `
+    query recentPaid($q: String!, $first: Int!) {
+      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: true) {
+        edges { node { ${PACK_ORDER_FIELDS} } }
+      }
+    }
+  `;
+  const q = `financial_status:paid AND created_at:>=${sinceStr}`;
+  const res = await shopifyGraphQL<{ orders: { edges: { node: PackOrderNode }[] } }>(
+    query,
+    { q, first: limit },
+  );
+  return res.data?.orders.edges.map((e) => mapPackOrder(e.node)) ?? [];
+}
+
 /** Fetch one order by name (e.g. "#22264" or "22264") for Pack-Modus. */
 export async function fetchOrderForPack(orderName: string): Promise<PackOrder | null> {
   const clean = orderName.replace(/^#/, "");
