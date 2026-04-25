@@ -4,6 +4,8 @@ import { useMemo, useState, useTransition } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  Pencil,
+  Check,
   Plus,
   Search,
   X,
@@ -13,6 +15,8 @@ import type { Locale } from "@/lib/i18n";
 import {
   mapProductToCategory,
   unmapProduct,
+  updatePriceEntry,
+  updateSellingPrices,
 } from "@/lib/actions/prices";
 
 /* ── Types ───────────────────────────────────────────────────────── */
@@ -33,6 +37,7 @@ interface ProductRow {
   lgId: string;
   lgLabel: string;
   lengthValues: string[];
+  lgSellingPrices: Record<string, SellingPriceTier>;
   vk: SellingPriceTier | null;
   avgEk: number | null;
   categories: { entry: EntryType; ek: number | null }[];
@@ -72,6 +77,7 @@ function buildMethodGroups(list: PriceListFull): MethodGroup[] {
         lgId: lg.id,
         lgLabel: lg.label,
         lengthValues: lg.length_values,
+        lgSellingPrices: sp as Record<string, SellingPriceTier>,
         vk: (sp[m.name] as SellingPriceTier | undefined) ?? null,
         avgEk: totalEk / cats.length,
         categories: cats,
@@ -364,6 +370,11 @@ function ProductRowView({
   isLast: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [editingVk, setEditingVk] = useState(false);
+  const [vkBrutto, setVkBrutto] = useState(row.vk?.brutto ?? 0);
+  const [vkGewerbe, setVkGewerbe] = useState(row.vk?.gewerbe ?? 0);
+  const [isPending, startTransition] = useTransition();
+
   const vkDisplay = row.vk ? row.vk[vkMode] : null;
   const vkNetto = row.vk ? row.vk.netto : null;
   const ekWithZoll = row.avgEk != null ? row.avgEk * zollFactor : null;
@@ -376,6 +387,17 @@ function ProductRowView({
     aufschlagPct == null ? "" : aufschlagPct >= 80 ? "text-green-600" : aufschlagPct >= 50 ? "text-yellow-600" : "text-red-600";
   const margeColor =
     margePct == null ? "" : margePct >= 40 ? "text-green-600" : margePct >= 30 ? "text-yellow-600" : "text-red-600";
+
+  function saveVk() {
+    startTransition(async () => {
+      const netto = Math.round((vkBrutto / 1.19) * 100) / 100;
+      await updateSellingPrices(row.lgId, {
+        ...(row.lgSellingPrices ?? {}),
+        [row.method]: { brutto: vkBrutto, netto, gewerbe: vkGewerbe },
+      });
+      setEditingVk(false);
+    });
+  }
 
   return (
     <>
@@ -408,8 +430,53 @@ function ProductRowView({
               : `$${Math.round(ekWithZoll).toLocaleString("de-DE")}`
             : "—"}
         </td>
-        <td className="text-right px-3 py-2.5 tabular-nums text-blue-600 font-medium">
-          {vkDisplay ? `€${vkDisplay.toLocaleString("de-DE")}` : <span className="text-neutral-300">—</span>}
+        <td className="text-right px-3 py-2.5 tabular-nums text-blue-600 font-medium" onClick={(e) => e.stopPropagation()}>
+          {editingVk ? (
+            <div className="flex items-center gap-1 justify-end">
+              <div className="flex flex-col gap-0.5">
+                <div className="flex items-center gap-1">
+                  <span className="text-[9px] text-neutral-400">Brutto</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={vkBrutto}
+                    onChange={(e) => setVkBrutto(Number(e.target.value) || 0)}
+                    className="w-20 text-right text-xs rounded border border-blue-300 px-1 py-0.5 tabular-nums font-normal"
+                  />
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-[9px] text-neutral-400">Gewerbe</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={vkGewerbe}
+                    onChange={(e) => setVkGewerbe(Number(e.target.value) || 0)}
+                    className="w-20 text-right text-xs rounded border border-blue-300 px-1 py-0.5 tabular-nums font-normal"
+                  />
+                </div>
+              </div>
+              <button onClick={saveVk} disabled={isPending} className="p-1 text-green-600 hover:text-green-800">
+                <Check size={14} />
+              </button>
+              <button onClick={() => setEditingVk(false)} className="p-1 text-neutral-400 hover:text-neutral-700">
+                <X size={14} />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-end gap-1 group/vk">
+              {vkDisplay ? `€${vkDisplay.toLocaleString("de-DE")}` : <span className="text-neutral-300">—</span>}
+              <button
+                onClick={() => {
+                  setVkBrutto(row.vk?.brutto ?? 0);
+                  setVkGewerbe(row.vk?.gewerbe ?? 0);
+                  setEditingVk(true);
+                }}
+                className="opacity-0 group-hover/vk:opacity-100 p-0.5 text-neutral-400 hover:text-neutral-700 transition"
+              >
+                <Pencil size={11} />
+              </button>
+            </div>
+          )}
         </td>
         <td className="text-right px-3 py-2.5">
           {aufschlagPct != null ? (
@@ -474,6 +541,7 @@ function CategoryBreakdown({
             key={entry.id}
             entry={entry}
             ek={ek}
+            method={row.method}
             vkMode={vkMode}
             ekWithZoll={ekWithZoll}
             ekInEur={ekInEur}
@@ -495,6 +563,7 @@ function CategoryBreakdown({
 function CategoryRow({
   entry,
   ek,
+  method,
   vkMode,
   ekWithZoll,
   ekInEur,
@@ -507,6 +576,7 @@ function CategoryRow({
 }: {
   entry: EntryType;
   ek: number | null;
+  method: string;
   vkMode: VkMode;
   ekWithZoll: number | null;
   ekInEur: boolean;
@@ -518,6 +588,9 @@ function CategoryRow({
   showBorder: boolean;
 }) {
   const [showProducts, setShowProducts] = useState(false);
+  const [editingEk, setEditingEk] = useState(false);
+  const [editEk, setEditEk] = useState(ek ?? 0);
+  const [isPending, startTransition] = useTransition();
 
   const filteredMapped = entry.mapped_products.filter(
     (mp) => lengthValues.length === 0 || lengthValues.includes(mp.length_value),
@@ -529,6 +602,16 @@ function CategoryRow({
   const margePctLocal = ekWithZoll && aufschlagPct != null
     ? ((aufschlagPct / 100) / (1 + aufschlagPct / 100)) * 100
     : null;
+
+  function saveEk() {
+    startTransition(async () => {
+      await updatePriceEntry(entry.id, {
+        ...entry.prices,
+        [method]: editEk,
+      });
+      setEditingEk(false);
+    });
+  }
 
   const aufschlagColor =
     aufschlagPct == null ? "" : aufschlagPct >= 80 ? "text-green-600" : aufschlagPct >= 50 ? "text-yellow-600" : "text-red-600";
@@ -556,12 +639,45 @@ function CategoryRow({
           </div>
         </td>
         {/* EK */}
-        <td className="text-right px-3 py-1.5 tabular-nums text-xs text-neutral-600">
-          {ek != null
-            ? ekInEur
-              ? `€${Math.round(ek * usdEurRate).toLocaleString("de-DE")}`
-              : `$${ek.toLocaleString("de-DE")}`
-            : "—"}
+        <td className="text-right px-3 py-1.5 tabular-nums text-xs text-neutral-600" onClick={(e) => e.stopPropagation()}>
+          {editingEk ? (
+            <div className="flex items-center gap-1 justify-end">
+              <span className="text-neutral-400">$</span>
+              <input
+                type="number"
+                step="0.01"
+                value={editEk}
+                onChange={(e) => setEditEk(Number(e.target.value) || 0)}
+                className="w-20 text-right text-xs rounded border border-neutral-300 px-1 py-0.5 tabular-nums"
+                autoFocus
+              />
+              <button onClick={saveEk} disabled={isPending} className="p-0.5 text-green-600 hover:text-green-800">
+                <Check size={11} />
+              </button>
+              <button onClick={() => setEditingEk(false)} className="p-0.5 text-neutral-400 hover:text-neutral-700">
+                <X size={11} />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-end gap-1 group/ek">
+              <span>
+                {ek != null
+                  ? ekInEur
+                    ? `€${Math.round(ek * usdEurRate).toLocaleString("de-DE")}`
+                    : `$${ek.toLocaleString("de-DE")}`
+                  : "—"}
+              </span>
+              <button
+                onClick={() => {
+                  setEditEk(ek ?? 0);
+                  setEditingEk(true);
+                }}
+                className="opacity-0 group-hover/ek:opacity-100 p-0.5 text-neutral-400 hover:text-neutral-700 transition"
+              >
+                <Pencil size={10} />
+              </button>
+            </div>
+          )}
         </td>
         {/* Zoll */}
         <td className="text-right px-3 py-1.5 tabular-nums text-xs text-neutral-400">

@@ -1,7 +1,9 @@
 // ==========================================
 // HAIRVENLY – LAGERBESTAND + BESTELLÜBERSICHT
-// Version 2.1 – Rang-basierte Ziel-Caps als Konstanten
 // ==========================================
+// CODE_VERSION: 2026-04-22_23-00_DoSA-days-of-stock-allocator
+// ==========================================
+const CODE_VERSION = "2026-04-23_16-15_matchColor-konservativer-Retry-schneller-Abbruch";
 
 // IDs der externen Bestellungs-Sheets
 const CHINA_SHEET_ID    = "1zqh50KeQsworvG5OivfxvECM7HUoArwUEGBTUGVB4ZM";
@@ -25,6 +27,1410 @@ const ZIEL_CAP_REST_NORMAL  =  300; // REST  – andere Kategorien
 // Verhindert, dass ausverkaufte Topseller (niedrige 30d-Velocity) weniger Ziel bekommen als MID-Produkte
 const RANG_MINZIEL_TOP10 = 1500; // Rang  1–10  → mind. diesen Zielwert
 const RANG_MINZIEL_TOP20 = 1000; // Rang 11–20  → mind. diesen Zielwert
+
+// ==========================================================================
+// ██████████████████████████████████████████████████████████████████████████
+// CATALOG v1 — ZENTRALE PRODUKT-KONFIGURATION (Single Source of Truth)
+// ██████████████████████████████████████████████████████████████████████████
+// ==========================================================================
+// Diese Sektion definiert EINE kanonische Quelle für alle Collection-Mappings.
+// Sie ersetzt schrittweise die 6+ dupl. Mappings (COLL_MAP, COLL_MAP_VA,
+// LAGER_EXACT_COLL_MAP, HANDLE_TO_COLLNAME_TS, collMapping, collMappingAmanda).
+//
+// NUTZUNG:
+//   const catalog = buildCatalogFromInventory();
+//   für jeden Product in catalog: {
+//     sheetName, collection, handle, quality, typ, länge,
+//     fullName, farbeKey, unitWeight, quantity, lager
+//   }
+//
+// Ergänzt um Verkaufszahlen via joinCatalogWithSales(catalog, vaProductData).
+// ==========================================================================
+
+/**
+ * CATALOG_COLLECTIONS: Eindeutiges Mapping von Shopify-Collection-Name → Metadaten.
+ *
+ * Schlüssel = EXAKTER Collection-Name aus Shopify (so wie er im Inventar-Sheet
+ * in Spalte A erscheint). Alte Namen (Umbenennungen) als zusätzliche Aliase.
+ */
+const CATALOG_COLLECTIONS = {
+  // ── Russisch Glatt (Amanda) ──
+  "Standard Tapes Russisch": {
+    handle: "russische-normal-tapes",
+    quality: "Russisch Glatt",
+    typ: "Standard Tapes",
+    länge: "",
+    expectedUnitWeight: 25,
+    isPremium: true  // bekommt TOP7-Premium-Caps, TOP10/MID20
+  },
+  "Mini Tapes Glatt": {
+    handle: "mini-tapes",
+    quality: "Russisch Glatt",
+    typ: "Minitapes",
+    länge: "",
+    expectedUnitWeight: 50,
+    autoFixHalfWeight: true,  // Shopify liefert manchmal 25g statt 50g
+    isPremium: true
+  },
+  "Invisible Mini Tapes": {
+    handle: "invisible-mini-tapes",
+    quality: "Russisch Glatt",
+    typ: "Minitapes",
+    länge: "",
+    expectedUnitWeight: 50,
+    autoFixHalfWeight: true,
+    isPremium: true
+  },
+  "Russische Bondings (Glatt)": {
+    handle: "bondings-glatt",
+    quality: "Russisch Glatt",
+    typ: "Bondings",
+    länge: "",
+    expectedUnitWeight: 25,
+    isPremium: true
+  },
+  "Russische Classic Tressen (Glatt)": {
+    handle: "tressen-russisch-classic",
+    quality: "Russisch Glatt",
+    typ: "Classic Weft",
+    länge: "",
+    expectedUnitWeight: 50
+  },
+  "Russische Genius Tressen (Glatt)": {
+    handle: "tressen-russisch-genius",
+    quality: "Russisch Glatt",
+    typ: "Genius Weft",
+    länge: "",
+    expectedUnitWeight: 50
+  },
+  "Russische Invisible Tressen (Glatt) | Butterfly Weft": {
+    handle: "tressen-russisch-invisible",
+    quality: "Russisch Glatt",
+    typ: "Invisible Weft",
+    länge: "",
+    expectedUnitWeight: 50
+  },
+  "Russische Invisible Tressen (Glatt)": {  // alter Name – Alias
+    handle: "tressen-russisch-invisible",
+    quality: "Russisch Glatt",
+    typ: "Invisible Weft",
+    länge: "",
+    expectedUnitWeight: 50
+  },
+  "Clip In Extensions Echthaar": {
+    handle: "clip-extensions",
+    quality: "Russisch Glatt",
+    typ: "Clip-ins",
+    länge: "",                     // Länge wird aus unitWeight abgeleitet ("100g"/"150g"/"225g")
+    expectedUnitWeight: null,      // variabel
+    variants: [100, 150, 225],     // erlaubte Varianten (250g → 225g Shopify-Fehler)
+    isPremium: true
+  },
+
+  // ── Usbekisch Wellig (China) ──
+  "Tapes Wellig 45cm": {
+    handle: "tapes-45cm",
+    quality: "Usbekisch Wellig",
+    typ: "Tapes",
+    länge: "45cm",
+    expectedUnitWeight: 25
+  },
+  "Tapes Wellig 55cm": {
+    handle: "tapes-55cm",
+    quality: "Usbekisch Wellig",
+    typ: "Tapes",
+    länge: "55cm",
+    expectedUnitWeight: 25,
+    isPremium: true
+  },
+  "Tapes Wellig 65cm": {
+    handle: "tapes-65cm",
+    quality: "Usbekisch Wellig",
+    typ: "Tapes",
+    länge: "65cm",
+    expectedUnitWeight: 25,
+    isPremium: true
+  },
+  "Tapes Wellig 85cm": {
+    handle: "tapes-85cm",
+    quality: "Usbekisch Wellig",
+    typ: "Tapes",
+    länge: "85cm",
+    expectedUnitWeight: 25
+  },
+  "Bondings wellig 65cm": {
+    handle: "bondings-65cm",
+    quality: "Usbekisch Wellig",
+    typ: "Bondings",
+    länge: "65cm",
+    expectedUnitWeight: 25,
+    isPremium: true
+  },
+  "Bondings wellig 85cm": {
+    handle: "bondings-85cm",
+    quality: "Usbekisch Wellig",
+    typ: "Bondings",
+    länge: "85cm",
+    expectedUnitWeight: 25
+  },
+  "Usbekische Classic Tressen (Wellig)": {
+    handle: "tressen-usbekisch-classic",
+    quality: "Usbekisch Wellig",
+    typ: "Classic Weft",
+    länge: "65cm",
+    expectedUnitWeight: 50
+  },
+  "Usbekische Genius Tressen (Wellig)": {
+    handle: "tressen-usbekisch-genius",
+    quality: "Usbekisch Wellig",
+    typ: "Genius Weft",
+    länge: "65cm",
+    expectedUnitWeight: 50,
+    isPremium: true
+  },
+  "Ponytail Extensions": {
+    handle: "ponytail-extensions",
+    quality: "Usbekisch Wellig",
+    typ: "Ponytail",
+    länge: "65cm",
+    expectedUnitWeight: null  // variabel
+  },
+  "Ponytails 130g": {  // alter Name – Alias
+    handle: "ponytail-extensions",
+    quality: "Usbekisch Wellig",
+    typ: "Ponytail",
+    länge: "65cm",
+    expectedUnitWeight: 130
+  }
+};
+
+/**
+ * catalogByHandle: Reverse-Lookup Handle → Collection-Config.
+ * Wird beim ersten Zugriff berechnet.
+ */
+const _catalogByHandle_cache = {};
+function catalogByHandle_(handle) {
+  if (Object.keys(_catalogByHandle_cache).length === 0) {
+    for (const collName in CATALOG_COLLECTIONS) {
+      const cfg = CATALOG_COLLECTIONS[collName];
+      if (!_catalogByHandle_cache[cfg.handle]) {
+        _catalogByHandle_cache[cfg.handle] = { collection: collName, ...cfg };
+      }
+    }
+  }
+  return _catalogByHandle_cache[handle] || null;
+}
+
+/**
+ * extractFarbeCanonical: EINE kanonische Funktion für Farbextraktion.
+ * Ersetzt die 4+ verschiedenen Methoden (extractFullColor_, extractColorFromProduct,
+ * colorRaw.split(" ")[0], t.startsWith("#") Loop).
+ *
+ * Regeln:
+ *  1. Erstes "#" finden → extrahiere bis Stopword / Bindestrich / Komma
+ *  2. Fallback für Produkte OHNE "#" (z.B. Invisible Weft "Ebony | ..."):
+ *     Nimm Text vor erstem "|" und prefix mit "#"
+ *  3. Immer UPPERCASE
+ */
+function extractFarbeCanonical(productName) {
+  if (!productName) return "";
+  const upper = String(productName).toUpperCase().replace(/♡/g, "").trim();
+
+  const hashIdx = upper.indexOf("#");
+  if (hashIdx >= 0) {
+    const afterHash = upper.substring(hashIdx);
+    const words = afterHash.split(/\s+/);
+    const colorParts = [words[0]];
+    for (let i = 1; i < words.length; i++) {
+      const w = words[i];
+      if (COLOR_STOP_WORDS_.has(w)) break;
+      if (w === "-" || w === "–" || w === ",") break;
+      // [100G], [150G], [225G] Varianten-Suffix ausschließen
+      if (/^\[\d+G?\]$/i.test(w)) break;
+      colorParts.push(w);
+    }
+    return colorParts.join(" ");
+  }
+
+  // Kein "#" → Fallback: Text vor "|" als Farbe mit "#"-Prefix
+  const pipeIdx = upper.indexOf("|");
+  if (pipeIdx > 0) {
+    return "#" + upper.substring(0, pipeIdx).trim();
+  }
+
+  return "";
+}
+
+/**
+ * Länge-Bestimmung für ein Inventar-Item.
+ * Bei Clip-ins: aus unitWeight (100g/150g/225g).
+ * Bei anderen: aus Collection-Config.
+ */
+function resolveLänge_(collCfg, unitWeight) {
+  if (collCfg.handle === "clip-extensions" && unitWeight > 0) {
+    // Shopify-Fehler 250g → 225g
+    const normalized = unitWeight === 250 ? 225 : unitWeight;
+    return normalized + "g";
+  }
+  return collCfg.länge || "";
+}
+
+/**
+ * Gewicht normalisieren (Shopify-Fehler-Korrekturen).
+ * - Clip-ins 250 → 225
+ * - Mini Tapes 25 → 50 (wenn autoFixHalfWeight)
+ */
+function normalizeUnitWeight_(collCfg, rawWeight) {
+  if (!rawWeight || rawWeight <= 0) return collCfg.expectedUnitWeight || 0;
+  if (collCfg.handle === "clip-extensions") {
+    return rawWeight === 250 ? 225 : rawWeight;
+  }
+  if (collCfg.expectedUnitWeight) {
+    if (rawWeight === collCfg.expectedUnitWeight) return rawWeight;
+    if (rawWeight === collCfg.expectedUnitWeight * 10) return collCfg.expectedUnitWeight;
+    if (collCfg.autoFixHalfWeight && rawWeight === collCfg.expectedUnitWeight / 2) {
+      return collCfg.expectedUnitWeight;
+    }
+  }
+  return rawWeight;
+}
+
+/**
+ * buildCatalogFromInventory: Baut kanonische Produkt-Liste aus beiden Inventar-Tabs.
+ *
+ * RÜCKGABE: Array von Products. Jeder Product entspricht genau einer Zeile
+ * im Inventar-Sheet. Identität = collection + farbeKey + unitWeight.
+ *
+ * Unbekannte Collections werden übersprungen (mit Log).
+ */
+function buildCatalogFromInventory() {
+  const catalog = [];
+  const unknownCollections = {};
+
+  const sheetsToRead = [
+    { sheetName: "Russisch - GLATT", expectedQuality: "Russisch Glatt" },
+    { sheetName: "Usbekisch - WELLIG", expectedQuality: "Usbekisch Wellig" }
+  ];
+
+  for (const s of sheetsToRead) {
+    const rows = readInventoryRowsFromSheet(s.sheetName);
+    for (const row of rows) {
+      const collCfg = CATALOG_COLLECTIONS[row.collection];
+      if (!collCfg) {
+        unknownCollections[row.collection] = (unknownCollections[row.collection] || 0) + 1;
+        continue;
+      }
+
+      const farbeKey = extractFarbeCanonical(row.product);
+      if (!farbeKey) continue;  // Produkt ohne identifizierbare Farbe → skip
+
+      const normalizedUnitWeight = normalizeUnitWeight_(collCfg, row.unitWeight);
+      // Lager ggf. neu berechnen wenn Gewicht korrigiert wurde
+      const lager = (normalizedUnitWeight !== row.unitWeight && row.quantity > 0)
+        ? normalizedUnitWeight * row.quantity
+        : row.totalWeight;
+
+      catalog.push({
+        // Identity
+        sheetName: s.sheetName,
+        collection: row.collection,
+        fullName: row.product,
+        farbeKey: farbeKey,
+        unitWeight: normalizedUnitWeight,
+
+        // Abgeleitet aus Config
+        handle: collCfg.handle,
+        quality: collCfg.quality,
+        typ: collCfg.typ,
+        länge: resolveLänge_(collCfg, normalizedUnitWeight),
+        isPremium: !!collCfg.isPremium,
+
+        // Inventory
+        quantity: row.quantity,
+        lager: lager,
+
+        // Sales (per joinCatalogWithSales später befüllt)
+        g30d: 0,
+        g90d: 0,
+        g60d_alt: 0,
+        qty90d: 0,
+
+        // Ranking (später befüllt)
+        rang: 0,
+        tier: "REST"
+      });
+    }
+  }
+
+  for (const coll in unknownCollections) {
+    Logger.log("⚠️ CATALOG: Unbekannte Collection '" + coll + "' (" + unknownCollections[coll] + " Produkte ignoriert). In CATALOG_COLLECTIONS ergänzen!");
+  }
+
+  Logger.log("✅ CATALOG: " + catalog.length + " Products aus " + sheetsToRead.length + " Inventar-Tabs gebaut");
+  return catalog;
+}
+
+/**
+ * Baut einen Index aus VA_PRODUCT_DATA zum schnellen Sales-Lookup.
+ * Key-Format: "handle|farbeKey" oder (für Clip-ins) "handle|farbeKey|unitWeight"
+ *
+ * Mehrere VA-Einträge mit gleichem Key werden summiert (bei Clip-ins falls
+ * mehrere Shopify-Produkt-IDs für gleiche Farbe+Variante existieren).
+ */
+function buildVaIndex_(vaProductData) {
+  const index = {};
+  if (!vaProductData) return index;
+
+  for (const pid in vaProductData) {
+    const p = vaProductData[pid];
+    if (!p || !p.handle || !p.name) continue;
+
+    const farbe = extractFarbeCanonical(p.name);
+    if (!farbe) continue;
+
+    // Clip-ins: Key mit Variante
+    let key;
+    if (p.handle === "clip-extensions" && p.clipVariant && p.clipVariant > 0) {
+      const normVariant = p.clipVariant === 250 ? 225 : p.clipVariant;
+      key = p.handle + "|" + farbe + "|" + normVariant;
+    } else {
+      key = p.handle + "|" + farbe;
+    }
+
+    if (!index[key]) {
+      index[key] = { g30d: 0, g90d: 0, g60d_alt: 0, qty90d: 0 };
+    }
+    index[key].g30d    += (p.g30d || 0);
+    index[key].g90d    += (p.g90d || 0);
+    index[key].g60d_alt+= (p.g60d_alt || 0);
+    index[key].qty90d  += (p.qty90d || 0);
+  }
+
+  return index;
+}
+
+/**
+ * joinCatalogWithSales: Verbindet Catalog (Inventar) mit Verkaufszahlen.
+ * Mutiert catalog-Items, gibt aber auch catalog zurück für chaining.
+ */
+function joinCatalogWithSales(catalog, vaProductData) {
+  const vaIndex = buildVaIndex_(vaProductData);
+
+  for (const product of catalog) {
+    // Clip-ins: Key mit unitWeight
+    let key;
+    if (product.handle === "clip-extensions" && product.unitWeight > 0) {
+      key = product.handle + "|" + product.farbeKey + "|" + product.unitWeight;
+    } else {
+      key = product.handle + "|" + product.farbeKey;
+    }
+
+    const sales = vaIndex[key];
+    if (sales) {
+      product.g30d = sales.g30d;
+      product.g90d = sales.g90d;
+      product.g60d_alt = sales.g60d_alt;
+      product.qty90d = sales.qty90d;
+    }
+  }
+
+  return catalog;
+}
+
+/**
+ * rankCatalog: Gruppiert catalog nach (quality, typ, länge) und vergibt Rang + Tier.
+ *
+ * Ranking: absteigend nach g90d, dann g30d als Tiebreaker.
+ * Tier-Schwellen:
+ *   - isPremium: TOP7=Rang 1-10, MID=11-20, REST=21+, KAUM=unter minGrams
+ *   - sonst:     TOP7=Rang 1-7,  MID=8-14,  REST=15+, KAUM=unter minGrams
+ *
+ * Mutiert catalog-Items (rang, tier, isPremium) und gibt Gruppen zurück:
+ *   { "Russisch Glatt|Standard Tapes|": [product, ...], ... }
+ */
+function rankCatalog(catalog, minGrams) {
+  if (minGrams == null) minGrams = 50;
+  const groups = {};
+
+  for (const p of catalog) {
+    const key = p.quality + "|" + p.typ + "|" + (p.länge || "");
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(p);
+  }
+
+  for (const key in groups) {
+    const items = groups[key];
+    items.sort((a, b) => {
+      if (b.g90d !== a.g90d) return b.g90d - a.g90d;
+      return (b.g30d || 0) - (a.g30d || 0);
+    });
+
+    const isPrem = items.length > 0 && items[0].isPremium;
+    const topLimit = isPrem ? 10 : 7;
+    const midLimit = isPrem ? 20 : 14;
+
+    for (let i = 0; i < items.length; i++) {
+      items[i].rang = i + 1;
+      if      (i < topLimit)                    items[i].tier = "TOP7";
+      else if (i < midLimit)                    items[i].tier = "MID";
+      else if ((items[i].g90d || 0) >= minGrams) items[i].tier = "REST";
+      else                                      items[i].tier = "KAUM";
+    }
+  }
+
+  return groups;
+}
+
+// ==========================================================================
+// █████████████████ TOPSELLER V2 — auf CATALOG-Basis ███████████████████████
+// ==========================================================================
+
+/**
+ * Reihenfolge der Sektionen im Topseller-Tab.
+ * Sortiert nach (quality, typ-order). Clip-Ins werden nach Variante aufgeteilt.
+ */
+const TOPSELLER_V2_ORDER = [
+  // Russisch Glatt (Amanda)
+  { quality: "Russisch Glatt",   typ: "Standard Tapes", länge: "" },
+  { quality: "Russisch Glatt",   typ: "Minitapes",       länge: "" },
+  { quality: "Russisch Glatt",   typ: "Bondings",        länge: "" },
+  { quality: "Russisch Glatt",   typ: "Classic Weft",    länge: "" },
+  { quality: "Russisch Glatt",   typ: "Genius Weft",     länge: "" },
+  { quality: "Russisch Glatt",   typ: "Invisible Weft",  länge: "" },
+  { quality: "Russisch Glatt",   typ: "Clip-ins",        länge: "100g" },
+  { quality: "Russisch Glatt",   typ: "Clip-ins",        länge: "150g" },
+  { quality: "Russisch Glatt",   typ: "Clip-ins",        länge: "225g" },
+  // Usbekisch Wellig (China)
+  { quality: "Usbekisch Wellig", typ: "Tapes",    länge: "45cm" },
+  { quality: "Usbekisch Wellig", typ: "Tapes",    länge: "55cm" },
+  { quality: "Usbekisch Wellig", typ: "Tapes",    länge: "65cm" },
+  { quality: "Usbekisch Wellig", typ: "Tapes",    länge: "85cm" },
+  { quality: "Usbekisch Wellig", typ: "Bondings", länge: "65cm" },
+  { quality: "Usbekisch Wellig", typ: "Bondings", länge: "85cm" },
+  { quality: "Usbekisch Wellig", typ: "Classic Weft", länge: "65cm" },
+  { quality: "Usbekisch Wellig", typ: "Genius Weft",  länge: "65cm" },
+  { quality: "Usbekisch Wellig", typ: "Ponytail",     länge: "65cm" }
+];
+
+/**
+ * Berechnet effektive Tages-Verkaufsrate mit Ausverkauf-Korrektur.
+ * Wenn aktuelle Rate (30d) deutlich niedriger ist als alte Rate (60d_alt = Tag 31-90),
+ * → war ausverkauft → alte Rate verwenden.
+ */
+function effectiveDailyRate_(product) {
+  const rateNeu = (product.g30d || 0) / 30;
+  const rateAlt = (product.g60d_alt || 0) / 60;
+  if (rateAlt > 0.5 && rateNeu < rateAlt * 0.6) return rateAlt;
+  return rateNeu;
+}
+
+/**
+ * Berechnet Ziel-Grammzahl basierend auf Tier.
+ * HINWEIS: Premium-Flag entscheidet nur über Ranking-Breite (TOP7=Rang 1-10 statt 1-7),
+ * NICHT mehr über Ziel-Höhe. Ziel ist eine grobe Orientierung;
+ * das echte verkaufsbasierte Ziel wird im Bestellvorschlag berechnet.
+ */
+function zielForProduct_(product) {
+  if (product.tier === "TOP7") return 1000;
+  if (product.tier === "MID")  return 500;
+  if (product.tier === "REST") return 300;
+  return 0;
+}
+
+/**
+ * Rang-Klasse-Label (für Anzeige).
+ */
+function rangKlasseLabel_(product) {
+  if (product.tier === "TOP7") return product.isPremium ? "Top 1–10" : "Top 1–7";
+  if (product.tier === "MID")  return product.isPremium ? "Rang 11–20" : "Rang 8–14";
+  if (product.tier === "REST") return "Rest";
+  return "Kaum verkauft";
+}
+
+/**
+ * refreshTopsellerV2: Neue, saubere Topseller-Implementierung auf Catalog-Basis.
+ *
+ * Schreibt in den Tab "Topseller V2" (parallel zum alten "Topseller").
+ * Speichert Ranking in Script Property "TOPSELLER_DATA_V2" für spätere Nutzung
+ * in Amanda/China V2.
+ */
+function refreshTopsellerV2() {
+  Logger.log("🏷️ CODE_VERSION: " + CODE_VERSION + " (refreshTopsellerV2)");
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const DAYS = 90;
+
+  // ── Schritt 1: Catalog + Sales + Ranking ──
+  const catalog = buildCatalogFromInventory();
+  const vaProductData = loadChunked_(PropertiesService.getScriptProperties(), "VA_PRODUCT_DATA");
+  if (!vaProductData) {
+    safeAlert_("⚠️ Keine Verkaufsanalyse-Daten!\n\nBitte erst 'Verkaufsanalyse aktualisieren' ausführen.");
+    return;
+  }
+  joinCatalogWithSales(catalog, vaProductData);
+  rankCatalog(catalog, 50);
+
+  // ── Schritt 2: Unterwegs-Bestellungen laden ──
+  let chinaOrdersV2 = [], amandaOrdersV2 = [];
+  try {
+    const all = getAllOrders();
+    chinaOrdersV2  = all.filter(o => o.provider === "China");
+    amandaOrdersV2 = all.filter(o => o.provider === "Amanda");
+    Logger.log("✅ Unterwegs V2: " + chinaOrdersV2.length + " China, " + amandaOrdersV2.length + " Amanda");
+  } catch(e) { Logger.log("⚠️ Unterwegs V2 fehlgeschlagen: " + e.message); }
+
+  // ── Schritt 3: Gruppen nach TOPSELLER_V2_ORDER bauen ──
+  const groupedBySection = {};
+  for (const product of catalog) {
+    const key = product.quality + "|" + product.typ + "|" + (product.länge || "");
+    if (!groupedBySection[key]) groupedBySection[key] = [];
+    groupedBySection[key].push(product);
+  }
+
+  // Innerhalb jeder Gruppe nach Rang sortieren
+  for (const k in groupedBySection) {
+    groupedBySection[k].sort((a, b) => a.rang - b.rang);
+  }
+
+  // ── Schritt 4: Tab schreiben ──
+  // V2 ist Default: schreibt in "Topseller" (alter Name). Alter "Topseller V2" bleibt als Snapshot.
+  const tabName = PropertiesService.getScriptProperties().getProperty("TOPSELLER_WRITE_SUFFIX") === "V2"
+    ? "Topseller V2" : "Topseller";
+  let sheet = ss.getSheetByName(tabName);
+  if (!sheet) sheet = ss.insertSheet(tabName);
+  sheet.clear();
+
+  const dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd.MM.yyyy HH:mm");
+  let row = 1;
+
+  // Zeitraum-Info oben rechts
+  sheet.getRange(1, 17).setValue("Zeitraum (Tage)").setFontWeight("bold").setBackground("#eeeeee").setFontSize(10);
+  sheet.getRange(2, 17).setValue(DAYS).setBackground("#fff9c4").setFontWeight("bold").setFontSize(14).setHorizontalAlignment("center");
+  sheet.setColumnWidth(17, 160);
+
+  // Detail-Spalten: pro Bestellung eine
+  const DETAIL_START_COL = 15;
+  const maxDetailCols = Math.max(chinaOrdersV2.length, amandaOrdersV2.length, 0);
+
+  // Russisch Glatt Tabelle
+  row = writeTopsellerTabV2_(sheet, row,
+    "RUSSISCH GLATT – Topseller letzte " + DAYS + " Tage  |  " + dateStr,
+    "Russisch Glatt", groupedBySection, TOPSELLER_V2_ORDER,
+    "#1b5e20", "#e8f5e9", amandaOrdersV2, 45, DETAIL_START_COL, maxDetailCols);
+
+  row += 2;
+
+  // Usbekisch Wellig Tabelle
+  row = writeTopsellerTabV2_(sheet, row,
+    "USBEKISCH WELLIG – Topseller letzte " + DAYS + " Tage  |  " + dateStr,
+    "Usbekisch Wellig", groupedBySection, TOPSELLER_V2_ORDER,
+    "#1565c0", "#e3f2fd", chinaOrdersV2, 60, DETAIL_START_COL, maxDetailCols);
+
+  // Spaltenbreiten
+  sheet.setColumnWidth(1, 45);
+  sheet.setColumnWidth(2, 300);  // Voller Shopify-Produktname
+  sheet.setColumnWidth(3, 75);
+  sheet.setColumnWidth(4, 110);
+  sheet.setColumnWidth(5, 110);
+  sheet.setColumnWidth(6, 90);
+  sheet.setColumnWidth(7, 110);  // Prognose
+  sheet.setColumnWidth(8, 65);   // Tier
+  sheet.setColumnWidth(9, 75);   // Ziel
+  sheet.setColumnWidth(10, 80);  // Lager
+  sheet.setColumnWidth(11, 90);  // Rang-Klasse
+  sheet.setColumnWidth(12, 12);  // Trenner
+  sheet.setColumnWidth(13, 120); // Unterwegs gesamt
+  sheet.setColumnWidth(14, 30);  // Toggle
+  for (let i = 0; i < maxDetailCols; i++) sheet.setColumnWidth(DETAIL_START_COL + i, 100);
+  sheet.setFrozenRows(0);
+
+  // ── Schritt 5: Ranking in Script Property speichern (für Amanda/China V2) ──
+  const topsellerDataV2 = {};
+  for (const product of catalog) {
+    const q = product.quality;
+    const t = product.typ;
+    const l = product.länge || "";
+    if (!topsellerDataV2[q]) topsellerDataV2[q] = {};
+    const typKey = (t === "Clip-ins" && l) ? ("Clip-ins " + l) : t;
+    if (!topsellerDataV2[q][typKey]) topsellerDataV2[q][typKey] = {};
+    topsellerDataV2[q][typKey][product.farbeKey] = {
+      tier: product.tier,
+      rang: product.rang,
+      lager: product.lager,
+      fullName: product.fullName
+    };
+  }
+  saveChunked_(PropertiesService.getScriptProperties(), "TOPSELLER_DATA_V2", topsellerDataV2);
+  Logger.log("✅ TOPSELLER_DATA_V2 gespeichert: " + Object.keys(topsellerDataV2).length + " Qualitäten");
+
+  Logger.log("✅ Topseller V2 Tab geschrieben (" + catalog.length + " Products)");
+  safeAlert_("✅ Topseller V2 aktualisiert!\n\nTab 'Topseller V2' enthält den neuen Catalog-basierten Topseller.\n\nVergleiche ihn mit dem alten 'Topseller' Tab.");
+}
+
+/**
+ * Schreibt eine Topseller-Tabelle für eine Quality (Russisch Glatt / Usbekisch Wellig).
+ * Gibt die Zeilennummer zurück auf der die Tabelle endet.
+ */
+function writeTopsellerTabV2_(sheet, startRow, title, quality, groupedBySection, sectionOrder,
+                              headerColor, sectionBg, orders, forecastDays, detailStartCol, maxDetailCols) {
+  const COL_COUNT = 13;
+  const COL_SEP   = 12;
+  const COL_UW    = 13;
+  const SEP_BG    = "#e0e0e0";
+  const DETAIL_START = detailStartCol || 15;
+  const fDays = forecastDays || 30;
+
+  let row = startRow;
+
+  // Haupt-Titel
+  sheet.getRange(row, 1, 1, COL_COUNT).merge()
+    .setValue(title)
+    .setBackground(headerColor).setFontColor("#ffffff")
+    .setFontWeight("bold").setFontSize(13).setHorizontalAlignment("center");
+  row++;
+
+  for (const section of sectionOrder) {
+    if (section.quality !== quality) continue;
+    const key = section.quality + "|" + section.typ + "|" + section.länge;
+    const items = groupedBySection[key];
+    if (!items || items.length === 0) continue;
+
+    const lenLabel = section.länge ? " " + section.länge.toUpperCase() : "";
+    const sectionLabel = section.typ + lenLabel + " (" + section.quality + ")";
+
+    // Sektion-Header
+    sheet.getRange(row, 1, 1, COL_COUNT).merge()
+      .setValue("── " + sectionLabel + " ──")
+      .setBackground(sectionBg).setFontWeight("bold").setFontSize(11).setFontColor(headerColor);
+    // Bestellnamen für Detailspalten
+    if (orders && orders.length > 0) {
+      for (let oi = 0; oi < orders.length; oi++) {
+        const ankunft = calcAnkunft_(orders[oi]);
+        const label = orders[oi].name + (ankunft ? "\n" + ankunft : "");
+        sheet.getRange(row, DETAIL_START + oi)
+          .setValue(label)
+          .setBackground(headerColor).setFontColor("#ffffff")
+          .setFontWeight("bold").setFontSize(8).setWrap(true);
+      }
+    }
+    row++;
+
+    // Spalten-Header
+    const headerVals = ["Rang", "Produkt", "Länge", "Verkauft (g)", "30 Tage (g)", "Verkauft (Stk)",
+                        fDays + " Tage Verbrauch", "Tier", "Ziel (g)", "Lager (g)", "Rang-Klasse", "", "Unterwegs (g)"];
+    sheet.getRange(row, 1, 1, COL_COUNT)
+      .setValues([headerVals])
+      .setBackground("#2d2d2d").setFontColor("#ffffff").setFontWeight("bold").setFontSize(9);
+    sheet.getRange(row, COL_SEP).setBackground(SEP_BG).setValue("");
+    if (orders && orders.length > 0) {
+      for (let oi = 0; oi < orders.length; oi++) {
+        sheet.getRange(row, DETAIL_START + oi)
+          .setValue(orders[oi].date)
+          .setBackground("#2d2d2d").setFontColor("#ffffff").setFontWeight("bold").setFontSize(9);
+      }
+    }
+    row++;
+
+    // Datenzeilen — Batch-Writing: alle Werte sammeln, dann EINMAL schreiben
+    let sectionGrams = 0, sectionGrams30 = 0;
+    const dataStartRow = row;
+    const rowsValues = [];       // 2D-Array: Hauptwerte (Spalten 1-13)
+    const rowsBG = [];           // 2D: Hintergrundfarben
+    const rowsFontColor = [];    // 2D: Schriftfarben
+    const rowsFontWeight = [];   // 2D: bold/normal
+    const detailValues = [];     // 2D: Werte Detailspalten (Orders)
+    const detailBG = [];         // 2D: Background Detailspalten
+    const detailFontColor = [];
+    const detailFontWeight = [];
+    const detailFontSize = [];
+
+    for (const p of items) {
+      const ziel = zielForProduct_(p);
+      const rangKlasse = rangKlasseLabel_(p);
+      const rate = effectiveDailyRate_(p);
+      const prognose = rate > 0 ? Math.round(rate * fDays) : "";
+
+      let unterwegsGrams = 0;
+      const perOrderGrams = [];
+      if (orders && orders.length > 0) {
+        for (const ord of orders) {
+          const clipVar = (p.typ === "Clip-ins") ? p.unitWeight : null;
+          const w = getOrderedWeightForProduct(p.fullName, p.collection, ord, clipVar);
+          perOrderGrams.push(w);
+          unterwegsGrams += w;
+        }
+      }
+
+      // Tier-Basisfarbe
+      let bg = "#ffffff";
+      if      (p.tier === "TOP7") bg = "#fff9c4";
+      else if (p.tier === "MID")  bg = "#e3f2fd";
+      else if (p.tier === "KAUM") bg = "#eeeeee";
+      const fontColor = p.tier === "KAUM" ? "#aaaaaa" : "#000000";
+      const isTop = p.tier === "TOP7";
+
+      // Haupt-Werte-Zeile
+      rowsValues.push([
+        p.rang, p.fullName, p.länge, p.g90d, p.g30d, p.qty90d,
+        prognose, p.tier, ziel, p.lager, rangKlasse, "", unterwegsGrams > 0 ? unterwegsGrams : ""
+      ]);
+
+      // Backgrounds: Standard tier-bg, Spezialfälle für kritisch / unterwegs / trenner
+      const lagerKritisch = (p.lager < 100);
+      const keinUnterwegs = unterwegsGrams === 0;
+      const bgRow = new Array(COL_COUNT).fill(bg);
+      const fcRow = new Array(COL_COUNT).fill(fontColor);
+      const fwRow = new Array(COL_COUNT).fill("normal");
+
+      // Trenner-Spalte (Spalte 12 = COL_SEP)
+      bgRow[COL_SEP - 1] = SEP_BG;
+
+      // Kritisch: Spalten J-M (10-13) rötlich
+      if (lagerKritisch && keinUnterwegs) {
+        for (let ci = 10 - 1; ci <= 13 - 1; ci++) bgRow[ci] = "#fde8e8";
+        fcRow[10 - 1] = "#c62828";
+        fwRow[10 - 1] = "bold";
+        bgRow[COL_SEP - 1] = "#f5c6c6";
+      } else if (p.lager === 0) {
+        bgRow[10 - 1] = "#fde8e8";
+        fcRow[10 - 1] = "#c62828";
+        fwRow[10 - 1] = "bold";
+      }
+      if (unterwegsGrams > 0) {
+        bgRow[COL_UW - 1] = "#e8f5e9";
+        fcRow[COL_UW - 1] = "#2e7d32";
+        fwRow[COL_UW - 1] = "bold";
+      }
+      if (isTop) {
+        fwRow[0] = "bold"; // Rang
+        fwRow[1] = "bold"; // Produkt
+      }
+
+      rowsBG.push(bgRow);
+      rowsFontColor.push(fcRow);
+      rowsFontWeight.push(fwRow);
+
+      // Detail-Spalten: pro Bestellung
+      if (orders && orders.length > 0) {
+        const dVals = [], dBG = [], dFC = [], dFW = [], dFS = [];
+        for (let oi = 0; oi < orders.length; oi++) {
+          const w = perOrderGrams[oi];
+          if (w > 0) {
+            dVals.push(w);    dBG.push("#ceead6"); dFC.push("#0d6e27"); dFW.push("bold");   dFS.push(10);
+          } else {
+            dVals.push("–");  dBG.push(bg);        dFC.push("#cccccc"); dFW.push("normal"); dFS.push(9);
+          }
+        }
+        detailValues.push(dVals);
+        detailBG.push(dBG);
+        detailFontColor.push(dFC);
+        detailFontWeight.push(dFW);
+        detailFontSize.push(dFS);
+      }
+
+      sectionGrams   += p.g90d;
+      sectionGrams30 += p.g30d;
+      row++;
+    }
+
+    // BATCH-WRITE: alle Datenzeilen der Sektion in wenigen API-Calls
+    if (rowsValues.length > 0) {
+      const rng = sheet.getRange(dataStartRow, 1, rowsValues.length, COL_COUNT);
+      rng.setValues(rowsValues);
+      rng.setBackgrounds(rowsBG);
+      rng.setFontColors(rowsFontColor);
+      rng.setFontWeights(rowsFontWeight);
+      rng.setFontSize(10);
+
+      // Detail-Spalten batch
+      if (orders && orders.length > 0 && detailValues.length > 0) {
+        const dRng = sheet.getRange(dataStartRow, DETAIL_START, detailValues.length, orders.length);
+        dRng.setValues(detailValues);
+        dRng.setBackgrounds(detailBG);
+        dRng.setFontColors(detailFontColor);
+        dRng.setFontWeights(detailFontWeight);
+        dRng.setFontSizes(detailFontSize);
+      }
+    }
+
+    // Summen-Zeile
+    const sumRow = ["", "GESAMT", "", sectionGrams, sectionGrams30, "", "", "", "", "", "", "", ""];
+    sheet.getRange(row, 1, 1, COL_COUNT)
+      .setValues([sumRow])
+      .setBackground(sectionBg).setFontWeight("bold").setFontSize(9).setFontColor(headerColor);
+    sheet.getRange(row, COL_SEP).setBackground(SEP_BG);
+    row++;
+    row++; // Leerzeile zwischen Sektionen
+  }
+
+  return row;
+}
+
+// ==========================================================================
+// █████████████████ BESTELLVORSCHLAG V2 WRAPPER ███████████████████████████
+// ==========================================================================
+//
+// Setzt Feature-Flag und ruft die bestehende createBestellungAmanda/China auf.
+// V2-Modus:
+//  - Inventar-Input kommt aus CATALOG (statt direkt aus Sheet)
+//  - Schreibt in "Vorschlag - Amanda V2" / "Vorschlag - China V2"
+//  - Budget-Algorithmus bleibt 100% identisch
+//
+// Fallback: Falls V2 fehlschlägt, wird das Flag immer zurückgesetzt
+// und die nächste Ausführung von createBestellungAmanda läuft wieder als V1.
+// ==========================================================================
+
+function createBestellungAmandaV2() {
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty("AMANDA_USE_CATALOG_V2", "true");
+  try {
+    createBestellungAmanda();
+  } finally {
+    props.deleteProperty("AMANDA_USE_CATALOG_V2");
+  }
+}
+
+function createBestellungChinaV2() {
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty("CHINA_USE_CATALOG_V2", "true");
+  try {
+    createBestellungChina();
+  } finally {
+    props.deleteProperty("CHINA_USE_CATALOG_V2");
+  }
+}
+
+function createDashboardV2() {
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty("DASHBOARD_USE_CATALOG_V2", "true");
+  try {
+    createDashboard();
+  } finally {
+    props.deleteProperty("DASHBOARD_USE_CATALOG_V2");
+  }
+}
+
+// ==========================================================================
+// █████████████ DAYS-OF-STOCK ALLOCATOR (DoSA) █████████████████████████████
+// ==========================================================================
+// Verteilt ein Budget auf Produkte nach einheitlicher, dynamischer Formel.
+// Überschreibt ALLE vorherigen Zuteilungen.
+//
+// cfg = {
+//   zielReichweite:  42,            // Phase A: Grundbedarf (Tage)
+//   tierReichweiten: { top:84, mid:70, rest:56 },  // Phase C: Überschuss-Caps
+//   regalMindest:    300,           // KAUM-Produkt ohne Vorrat → diese Menge
+//   minBestellung:   500,           // Mindestmenge TOP/MID (China: für alle)
+//   minBestellungRest: 300,         // Amanda: kleinere Mindestmenge für REST
+//   einheitFn:       (c) => ...,    // Einheit pro Produkt (100/50/150/225/...)
+//   stockBeiAnkunftFn: (c) => ...,  // Stock bei Ankunft (stock_at_84/_at_arrival)
+//   label:           "Amanda" / "China"   // für Logs
+// }
+// ==========================================================================
+
+// ─── FULL-CANDIDATE-BUILDER (Amanda) ───────────────────────────────────────
+// Ergänzt bestehende Kandidaten-Liste um ALLE Shopify-Produkte aus VA_PRODUCT_DATA
+// (auch Lager=0, auch nie verkauft). Damit sieht die Idealbestand-Tabelle echt
+// alles was in Shopify existiert — nicht nur das was gerade Bestand hat.
+function buildFullAmandaCandidates_(existingCandidates, allOrders) {
+  const vaData = loadChunked_(PropertiesService.getScriptProperties(), "VA_PRODUCT_DATA");
+  if (!vaData) { Logger.log("⚠️ VA_PRODUCT_DATA leer — Full-Candidate-Builder skipped"); return existingCandidates; }
+  const tsDataV2 = loadChunked_(PropertiesService.getScriptProperties(), "TOPSELLER_DATA_V2");
+
+  const HANDLE_TO_METHOD_A = {
+    "russische-normal-tapes":     { method: "Standard Tapes", collName: "Standard Tapes Russisch",             länge: "60cm", einheit: 100 },
+    "mini-tapes":                 { method: "Minitapes",      collName: "Mini Tapes Glatt",                     länge: "60cm", einheit: 50  },
+    "bondings-glatt":             { method: "Bondings",       collName: "Russische Bondings (Glatt)",           länge: "60cm", einheit: 100 },
+    "tressen-russisch-classic":   { method: "Classic Weft",   collName: "Russische Classic Tressen (Glatt)",    länge: "60cm", einheit: 100 },
+    "tressen-russisch-genius":    { method: "Genius Weft",    collName: "Russische Genius Tressen (Glatt)",     länge: "60cm", einheit: 100 },
+    "tressen-russisch-invisible": { method: "Invisible Weft", collName: "Russische Invisible Tressen (Glatt) | Butterfly Weft", länge: "60cm", einheit: 100 },
+    "clip-extensions":            { method: "Clip-ins",       collName: "Clip In Extensions Echthaar",          länge: null,   einheit: null }
+  };
+
+  // Dedupe-Key-Normalisierung: Farbe + Suffix-Entfernung + uppercase
+  const normalizeFarbe = (s) => (s || "").toUpperCase()
+    .replace(/\s*\[\d+\s*G\]\s*/gi, "")
+    .replace(/\s*-\s*INVISIBLE.*$/i, "")
+    .replace(/\s+/g, " ").trim();
+
+  // ═══ STEP 1: Existing Kandidaten indexieren + ausführlicher Log ═══
+  const existingMap = new Map();  // key → { rate, product, source }
+  Logger.log("━━━━━ buildFullAmandaCandidates_ DEDUPE-LOG ━━━━━");
+  Logger.log("EXISTING KANDIDATEN (" + existingCandidates.length + "):");
+  for (const c of existingCandidates) {
+    const farbeRaw = extractFullColor_(c.product || "") || "";
+    const farbe = normalizeFarbe(farbeRaw);
+    const key = (c.method || "") + "|" + farbe + "|" + (c.einheit || 100);
+    existingMap.set(key, { rate: c.tagesrate || 0, product: c.product, source: "amanda_flow" });
+    // Schlüssel-Produkte speziell markieren
+    if (/NORVEGIAN|DESERT|EBONY|RAW |BITTER CACAO|DUBAI|PLATIN/i.test(c.product || "")) {
+      Logger.log("  📌 " + key.padEnd(55) + " rate=" + (c.tagesrate||0).toFixed(2) + "/d  [" + (c.product||"").substring(0,45) + "]");
+    }
+  }
+
+  // ═══ STEP 2: VA-Kandidaten durchgehen mit Rate-Schutz ═══
+  const result = existingCandidates.slice();
+  let added = 0, skippedDedupe = 0, skippedRateLower = 0, rateConflicts = [];
+  Logger.log("VA-DURCHLAUF:");
+
+  for (const vaKey in vaData) {
+    const p = vaData[vaKey];
+    if (!p || !p.handle || !p.name) continue;
+    const mapping = HANDLE_TO_METHOD_A[p.handle];
+    if (!mapping) continue;
+
+    // WICHTIG: extractFarbeCanonical verwenden — gleiche Funktion wie beim Speichern
+    // von TOPSELLER_DATA_V2. extractFullColor_ liefert bei "#VANILA OMBRE [225g]"
+    // den String "#VANILA OMBRE [225G]" (mit Suffix), tsDataV2-Key ist aber
+    // "#VANILA OMBRE" → Lookup scheitert → Lager=0 trotz vorhandenem Bestand.
+    const farbe = extractFarbeCanonical(p.name);
+    if (!farbe) continue;
+
+    let einheit = mapping.einheit;
+    let länge = mapping.länge;
+    if (p.handle === "clip-extensions") {
+      einheit = p.clipVariant || 100;
+      länge = einheit + "g";
+    }
+
+    const dedupeKey = mapping.method + "|" + normalizeFarbe(farbe) + "|" + einheit;
+    const g30 = p.g30d || 0;
+    const g60alt = p.g60d_alt || 0;
+    const g90 = p.g90d || 0;
+    const tagesrate = Math.max(g30 / 30, g60alt / 60, g90 / 90);
+
+    // ─── DEDUPE-CHECK mit RATE-SCHUTZ ───
+    if (existingMap.has(dedupeKey)) {
+      const existing = existingMap.get(dedupeKey);
+      skippedDedupe++;
+      // Rate-Konflikt erkennen: existing Rate stark abweichend von VA Rate → Log als Warnung
+      if (Math.abs(existing.rate - tagesrate) > 3) {
+        rateConflicts.push({
+          key: dedupeKey,
+          existing_rate: existing.rate,
+          va_rate: tagesrate,
+          existing_product: existing.product,
+          va_product: p.name
+        });
+      }
+      continue;
+    }
+
+    // ─── RATE-SCHUTZ bei Duplikaten die Dedupe verpasst (Safety-Net) ───
+    // Prüfe ob ein existing Kandidat mit gleicher farbe + method aber anderer Einheit existiert
+    // und ob die VA-Rate UNTER der existing-Rate liegt → das wäre Degradation
+    const altKeyFarbeOnly = mapping.method + "|" + normalizeFarbe(farbe);
+    let degradation = false;
+    for (const [k, v] of existingMap) {
+      if (k.startsWith(altKeyFarbeOnly + "|") && k !== dedupeKey) {
+        if (tagesrate < v.rate - 3) {
+          degradation = true;
+          skippedRateLower++;
+          Logger.log("  🛡️ RATE-SCHUTZ: VA-Kandidat " + p.name.substring(0,40) + " (rate=" + tagesrate.toFixed(1) + ") würde existing " + v.product.substring(0,40) + " (rate=" + v.rate.toFixed(1) + ") degradieren — SKIP");
+          break;
+        }
+      }
+    }
+    if (degradation) continue;
+
+    // ─── Kandidat wirklich neu → hinzufügen ───
+    let tier = "KAUM", lager = 0, fullName = p.name;
+    if (tsDataV2 && tsDataV2["Russisch Glatt"]) {
+      const typKey = (mapping.method === "Clip-ins") ? ("Clip-ins " + länge) : mapping.method;
+      const typEntry = tsDataV2["Russisch Glatt"][typKey];
+      if (typEntry && typEntry[farbe]) {
+        tier = typEntry[farbe].tier || "KAUM";
+        lager = typEntry[farbe].lager || 0;
+        // Vollen Shopify-Produktnamen aus tsDataV2 übernehmen wenn vorhanden
+        // (p.name ist bei aus Inventar nachgezogenen Clip-ins oft gekürzt wie "#VANILA OMBRE [225g]")
+        if (typEntry[farbe].fullName) fullName = typEntry[farbe].fullName;
+      }
+    }
+    const unterwegs = getUnterwegsForProduct(
+      allOrders || [], "Amanda", farbe, mapping.collName, länge,
+      (mapping.method === "Clip-ins" ? einheit : null)
+    );
+
+    result.push({
+      quality: "Russian Straight hair",
+      method: mapping.method,
+      länge: länge,
+      product: fullName,
+      lager: lager,
+      unterwegs: unterwegs,
+      verfügbar: lager + unterwegs,
+      tagesrate: tagesrate,
+      tier: tier,
+      einheit: einheit,
+      rang: 999,
+      isTop: tier === "TOP7",
+      isMid: tier === "MID",
+      isPrio: false,
+      ziel: 0, bedarf: 0,
+      zugeteilt: 0,
+      stock_at_arrival: null,
+      _fullOnly: true
+    });
+    existingMap.set(dedupeKey, { rate: tagesrate, product: p.name, source: "va_data" });
+    added++;
+
+    // Topseller Clip-ins 225g oder wichtige neue Produkte im Log markieren
+    if (einheit === 225 || /SMOKY BROWN|BITTER CACAO|NORVEGIAN|LATTE BALAYAGE/i.test(p.name)) {
+      Logger.log("  ➕ NEU: " + dedupeKey.padEnd(55) + " rate=" + tagesrate.toFixed(2) + "/d tier=" + tier + " L=" + lager + " U=" + unterwegs);
+    }
+  }
+
+  // ═══ STEP 3: Zusammenfassung ═══
+  Logger.log("━━━━━ ERGEBNIS ━━━━━");
+  Logger.log("  Hinzugefügt: " + added + " neue Kandidaten");
+  Logger.log("  Dedupe-skipped (existing bleibt): " + skippedDedupe);
+  Logger.log("  Rate-Schutz-skipped (VA würde degradieren): " + skippedRateLower);
+  if (rateConflicts.length > 0) {
+    Logger.log("  ⚠️ RATE-KONFLIKTE (Dedupe greift, aber existing/va unterschiedlich):");
+    for (const rc of rateConflicts.slice(0, 10)) {
+      Logger.log("    " + rc.key + " existing=" + rc.existing_rate.toFixed(1) + "/d vs VA=" + rc.va_rate.toFixed(1) + "/d");
+    }
+  }
+  Logger.log("  Pool: " + existingCandidates.length + " → " + result.length);
+  Logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  return result;
+}
+
+// ─── IDEALBESTAND (unbegrenzt) ─────────────────────────────────────────────
+// Für die VOLLSTÄNDIGE LISTE: rechnet den Idealbestand pro Produkt OHNE
+// jegliche Guards/Budget-Limits. Jedes Produkt bekommt so viel, dass
+// Lager + Unterwegs + Bestellung den Soll-Bestand erreicht.
+//   Aktive (TOP7/MID/REST): tier.maxTage × tagesrate
+//   KAUM: regalMindest (Regal-Präsenz)
+// Unterwegs-Ware wird mitgerechnet (realistisch: was in Zukunft ankommt zählt).
+function allocateIdealStock_(candidates, cfg) {
+  const einheitOf = (c) => Math.max(1, cfg.einheitFn(c));
+  const ceilEinh  = (c, val) => Math.ceil(val / einheitOf(c)) * einheitOf(c);
+  // Lieferanten-Mindestbestellmenge (Amanda 300g, China 500g), auf Einheit aufgerundet
+  const minOrder = cfg.minBestellung || cfg.regalMindest || 300;
+
+  for (const c of candidates) {
+    c.zugeteilt = 0;
+    const lager = c.lager || 0;
+    const unterwegs = c.unterwegs || 0;
+    const vorhanden = lager + unterwegs;
+    const tier = c.tier || "REST";
+    const rate = c.tagesrate || 0;
+
+    let idealBestand = 0;
+    if (rate > 0) {
+      // Aktiv: tier-spezifische maxTage
+      const maxTage = tier === "TOP7" ? cfg.tierReichweiten.top :
+                      tier === "MID"  ? cfg.tierReichweiten.mid :
+                                        cfg.tierReichweiten.rest;
+      idealBestand = maxTage * rate;
+    } else {
+      // KAUM/inaktiv: Regal-Präsenz
+      idealBestand = cfg.regalMindest;
+    }
+
+    // UNTERGRENZE: Lieferanten-Mindestbestellung — kein Produkt soll unter 300g (Amanda)
+    // bestellt werden, auch wenn rechnerisch weniger nötig wäre. Das entspricht der
+    // echten Lieferanten-Realität (Amanda akzeptiert keine <300g-Bestellungen).
+    if (idealBestand < minOrder) idealBestand = minOrder;
+
+    const fehlt = idealBestand - vorhanden;
+    if (fehlt <= 0) continue;  // schon genug → nichts bestellen
+    let bestellung = ceilEinh(c, fehlt);
+    // Cleanup-Pass: Bestellung muss auch selbst ≥ minOrder sein
+    // (z.B. vorhanden=200, ideal=300 → fehlt=100 → aber 100 < 300 → auf 300 aufrunden)
+    if (bestellung < ceilEinh(c, minOrder)) bestellung = ceilEinh(c, minOrder);
+    c.zugeteilt = bestellung;
+    c.bedarf42d = ceilEinh(c, idealBestand);  // für Anzeige
+  }
+
+  const total = candidates.reduce((s, c) => s + (c.zugeteilt || 0), 0);
+  Logger.log("💎 Idealbestand " + cfg.label + " (Mindest " + minOrder + "g durchgesetzt): " + (total/1000).toFixed(1) + "kg für " + candidates.filter(c => c.zugeteilt > 0).length + " Produkte");
+  return total;
+}
+
+function allocateByDaysOfStock_(candidates, budgetG, cfg) {
+  const einheitOf = (c) => Math.max(1, cfg.einheitFn(c));
+  const stockOf   = (c) => {
+    const v = cfg.stockBeiAnkunftFn(c);
+    return (v != null && !isNaN(v)) ? v : ((c.lager || 0) + (c.unterwegs || 0));
+  };
+  const ceilEinh  = (c, val) => Math.ceil(val / einheitOf(c)) * einheitOf(c);
+  const floorEinh = (c, val) => Math.floor(val / einheitOf(c)) * einheitOf(c);
+  // Einheit-sensitive Mindestmenge — Clip-ins 225g dürfen 1 Einheit = 225g sein,
+  // damit TOP7-Produkte nicht durch hartes 500g-Minimum rausfallen.
+  const minSockelFor = (c) => {
+    const base = cfg.minSockel != null ? cfg.minSockel : 200;
+    return Math.max(einheitOf(c), ceilEinh(c, base));
+  };
+  const minBestFor = (c) => {
+    const base = (c.tier === "REST" && cfg.minBestellungRest) ? cfg.minBestellungRest : cfg.minBestellung;
+    return ceilEinh(c, base);
+  };
+
+  let pool = budgetG;
+
+  // Reset alle Zuteilungen — DoSA ist der neue Source of Truth
+  for (const c of candidates) c.zugeteilt = 0;
+
+  const aktive   = candidates.filter(c => (c.tagesrate || 0) > 0);
+  const inaktive = candidates.filter(c => (c.tagesrate || 0) <= 0);
+
+  // ── PHASE A: Tier-gestaffelt + Gesamt-Reichweite-Guard ──
+  //   Phase A1: TOP7 → volle zielReichweite, MID → 2/3, REST → 1/3, KAUM → raus.
+  //   Guard: wenn (Lager + ALLES Unterwegs) / tagesrate >= zielReichweite → skip
+  //   (verhindert dass KAUM mit viel Unterwegs nochmal bestellt wird, auch wenn
+  //    stock_at_arrival formal niedrig ist weil Unterwegs erst nach Tag 42 kommt).
+  const zielR = cfg.zielReichweite;
+  const tierFaktor = (tier) => {
+    if (tier === "TOP7") return 1.0;      // volle Reichweite
+    if (tier === "MID")  return 0.67;     // 2/3
+    if (tier === "REST") return 0.33;     // 1/3 (= 1 Zyklus bei 42d = 14d)
+    return 0;                              // KAUM nur Phase B
+  };
+  for (const c of aktive) {
+    const base = stockOf(c);
+    const gesamtVorrat = (c.lager || 0) + (c.unterwegs || 0);
+    const gesamtReichweite = gesamtVorrat / Math.max(0.01, c.tagesrate);
+    const tier = c.tier || "REST";
+    const faktor = tierFaktor(tier);
+
+    // Guard 1: Gesamt-Reichweite reicht schon für volle zielR → nichts brauchen
+    // (auch wenn stock_at_arrival formal 0 ist weil Unterwegs erst später kommt)
+    const hatGenugTotal = gesamtReichweite >= zielR;
+
+    // Guard 2: KAUM kommt nie in Phase A
+    const istKaum = (tier === "KAUM") || (faktor === 0);
+
+    const sockelReichweite = Math.round(zielR * faktor);
+    const rawSockel = sockelReichweite * c.tagesrate - base;
+    const rawZiel   = zielR * c.tagesrate - base;
+
+    c._dosa_ziel   = (!istKaum && !hatGenugTotal && rawZiel   > 0) ? ceilEinh(c, rawZiel)   : 0;
+    c._dosa_sockel = (!istKaum && !hatGenugTotal && rawSockel > 0) ? ceilEinh(c, rawSockel) : 0;
+    c._dosa_dringlichkeit = base / Math.max(0.01, c.tagesrate);
+    c._dosa_tier_rank = (tier === "TOP7") ? 0 : (tier === "MID") ? 1 : (tier === "REST") ? 2 : 3;
+  }
+
+  // Sortiere: erst Tier (TOP7 zuerst), dann Dringlichkeit (leere zuerst)
+  const sortedActive = aktive.slice().sort((a, b) => {
+    if (a._dosa_tier_rank !== b._dosa_tier_rank) return a._dosa_tier_rank - b._dosa_tier_rank;
+    return a._dosa_dringlichkeit - b._dosa_dringlichkeit;
+  });
+
+  // ── PHASE A1: Tier-gestaffelter Sockel ──
+  let phA1_count = 0, phA1_sum = 0, phA1_byTier = {TOP7:0, MID:0, REST:0};
+  for (const c of sortedActive) {
+    if (pool < einheitOf(c)) break;
+    if (c._dosa_sockel <= 0) continue;
+    const mS = minSockelFor(c);
+    let assign = Math.min(c._dosa_sockel, pool);
+    assign = floorEinh(c, assign);
+    if (assign < mS) {
+      if (pool >= mS && c._dosa_sockel > 0) {
+        assign = mS;
+      } else {
+        continue;
+      }
+    }
+    c.zugeteilt = assign;
+    pool -= assign;
+    phA1_sum += assign;
+    phA1_count++;
+    phA1_byTier[c.tier || "REST"] = (phA1_byTier[c.tier || "REST"] || 0) + assign;
+  }
+  Logger.log("📦 DoSA " + cfg.label + " Phase A1 (Tier-Sockel): " + phA1_count + " Produkte, " + (phA1_sum/1000).toFixed(1) + "kg [TOP7=" + (phA1_byTier.TOP7/1000).toFixed(1) + "kg MID=" + (phA1_byTier.MID/1000).toFixed(1) + "kg REST=" + (phA1_byTier.REST/1000).toFixed(1) + "kg] | Rest: " + (pool/1000).toFixed(1) + "kg");
+
+  // ── PHASE A2: Aufstockung auf zielReichweite für alle aktiven ──
+  let phA2_count = 0, phA2_sum = 0;
+  for (const c of sortedActive) {
+    if (pool < einheitOf(c)) break;
+    if (c._dosa_ziel <= 0) continue;
+    const fehlt = c._dosa_ziel - c.zugeteilt;
+    if (fehlt <= 0) continue;
+    let add = Math.min(fehlt, pool);
+    add = floorEinh(c, add);
+    if (add < einheitOf(c)) continue;
+    c.zugeteilt += add;
+    pool -= add;
+    phA2_sum += add;
+    phA2_count++;
+  }
+  Logger.log("📦 DoSA " + cfg.label + " Phase A2 (auf " + zielR + "d): " + phA2_count + " Aufstockungen, " + (phA2_sum/1000).toFixed(1) + "kg | Rest: " + (pool/1000).toFixed(1) + "kg");
+
+  // ── PHASE B: Regal-Präsenz für KAUM ohne Vorrat ──
+  let phB_count = 0, phB_sum = 0;
+  for (const c of inaktive) {
+    if (pool < einheitOf(c)) break;
+    const vorrat = (c.lager || 0) + (c.unterwegs || 0);
+    if (vorrat >= cfg.regalMindest) continue;  // schon genug da → gar nichts
+    const menge = ceilEinh(c, cfg.regalMindest);
+    if (pool < menge) continue;
+    c.zugeteilt = menge;
+    pool -= menge;
+    phB_sum += menge;
+    phB_count++;
+  }
+  Logger.log("📦 DoSA " + cfg.label + " Phase B (Regal-Präsenz KAUM): " + phB_count + " Produkte, " + (phB_sum/1000).toFixed(1) + "kg | Rest: " + (pool/1000).toFixed(1) + "kg");
+
+  // ── PHASE C: Überschuss-Reserve — Tier-Aufstockung auf 84/70/56d ──
+  //   GATE: Phase C greift NUR wenn alle aktiven Produkte mindestens auf zielR (42d)
+  //   sind. Bei knappem Budget bleibt Phase A2 unvollständig → Phase C skippt →
+  //   kein Überpumpen einzelner TOP7-Produkte während andere leer ausgehen.
+  //   Bei unlimited Budget sind alle auf 42d → Phase C pumpt bis tierReichweiten.
+  const alleAktivenAufZielR = aktive.every(c => {
+    if ((c._dosa_ziel || 0) <= 0) return true;  // nichts zu tun
+    return (stockOf(c) + c.zugeteilt) >= c._dosa_ziel;
+  });
+  if (!alleAktivenAufZielR) {
+    Logger.log("⏸️ DoSA " + cfg.label + " Phase C skipped: nicht alle aktiven Produkte auf zielR (" + zielR + "d) — Budget zu knapp.");
+  }
+  if (alleAktivenAufZielR && pool >= cfg.minBestellung) {
+    const tiers = [
+      { name: "TOP7", filter: c => c.tier === "TOP7", maxTage: cfg.tierReichweiten.top },
+      { name: "MID",  filter: c => c.tier === "MID",  maxTage: cfg.tierReichweiten.mid },
+      { name: "REST", filter: c => c.tier === "REST", maxTage: cfg.tierReichweiten.rest }
+    ];
+    for (const t of tiers) {
+      if (pool < cfg.minBestellung) break;
+      const group = aktive.filter(t.filter);
+      if (group.length === 0) continue;
+      let phC_added = 0, phC_count = 0;
+      // Iterative Verteilung: pro Pass Produkt mit geringster aktueller Reichweite stocken
+      for (let pass = 0; pass < 30; pass++) {
+        if (pool < cfg.minBestellung) break;
+        const unter = group.filter(c => {
+          // GUARD: Gesamt-Reichweite (Lager + ALLES Unterwegs + zugeteilt) über maxTage → skip
+          // Verhindert Phase C-Aufstockung für Produkte die schon monatelang Vorrat haben,
+          // auch wenn stock_at_arrival formal niedrig ist (Unterwegs kommt erst nach Tag 42).
+          const gesamtReichweite = ((c.lager || 0) + (c.unterwegs || 0) + c.zugeteilt) / c.tagesrate;
+          if (gesamtReichweite >= t.maxTage) return false;
+          const r = (stockOf(c) + c.zugeteilt) / c.tagesrate;
+          return r < t.maxTage;
+        });
+        if (unter.length === 0) break;
+        unter.sort((a, b) => {
+          const ra = (stockOf(a) + a.zugeteilt) / a.tagesrate;
+          const rb = (stockOf(b) + b.zugeteilt) / b.tagesrate;
+          return ra - rb;
+        });
+        let anyAdded = false;
+        for (const c of unter) {
+          const step = Math.max(einheitOf(c), 100);
+          if (pool < step) continue;
+          // GUARD: Auch im inneren Loop — Gesamt-Reichweite prüfen
+          const gesamtNow = ((c.lager || 0) + (c.unterwegs || 0) + c.zugeteilt) / c.tagesrate;
+          if (gesamtNow >= t.maxTage) continue;
+          // Nicht über maxTage hinausschießen
+          const rNow = (stockOf(c) + c.zugeteilt) / c.tagesrate;
+          if (rNow >= t.maxTage) continue;
+          const maxExtra = (t.maxTage - rNow) * c.tagesrate;
+          let extra = Math.min(step, floorEinh(c, maxExtra));
+          if (extra < einheitOf(c)) continue;
+          c.zugeteilt += extra;
+          pool -= extra;
+          phC_added += extra;
+          phC_count++;
+          anyAdded = true;
+        }
+        if (!anyAdded) break;
+      }
+      if (phC_added > 0) {
+        Logger.log("📦 DoSA " + cfg.label + " Phase C (" + t.name + " Überschuss): +" + (phC_added/1000).toFixed(1) + "kg auf " + phC_count + " Steps | Rest: " + (pool/1000).toFixed(1) + "kg");
+      }
+    }
+  }
+
+  // ── CLEANUP: Lieferanten-Mindestbestellmenge durchsetzen ──
+  //   Amanda: 300g pro Produkt (Vielfaches der Einheit, z.B. Clip-ins 225g → 450g)
+  //   China: 500g pro Produkt
+  //   Alle c.zugeteilt > 0 aber < cfg.minBestellung:
+  //     → wenn Pool reicht: auf minBestellung aufstocken
+  //     → sonst: Bestellung komplett entfernen (Budget zurück in Pool)
+  {
+    let cleanupUp = 0, cleanupDown = 0, cleanupUpSum = 0, cleanupDownSum = 0;
+    // Erst alle Kandidaten einsammeln die aufgestockt oder gekillt werden müssen
+    const tooSmall = candidates.filter(c => {
+      if ((c.zugeteilt || 0) <= 0) return false;
+      const minMenge = ceilEinh(c, cfg.minBestellung);
+      return c.zugeteilt < minMenge;
+    });
+    // Priorität: erst TOP7, dann MID, dann REST, dann KAUM
+    tooSmall.sort((a, b) => {
+      const ra = (a.tier === "TOP7") ? 0 : (a.tier === "MID") ? 1 : (a.tier === "REST") ? 2 : 3;
+      const rb = (b.tier === "TOP7") ? 0 : (b.tier === "MID") ? 1 : (b.tier === "REST") ? 2 : 3;
+      return ra - rb;
+    });
+    for (const c of tooSmall) {
+      const minMenge = ceilEinh(c, cfg.minBestellung);
+      const fehlt = minMenge - c.zugeteilt;
+      if (pool >= fehlt) {
+        c.zugeteilt = minMenge;
+        pool -= fehlt;
+        cleanupUp++;
+        cleanupUpSum += fehlt;
+      } else {
+        // Budget reicht nicht → Bestellung komplett entfernen, Budget zurück
+        pool += c.zugeteilt;
+        cleanupDown++;
+        cleanupDownSum += c.zugeteilt;
+        c.zugeteilt = 0;
+      }
+    }
+    if (cleanupUp > 0 || cleanupDown > 0) {
+      Logger.log("🧹 DoSA " + cfg.label + " Cleanup (Mindestmenge " + cfg.minBestellung + "g): ↑" + cleanupUp + " Produkte aufgestockt (+" + (cleanupUpSum/1000).toFixed(1) + "kg), ↓" + cleanupDown + " Produkte entfernt (-" + (cleanupDownSum/1000).toFixed(1) + "kg) | Rest: " + (pool/1000).toFixed(1) + "kg");
+    }
+  }
+
+  // ── Per-Produkt Debug-Log (alle Kandidaten mit Wunsch > 0 oder Zuteilung > 0) ──
+  Logger.log("── DoSA " + cfg.label + " Debug pro Produkt ──");
+  const debugList = candidates
+    .filter(c => (c.zugeteilt || 0) > 0 || (c._dosa_ziel || 0) > 0)
+    .sort((a, b) => (b.zugeteilt || 0) - (a.zugeteilt || 0));
+  for (const c of debugList) {
+    const stock = stockOf(c);
+    const name = (c.product || c.farbe || "?").substring(0, 40);
+    Logger.log("  " + (c.tier||"?").padEnd(5) + " | " + name.padEnd(42) +
+               " | L=" + String(c.lager||0).padStart(4) + " U=" + String(c.unterwegs||0).padStart(4) +
+               " stockArr=" + String(Math.round(stock)).padStart(4) +
+               " rate=" + (c.tagesrate||0).toFixed(1).padStart(5) + "/d" +
+               " | ziel=" + String(c._dosa_ziel||0).padStart(4) +
+               " sockel=" + String(c._dosa_sockel||0).padStart(4) +
+               " → BEST=" + String(c.zugeteilt||0).padStart(5));
+  }
+  // Und die die nichts bekamen obwohl tagesrate > 0:
+  const skipped = candidates.filter(c => (c.zugeteilt||0) === 0 && (c.tagesrate||0) > 0 && (c._dosa_ziel||0) > 0);
+  if (skipped.length > 0) {
+    Logger.log("── DoSA " + cfg.label + " SKIPPED (aktive aber 0 zugeteilt): " + skipped.length + " ──");
+    for (const c of skipped) {
+      const name = (c.product || c.farbe || "?").substring(0, 40);
+      Logger.log("  ⚠️ " + (c.tier||"?").padEnd(5) + " | " + name.padEnd(42) +
+                 " | L=" + (c.lager||0) + " U=" + (c.unterwegs||0) +
+                 " rate=" + (c.tagesrate||0).toFixed(1) +
+                 " ziel=" + (c._dosa_ziel||0) + " sockel=" + (c._dosa_sockel||0));
+    }
+  }
+
+  // Aufräumen: temporäre Felder entfernen (ziel als c.bedarf42d persistieren für Anzeige)
+  for (const c of candidates) {
+    if ((c._dosa_ziel || 0) > 0) c.bedarf42d = c._dosa_ziel;
+    delete c._dosa_wunsch;
+    delete c._dosa_ziel;
+    delete c._dosa_sockel;
+    delete c._dosa_dringlichkeit;
+    delete c._dosa_tier_rank;
+  }
+
+  const totalAssigned = candidates.reduce((s, c) => s + (c.zugeteilt || 0), 0);
+  Logger.log("✅ DoSA " + cfg.label + " FERTIG: " + (totalAssigned/1000).toFixed(1) + "kg / " + (budgetG/1000).toFixed(1) + "kg Budget (" + ((totalAssigned/budgetG)*100).toFixed(0) + "% ausgeschöpft)");
+
+  return { assigned: totalAssigned, remaining: pool };
+}
+
+// ==========================================================================
+// █████████████████████████ ENDE CATALOG v1 ████████████████████████████████
+// ==========================================================================
+
 
 // ==========================================
 // SHOPIFY INVENTORY FETCH
@@ -70,6 +1476,59 @@ function loadChunked_(props, baseKey) {
 function hardReset() {
   PropertiesService.getScriptProperties().deleteAllProperties();
   Logger.log("✅ Alle Properties gelöscht. Jetzt fetchShopifyInventoryData starten.");
+}
+
+/**
+ * Shopify-Fetch mit Retry bei Rate-Limit (429) oder 5xx-Fehlern.
+ * Exponential Backoff: 1s, 2s, 4s, 8s.
+ *
+ * @param {string} url - Shopify API URL
+ * @param {Object} options - UrlFetchApp Options (muteHttpExceptions:true empfohlen)
+ * @param {number} [maxAttempts=4] - Maximale Versuche
+ * @returns {HTTPResponse|null} Response oder null nach allen fehlgeschlagenen Versuchen
+ */
+function fetchShopifyWithRetry_(url, options, maxAttempts) {
+  const attempts = maxAttempts || 2;  // Konservativ: bei globalem Quota-Error nicht ewig warten
+  Utilities.sleep(250); // 250ms vor jedem Call = 4 req/s (Shopify Default Shopify-Plan)
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      const resp = UrlFetchApp.fetch(url, options || { muteHttpExceptions: true });
+      const code = resp.getResponseCode();
+      if (code === 200 || code === 201) return resp;
+      if (code === 429 || code >= 500) {
+        if (i === attempts) {
+          Logger.log("⚠️ Shopify " + code + " nach " + attempts + " Versuchen — überspringe");
+          return null;
+        }
+        const waitMs = 1500 * i; // 1.5s, 3s
+        Logger.log("⚠️ Shopify " + code + " (Versuch " + i + "/" + attempts + "), warte " + (waitMs/1000) + "s");
+        Utilities.sleep(waitMs);
+        continue;
+      }
+      // 4xx außer 429 → permanent, kein Retry
+      return resp;
+    } catch(e) {
+      if (i === attempts) {
+        Logger.log("❌ Shopify Exception nach " + attempts + " Versuchen: " + e.message);
+        return null;
+      }
+      Utilities.sleep(1500);
+    }
+  }
+  return null;
+}
+
+/**
+ * Entfernt den AUTO_BUDGET-Flag falls er nach einem Trigger-Fehler hängt.
+ * Ohne diesen Fix springt das manuell eingegebene Budget zurück auf die Empfehlung.
+ * Kann auch direkt aus dem Skript-Menü ausgeführt werden.
+ */
+function clearAutoBudgetFlag() {
+  const props = PropertiesService.getScriptProperties();
+  const wasSet = props.getProperty("AUTO_BUDGET");
+  props.deleteProperty("AUTO_BUDGET");
+  Logger.log("🧹 AUTO_BUDGET gelöscht (vorher: " + wasSet + "). Manuelle Budget-Eingabe funktioniert jetzt wieder.");
+  safeAlert_("✅ AUTO_BUDGET-Flag gelöscht.\n\nWert vorher: " + wasSet + "\n\nJetzt kann das Budget manuell geändert werden.");
 }
 
 function fetchShopifyInventoryData() {
@@ -378,46 +1837,87 @@ function autoChain_cleanup_() {
     .forEach(fn => deleteExistingTriggers(fn));
 }
 
+// Sicherer UI-Alert: in Auto-Triggern gibt es keine UI → wirft Fehler.
+// safeAlert_ fängt das ab und loggt stattdessen.
+function safeAlert_(msg) {
+  try {
+    safeAlert_(msg);
+  } catch(e) {
+    Logger.log("ℹ️ Alert unterdrückt (Auto-Kontext): " + String(msg).replace(/\n/g, " | ").substring(0, 200));
+  }
+}
+
+// ROBUSTE KETTEN-STRATEGIE:
+// Der nächste Trigger wird VOR der eigentlichen Arbeit geplant.
+// So bricht ein Timeout nur den aktuellen Schritt — die Kette läuft weiter.
+// Bei Erfolg: kurzer .after() Trigger. Bei Timeout: Trigger ist schon geplant.
+
 function autoChain_verkaufsanalyse() {
-  autoChain_cleanup_(); // Alte Chains aufräumen
-  Logger.log("🔗 Auto-Chain Schritt 1/5: Verkaufsanalyse...");
-  try { refreshVerkaufsanalyse(); } catch(e) { Logger.log("❌ Verkaufsanalyse Fehler: " + e.message); }
-  // Nächsten Schritt planen
-  deleteExistingTriggers("autoChain_topseller");
-  ScriptApp.newTrigger("autoChain_topseller").timeBased().after(3000).create();
-  Logger.log("🔗 → Schritt 2 (Topseller) geplant");
+  autoChain_cleanup_();
+  Logger.log("🔗 Auto-Chain 1/5: Verkaufsanalyse startet...");
+  // Nächsten Schritt SOFORT planen — robust gegen Timeout
+  ScriptApp.newTrigger("autoChain_topseller").timeBased().after(5 * 60 * 1000).create();
+  Logger.log("🔗 → Schritt 2 (Topseller) vorab für +5min geplant");
+  try { refreshVerkaufsanalyse(); }
+  catch(e) { Logger.log("❌ Verkaufsanalyse Fehler: " + e.message); }
 }
 
 function autoChain_topseller() {
-  Logger.log("🔗 Auto-Chain Schritt 2/5: Topseller...");
-  try { refreshTopseller(); } catch(e) { Logger.log("❌ Topseller Fehler: " + e.message); }
-  deleteExistingTriggers("autoChain_dashboard");
-  ScriptApp.newTrigger("autoChain_dashboard").timeBased().after(3000).create();
-  Logger.log("🔗 → Schritt 3 (Dashboard) geplant");
+  deleteExistingTriggers("autoChain_topseller");
+  Logger.log("🔗 Auto-Chain 2/5: Topseller startet...");
+  // Nächsten Schritt SOFORT planen
+  ScriptApp.newTrigger("autoChain_dashboard").timeBased().after(5 * 60 * 1000).create();
+  Logger.log("🔗 → Schritt 3 (Dashboard) vorab für +5min geplant");
+  try { refreshTopseller(); }
+  catch(e) { Logger.log("❌ Topseller Fehler: " + e.message); }
 }
 
 function autoChain_dashboard() {
-  Logger.log("🔗 Auto-Chain Schritt 3/5: Dashboard...");
-  try { createDashboard(); } catch(e) { Logger.log("❌ Dashboard Fehler: " + e.message); }
-  deleteExistingTriggers("autoChain_china");
+  deleteExistingTriggers("autoChain_dashboard");
+  Logger.log("🔗 Auto-Chain 3/5: Dashboard startet...");
   PropertiesService.getScriptProperties().setProperty("AUTO_BUDGET", "true");
-  ScriptApp.newTrigger("autoChain_china").timeBased().after(3000).create();
-  Logger.log("🔗 → Schritt 4 (China) geplant");
+  // Nächsten Schritt SOFORT planen (Dashboard kann lange dauern → +8min Puffer)
+  ScriptApp.newTrigger("autoChain_china").timeBased().after(8 * 60 * 1000).create();
+  Logger.log("🔗 → Schritt 4 (China) vorab für +8min geplant");
+  try { createDashboard(); }
+  catch(e) { Logger.log("❌ Dashboard Fehler: " + e.message); }
 }
 
 function autoChain_china() {
-  Logger.log("🔗 Auto-Chain Schritt 4/5: Bestellung China...");
-  try { createBestellungChina(); } catch(e) { Logger.log("❌ China Fehler: " + e.message); }
-  deleteExistingTriggers("autoChain_amanda");
-  ScriptApp.newTrigger("autoChain_amanda").timeBased().after(3000).create();
-  Logger.log("🔗 → Schritt 5 (Amanda) geplant");
+  deleteExistingTriggers("autoChain_china");
+  Logger.log("🔗 Auto-Chain 4/5: Bestellung China startet...");
+  ScriptApp.newTrigger("autoChain_amanda").timeBased().after(8 * 60 * 1000).create();
+  Logger.log("🔗 → Schritt 5 (Amanda) vorab für +8min geplant");
+  runWithRetry_("createBestellungChina", createBestellungChina, 2);
 }
 
 function autoChain_amanda() {
-  Logger.log("🔗 Auto-Chain Schritt 5/5: Bestellung Amanda...");
-  try { createBestellungAmanda(); } catch(e) { Logger.log("❌ Amanda Fehler: " + e.message); }
+  deleteExistingTriggers("autoChain_amanda");
+  Logger.log("🔗 Auto-Chain 5/5: Bestellung Amanda startet...");
+  runWithRetry_("createBestellungAmanda", createBestellungAmanda, 2);
   PropertiesService.getScriptProperties().deleteProperty("AUTO_BUDGET");
   Logger.log("✅ Auto-Refresh-Kette vollständig abgeschlossen!");
+}
+
+/**
+ * Führt Funktion aus. Bei "Tabellen"-Timeout (API-Lock): kurz warten und nochmal versuchen.
+ */
+function runWithRetry_(name, fn, maxAttempts) {
+  const attempts = maxAttempts || 2;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      fn();
+      if (i > 1) Logger.log("✅ " + name + " im Versuch " + i + " erfolgreich");
+      return;
+    } catch(e) {
+      const msg = String(e.message || e);
+      const isTimeout = msg.indexOf("Tabellen") >= 0 || msg.indexOf("Spreadsheet") >= 0 || msg.indexOf("Zeit überschritten") >= 0 || msg.indexOf("timed out") >= 0;
+      Logger.log("❌ " + name + " Versuch " + i + "/" + attempts + " Fehler: " + msg);
+      if (!isTimeout || i === attempts) return;  // kein Retry bei anderen Fehlern oder letzter Versuch
+      Utilities.sleep(30 * 1000);  // 30 Sekunden warten vor Retry
+      Logger.log("🔁 " + name + " Retry...");
+    }
+  }
 }
 
 function getOrCreateSheet(ss, sheetName) {
@@ -530,7 +2030,8 @@ function sanitizeWeightForCollection(collectionName, rawWeight) {
   if (!expected) return rawWeight;
   if (rawWeight == null || isNaN(rawWeight) || rawWeight <= 0) return expected;
   if (rawWeight === expected) return rawWeight;
-  if (rawWeight === expected * 10) return expected;
+  if (rawWeight === expected * 10) return expected;  // z.B. 250 statt 25
+  if (rawWeight === expected / 2) return expected;   // z.B. 25 statt 50 (Mini Tapes in Shopify manchmal falsch)
   if (rawWeight === 1) return expected;
   return rawWeight;
 }
@@ -1177,6 +2678,7 @@ function extractFullColor_(productName) {
   let colorParts = [words[0]];
   for (let i = 1; i < words.length; i++) {
     if (COLOR_STOP_WORDS_.has(words[i])) break;
+    if (words[i] === "-" || words[i] === "–") break;  // Bindestrich = Farb-Ende (Clip-in-Format: "#EBONY - INVISIBLE CLIP...")
     colorParts.push(words[i]);
   }
   return colorParts.join(" ");
@@ -1218,11 +2720,26 @@ function matchColor(itemColor, pUpper) {
   let orderColor = applyColorAliases_(normalizeColorStr_(itemColor));
   if (!orderColor.startsWith("#")) orderColor = "#" + orderColor;
 
-  // 2. Farbsegment aus Produktnamen extrahieren (alles ab dem ersten "#")
+  // 2. Farbsegment aus Produktnamen extrahieren
   let pNorm = applyColorAliases_(normalizeColorStr_(pUpper));
+  let prodColor;
   const hashIdx = pNorm.indexOf("#");
-  if (hashIdx < 0) return false;
-  let prodColor = pNorm.substring(hashIdx); // z.B. "#3T PEARL WHITE"
+  if (hashIdx >= 0) {
+    prodColor = pNorm.substring(hashIdx); // z.B. "#3T PEARL WHITE"
+  } else {
+    // FALLBACK: NUR für Invisible Weft Produkte die kein "#" haben.
+    // Format erkennen: "Ebony | Russische Echthaar Tressen – Invisible Butterfly..."
+    // Bedingungen (alle müssen erfüllt sein, um false-positives zu vermeiden):
+    //   a) String enthält "INVISIBLE" oder "ECHTHAAR TRESSEN" oder "BUTTERFLY"
+    //   b) Pipe | existiert an kurzer Position (Farbe vorne, max 25 Zeichen)
+    const isInvisibleWeftPattern = pNorm.includes("INVISIBLE") ||
+                                    pNorm.includes("ECHTHAAR TRESSEN") ||
+                                    pNorm.includes("BUTTERFLY");
+    if (!isInvisibleWeftPattern) return false;
+    const pipeIdx = pNorm.indexOf("|");
+    if (pipeIdx <= 0 || pipeIdx > 25) return false;
+    prodColor = "#" + pNorm.substring(0, pipeIdx).trim();
+  }
 
   // 3. Bidirektionaler Präfix-Vergleich
   if (orderColor === prodColor) return true;
@@ -1389,13 +2906,20 @@ function calcAnkunft_(order) {
 function createDashboard() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  let dash = ss.getSheetByName("📊 Dashboard");
+  // V2 (Catalog-basiert) ist seit 17.04.2026 Standard.
+  // Für Rollback auf V1: Script Property "DASHBOARD_USE_V1_LEGACY" = "true"
+  const useV1Legacy = PropertiesService.getScriptProperties().getProperty("DASHBOARD_USE_V1_LEGACY") === "true";
+  const useCatalogV2 = !useV1Legacy;
+  const dashName = "📊 Dashboard";
+  if (useV1Legacy) Logger.log("⚠️ Dashboard V1 LEGACY-Modus aktiv (DASHBOARD_USE_V1_LEGACY=true)");
+
+  let dash = ss.getSheetByName(dashName);
   if (dash) {
     dash.clear();
     let charts = dash.getCharts();
     for (let chart of charts) dash.removeChart(chart);
   } else {
-    dash = ss.insertSheet("📊 Dashboard");
+    dash = ss.insertSheet(dashName);
     ss.setActiveSheet(dash);
     ss.moveActiveSheet(1);
   }
@@ -1415,51 +2939,118 @@ function createDashboard() {
   const SCHWELLE_KRITISCH = 300; // < 300g = kritisch (Orange)
   const SCHWELLE_NIEDRIG  = 600; // < 600g = niedrig (Gelb)
 
-  for (let def of sheetDefs) {
-    let sheet = ss.getSheetByName(def.name);
-    if (!sheet) continue;
-    let data = sheet.getDataRange().getValues();
-    for (let row of data) {
-      let col0 = String(row[0]).trim();
-      let col4 = parseFloat(row[4]) || 0;
-      let col3 = parseFloat(row[3]) || 0;
-      let col2 = parseFloat(row[2]) || 0; // Unit Weight
-      if (col0.startsWith("Total Weight for ")) {
-        let colName = col0.replace("Total Weight for ", "").trim();
-        // Clip-Ins gehören zu Russisch Glatt / Amanda
-        let isClipInCollection = colName.toUpperCase().includes("CLIP IN") || colName.toUpperCase().includes("CLIP-IN");
-        let effectiveKey = isClipInCollection ? "glatt" : def.key;
-        let effectiveName = isClipInCollection ? "Russisch - GLATT" : def.name;
-        let effectiveColor = isClipInCollection ? "#d9ead3" : def.color;
-        grandTotals[effectiveKey] += col4;
-        summaryData.push({
-          sheetName: effectiveName, sheetKey: effectiveKey, color: effectiveColor,
-          collectionName: colName, totalWeightG: col4, totalWeightKg: col4 / 1000
+  if (useCatalogV2) {
+    // ─── V2: Catalog als Datenquelle ────────────────────────────
+    Logger.log("🧪 Dashboard V2: Catalog-Modus aktiv");
+    const catalog = buildCatalogFromInventory();
+    const collTotals = {};  // collection → { total, key, sheetName, color }
+
+    for (const product of catalog) {
+      const effectiveKey   = product.quality === "Russisch Glatt" ? "glatt" : "wellig";
+      const effectiveName  = product.quality === "Russisch Glatt" ? "Russisch - GLATT" : "Usbekisch - WELLIG";
+      const effectiveColor = effectiveKey === "glatt" ? "#d9ead3" : "#c9daf8";
+
+      grandTotals[effectiveKey] += product.lager;
+
+      // Collection-Aggregation (für summaryData)
+      if (!collTotals[product.collection]) {
+        collTotals[product.collection] = {
+          total: 0, key: effectiveKey, sheetName: effectiveName, color: effectiveColor
+        };
+      }
+      collTotals[product.collection].total += product.lager;
+
+      // Null / Kritisch-Listen
+      const variant = product.typ === "Clip-ins" ? product.unitWeight : null;
+      if (product.quantity === 0) {
+        nullbestand.push({
+          collection: product.collection, product: product.fullName,
+          variant: variant, sheetKey: effectiveKey, sheetName: effectiveName
+        });
+      } else if (product.lager > 0 && product.lager < SCHWELLE_NIEDRIG) {
+        const stufe = product.lager < SCHWELLE_KRITISCH ? "kritisch" : "niedrig";
+        kritischbestand.push({
+          collection: product.collection, product: product.fullName,
+          variant: variant, bestandG: product.lager, stufe: stufe,
+          sheetKey: effectiveKey, sheetName: effectiveName
         });
       }
-      if (def.key !== "tools" && col0 !== "" && col0 !== "Collection Name"
-        && !col0.startsWith("Total") && !col0.startsWith("GRAND")) {
-        let isClipIn = col0.toUpperCase().includes("CLIP IN") || col0.toUpperCase().includes("CLIP-IN");
-        let variant = isClipIn ? (col2 || null) : null;
-        // Clip-Ins gehören immer zu Russisch Glatt / Amanda
-        let effectiveSheetKey = isClipIn ? "glatt" : def.key;
-        let effectiveSheetName = isClipIn ? "Russisch - GLATT" : def.name;
-        let totalWeightG = col4; // Gesamtgewicht auf Lager (Menge * Einheitsgew.)
-        if (col3 === 0) {
-          // Nullbestand
-          nullbestand.push({ collection: col0, product: String(row[1]), variant: variant, sheetKey: effectiveSheetKey, sheetName: effectiveSheetName });
-        } else if (totalWeightG > 0 && totalWeightG < SCHWELLE_NIEDRIG) {
-          // Kritisch oder Niedrig – aber nicht Null
-          let stufe = totalWeightG < SCHWELLE_KRITISCH ? "kritisch" : "niedrig";
-          kritischbestand.push({
-            collection: col0,
-            product: String(row[1]),
-            variant: variant,
-            bestandG: totalWeightG,
-            stufe: stufe,
-            sheetKey: effectiveSheetKey,
-            sheetName: effectiveSheetName
+    }
+
+    // Collection-Totals → summaryData
+    for (const coll in collTotals) {
+      const c = collTotals[coll];
+      summaryData.push({
+        sheetName: c.sheetName, sheetKey: c.key, color: c.color,
+        collectionName: coll, totalWeightG: c.total, totalWeightKg: c.total / 1000
+      });
+    }
+
+    // Tools-Sheet separat lesen (nicht im Catalog)
+    const toolsSheet = ss.getSheetByName("Tools & Haarpflege");
+    if (toolsSheet) {
+      const tData = toolsSheet.getDataRange().getValues();
+      for (const row of tData) {
+        const c0 = String(row[0]).trim();
+        const c4 = parseFloat(row[4]) || 0;
+        if (c0.startsWith("Total Weight for ")) {
+          const colName = c0.replace("Total Weight for ", "").trim();
+          grandTotals["tools"] += c4;
+          summaryData.push({
+            sheetName: "Tools & Haarpflege", sheetKey: "tools", color: "#fff2cc",
+            collectionName: colName, totalWeightG: c4, totalWeightKg: c4 / 1000
           });
+        }
+      }
+    }
+  } else {
+    // ─── V1: bestehendes Verhalten (direkt Sheets lesen) ───────
+    for (let def of sheetDefs) {
+      let sheet = ss.getSheetByName(def.name);
+      if (!sheet) continue;
+      let data = sheet.getDataRange().getValues();
+      for (let row of data) {
+        let col0 = String(row[0]).trim();
+        let col4 = parseFloat(row[4]) || 0;
+        let col3 = parseFloat(row[3]) || 0;
+        let col2 = parseFloat(row[2]) || 0; // Unit Weight
+        if (col0.startsWith("Total Weight for ")) {
+          let colName = col0.replace("Total Weight for ", "").trim();
+          // Clip-Ins gehören zu Russisch Glatt / Amanda
+          let isClipInCollection = colName.toUpperCase().includes("CLIP IN") || colName.toUpperCase().includes("CLIP-IN");
+          let effectiveKey = isClipInCollection ? "glatt" : def.key;
+          let effectiveName = isClipInCollection ? "Russisch - GLATT" : def.name;
+          let effectiveColor = isClipInCollection ? "#d9ead3" : def.color;
+          grandTotals[effectiveKey] += col4;
+          summaryData.push({
+            sheetName: effectiveName, sheetKey: effectiveKey, color: effectiveColor,
+            collectionName: colName, totalWeightG: col4, totalWeightKg: col4 / 1000
+          });
+        }
+        if (def.key !== "tools" && col0 !== "" && col0 !== "Collection Name"
+          && !col0.startsWith("Total") && !col0.startsWith("GRAND")) {
+          let isClipIn = col0.toUpperCase().includes("CLIP IN") || col0.toUpperCase().includes("CLIP-IN");
+          let variant = isClipIn ? (col2 || null) : null;
+          // Clip-Ins gehören immer zu Russisch Glatt / Amanda
+          let effectiveSheetKey = isClipIn ? "glatt" : def.key;
+          let effectiveSheetName = isClipIn ? "Russisch - GLATT" : def.name;
+          let totalWeightG = col4; // Gesamtgewicht auf Lager (Menge * Einheitsgew.)
+          if (col3 === 0) {
+            // Nullbestand
+            nullbestand.push({ collection: col0, product: String(row[1]), variant: variant, sheetKey: effectiveSheetKey, sheetName: effectiveSheetName });
+          } else if (totalWeightG > 0 && totalWeightG < SCHWELLE_NIEDRIG) {
+            // Kritisch oder Niedrig – aber nicht Null
+            let stufe = totalWeightG < SCHWELLE_KRITISCH ? "kritisch" : "niedrig";
+            kritischbestand.push({
+              collection: col0,
+              product: String(row[1]),
+              variant: variant,
+              bestandG: totalWeightG,
+              stufe: stufe,
+              sheetKey: effectiveSheetKey,
+              sheetName: effectiveSheetName
+            });
+          }
         }
       }
     }
@@ -2308,6 +3899,10 @@ function writeBestellungSheet(sheet, title, columns, rows, headerBg, topColor, m
 
 function createBestellungChina() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  // V2 (Catalog-basiert) ist seit 17.04.2026 Standard.
+  // Für Rollback auf V1: Script Property "CHINA_USE_V1_LEGACY" = "true"
+  const useV1Legacy = PropertiesService.getScriptProperties().getProperty("CHINA_USE_V1_LEGACY") === "true";
+  const useCatalogV2 = !useV1Legacy;
   const tabName = "Vorschlag - China";
   const isAutoRun = PropertiesService.getScriptProperties().getProperty("AUTO_BUDGET") === "true";
   let sheet = ss.getSheetByName(tabName);
@@ -2318,15 +3913,39 @@ function createBestellungChina() {
       PropertiesService.getScriptProperties().setProperty("BUDGET_CHINA", String(parseInt(cellVal)));
     }
   }
-  if (sheet) ss.deleteSheet(sheet);
-  sheet = ss.insertSheet(tabName);
+  // Tab nicht löschen+neuerstellen (verursacht API-Lock-Konflikte in Auto-Triggern)
+  // Stattdessen: Wenn vorhanden → clear(); wenn nicht → neu erstellen
+  if (sheet) {
+    sheet.clear();
+    sheet.getCharts().forEach(c => sheet.removeChart(c));
+  } else {
+    sheet = ss.insertSheet(tabName);
+  }
   sheet.setTabColor("#1a73e8");
+  SpreadsheetApp.flush();
+  if (useV1Legacy) Logger.log("⚠️ China V1 LEGACY-Modus aktiv (CHINA_USE_V1_LEGACY=true)");
 
   const today = new Date();
   const dateStr = Utilities.formatDate(today, Session.getScriptTimeZone(), "dd.MM.yyyy, HH:mm");
 
-  // Alle Inventar-Zeilen aus "Usbekisch - WELLIG" Sheet lesen
-  const invRows = readInventoryRowsFromSheet("Usbekisch - WELLIG");
+  // Inventar-Zeilen laden
+  // V1: direkt aus Sheet. V2: aus Catalog (für saubere Collection-Klassifizierung).
+  let invRows;
+  if (useCatalogV2) {
+    Logger.log("🧪 China V2: Catalog-Modus aktiv");
+    const catalogAll = buildCatalogFromInventory();
+    invRows = catalogAll.filter(p => p.quality === "Usbekisch Wellig").map(p => ({
+      collection: p.collection,
+      product: p.fullName,
+      productUpper: p.fullName.toUpperCase(),
+      unitWeight: p.unitWeight,
+      quantity: p.quantity,
+      totalWeight: p.lager
+    }));
+    Logger.log("🧪 China V2: " + invRows.length + " Inventar-Zeilen aus Catalog");
+  } else {
+    invRows = readInventoryRowsFromSheet("Usbekisch - WELLIG");
+  }
 
   // Aktive Bestellungen laden
   const allOrders = getAllOrders();
@@ -2907,6 +4526,322 @@ function createBestellungChina() {
     }
   }
 
+  // ─── RUNDE 8: VORRAT-AUFSTOCKUNG – Rest-Budget sinnvoll auf max 3 Monate Vorrat verteilen ─────
+  // Priorität: Premium-TOP7 → Premium-MID → Non-Prem-TOP7 → Non-Prem-MID → REST (nur mit Verkauf)
+  // Skip-Filter: Lager ≥ 150g UND keine Verkäufe in 90 Tagen (tagesrate===0) → nicht nachbestellen
+  // Obergrenze pro Produkt: 90 Tage × tagesrate (echter 3-Monats-Verbrauch)
+  // Ohne Rate (auch g60d_alt = 0) → keine Aufstockung. KAUM-Mindestmenge am Ende greift extra.
+  if (restBudget > 500) {
+    Logger.log("💰 China Runde 8: Rest-Budget " + (restBudget/1000).toFixed(1) + "kg → Vorrat-Aufstockung (max 4 Monate)");
+    const MAX_TAGE = 120;
+    const MIN_STEP = 500;
+
+    // Erweiterte Kandidatenliste: alle Produkte aus rowsByGroup (auch die mit bedarf=0 aus Runden 0-7)
+    const existingProducts = new Set(allCandidates.map(c => c.product));
+    const vorratsCandidates = [...allCandidates];
+    for (const g of groupOrder) {
+      for (const r of (rowsByGroup[g.key] || [])) {
+        if (existingProducts.has(r.product)) continue;
+        // Skip: verkauft sich nicht & hat schon ≥ 150g Lager
+        if ((r.lager || 0) >= 150 && (r.tagesrate || 0) === 0) continue;
+        vorratsCandidates.push({
+          rang: r.rang, tier: r.tier, isPremium: r.isPremium || false,
+          isTop: r.tier === "TOP7", isMid: r.tier === "MID",
+          lager: r.lager, unterwegs: r.unterwegs,
+          ziel: r.ziel, bedarf: 0,
+          tagesrate: r.tagesrate || 0, stock_at_84: r.stock_at_84,
+          product: r.product, typ: g.typ, länge: g.länge,
+          grundbedarf: MIN_STEP, zugeteilt: 0,
+          _vorratOnly: true
+        });
+        existingProducts.add(r.product);
+      }
+    }
+
+    const skippable = c => (c.lager >= 150 && (c.tagesrate || 0) === 0);
+    const maxVorratFor = c => {
+      if ((c.tagesrate || 0) > 0) return Math.ceil(c.tagesrate * MAX_TAGE / 100) * 100;
+      return 0;  // Ohne Rate → keine Aufstockung (KAUM-Mindestmenge greift separat unten)
+    };
+
+    const priorityGroups = [
+      { name: "TOP7 Premium", filter: c => c.isTop  &&  c.isPremium && !skippable(c) },
+      { name: "MID Premium",  filter: c => c.isMid  &&  c.isPremium && !skippable(c) },
+      { name: "TOP7 Normal",  filter: c => c.isTop  && !c.isPremium && !skippable(c) },
+      { name: "MID Normal",   filter: c => c.isMid  && !c.isPremium && !skippable(c) },
+      { name: "REST aktiv",   filter: c => !c.isTop && !c.isMid && (c.tagesrate || 0) > 0 && !skippable(c) }
+    ];
+
+    for (const grp of priorityGroups) {
+      if (restBudget < MIN_STEP) break;
+      const grpCands = vorratsCandidates.filter(grp.filter).sort((a, b) => (a.rang || 999) - (b.rang || 999));
+      Logger.log("   Runde 8 – " + grp.name + ": " + grpCands.length + " Kandidaten, Rest-Budget: " + (restBudget/1000).toFixed(1) + "kg");
+      for (let pass = 0; pass < 10; pass++) {
+        if (restBudget < MIN_STEP) break;
+        let anyAdded = false;
+        for (const c of grpCands) {
+          if (restBudget < MIN_STEP) break;
+          const maxPro = maxVorratFor(c);
+          const aktuellerStock = (c.stock_at_84 != null ? c.stock_at_84 : (c.lager + c.unterwegs)) + c.zugeteilt;
+          if (aktuellerStock >= maxPro) continue;
+          const capacity = maxPro - aktuellerStock;
+          let step = Math.min(c.grundbedarf || MIN_STEP, capacity, restBudget);
+          step = Math.floor(step / 100) * 100;
+          if (step < MIN_STEP) continue;
+          c.zugeteilt += step;
+          restBudget -= step;
+          anyAdded = true;
+        }
+        if (!anyAdded) break;
+      }
+    }
+
+    // KAUM-Mindestmenge: Nur wenn Lager + Unterwegs < 100g (WIRKLICH leer, nichts kommt).
+    // Ignoriert Unterwegs war ein Bug: Produkte mit 1000g unterwegs wurden trotz 0 Verkäufe nachbestellt.
+    const kaumLeer = vorratsCandidates.filter(c =>
+      c.zugeteilt === 0 && ((c.lager || 0) + (c.unterwegs || 0)) < 100
+    );
+    for (const c of kaumLeer) {
+      if (restBudget < 500) break;
+      c.zugeteilt = 500;
+      restBudget -= 500;
+    }
+
+    // Neue Kandidaten aus Vorrat-Runde ins Hauptarray übernehmen
+    for (const c of vorratsCandidates) {
+      if (c._vorratOnly && c.zugeteilt > 0) {
+        c.bedarf = c.zugeteilt;
+        allCandidates.push(c);
+      }
+    }
+
+    Logger.log("💰 China Runde 8 fertig: Rest-Budget " + (restBudget/1000).toFixed(1) + "kg | Total zugeteilt: " + (allCandidates.reduce((s,c)=>s+c.zugeteilt,0)/1000).toFixed(1) + "kg");
+  }
+
+  // ─── RUNDE 9: HARTER 120-TAGE-CAP & FAIRE UMVERTEILUNG ───────────────────────────
+  // Schritt A: Kappt alle Bestellungen die zu mehr als 120 Tagen Reichweite führen.
+  // Schritt B: Verteilt frei werdendes Budget auf Produkte mit kürzester Reichweite.
+  // Ergebnis: Alle Produkte mit Verkaufsrate landen bei ähnlicher Reichweite.
+  {
+    const MAX_TAGE_CAP = 120;
+    const MIN_BESTELLUNG = 500;  // China-Mindestmenge
+
+    // Schritt A: Über-Bestellungen kappen
+    let kappBudget = 0;
+    let kappCount = 0;
+    for (const c of allCandidates) {
+      if ((c.tagesrate || 0) <= 0) continue;
+      if (c.zugeteilt <= 0) continue;
+      const tageNachLief = (c.lager + c.unterwegs + c.zugeteilt) / c.tagesrate;
+      if (tageNachLief <= MAX_TAGE_CAP) continue;
+      const überschussG = (tageNachLief - MAX_TAGE_CAP) * c.tagesrate;
+      let kappung = Math.floor(überschussG / 100) * 100;
+      // Nicht unter Mindestmenge kappen (würde sonst die Bestellung killen)
+      const maxKappbar = c.zugeteilt - MIN_BESTELLUNG;
+      if (maxKappbar <= 0) continue;
+      kappung = Math.min(kappung, maxKappbar);
+      if (kappung >= 100) {
+        c.zugeteilt -= kappung;
+        kappBudget += kappung;
+        kappCount++;
+      }
+    }
+    if (kappBudget > 0) {
+      restBudget += kappBudget;
+      Logger.log("⬇️ China Runde 9 Kappung: " + kappCount + " Produkte | " + (kappBudget/1000).toFixed(1) + "kg freigesetzt (max 120 Tage Reichweite)");
+    }
+
+    // Schritt B: Umverteilung — sortiere nach kürzester Reichweite, stocke bis 120 Tage
+    if (restBudget >= 100) {
+      const aktiveCands = allCandidates.filter(c => (c.tagesrate || 0) > 0);
+      for (let pass = 0; pass < 5; pass++) {
+        if (restBudget < 100) break;
+        const sorted = aktiveCands.slice().sort((a, b) => {
+          const ta = (a.lager + a.unterwegs + a.zugeteilt) / a.tagesrate;
+          const tb = (b.lager + b.unterwegs + b.zugeteilt) / b.tagesrate;
+          return ta - tb;
+        });
+        let anyAdded = false;
+        for (const c of sorted) {
+          if (restBudget < 100) break;
+          const tageJetzt = (c.lager + c.unterwegs + c.zugeteilt) / c.tagesrate;
+          if (tageJetzt >= MAX_TAGE_CAP) continue;
+          const fehlmengeG = Math.ceil((MAX_TAGE_CAP - tageJetzt) * c.tagesrate / 100) * 100;
+          let extra = Math.min(fehlmengeG, restBudget);
+          extra = Math.floor(extra / 100) * 100;
+          if (extra >= 100) {
+            c.zugeteilt += extra;
+            restBudget -= extra;
+            anyAdded = true;
+          }
+        }
+        if (!anyAdded) break;
+      }
+      Logger.log("⬆️ China Runde 9 Umverteilung fertig: Rest-Budget " + (restBudget/1000).toFixed(1) + "kg | Total zugeteilt: " + (allCandidates.reduce((s,c)=>s+c.zugeteilt,0)/1000).toFixed(1) + "kg");
+    }
+  }
+
+  // ╔══════════════════════════════════════════════════════════════════════════════╗
+  // ║ RUNDE 10: DAYS-OF-STOCK FINAL — Reichweite AB ANKUNFT der neuen Bestellung  ║
+  // ╠══════════════════════════════════════════════════════════════════════════════╣
+  // ║ Reichweite = (stock_at_84 + zugeteilt) / tagesrate                           ║
+  // ║   stock_at_84 = simulierter Lagerstand wenn neue Bestellung ankommt (Tag 84) ║
+  // ║   → berücksichtigt Verbrauch während Lieferzeit + bestehende Unterwegs       ║
+  // ║                                                                              ║
+  // ║ Reset aktiver Produkte (außer Notfall), iterativ Step=500g an kürzeste.      ║
+  // ║ Inaktive (tagesrate=0): unangetastet. Notfall (stock_at_84 < 100): min 500g. ║
+  // ╚══════════════════════════════════════════════════════════════════════════════╝
+  {
+    const TARGET_TAGE = 120;
+    const MIN_BEST = 500;
+    const STEP = 500;
+    const MAX_PER_PASS = 30;
+
+    // Bestand bei Ankunft der neuen Bestellung (mit Fallback auf lager+unterwegs)
+    const stockBaseC = (c) => (c.stock_at_84 != null ? c.stock_at_84 : (c.lager + c.unterwegs));
+
+    const aktive   = allCandidates.filter(c => (c.tagesrate || 0) > 0);
+    const inaktive = allCandidates.filter(c => (c.tagesrate || 0) <= 0);
+
+    let pool = budgetG - inaktive.reduce((s, c) => s + (c.zugeteilt || 0), 0);
+
+    // Aktive: Reset → Mindestmenge falls Notfall (stock_at_84 < 100 = bald leer)
+    for (const c of aktive) {
+      const sBase = stockBaseC(c);
+      const minimal = (sBase < 100) ? MIN_BEST : 0;
+      c.zugeteilt = minimal;
+      pool -= minimal;
+    }
+
+    if (pool < 0) {
+      Logger.log("⚠️ China Runde 10: Budget durch Notfall-Mindestmengen erschöpft");
+      pool = Math.max(0, pool);
+    }
+    Logger.log("🔄 China Runde 10 START: aktive=" + aktive.length + " | inaktive=" + inaktive.length + " | Pool: " + (pool/1000).toFixed(1) + "kg");
+
+    let iter = 0;
+    let totalSteps = 0;
+    while (pool >= STEP && iter < 2000) {
+      iter++;
+      const unter = aktive.filter(c => {
+        const tageAbAnkunft = (stockBaseC(c) + c.zugeteilt) / c.tagesrate;
+        return tageAbAnkunft < TARGET_TAGE;
+      });
+      if (unter.length === 0) break;
+      unter.sort((a, b) => {
+        const ta = (stockBaseC(a) + a.zugeteilt) / a.tagesrate;
+        const tb = (stockBaseC(b) + b.zugeteilt) / b.tagesrate;
+        return ta - tb;
+      });
+      let steppedThisPass = 0;
+      for (let i = 0; i < unter.length && i < MAX_PER_PASS; i++) {
+        if (pool < STEP) break;
+        unter[i].zugeteilt += STEP;
+        pool -= STEP;
+        steppedThisPass++;
+        totalSteps++;
+      }
+      if (steppedThisPass === 0) break;
+    }
+
+    restBudget = budgetG - allCandidates.reduce((s, c) => s + c.zugeteilt, 0);
+    const totalZugeteilt = allCandidates.reduce((s, c) => s + c.zugeteilt, 0);
+    Logger.log("🔄 China Runde 10 ENDE: " + iter + " Iter | " + totalSteps + " Steps | Rest: " + (restBudget/1000).toFixed(1) + "kg | Total verteilt: " + (totalZugeteilt/1000).toFixed(1) + "kg / " + (budgetG/1000).toFixed(1) + "kg (Reichweite ab Ankunft Tag 84)");
+  }
+
+  // ╔══════════════════════════════════════════════════════════════════════════════╗
+  // ║ SANITY-RUNDE: Garantierter Nach-Filter — entfernt absurde Bestellungen       ║
+  // ╠══════════════════════════════════════════════════════════════════════════════╣
+  // ║ Regel 1: tagesrate = 0 UND (lager + unterwegs) >= 200g → zugeteilt = 0      ║
+  // ║          (Produkt verkauft sich nicht und hat genug Vorrat — keine Bestellung)║
+  // ║ Regel 2: tagesrate > 0 UND Reichweite nach Lieferung > 120 Tage             ║
+  // ║          → kappen auf 120 Tage (nicht unter 500g Mindestmenge)              ║
+  // ╚══════════════════════════════════════════════════════════════════════════════╝
+  {
+    let sanityKappungG = 0, sanityKappCount = 0, sanityRemoveCount = 0;
+    const MAX_TAGE_SANITY = 120;
+    const MIN_BESTELLUNG_SANITY = 500;
+    for (const c of allCandidates) {
+      if (c.zugeteilt <= 0) continue;
+      const rate = c.tagesrate || 0;
+      if (rate <= 0) {
+        // KAUM/inaktiv: Wenn schon genug unterwegs, keine Bestellung nötig
+        if (((c.lager || 0) + (c.unterwegs || 0)) >= 200) {
+          sanityKappungG += c.zugeteilt;
+          sanityRemoveCount++;
+          c.zugeteilt = 0;
+        }
+      } else {
+        // Aktiv: Cap auf 120 Tage Reichweite ab Ankunft neuer Lieferung
+        const baseStock = (c.stock_at_84 != null) ? c.stock_at_84 : (c.lager + c.unterwegs);
+        const tageNach = (baseStock + c.zugeteilt) / rate;
+        if (tageNach > MAX_TAGE_SANITY) {
+          const übermaß = (tageNach - MAX_TAGE_SANITY) * rate;
+          let kappG = Math.floor(übermaß / 100) * 100;
+          // Nicht unter Mindestmenge kappen
+          const maxKappbar = c.zugeteilt - MIN_BESTELLUNG_SANITY;
+          if (maxKappbar <= 0) continue;
+          kappG = Math.min(kappG, maxKappbar);
+          if (kappG >= 100) {
+            c.zugeteilt -= kappG;
+            sanityKappungG += kappG;
+            sanityKappCount++;
+          }
+        }
+      }
+    }
+    if (sanityKappungG > 0 || sanityRemoveCount > 0) {
+      restBudget += sanityKappungG;
+      Logger.log("🧹 China Sanity-Runde Phase 1 (Kappen): " + sanityRemoveCount + " KAUM entfernt, " + sanityKappCount + " aktive gekappt, " + (sanityKappungG/1000).toFixed(1) + "kg freigesetzt → Rest-Budget: " + (restBudget/1000).toFixed(1) + "kg");
+    }
+
+    // Phase 2: Rest-Budget auf Produkte mit kürzester Reichweite umverteilen
+    if (restBudget >= MIN_BESTELLUNG_SANITY) {
+      const aktive2 = allCandidates.filter(c => (c.tagesrate || 0) > 0);
+      const reichw = c => {
+        const base = (c.stock_at_84 != null) ? c.stock_at_84 : (c.lager + c.unterwegs);
+        return (base + c.zugeteilt) / c.tagesrate;
+      };
+      let redistSteps = 0;
+      for (let pass = 0; pass < 20; pass++) {
+        if (restBudget < MIN_BESTELLUNG_SANITY) break;
+        const unter = aktive2.filter(c => reichw(c) < MAX_TAGE_SANITY);
+        if (unter.length === 0) break;
+        unter.sort((a, b) => reichw(a) - reichw(b));
+        let added = false;
+        for (let i = 0; i < unter.length && i < 30; i++) {
+          if (restBudget < MIN_BESTELLUNG_SANITY) break;
+          unter[i].zugeteilt += MIN_BESTELLUNG_SANITY;
+          restBudget -= MIN_BESTELLUNG_SANITY;
+          redistSteps++;
+          added = true;
+        }
+        if (!added) break;
+      }
+      if (redistSteps > 0) {
+        Logger.log("🧹 China Sanity Phase 2 (Umverteilung): " + redistSteps + " Steps → Rest-Budget: " + (restBudget/1000).toFixed(1) + "kg");
+      }
+    }
+  }
+
+  // ╔══════════════════════════════════════════════════════════════════════════════╗
+  // ║ DAYS-OF-STOCK ALLOCATOR (DoSA) — überschreibt alle vorherigen Zuteilungen    ║
+  // ║ Ersetzt Runden 0-10 + Sanity durch eine saubere, einheitliche Logik.         ║
+  // ╚══════════════════════════════════════════════════════════════════════════════╝
+  allocateByDaysOfStock_(allCandidates, budgetG, {
+    label: "China",
+    zielReichweite: 42,          // Phase A2: voller Sollbestand bei Ankunft (42d)
+    sockelReichweite: 21,        // Phase A1: Sockel-Runde (Breite vor Tiefe)
+    minSockel: 200,              // Sockel-Mindestmenge (auf Einheit aufgerundet)
+    tierReichweiten: { top: 84, mid: 70, rest: 56 },
+    regalMindest:    500,        // China-Mindestmenge
+    minBestellung:   500,
+    minBestellungRest: null,     // bei China keine Sonderregel für REST
+    einheitFn:       (c) => 100, // China: alle auf 100g-Schritte
+    stockBeiAnkunftFn: (c) => (c.stock_at_84 != null ? c.stock_at_84 : ((c.lager || 0) + (c.unterwegs || 0)))
+  });
+  restBudget = budgetG - allCandidates.reduce((s, c) => s + c.zugeteilt, 0);
+
   // Nur Kandidaten mit Zuteilung > 0, nach Typ+Länge gruppiert sortieren
   // Sortierung NOTFALL-Produkte zuerst innerhalb ihrer Gruppe
   let budgetCandidatesSorted_ = allCandidates
@@ -2922,7 +4857,7 @@ function createBestellungChina() {
     });
 
   let budgetItems = budgetCandidatesSorted_
-    .map(c => [c.typ, c.länge, c.product, c.lager, c.unterwegs, c.ziel, c.zugeteilt]);
+    .map(c => [c.typ, c.länge, c.product, c.lager, c.unterwegs, (c.bedarf42d != null ? c.bedarf42d : c.ziel), c.zugeteilt]);
 
   // Gruppenstruktur: Typ nur in erster Zeile
   let lastTypBudget = null;
@@ -2942,8 +4877,8 @@ function createBestellungChina() {
 
   // ─── BUDGET-LISTE oben schreiben ───
   let colCount = 7;
-  let headerRow = ["Typ", "Länge", "Farbcode", "Lager (g)", "Unterwegs (g)", "Ziel (g)", "Bestellung (g)"];
-  let budgetTitle = "CHINA (Usbekisch Wellig) – BUDGET-BESTELLUNG " + dateStr + "  |  Budget: " + (budgetG/1000).toFixed(1) + " kg  |  Verbraucht: " + ((budgetG - restBudget)/1000).toFixed(1) + " kg";
+  let headerRow = ["Typ", "Länge", "Farbcode", "Lager (g)", "Unterwegs (g)", "Bedarf 42d (g)", "Bestellung (g)"];
+  let budgetTitle = "CHINA (Usbekisch Wellig) – BUDGET-BESTELLUNG " + dateStr + "  |  Budget: " + (budgetG/1000).toFixed(1) + " kg  |  Verbraucht: " + ((budgetG - restBudget)/1000).toFixed(1) + " kg  |  Zyklus: alle 14 Tage (Ziel-Reichweite 42d = 14 Zyklus + 28 Lieferzeit)";
   let budgetTotalBedarf = budgetItems.reduce((s, r) => s + (typeof r[6] === "number" ? r[6] : 0), 0);
   let budgetSubtotal = Array(colCount).fill("");
   budgetSubtotal[0] = "Subtotal";
@@ -3033,18 +4968,33 @@ function createBestellungChina() {
   // ─── TRENNZEILE ───
   let sepRow = budgetAllRows.length + (hasTopsellerdaten ? 2 : 3);
   sheet.getRange(sepRow, 1, 1, colCount).merge()
-    .setValue("▼▼▼  VOLLSTÄNDIGE LISTE (alle Produkte mit Bedarf)  ▼▼▼")
+    .setValue("▼▼▼  VOLLSTÄNDIGE LISTE (DoSA-Empfehlung bei unbegrenztem Budget)  ▼▼▼")
     .setBackground("#455a64").setFontColor("#ffffff").setFontWeight("bold").setFontSize(11)
     .setHorizontalAlignment("center");
 
+  // ─── IDEALBESTAND UNBEGRENZT für VOLLSTÄNDIGE LISTE ───
+  const allCandidates_full = allCandidates.map(c => Object.assign({}, c));
+  allocateIdealStock_(allCandidates_full, {
+    label: "China-IDEAL",
+    tierReichweiten: { top: 84, mid: 70, rest: 56 },
+    regalMindest: 500,
+    minBestellung: 500,                       // China: 500g Mindestbestellung pro Produkt
+    einheitFn: (c) => 100
+  });
+  let rowsFullC = allCandidates_full
+    .filter(c => c.zugeteilt > 0)
+    .sort((a, b) => (a.typ || "").localeCompare(b.typ || "") || a.lager - b.lager)
+    .map(c => [c.typ, c.länge, c.product, c.lager, c.unterwegs,
+               (c.bedarf42d != null ? c.bedarf42d : c.ziel),
+               c.zugeteilt, c.tier || "REST"]);
+
   // ─── KOMPLETTE LISTE darunter ───
   let fullStartRow = sepRow + 1;
-  // rows enthält 9 Felder (inkl. tier) – auf 8 kürzen
-  const rows8C = rows.map(r => r.slice(0, 8));
+  const totalFullGC = rowsFullC.reduce((s, r) => s + (r[6] || 0), 0);
   writeBestellungSheetAt(
     sheet, fullStartRow,
-    "CHINA (Usbekisch Wellig) – Bestellvorschlag " + dateStr + " (vollständig)",
-    5, rows8C,
+    "CHINA DoSA-unlimitiert " + dateStr + "  |  Gesamt-Empfehlung: " + (totalFullGC/1000).toFixed(1) + " kg  |  (alle Produkte mit echtem 42d-Bedarf, ignoriert Budget)",
+    5, rowsFullC,
     "#1a73e8", "#1a73e8", "#4a90d9"
   );
 
@@ -3136,6 +5086,10 @@ function createBestellungChina() {
 
 function createBestellungAmanda() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  // V2 (Catalog-basiert) ist seit 17.04.2026 Standard.
+  // Für Rollback auf V1: Script Property "AMANDA_USE_V1_LEGACY" = "true"
+  const useV1Legacy = PropertiesService.getScriptProperties().getProperty("AMANDA_USE_V1_LEGACY") === "true";
+  const useCatalogV2 = !useV1Legacy;
   const tabName = "Vorschlag - Amanda";
   const isAutoRun = PropertiesService.getScriptProperties().getProperty("AUTO_BUDGET") === "true";
   let sheet = ss.getSheetByName(tabName);
@@ -3146,19 +5100,47 @@ function createBestellungAmanda() {
       PropertiesService.getScriptProperties().setProperty("BUDGET_AMANDA", String(parseInt(cellVal)));
     }
   }
-  if (sheet) ss.deleteSheet(sheet);
-  sheet = ss.insertSheet(tabName);
+  // Tab nicht löschen+neuerstellen (verursacht API-Lock-Konflikte in Auto-Triggern)
+  if (sheet) {
+    sheet.clear();
+    sheet.getCharts().forEach(c => sheet.removeChart(c));
+  } else {
+    sheet = ss.insertSheet(tabName);
+  }
   sheet.setTabColor("#0f9d58");
+  SpreadsheetApp.flush();
+  if (useV1Legacy) Logger.log("⚠️ Amanda V1 LEGACY-Modus aktiv (AMANDA_USE_V1_LEGACY=true)");
 
   const today = new Date();
   const dateStr = Utilities.formatDate(today, Session.getScriptTimeZone(), "dd.MM.yyyy, HH:mm");
   const CODE_VERSION = "v5.0 – Breite vor Tiefe | " + dateStr + " Uhr";
 
-  // Alle Inventar-Zeilen aus "Russisch - GLATT" Sheet lesen
-  const invRows = readInventoryRowsFromSheet("Russisch - GLATT");
-  // Clip-Ins kommen aus "Russisch - GLATT" Sheet, Ponytails aus "Usbekisch - WELLIG"
-  const invGlattRows = readInventoryRowsFromSheet("Russisch - GLATT");  // für Clip-Ins (alle Varianten)
-  const invWellig = readInventoryFromSheet("Usbekisch - WELLIG");  // für Ponytails
+  // Alle Inventar-Zeilen lesen
+  // V1: direkt aus Sheet. V2: aus Catalog (für saubere Collection-Klassifizierung).
+  let invRows, invGlattRows;
+  if (useCatalogV2) {
+    // ─── V2: Catalog als Eingabe ──────────────────────────────
+    Logger.log("🧪 Amanda V2: Catalog-Modus aktiv");
+    const catalogAll = buildCatalogFromInventory();
+    const catalogRG = catalogAll.filter(p => p.quality === "Russisch Glatt");
+    // Catalog-Products → invRows-kompatibles Format umbauen
+    const mapped = catalogRG.map(p => ({
+      collection: p.collection,
+      product: p.fullName,
+      productUpper: p.fullName.toUpperCase(),
+      unitWeight: p.unitWeight,
+      quantity: p.quantity,
+      totalWeight: p.lager
+    }));
+    invRows = mapped;
+    invGlattRows = mapped;  // für Clip-Ins gleich (enthält alle Russisch-Glatt-Zeilen)
+    Logger.log("🧪 Amanda V2: " + invRows.length + " Inventar-Zeilen aus Catalog");
+  } else {
+    // ─── V1: bestehendes Verhalten (Sheet direkt lesen) ──────
+    invRows = readInventoryRowsFromSheet("Russisch - GLATT");
+    invGlattRows = readInventoryRowsFromSheet("Russisch - GLATT");
+  }
+  const invWellig = readInventoryFromSheet("Usbekisch - WELLIG");  // für Ponytails (unverändert)
 
   // Aktive Bestellungen laden
   const allOrders = getAllOrders();
@@ -4188,6 +6170,368 @@ function createBestellungAmanda() {
     }
   }
 
+  // ─── RUNDE L: VORRAT-AUFSTOCKUNG – Rest-Budget auf max 3 Monate Vorrat verteilen ──────────
+  // Priorität: Prio-TOP7 → Prio-MID → Non-Prio-TOP7 → Non-Prio-MID → REST (nur mit Verkauf)
+  // Skip: Lager ≥ 150g UND tagesrate=0 → verkauft sich nicht, hat genug Vorrat
+  // Max: 90 Tage × tagesrate. Ohne Rate → keine Aufstockung (KAUM-Mindestmenge am Ende greift).
+  if (restBudgetA > 500) {
+    Logger.log("💰 Amanda Runde L: Rest-Budget " + (restBudgetA/1000).toFixed(1) + "kg → Vorrat-Aufstockung (max 4 Monate)");
+    const MAX_TAGE_L = 120;
+
+    const getEinheitFor = (method, länge) => {
+      if (method === "Clip-ins") {
+        const m = String(länge || "").match(/(\d+)/);
+        if (m) return parseInt(m[1]);
+        return 100;
+      }
+      if (method === "Ponytail") return 130;
+      return 100;
+    };
+
+    const existingProducts = new Set(allCandidatesA.map(c => c.product));
+    const vorratsCandidatesA = [...allCandidatesA];
+
+    for (const g of groupOrder) {
+      for (const r of (rowsByGroup[g.key] || [])) {
+        if (existingProducts.has(r.product)) continue;
+        if ((r.lager || 0) >= 150 && (r.tagesrate || 0) === 0) continue;
+        const isTop = r.tier === "TOP7";
+        const isMid = r.tier === "MID";
+        const isPrio = PRIO_METHODS_A.indexOf(g.method) >= 0;
+        const einheit = getEinheitFor(g.method, r.länge || "");
+        const grundbedarfNeu = r.tagesrate > 0
+          ? Math.max(einheit, Math.ceil(r.tagesrate * 21 / einheit) * einheit)
+          : einheit;
+        vorratsCandidatesA.push({
+          quality: g.quality || "Russian Straight hair",
+          method: g.method, länge: r.länge || "",
+          product: r.product,
+          lager: r.lager || 0, unterwegs: r.unterwegs || 0,
+          verfügbar: (r.lager || 0) + (r.unterwegs || 0),
+          ziel: r.ziel, bedarf: 0, tier: r.tier || "REST", rang: r.rang || 999,
+          isTop, isMid, isPrio, einheit,
+          zugeteilt: 0, stock_at_arrival: r.stock_at_42 != null ? r.stock_at_42 : null,
+          tagesrate: r.tagesrate || 0, grundbedarf: grundbedarfNeu,
+          _vorratOnly: true
+        });
+        existingProducts.add(r.product);
+      }
+    }
+
+    const skippableL = c => ((c.lager || 0) >= 150 && (c.tagesrate || 0) === 0);
+    const maxVorratFor_L = c => {
+      if ((c.tagesrate || 0) > 0) return Math.ceil(c.tagesrate * MAX_TAGE_L / (c.einheit || 100)) * (c.einheit || 100);
+      return 0;  // Ohne Rate → keine Aufstockung (KAUM-Mindestmenge greift separat unten)
+    };
+
+    const priorityGroupsL = [
+      { name: "TOP7 Prio",  filter: c => c.isTop  &&  c.isPrio && !skippableL(c) },
+      { name: "MID Prio",   filter: c => c.isMid  &&  c.isPrio && !skippableL(c) },
+      { name: "TOP7",       filter: c => c.isTop  && !c.isPrio && !skippableL(c) },
+      { name: "MID",        filter: c => c.isMid  && !c.isPrio && !skippableL(c) },
+      { name: "REST aktiv", filter: c => !c.isTop && !c.isMid && (c.tagesrate || 0) > 0 && !skippableL(c) }
+    ];
+
+    for (const grp of priorityGroupsL) {
+      if (restBudgetA < 100) break;
+      const grpCands = vorratsCandidatesA.filter(grp.filter).sort((a, b) => (a.rang || 999) - (b.rang || 999));
+      Logger.log("   Amanda Runde L – " + grp.name + ": " + grpCands.length + " Kandidaten, Rest-Budget: " + (restBudgetA/1000).toFixed(1) + "kg");
+      for (let pass = 0; pass < 10; pass++) {
+        if (restBudgetA < 100) break;
+        let anyAdded = false;
+        for (const c of grpCands) {
+          const minStep = Math.max(c.einheit || 100, 100);
+          if (restBudgetA < minStep) break;
+          const maxPro = maxVorratFor_L(c);
+          const aktStock = (c.stock_at_arrival != null ? c.stock_at_arrival : (c.lager + c.unterwegs)) + c.zugeteilt;
+          if (aktStock >= maxPro) continue;
+          const capacity = maxPro - aktStock;
+          let step = Math.min(c.grundbedarf || minStep, capacity, restBudgetA);
+          step = Math.floor(step / (c.einheit || 100)) * (c.einheit || 100);
+          if (step < minStep) continue;
+          c.zugeteilt += step;
+          restBudgetA -= step;
+          anyAdded = true;
+        }
+        if (!anyAdded) break;
+      }
+    }
+
+    // KAUM-Mindestmenge: Nur wenn Lager + Unterwegs < 100g (WIRKLICH leer, nichts kommt).
+    // Verhindert dass KAUM-Produkte mit bereits 1000g unterwegs nochmal unnötig bestellt werden.
+    const leerA = vorratsCandidatesA.filter(c =>
+      c.zugeteilt === 0 && ((c.lager || 0) + (c.unterwegs || 0)) < 100
+    );
+    for (const c of leerA) {
+      const minMenge = (c.isTop || c.isMid) ? 500 : 300;
+      const step = Math.ceil(minMenge / (c.einheit || 100)) * (c.einheit || 100);
+      if (restBudgetA < step) break;
+      c.zugeteilt = step;
+      restBudgetA -= step;
+    }
+
+    // Neue Vorrat-Kandidaten in allCandidatesA übernehmen
+    for (const c of vorratsCandidatesA) {
+      if (c._vorratOnly && c.zugeteilt > 0) {
+        c.bedarf = c.zugeteilt;
+        allCandidatesA.push(c);
+      }
+    }
+
+    Logger.log("💰 Amanda Runde L fertig: Rest-Budget " + (restBudgetA/1000).toFixed(1) + "kg | Total zugeteilt: " + (allCandidatesA.reduce((s,c)=>s+c.zugeteilt,0)/1000).toFixed(1) + "kg");
+  }
+
+  // ─── RUNDE M: HARTER 120-TAGE-CAP & FAIRE UMVERTEILUNG ───────────────────────────
+  // Schritt A: Kappt Bestellungen die zu mehr als 120 Tagen Reichweite führen.
+  // Schritt B: Verteilt frei werdendes Budget auf Produkte mit kürzester Reichweite.
+  // Mindestmengen pro Produkt (Einheit-basiert) werden respektiert.
+  {
+    const MAX_TAGE_CAP_A = 120;
+
+    // Schritt A: Kappen
+    let kappBudgetA = 0;
+    let kappCountA = 0;
+    for (const c of allCandidatesA) {
+      if ((c.tagesrate || 0) <= 0) continue;
+      if (c.zugeteilt <= 0) continue;
+      const tageNachLief = (c.lager + c.unterwegs + c.zugeteilt) / c.tagesrate;
+      if (tageNachLief <= MAX_TAGE_CAP_A) continue;
+      const überschussG = (tageNachLief - MAX_TAGE_CAP_A) * c.tagesrate;
+      const einheit = c.einheit || 100;
+      // Mindestmenge bewahren: TOP/MID min 500g (oder Einheit), REST min 300g
+      const minBestellung = Math.ceil(((c.isTop || c.isMid) ? 500 : 300) / einheit) * einheit;
+      let kappung = Math.floor(überschussG / einheit) * einheit;
+      const maxKappbar = c.zugeteilt - minBestellung;
+      if (maxKappbar <= 0) continue;
+      kappung = Math.min(kappung, maxKappbar);
+      if (kappung >= einheit) {
+        c.zugeteilt -= kappung;
+        kappBudgetA += kappung;
+        kappCountA++;
+      }
+    }
+    if (kappBudgetA > 0) {
+      restBudgetA += kappBudgetA;
+      Logger.log("⬇️ Amanda Runde M Kappung: " + kappCountA + " Produkte | " + (kappBudgetA/1000).toFixed(1) + "kg freigesetzt (max 120 Tage Reichweite)");
+    }
+
+    // Schritt B: Umverteilung — Produkte mit kürzester Reichweite zuerst
+    if (restBudgetA >= 100) {
+      const aktiveA = allCandidatesA.filter(c => (c.tagesrate || 0) > 0);
+      for (let pass = 0; pass < 5; pass++) {
+        if (restBudgetA < 100) break;
+        const sorted = aktiveA.slice().sort((a, b) => {
+          const ta = (a.lager + a.unterwegs + a.zugeteilt) / a.tagesrate;
+          const tb = (b.lager + b.unterwegs + b.zugeteilt) / b.tagesrate;
+          return ta - tb;
+        });
+        let anyAdded = false;
+        for (const c of sorted) {
+          if (restBudgetA < (c.einheit || 100)) break;
+          const tageJetzt = (c.lager + c.unterwegs + c.zugeteilt) / c.tagesrate;
+          if (tageJetzt >= MAX_TAGE_CAP_A) continue;
+          const einheit = c.einheit || 100;
+          const fehlmengeG = Math.ceil((MAX_TAGE_CAP_A - tageJetzt) * c.tagesrate / einheit) * einheit;
+          let extra = Math.min(fehlmengeG, restBudgetA);
+          extra = Math.floor(extra / einheit) * einheit;
+          if (extra >= einheit) {
+            c.zugeteilt += extra;
+            restBudgetA -= extra;
+            anyAdded = true;
+          }
+        }
+        if (!anyAdded) break;
+      }
+      Logger.log("⬆️ Amanda Runde M Umverteilung fertig: Rest-Budget " + (restBudgetA/1000).toFixed(1) + "kg | Total zugeteilt: " + (allCandidatesA.reduce((s,c)=>s+c.zugeteilt,0)/1000).toFixed(1) + "kg");
+    }
+  }
+
+  // ╔══════════════════════════════════════════════════════════════════════════════╗
+  // ║ RUNDE N: DAYS-OF-STOCK FINAL — Reichweite AB ANKUNFT der neuen Bestellung   ║
+  // ╠══════════════════════════════════════════════════════════════════════════════╣
+  // ║ Reichweite = (stock_at_arrival + zugeteilt) / tagesrate                      ║
+  // ║   stock_at_arrival = simulierter Lagerstand bei Ankunft (Tag 42 Amanda)      ║
+  // ║                                                                              ║
+  // ║ Reset aktiver, Step = c.einheit. Inaktive (tagesrate=0) unangetastet.        ║
+  // ║ Notfall (stock_at_arrival < 100): Mindestmenge auf einheit gerundet.         ║
+  // ╚══════════════════════════════════════════════════════════════════════════════╝
+  {
+    const TARGET_TAGE_N = 120;
+    const MAX_PER_PASS_N = 30;
+
+    const stockBaseA = (c) => (c.stock_at_arrival != null ? c.stock_at_arrival : (c.lager + c.unterwegs));
+
+    const aktiveN   = allCandidatesA.filter(c => (c.tagesrate || 0) > 0);
+    const inaktiveN = allCandidatesA.filter(c => (c.tagesrate || 0) <= 0);
+
+    let poolN = budgetGA - inaktiveN.reduce((s, c) => s + (c.zugeteilt || 0), 0);
+
+    // Aktive: Reset → Notfall-Mindestmenge falls bald leer (stock_at_arrival < 100)
+    for (const c of aktiveN) {
+      const einheit = c.einheit || 100;
+      const minMenge = (c.isTop || c.isMid) ? 500 : 300;
+      const sBase = stockBaseA(c);
+      const notfallMin = (sBase < 100) ? Math.ceil(minMenge / einheit) * einheit : 0;
+      c.zugeteilt = notfallMin;
+      poolN -= notfallMin;
+    }
+
+    if (poolN < 0) {
+      Logger.log("⚠️ Amanda Runde N: Budget durch Notfall-Mindestmengen erschöpft");
+      poolN = Math.max(0, poolN);
+    }
+    Logger.log("🔄 Amanda Runde N START: aktive=" + aktiveN.length + " | inaktive=" + inaktiveN.length + " | Pool: " + (poolN/1000).toFixed(1) + "kg");
+
+    let iterN = 0;
+    let totalStepsN = 0;
+    while (poolN > 0 && iterN < 2000) {
+      iterN++;
+      const unter = aktiveN.filter(c => {
+        const tageAbAnkunft = (stockBaseA(c) + c.zugeteilt) / c.tagesrate;
+        return tageAbAnkunft < TARGET_TAGE_N;
+      });
+      if (unter.length === 0) break;
+      unter.sort((a, b) => {
+        const ta = (stockBaseA(a) + a.zugeteilt) / a.tagesrate;
+        const tb = (stockBaseA(b) + b.zugeteilt) / b.tagesrate;
+        return ta - tb;
+      });
+      let stepsThisPass = 0;
+      for (let i = 0; i < unter.length && i < MAX_PER_PASS_N; i++) {
+        const c = unter[i];
+        const stepSize = c.einheit || 100;
+        if (poolN < stepSize) continue;
+        c.zugeteilt += stepSize;
+        poolN -= stepSize;
+        stepsThisPass++;
+        totalStepsN++;
+      }
+      if (stepsThisPass === 0) break;
+    }
+
+    restBudgetA = budgetGA - allCandidatesA.reduce((s, c) => s + c.zugeteilt, 0);
+    const totalA = allCandidatesA.reduce((s, c) => s + c.zugeteilt, 0);
+    Logger.log("🔄 Amanda Runde N ENDE: " + iterN + " Iter | " + totalStepsN + " Steps | Rest: " + (restBudgetA/1000).toFixed(1) + "kg | Total verteilt: " + (totalA/1000).toFixed(1) + "kg / " + (budgetGA/1000).toFixed(1) + "kg (Reichweite ab Ankunft Tag 42)");
+  }
+
+  // ╔══════════════════════════════════════════════════════════════════════════════╗
+  // ║ SANITY-RUNDE Amanda: Garantierter Nach-Filter — entfernt absurde Bestellungen║
+  // ╠══════════════════════════════════════════════════════════════════════════════╣
+  // ║ Regel 1: tagesrate = 0 UND (lager + unterwegs) >= 200g → zugeteilt = 0      ║
+  // ║ Regel 2: tagesrate > 0 UND Reichweite > 120 Tage → kappen (nie unter Mindest)║
+  // ╚══════════════════════════════════════════════════════════════════════════════╝
+  {
+    let sanityKappG = 0, sanityKappCnt = 0, sanityRmCnt = 0;
+    const MAX_TAGE_SAN_A = 120;
+    for (const c of allCandidatesA) {
+      if (c.zugeteilt <= 0) continue;
+      const rate = c.tagesrate || 0;
+      if (rate <= 0) {
+        // KAUM/inaktiv mit ausreichend Vorrat/Unterwegs → keine Bestellung
+        if (((c.lager || 0) + (c.unterwegs || 0)) >= 200) {
+          sanityKappG += c.zugeteilt;
+          sanityRmCnt++;
+          c.zugeteilt = 0;
+        }
+      } else {
+        // Aktiv: Cap auf 120 Tage ab Ankunft
+        const baseStock = (c.stock_at_arrival != null) ? c.stock_at_arrival : (c.lager + c.unterwegs);
+        const tageNach = (baseStock + c.zugeteilt) / rate;
+        if (tageNach > MAX_TAGE_SAN_A) {
+          const einheit = c.einheit || 100;
+          const übermaß = (tageNach - MAX_TAGE_SAN_A) * rate;
+          let kappG = Math.floor(übermaß / einheit) * einheit;
+          // Mindestmenge: TOP/MID 500g, REST 300g, gerundet auf einheit
+          const minMenge = (c.isTop || c.isMid) ? 500 : 300;
+          const minRound = Math.ceil(minMenge / einheit) * einheit;
+          const maxKappbar = c.zugeteilt - minRound;
+          if (maxKappbar <= 0) continue;
+          kappG = Math.min(kappG, maxKappbar);
+          if (kappG >= einheit) {
+            c.zugeteilt -= kappG;
+            sanityKappG += kappG;
+            sanityKappCnt++;
+          }
+        }
+      }
+    }
+    if (sanityKappG > 0 || sanityRmCnt > 0) {
+      restBudgetA += sanityKappG;
+      Logger.log("🧹 Amanda Sanity-Runde Phase 1 (Kappen): " + sanityRmCnt + " KAUM entfernt, " + sanityKappCnt + " aktive gekappt, " + (sanityKappG/1000).toFixed(1) + "kg freigesetzt → Rest-Budget: " + (restBudgetA/1000).toFixed(1) + "kg");
+    }
+
+    // Phase 2: Rest-Budget auf Produkte mit kürzester Reichweite umverteilen
+    if (restBudgetA > 0) {
+      const aktive2A = allCandidatesA.filter(c => (c.tagesrate || 0) > 0);
+      const reichwA = c => {
+        const base = (c.stock_at_arrival != null) ? c.stock_at_arrival : (c.lager + c.unterwegs);
+        return (base + c.zugeteilt) / c.tagesrate;
+      };
+      let redistStepsA = 0;
+      for (let pass = 0; pass < 20; pass++) {
+        if (restBudgetA <= 0) break;
+        const unter = aktive2A.filter(c => reichwA(c) < MAX_TAGE_SAN_A);
+        if (unter.length === 0) break;
+        unter.sort((a, b) => reichwA(a) - reichwA(b));
+        let added = false;
+        for (let i = 0; i < unter.length && i < 30; i++) {
+          const c = unter[i];
+          const step = c.einheit || 100;
+          if (restBudgetA < step) continue;
+          c.zugeteilt += step;
+          restBudgetA -= step;
+          redistStepsA++;
+          added = true;
+        }
+        if (!added) break;
+      }
+      if (redistStepsA > 0) {
+        Logger.log("🧹 Amanda Sanity Phase 2 (Umverteilung): " + redistStepsA + " Steps → Rest-Budget: " + (restBudgetA/1000).toFixed(1) + "kg");
+      }
+    }
+  }
+
+  // ╔══════════════════════════════════════════════════════════════════════════════╗
+  // ║ DAYS-OF-STOCK ALLOCATOR (DoSA) — überschreibt alle vorherigen Zuteilungen    ║
+  // ║ Ersetzt Runden A-N + Sanity durch eine saubere, einheitliche Logik.          ║
+  // ╚══════════════════════════════════════════════════════════════════════════════╝
+  // ── Kandidaten-Pool erweitern BEVOR DoSA läuft ──
+  //   Zweck: fehlende Shopify-Produkte (Clip-ins 225g TOP7, Invisible Weft etc.)
+  //   einbeziehen, die nicht im Inventar-Sheet stehen weil Lager=0.
+  //   Dedupe: bestehende Kandidaten (mit korrekter ausverkaufs-Rate aus Amanda-Flow)
+  //   bleiben UNVERÄNDERT, nur fehlende Produkte werden neu hinzugefügt.
+  const beforeCount = allCandidatesA.length;
+  // Snapshot der existing NORVEGIAN-Rate für Dedupe-Kontrolle
+  const norvRate_before = (allCandidatesA.find(c =>
+    c.method === "Standard Tapes" && (c.product || "").toUpperCase().includes("#NORVEGIAN")
+  ) || {}).tagesrate;
+  allCandidatesA = buildFullAmandaCandidates_(allCandidatesA, allOrders);
+  const norvRate_after = (allCandidatesA.find(c =>
+    c.method === "Standard Tapes" && (c.product || "").toUpperCase().includes("#NORVEGIAN")
+  ) || {}).tagesrate;
+  Logger.log("📊 Pool-Erweiterung: " + beforeCount + " → " + allCandidatesA.length + " Kandidaten");
+  Logger.log("📊 NORVEGIAN Rate-Check: vorher=" + (norvRate_before||0).toFixed(2) + "/d, nachher=" + (norvRate_after||0).toFixed(2) + "/d" +
+             ((Math.abs((norvRate_before||0) - (norvRate_after||0)) > 1) ? " ⚠️ RATE GEÄNDERT (Dedupe versagt!)" : " ✓ unverändert"));
+
+  // ═══ Kandidaten-Pool erweitern VOR DoSA ═══
+  //   Fehlende Shopify-Produkte (Clip-ins 225g TOP7, Invisible Weft etc.) dazuziehen.
+  //   Mit ausführlichem Dedupe-Log + Rate-Schutz (verhindert Degradation von NORVEGIAN etc.)
+  allCandidatesA = buildFullAmandaCandidates_(allCandidatesA, allOrders);
+
+  allocateByDaysOfStock_(allCandidatesA, budgetGA, {
+    label: "Amanda",
+    zielReichweite: 42,          // Phase A2: voller Sollbestand bei Ankunft (42d)
+    sockelReichweite: 21,        // Phase A1: Sockel-Runde (Breite vor Tiefe)
+    minSockel: 300,              // Sockel-Mindestmenge = Amanda-Mindestbestellung (300g, wird auf Einheit aufgerundet: Clip-ins 225g → 450g)
+    tierReichweiten: { top: 84, mid: 70, rest: 56 },
+    regalMindest:    300,        // Amanda: Regal-Mindestmenge für KAUM
+    minBestellung:   300,        // Russisch: 300g Mindestbestellung für ALLE Tiers (nicht 500g wie China)
+    minBestellungRest: 300,
+    einheitFn:       (c) => c.einheit || 100,  // Clip-ins: 100/150/225, Mini: 50, Standard: 100
+    stockBeiAnkunftFn: (c) => (c.stock_at_arrival != null ? c.stock_at_arrival : ((c.lager || 0) + (c.unterwegs || 0)))
+  });
+  restBudgetA = budgetGA - allCandidatesA.reduce((s, c) => s + c.zugeteilt, 0);
+
   // Nach Method-Reihenfolge sortieren, dann innerhalb nach Lager aufsteigend
   let budgetItemsA = allCandidatesA
     .filter(c => c.zugeteilt > 0)
@@ -4197,7 +6541,7 @@ function createBestellungAmanda() {
       return a.lager - b.lager;
     })
     .map(c => {
-      return [c.quality, c.method, c.länge, c.product, c.lager, c.unterwegs, c.ziel, c.zugeteilt];
+      return [c.quality, c.method, c.länge, c.product, c.lager, c.unterwegs, (c.bedarf42d != null ? c.bedarf42d : c.ziel), c.zugeteilt];
     });
 
   // Gruppenstruktur: Quality + Method nur in erster Zeile der Gruppe
@@ -4211,8 +6555,8 @@ function createBestellungAmanda() {
 
   // ─── BUDGET-LISTE oben schreiben ───
   let colCountA = 8;
-  let headerRowA = ["Quality", "Method", "Länge/Variante", "Farbcode", "Lager (g)", "Unterwegs (g)", "Ziel (g)", "Bestellung (g)"];
-  let budgetTitleA = "AMANDA (Russisch Glatt) – BUDGET-BESTELLUNG " + dateStr + "  |  Budget: " + (budgetGA/1000).toFixed(1) + " kg  |  Verbraucht: " + ((budgetGA - restBudgetA)/1000).toFixed(1) + " kg";
+  let headerRowA = ["Quality", "Method", "Länge/Variante", "Farbcode", "Lager (g)", "Unterwegs (g)", "Bedarf 42d (g)", "Bestellung (g)"];
+  let budgetTitleA = "AMANDA (Russisch Glatt) – BUDGET-BESTELLUNG " + dateStr + "  |  Budget: " + (budgetGA/1000).toFixed(1) + " kg  |  Verbraucht: " + ((budgetGA - restBudgetA)/1000).toFixed(1) + " kg  |  Zyklus: alle 14 Tage (Ziel-Reichweite 42d = 14 Zyklus + 28 Lieferzeit)";
   let budgetTotalA = budgetItemsA.reduce((s, r) => s + (r[7] || 0), 0);
   let budgetSubtotalA = Array(colCountA).fill("");
   budgetSubtotalA[0] = "Subtotal";
@@ -4290,18 +6634,45 @@ function createBestellungAmanda() {
   // ─── TRENNZEILE ───
   let sepRowA = budgetAllRowsA.length + (hasTopsellerdatenA ? 2 : 3);
   sheet.getRange(sepRowA, 1, 1, colCountA).merge()
-    .setValue("▼▼▼  VOLLSTÄNDIGE LISTE (alle Produkte mit Bedarf)  ▼▼▼")
+    .setValue("▼▼▼  VOLLSTÄNDIGE LISTE (DoSA-Empfehlung bei unbegrenztem Budget)  ▼▼▼")
     .setBackground("#455a64").setFontColor("#ffffff").setFontWeight("bold").setFontSize(11)
     .setHorizontalAlignment("center");
 
+  // ─── IDEALBESTAND UNBEGRENZT für VOLLSTÄNDIGE LISTE ───
+  //   allCandidatesA ist bereits erweitert (siehe oben, vor DoSA). Hier nur Deep-Copy
+  //   damit die Zuteilungen der oberen Tabelle nicht überschrieben werden.
+  const allCandidatesA_full = allCandidatesA.map(c => Object.assign({}, c));
+  allocateIdealStock_(allCandidatesA_full, {
+    label: "Amanda-IDEAL",
+    tierReichweiten: { top: 84, mid: 70, rest: 56 },
+    regalMindest: 300,
+    minBestellung: 300,                       // Amanda: 300g Mindestbestellung pro Produkt (auch in Ideal-Liste)
+    einheitFn: (c) => c.einheit || 100
+  });
+
+  // rows für untere Tabelle bauen (gleiches Format wie oben, inkl. Tier für Farbgebung)
+  let rowsFullSorted = allCandidatesA_full
+    .filter(c => c.zugeteilt > 0)
+    .sort((a, b) => {
+      let ai = methodOrderA.indexOf(a.method), bi = methodOrderA.indexOf(b.method);
+      if (ai !== bi) return ai - bi;
+      return a.lager - b.lager;
+    });
+  let rowsFull = rowsFullSorted.map(c => [
+    c.quality || "Russian Straight hair", c.method, c.länge, c.product,
+    c.lager, c.unterwegs,
+    (c.bedarf42d != null ? c.bedarf42d : c.ziel),
+    c.zugeteilt,
+    c.tier || "REST"  // Index 8: Tier für Farbgebung in writeBestellungSheetAt
+  ]);
+
   // ─── KOMPLETTE LISTE darunter ───
   let fullStartRowA = sepRowA + 1;
-  // rows enthält 9 Felder (inkl. tier an Index 8) – auf 8 kürzen für writeBestellungSheetAt
-  const rows8A = rows.map(r => r.slice(0, 8));
+  const totalFullG = rowsFull.reduce((s, r) => s + (r[7] || 0), 0);
   writeBestellungSheetAt(
     sheet, fullStartRowA,
-    "AMANDA (Russisch Glatt) – Bestellvorschlag " + dateStr + " (vollständig)",
-    6, rows8A,
+    "AMANDA DoSA-unlimitiert " + dateStr + "  |  Gesamt-Empfehlung: " + (totalFullG/1000).toFixed(1) + " kg  |  (alle Produkte mit echtem 42d-Bedarf, ignoriert Budget)",
+    6, rowsFull,
     "#0f9d58", "#0f9d58", "#34a853"
   );
 
@@ -4406,7 +6777,16 @@ function writeBestellungSheetAt(sheet, startRow, title, columns, rows, headerBg,
   }
   let colCount = headerRow.length;
 
-  let totalBedarf = rows.reduce((s, r) => s + (r[r.length - 1] || 0), 0);
+  // Tier-Info extrahieren (Index 8 enthält "TOP7"/"MID"/"REST" wenn vorhanden)
+  // Rows haben unterschiedliche Längen (8-12 Felder), die ersten 8 sind die Datenspalten
+  let tiers = [];
+  let dataRows = rows.map(r => {
+    let tier = (r.length > 8 && typeof r[8] === "string" && (r[8] === "TOP7" || r[8] === "MID" || r[8] === "REST")) ? r[8] : null;
+    tiers.push(tier);
+    return r.slice(0, 8);  // nur die 8 Datenspalten behalten
+  });
+
+  let totalBedarf = dataRows.reduce((s, r) => s + (r[r.length - 1] || 0), 0);
   let subtotalRow = Array(colCount).fill("");
   subtotalRow[0] = "Subtotal";
   subtotalRow[colCount - 1] = totalBedarf;
@@ -4414,7 +6794,7 @@ function writeBestellungSheetAt(sheet, startRow, title, columns, rows, headerBg,
   let allRows = [
     [title, ...Array(colCount - 1).fill("")],
     headerRow,
-    ...rows,
+    ...dataRows,
     subtotalRow
   ];
 
@@ -4441,10 +6821,10 @@ function writeBestellungSheetAt(sheet, startRow, title, columns, rows, headerBg,
 
   for (let i = 2; i < allRows.length - 1; i++) {
     let row = allRows[i];
-    let ziel   = row[row.length - 2];
     let bedarf = row[row.length - 1];
-    let isTop7 = (ziel >= 1000);
-    let isMid  = (ziel >= 500 && ziel < 1000);
+    let tier = tiers[i - 2];  // tiers-Array ist 0-basiert, Datenzeilen starten bei i=2
+    let isTop7 = (tier === "TOP7");
+    let isMid  = (tier === "MID");
     let bg;
     if (isTop7)     bg = (i % 2 === 0) ? F_TOP7  : F_TOP7B;
     else if (isMid) bg = (i % 2 === 0) ? F_MID   : F_MIDB;
@@ -4505,6 +6885,26 @@ function installBudgetTrigger() {
   Logger.log("✅ Budget-Trigger installiert.");
 }
 
+/**
+ * Parsed Budget-Eingabe tolerant:
+ *  - "250000" oder 250000         → 250000 g
+ *  - "250"                        → wenn < 1000 → interpretieren als kg → 250000 g
+ *  - "31 kg" / "31.0 kg" / "31,0" → 31000 g
+ *  - Bei leerer Eingabe           → 0 (kein Update)
+ */
+function parseBudgetInput_(raw) {
+  if (raw == null || raw === "") return 0;
+  const str = String(raw).toLowerCase().replace(/\s+/g, "").replace(/,/g, ".");
+  const isKg = str.includes("kg");
+  const cleaned = str.replace(/[^0-9.]/g, "");
+  if (!cleaned) return 0;
+  const num = parseFloat(cleaned);
+  if (isNaN(num) || num <= 0) return 0;
+  // Wenn "kg" drin ODER Zahl sehr klein (< 1000) → als kg interpretieren
+  if (isKg || num < 1000) return Math.round(num * 1000);
+  return Math.round(num);
+}
+
 function onEditBudget(e) {
   if (!e) return;
   let sheet = e.range.getSheet();
@@ -4512,22 +6912,28 @@ function onEditBudget(e) {
   let row = e.range.getRow();
   let col = e.range.getColumn();
 
-  // Vorschlag - China: Budget in Spalte I (9), Zeile 2
-  if (sheetName === "Vorschlag - China" && row === 2 && col === 9) {
-    let newBudget = parseInt(e.value);
-    if (!isNaN(newBudget) && newBudget > 0) {
+  // Vorschlag - China: Spalte I (9), Zeile 2 ODER 3 akzeptieren
+  if (sheetName === "Vorschlag - China" && col === 9 && (row === 2 || row === 3)) {
+    const newBudget = parseBudgetInput_(e.value);
+    if (newBudget > 0) {
+      // WICHTIG: AUTO_BUDGET explizit deaktivieren (siehe Amanda)
+      PropertiesService.getScriptProperties().deleteProperty("AUTO_BUDGET");
       PropertiesService.getScriptProperties().setProperty("BUDGET_CHINA", String(newBudget));
-      // Komplette Funktion aufrufen für konsistente Logik + Formatierung
+      Logger.log("💰 China Budget geändert auf " + (newBudget/1000).toFixed(1) + "kg via onEdit (AUTO_BUDGET gelöscht)");
       createBestellungChina();
     }
   }
 
-  // Vorschlag - Amanda: Budget in Spalte J (10), Zeile 2
-  if (sheetName === "Vorschlag - Amanda" && row === 2 && col === 10) {
-    let newBudget = parseInt(e.value);
-    if (!isNaN(newBudget) && newBudget > 0) {
+  // Vorschlag - Amanda: Spalte J (10), Zeile 2 ODER 3 akzeptieren
+  if (sheetName === "Vorschlag - Amanda" && col === 10 && (row === 2 || row === 3)) {
+    const newBudget = parseBudgetInput_(e.value);
+    if (newBudget > 0) {
+      // WICHTIG: AUTO_BUDGET explizit deaktivieren. Wenn die Auto-Trigger-Kette zuvor
+      // nicht sauber durchlief, würde AUTO_BUDGET="true" hängen bleiben → isAutoRun=true
+      // → manuelles Budget wird ignoriert, Empfehlung wird verwendet.
+      PropertiesService.getScriptProperties().deleteProperty("AUTO_BUDGET");
       PropertiesService.getScriptProperties().setProperty("BUDGET_AMANDA", String(newBudget));
-      // Komplette Funktion aufrufen für konsistente Logik + Formatierung
+      Logger.log("💰 Amanda Budget geändert auf " + (newBudget/1000).toFixed(1) + "kg via onEdit (AUTO_BUDGET gelöscht)");
       createBestellungAmanda();
     }
   }
@@ -4758,6 +7164,15 @@ function applyBudgetAmanda(sheet, budgetG) {
  * Dauer: ca. 60–90 Sekunden.
  */
 function refreshTopseller() {
+  // V2 (Catalog-basiert) ist seit 17.04.2026 Standard.
+  // Für Rollback auf V1 (Legacy-Code unten): Script Property "TOPSELLER_USE_V1_LEGACY" = "true"
+  const useV1Legacy = PropertiesService.getScriptProperties().getProperty("TOPSELLER_USE_V1_LEGACY") === "true";
+  if (!useV1Legacy) {
+    return refreshTopsellerV2();
+  }
+
+  Logger.log("⚠️ Topseller V1 LEGACY-Modus aktiv (TOPSELLER_USE_V1_LEGACY=true)");
+  Logger.log("🏷️ CODE_VERSION: " + CODE_VERSION);
   const MIN_GRAMS = 50; // Unter diesem Wert → "kaum verkauft" (grau)
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -4792,7 +7207,7 @@ function refreshTopseller() {
   const vaProductData_props = PropertiesService.getScriptProperties();
   const vaProductData = loadChunked_(vaProductData_props, "VA_PRODUCT_DATA");
   if (!vaProductData) {
-    SpreadsheetApp.getUi().alert("⚠️ Keine Verkaufsanalyse-Daten gefunden!\n\nBitte zuerst \"Verkaufsanalyse aktualisieren\" ausführen (bis zum Ende), dann erneut Topseller aktualisieren.");
+    safeAlert_("⚠️ Keine Verkaufsanalyse-Daten gefunden!\n\nBitte zuerst \"Verkaufsanalyse aktualisieren\" ausführen (bis zum Ende), dann erneut Topseller aktualisieren.");
     return;
   }
 
@@ -4919,12 +7334,42 @@ function refreshTopseller() {
         if (c0.startsWith("Total") || c0.startsWith("GRAND") || c0 === "Collection Name") continue;
         if (c0.startsWith("Zuletzt")) continue;
         if (c0) currentColl = c0;  // EXAKT, nicht toUpperCase!
-        if (!c1 || !c1.includes("#")) continue;
+        if (!c1) continue;
         // EXAKTES Collection-Matching (nicht Keyword-basiert)
         const handle = LAGER_EXACT_COLL_MAP[currentColl];
         if (!handle || handle === "clip-extensions") continue;
+        // Sanity-Check: Falls Shopify-Collection falsch zugeordnet ist, Namen prüfen
+        {
+          const nameU = c1.toUpperCase();
+          if (handle === "tressen-russisch-invisible") {
+            if (nameU.indexOf("INVISIBLE") < 0 && nameU.indexOf("BUTTERFLY") < 0) continue;
+            if (nameU.indexOf("CLASSIC WEFT") >= 0 || nameU.indexOf("GENIUS WEFT") >= 0) continue;
+          } else if (handle === "tressen-russisch-classic") {
+            if (nameU.indexOf("INVISIBLE") >= 0 || nameU.indexOf("GENIUS") >= 0) continue;
+          } else if (handle === "tressen-russisch-genius") {
+            if (nameU.indexOf("INVISIBLE") >= 0 || nameU.indexOf("CLASSIC WEFT") >= 0) continue;
+          }
+          // Längen-Check: Wenn Produktname explizite Länge enthält, muss sie zum Handle passen
+          const LENGTH_HANDLES = { "45CM": "tapes-45cm", "55CM": "tapes-55cm", "65CM": "tapes-65cm", "85CM": "tapes-85cm" };
+          const BONDING_LENGTH_HANDLES = { "65CM": "bondings-65cm", "85CM": "bondings-85cm" };
+          const lengthMatch = nameU.match(/\b(45CM|55CM|65CM|85CM)\b/);
+          if (lengthMatch) {
+            const foundLen = lengthMatch[1];
+            // Tapes Handles prüfen
+            if (handle.startsWith("tapes-") && LENGTH_HANDLES[foundLen] && LENGTH_HANDLES[foundLen] !== handle) continue;
+            // Bondings Handles prüfen
+            if (handle.startsWith("bondings-") && BONDING_LENGTH_HANDLES[foundLen] && BONDING_LENGTH_HANDLES[foundLen] !== handle) continue;
+          }
+        }
         // Farbcode: vollständiger Farbname (z.B. "#LATTE BROWN", nicht nur "#LATTE")
-        const farbe = extractFullColor_(c1);
+        let farbe = extractFullColor_(c1);
+        // Fallback für Produkte ohne # (z.B. Invisible Weft: "Ebony | Russische Echthaar...")
+        if (!farbe) {
+          const pipeIdx = c1.indexOf("|");
+          if (pipeIdx > 0) {
+            farbe = "#" + c1.substring(0, pipeIdx).trim().toUpperCase();
+          }
+        }
         if (!farbe) continue;
         // Prüfen ob diese Farbe unter diesem Handle BEREITS in VA_PRODUCT_DATA existiert
         if (existingByHandle[handle] && existingByHandle[handle].has(farbe)) continue;
@@ -4951,6 +7396,35 @@ function refreshTopseller() {
     const p = vaProductData[pid];
     const mapping = COLL_MAP[p.handle];
     if (!mapping) { skipped++; continue; }
+    // Sanity-Check: Produktname muss zum Typ passen.
+    // Verhindert dass z.B. "Classic Weft"-Produkte in Invisible Weft Sektion landen
+    // wenn sie in Shopify falsch zugeordnet sind.
+    {
+      const nameU = String(p.name || "").toUpperCase();
+      if (mapping.typ === "Invisible Weft") {
+        // Muss "INVISIBLE" oder "BUTTERFLY" im Namen haben
+        if (nameU.indexOf("INVISIBLE") < 0 && nameU.indexOf("BUTTERFLY") < 0) {
+          skipped++; continue;
+        }
+        // Darf nicht explizit "CLASSIC WEFT" oder "GENIUS WEFT" im Namen haben
+        if (nameU.indexOf("CLASSIC WEFT") >= 0 || nameU.indexOf("GENIUS WEFT") >= 0) {
+          skipped++; continue;
+        }
+      } else if (mapping.typ === "Classic Weft") {
+        if (nameU.indexOf("INVISIBLE") >= 0 || nameU.indexOf("GENIUS") >= 0) { skipped++; continue; }
+      } else if (mapping.typ === "Genius Weft") {
+        if (nameU.indexOf("INVISIBLE") >= 0 || nameU.indexOf("CLASSIC WEFT") >= 0) { skipped++; continue; }
+      }
+      // Längen-Check für Usbekisch Wellig Tapes & Bondings (Handles mit Länge wie tapes-45cm)
+      const LEN_HDL = { "45CM": "tapes-45cm", "55CM": "tapes-55cm", "65CM": "tapes-65cm", "85CM": "tapes-85cm" };
+      const BOND_LEN_HDL = { "65CM": "bondings-65cm", "85CM": "bondings-85cm" };
+      const lenMatch = nameU.match(/\b(45CM|55CM|65CM|85CM)\b/);
+      if (lenMatch) {
+        const foundLen = lenMatch[1];
+        if (p.handle && p.handle.indexOf("tapes-") === 0 && LEN_HDL[foundLen] && LEN_HDL[foundLen] !== p.handle) { skipped++; continue; }
+        if (p.handle && p.handle.indexOf("bondings-") === 0 && BOND_LEN_HDL[foundLen] && BOND_LEN_HDL[foundLen] !== p.handle) { skipped++; continue; }
+      }
+    }
     // Farbe aus Produktname extrahieren
     // farbe     = vollständiger Farbname bis Stopword (z.B. "#LATTE BROWN") → Schlüssel für Lager-Lookup
     // fullFarbe = alles ab dem ersten "#" bis Zeilenende (z.B. "#3T Pearl White") → Anzeige im Topseller-Tab
@@ -5041,55 +7515,14 @@ function refreshTopseller() {
   sheet.setColumnWidth(17, 160);
 
   // ── Lagerbestand laden für Topseller-Anzeige ──
-  const lagerLookup = {}; // key: "handle|farbe" oder "handle|farbe|variant" → totalWeight
+  // Rohe Inventar-Daten direkt übergeben — kein Lookup-Table, sondern matchColor() zur Laufzeit
+  let invGlattTS = [], invWelligTS = [];
   try {
-    const invGlattTS = readInventoryRowsFromSheet("Russisch - GLATT");
-    const invWelligTS = readInventoryRowsFromSheet("Usbekisch - WELLIG");
-    const allInvTS = invGlattTS.concat(invWelligTS);
-    // Mapping: Collection-Name → Handle (für Lookup)
-    // EXAKTES Mapping Collection-Name → Handle (kein Keyword-Matching!)
-    // Verhindert z.B. dass "Bondings wellig 65cm" als "bondings-glatt" gezählt wird
-    const COLL_TO_HANDLE_TS = {
-      "Standard Tapes Russisch":             "russische-normal-tapes",
-      "Mini Tapes Glatt":                    "mini-tapes",
-      "Invisible Mini Tapes":                "invisible-mini-tapes",
-      "Russische Bondings (Glatt)":          "bondings-glatt",
-      "Russische Classic Tressen (Glatt)":   "tressen-russisch-classic",
-      "Russische Genius Tressen (Glatt)":    "tressen-russisch-genius",
-      "Russische Invisible Tressen (Glatt) | Butterfly Weft": "tressen-russisch-invisible",
-      "Russische Invisible Tressen (Glatt)": "tressen-russisch-invisible",  // alter Name (Fallback)
-      "Clip In Extensions Echthaar":         "clip-extensions",
-      "Clip Extensions":                     "clip-extensions",
-      "Clip-In Extensions":                  "clip-extensions",
-      "Ponytail Extensions":                 "ponytail-extensions",
-      "Tapes Wellig 45cm":                   "tapes-45cm",
-      "Tapes Wellig 55cm":                   "tapes-55cm",
-      "Tapes Wellig 65cm":                   "tapes-65cm",
-      "Tapes Wellig 85cm":                   "tapes-85cm",
-      "Bondings wellig 65cm":                "bondings-65cm",
-      "Bondings wellig 85cm":                "bondings-85cm",
-      "Usbekische Classic Tressen (Wellig)": "tressen-usbekisch-classic",
-      "Usbekische Genius Tressen (Wellig)":  "tressen-usbekisch-genius",
-    };
-    for (const inv of allInvTS) {
-      const coll = inv.collection; // EXAKT, nicht .toUpperCase()
-      const handle = COLL_TO_HANDLE_TS[coll] || null;
-      if (!handle) continue;
-      // Farbcode extrahieren (vollständiger Farbname, z.B. "#LATTE BROWN" statt nur "#LATTE")
-      const farbe = extractFullColor_(inv.productUpper || inv.product || "");
-      if (!farbe) continue;
-      // Clip-ins: mit Variante speichern
-      if (handle === "clip-extensions" && inv.unitWeight > 0) {
-        const clipKey = handle + "|" + farbe + "|" + inv.unitWeight;
-        lagerLookup[clipKey] = (lagerLookup[clipKey] || 0) + inv.totalWeight;
-      }
-      // Immer auch ohne Variante speichern (für Nicht-Clip-in Lookup)
-      const baseKey = handle + "|" + farbe;
-      lagerLookup[baseKey] = (lagerLookup[baseKey] || 0) + inv.totalWeight;
-    }
-    Logger.log("✅ Lager-Lookup für Topseller: " + Object.keys(lagerLookup).length + " Einträge");
+    invGlattTS = readInventoryRowsFromSheet("Russisch - GLATT");
+    invWelligTS = readInventoryRowsFromSheet("Usbekisch - WELLIG");
+    Logger.log("✅ Inventar für Topseller geladen: " + invGlattTS.length + " Glatt, " + invWelligTS.length + " Wellig");
   } catch(eLagerTS) {
-    Logger.log("⚠️ Lager-Lookup für Topseller fehlgeschlagen: " + eLagerTS.message);
+    Logger.log("⚠️ Inventar für Topseller fehlgeschlagen: " + eLagerTS.message);
   }
 
   // ── Aktive Bestellungen für Unterwegs-Spalte laden ──
@@ -5109,16 +7542,16 @@ function refreshTopseller() {
 
   // ── Usbekisch Wellig Tabelle ──
   const welligResult = writeTopsellertabelleTS_(sheet, row, "USBEKISCH WELLIG – Topseller letzte " + DAYS + " Tage  |  " + dateStr,
-    welligRanking, TYPE_ORDER_WELLIG, "#1565c0", "#e3f2fd", "Usbekisch Wellig", lagerLookup, chinaOrdersTS_, 60, DETAIL_START_COL, maxDetailCols);
+    welligRanking, TYPE_ORDER_WELLIG, "#1565c0", "#e3f2fd", "Usbekisch Wellig", invWelligTS, chinaOrdersTS_, 60, DETAIL_START_COL, maxDetailCols);
   row = welligResult.row + 2;
 
   // ── Russisch Glatt Tabelle ──
   const russischResult = writeTopsellertabelleTS_(sheet, row, "RUSSISCH GLATT – Topseller letzte " + DAYS + " Tage  |  " + dateStr,
-    russischRanking, TYPE_ORDER_RUSSISCH, "#1b5e20", "#e8f5e9", "Russisch Glatt", lagerLookup, amandaOrdersTS_, 45, DETAIL_START_COL, maxDetailCols);
+    russischRanking, TYPE_ORDER_RUSSISCH, "#1b5e20", "#e8f5e9", "Russisch Glatt", invGlattTS, amandaOrdersTS_, 45, DETAIL_START_COL, maxDetailCols);
 
   // Spaltenbreiten
   sheet.setColumnWidth(1, 45);
-  sheet.setColumnWidth(2, 160);
+  sheet.setColumnWidth(2, 300);  // Voller Shopify-Produktname
   sheet.setColumnWidth(3, 75);
   sheet.setColumnWidth(4, 110);
   sheet.setColumnWidth(5, 110);
@@ -5250,7 +7683,7 @@ function refreshTopseller() {
   // ─────────────────────────────────────────────────────────────────────────
 
   Logger.log("✅ Topseller-Tab erstellt.");
-  SpreadsheetApp.getUi().alert("✅ Topseller aktualisiert!\n\nLetzte " + DAYS + " Tage ausgewertet.\n\nBitte jetzt createDashboard() ausführen, damit die Bestellvorschläge die neuen Topseller-Daten verwenden.");
+  safeAlert_("✅ Topseller aktualisiert!\n\nLetzte " + DAYS + " Tage ausgewertet.\n\nBitte jetzt createDashboard() ausführen, damit die Bestellvorschläge die neuen Topseller-Daten verwenden.");
 }
 
 function getTopsellertage_(ss) {
@@ -5415,7 +7848,7 @@ function buildRankingTS_(classified, qualityFilter, typeOrder, minGrams) {
  * @param {number} detailStartCol  Erste Spalte für Bestellungsdetails (Standard 15)
  * @param {number} maxDetailCols   Max. Anzahl Detailspalten (über beide Tabellen koordiniert)
  */
-function writeTopsellertabelleTS_(sheet, startRow, title, ranking, typeOrder, headerColor, sectionBg, qualityLabel, lagerLookup, orders, forecastDays, detailStartCol, maxDetailCols) {
+function writeTopsellertabelleTS_(sheet, startRow, title, ranking, typeOrder, headerColor, sectionBg, qualityLabel, invRows, orders, forecastDays, detailStartCol, maxDetailCols) {
   const COL_COUNT    = 13;
   const COL_SEP      = 12;
   const COL_UW_TOTAL = 13;
@@ -5491,30 +7924,58 @@ function writeTopsellertabelleTS_(sheet, startRow, title, ranking, typeOrder, he
       const rangKlasse = p.tier === "TOP7" ? (sectionIsPremium ? "Top 1–10" : "Top 1–7") : p.tier === "MID" ? (sectionIsPremium ? "Rang 11–20" : "Rang 8–14") : p.tier === "REST" ? "Rest" : "Kaum verkauft";
       const g30 = p.grams_sold_30 || 0;
 
-      // Lagerbestand
-      let lagerWert = "";
-      if (lagerLookup) {
-        if (p.clipVariant > 0) {
-          lagerWert = lagerLookup["clip-extensions|" + p.farbe.toUpperCase() + "|" + p.clipVariant] || 0;
-        } else {
-          const HANDLE_REVERSE = {
-            "Russisch Glatt|Standard Tapes":  "russische-normal-tapes",
-            "Russisch Glatt|Minitapes":        "mini-tapes",
-            "Russisch Glatt|Bondings":         "bondings-glatt",
-            "Russisch Glatt|Classic Weft":     "tressen-russisch-classic",
-            "Russisch Glatt|Genius Weft":      "tressen-russisch-genius",
-            "Russisch Glatt|Invisible Weft":   "tressen-russisch-invisible",
-            "Russisch Glatt|Clip-ins":         "clip-extensions",
-            "Russisch Glatt|Ponytail":         "ponytail-extensions",
-            "Usbekisch Wellig|Classic Weft":   "tressen-usbekisch-classic",
-            "Usbekisch Wellig|Genius Weft":    "tressen-usbekisch-genius",
-          };
-          let handle = HANDLE_REVERSE[p.quality + "|" + p.typ] || null;
-          if (!handle && p.quality === "Usbekisch Wellig") {
-            if      (p.typ === "Tapes")    handle = "tapes-"    + p.länge;
-            else if (p.typ === "Bondings") handle = "bondings-" + p.länge;
+      // Lagerbestand + Shopify-Name: direkt aus Inventar-Daten
+      let lagerWert = 0;
+      let shopifyName = "";
+      if (invRows && invRows.length > 0) {
+        const COLL_KEYWORDS = {
+          "Standard Tapes":  ["STANDARD TAPES"],
+          "Minitapes":       ["MINI TAPES", "INVISIBLE MINI"],
+          "Bondings":        ["BONDING"],
+          "Classic Weft":    ["CLASSIC TRESSEN", "CLASSIC WEFT"],
+          "Genius Weft":     ["GENIUS TRESSEN", "GENIUS WEFT"],
+          "Invisible Weft":  ["INVISIBLE TRESSEN", "INVISIBLE WEFT", "BUTTERFLY"],
+          "Clip-ins":        ["CLIP IN", "CLIP-IN", "CLIP EXTENSION"],
+          "Ponytail":        ["PONYTAIL"],
+          "Tapes":           ["TAPES"],
+        };
+        const keywords = COLL_KEYWORDS[p.typ] || [p.typ.toUpperCase()];
+        // Farbe normalisieren: "[100G]"/"[150G]"/"[225G]" Suffix entfernen (Clip-in Variante)
+        const farbeHash = (p.farbe || "").toUpperCase().replace(/\s*\[\d+\s*G\]\s*$/i, "").trim();
+        const farbeNoHash = farbeHash.replace(/^#/, "").trim();
+        // Variante direkt aus länge parsen ("100g" → 100) — zuverlässiger als p.clipVariant
+        let expectedVariant = 0;
+        if (p.typ === "Clip-ins") {
+          const m = String(p.länge || "").match(/(\d+)/);
+          if (m) expectedVariant = parseInt(m[1]);
+        }
+        if (farbeNoHash) {
+          for (const inv of invRows) {
+            const collU = inv.collection.toUpperCase();
+            if (!keywords.some(kw => collU.includes(kw))) continue;
+            // Clip-ins: Variante muss passen (aus p.länge geparst)
+            if (expectedVariant > 0 && Number(inv.unitWeight) !== expectedVariant) continue;
+            const prodU = inv.productUpper || "";
+            // Farb-Match: einfach indexOf + Wort-Grenze
+            let isMatch = false;
+            if (farbeHash && prodU.indexOf(farbeHash) >= 0) {
+              const pos = prodU.indexOf(farbeHash);
+              const after = prodU.charAt(pos + farbeHash.length);
+              if (after === "" || after === " " || after === "-" || after === "|" || after === ",") {
+                isMatch = true;
+              }
+            }
+            // Fallback für Produkte ohne # (Invisible Weft: "Ebony | Russische...")
+            if (!isMatch && prodU.indexOf("#") < 0 && farbeNoHash) {
+              if (prodU.startsWith(farbeNoHash + " ") || prodU.startsWith(farbeNoHash + "|")) {
+                isMatch = true;
+              }
+            }
+            if (isMatch) {
+              lagerWert += inv.totalWeight;
+              if (!shopifyName) shopifyName = inv.product;
+            }
           }
-          if (handle) lagerWert = lagerLookup[handle + "|" + p.farbe.toUpperCase()] || 0;
         }
       }
 
@@ -5537,8 +7998,8 @@ function writeTopsellertabelleTS_(sheet, startRow, title, ranking, typeOrder, he
         }
       }
 
-      // Hauptzeile schreiben
-      const displayFarbe = p.fullFarbe || p.farbe;
+      // Anzeigename: voller Shopify-Produktname, Fallback auf Topseller-Farbcode
+      let displayFarbe = shopifyName || p.fullFarbe || p.farbe;
       sheet.getRange(row, 1, 1, COL_COUNT).setValues([[
         p.rang, displayFarbe, p.länge, p.grams_sold, g30, p.qty_sold,
         prognose, p.tier, ziel, lagerWert, rangKlasse, "", unterwegsGrams > 0 ? unterwegsGrams : ""
@@ -5645,19 +8106,26 @@ function getRangTS_cached_(data, quality, typ, farbe, clipVariant) {
   if (!data) return 999;
   try {
     function extractRang(val) { return val && typeof val === "object" ? (val.rang || 999) : 999; }
+    function findByPrefix(bucket, key) {
+      if (!bucket) return null;
+      if (bucket[key]) return bucket[key];
+      for (var k in bucket) {
+        if (k.indexOf(key + " ") === 0 || key.indexOf(k + " ") === 0) return bucket[k];
+      }
+      return null;
+    }
     if (typ === "Clip-ins" && clipVariant > 0) {
       const typKey = "Clip-ins " + clipVariant + "g";
-      if (data[quality] && data[quality][typKey] && data[quality][typKey][farbe]) {
-        return extractRang(data[quality][typKey][farbe]);
-      }
+      var hit = findByPrefix(data[quality] && data[quality][typKey], farbe);
+      if (hit) return extractRang(hit);
       return 999;
     }
-    if (data[quality] && data[quality][typ] && data[quality][typ][farbe]) {
-      return extractRang(data[quality][typ][farbe]);
-    }
+    var hit = findByPrefix(data[quality] && data[quality][typ], farbe);
+    if (hit) return extractRang(hit);
     const altTyp = (typ === "Standard Tapes") ? "Tapes" : (typ === "Tapes" ? "Standard Tapes" : null);
-    if (altTyp && data[quality] && data[quality][altTyp] && data[quality][altTyp][farbe]) {
-      return extractRang(data[quality][altTyp][farbe]);
+    if (altTyp) {
+      hit = findByPrefix(data[quality] && data[quality][altTyp], farbe);
+      if (hit) return extractRang(hit);
     }
     return 999;
   } catch(e) { return 999; }
@@ -5666,22 +8134,30 @@ function getTopsellertierTS_cached_(data, quality, typ, farbe, clipVariant) {
   if (!data) return "REST";
   try {
     function extractTier(val) { return val && typeof val === "object" ? val.tier : val; }
+    // Prefix-Match Fallback: findet "#BITTER CACAO" auch wenn Key "#BITTER CACAO STANDARD" ist (oder umgekehrt)
+    function findByPrefix(bucket, key) {
+      if (!bucket) return null;
+      if (bucket[key]) return bucket[key];
+      // Suche: gespeicherter Key beginnt mit lookup-Key oder umgekehrt
+      for (var k in bucket) {
+        if (k.indexOf(key + " ") === 0 || key.indexOf(k + " ") === 0) return bucket[k];
+      }
+      return null;
+    }
     if (typ === "Clip-ins" && clipVariant > 0) {
       const typKey = "Clip-ins " + clipVariant + "g";
-      if (data[quality] && data[quality][typKey] && data[quality][typKey][farbe]) {
-        return extractTier(data[quality][typKey][farbe]);
-      }
-      if (data[quality] && data[quality]["Clip-ins"] && data[quality]["Clip-ins"][farbe]) {
-        return extractTier(data[quality]["Clip-ins"][farbe]);
-      }
+      var hit = findByPrefix(data[quality] && data[quality][typKey], farbe);
+      if (hit) return extractTier(hit);
+      hit = findByPrefix(data[quality] && data[quality]["Clip-ins"], farbe);
+      if (hit) return extractTier(hit);
       return "REST";
     }
-    if (data[quality] && data[quality][typ] && data[quality][typ][farbe]) {
-      return extractTier(data[quality][typ][farbe]);
-    }
+    var hit = findByPrefix(data[quality] && data[quality][typ], farbe);
+    if (hit) return extractTier(hit);
     const altTyp = (typ === "Standard Tapes") ? "Tapes" : (typ === "Tapes" ? "Standard Tapes" : null);
-    if (altTyp && data[quality] && data[quality][altTyp] && data[quality][altTyp][farbe]) {
-      return extractTier(data[quality][altTyp][farbe]);
+    if (altTyp) {
+      hit = findByPrefix(data[quality] && data[quality][altTyp], farbe);
+      if (hit) return extractTier(hit);
     }
     return "REST";
   } catch(e) { return "REST"; }
@@ -5951,10 +8427,10 @@ function refreshVerkaufsanalyse() {
               if (!prep.prodToCollIds[pid]) prep.prodToCollIds[pid] = [];
               if (!prep.prodToCollIds[pid].includes(collId)) prep.prodToCollIds[pid].push(collId);
             }
-            Utilities.sleep(100);
-            const vr = UrlFetchApp.fetch(BASE_URL_VA + "/products/" + prod.id + "/variants.json", {
+            const vr = fetchShopifyWithRetry_(BASE_URL_VA + "/products/" + prod.id + "/variants.json", {
               headers: { "X-Shopify-Access-Token": ACCESS_TOKEN_VA }, muteHttpExceptions: true
             });
+            if (!vr) continue; // nach allen Retry-Versuchen fehlgeschlagen → überspringen
             for (const v of (JSON.parse(vr.getContentText()).variants || [])) {
               let g = v.grams || 0;
               // Ponytail: Shopify hat oft 0g oder 200g als Fehler → korrekt: 130g
@@ -6008,10 +8484,10 @@ function refreshVerkaufsanalyse() {
               newClipCount++;
             }
             // Varianten-Gewichte laden falls noch nicht vorhanden
-            Utilities.sleep(100);
-            const vr2 = UrlFetchApp.fetch(BASE_URL_VA + "/products/" + prod.id + "/variants.json", {
+            const vr2 = fetchShopifyWithRetry_(BASE_URL_VA + "/products/" + prod.id + "/variants.json", {
               headers: { "X-Shopify-Access-Token": ACCESS_TOKEN_VA }, muteHttpExceptions: true
             });
+            if (!vr2) continue;
             for (const v of (JSON.parse(vr2.getContentText()).variants || [])) {
               if (prep.variantWeightsVA[String(v.id)] !== undefined) continue; // bereits geladen
               // Clip-Ins: Variantentitel HAT IMMER VORRANG vor grams
@@ -6072,7 +8548,7 @@ function refreshVerkaufsanalyse() {
     if (!cm) {
       // Kein Mapping mehr → von vorne
       props.deleteProperty(CHECKPOINT_KEY);
-      SpreadsheetApp.getUi().alert("⚠️ Checkpoint-Daten fehlen. Bitte refreshVerkaufsanalyse() erneut ausführen.");
+      safeAlert_("⚠️ Checkpoint-Daten fehlen. Bitte refreshVerkaufsanalyse() erneut ausführen.");
       return;
     }
     collHandleToId = cm.collHandleToId;
@@ -6514,7 +8990,7 @@ function refreshVerkaufsanalyse() {
   PropertiesService.getScriptProperties().deleteProperty("VA_TRIGGER_ID");
   Logger.log("✅ Auto-Trigger gelöscht");
 
-  SpreadsheetApp.getUi().alert("✅ Verkaufsanalyse aktualisiert!\n\nUsbekisch Wellig Ø3M: " + Math.round(welligG3M/1000*10)/10 + " kg/Monat\nRussisch Glatt Ø3M: " + Math.round(russischG3M/1000*10)/10 + " kg/Monat\nGesamt Ø3M: " + Math.round((welligG3M+russischG3M)/1000*10)/10 + " kg/Monat");
+  safeAlert_("✅ Verkaufsanalyse aktualisiert!\n\nUsbekisch Wellig Ø3M: " + Math.round(welligG3M/1000*10)/10 + " kg/Monat\nRussisch Glatt Ø3M: " + Math.round(russischG3M/1000*10)/10 + " kg/Monat\nGesamt Ø3M: " + Math.round((welligG3M+russischG3M)/1000*10)/10 + " kg/Monat");
 }
 
 // ==========================================
@@ -6778,7 +9254,7 @@ function resetVerkaufsanalyse() {
   props.deleteProperty("VA_PREP");
   props.deleteProperty("VA_TRIGGER_ID");
   Logger.log("✅ Verkaufsanalyse zurückgesetzt (inkl. Trigger).");
-  SpreadsheetApp.getUi().alert("✅ Zurückgesetzt!\n\nBitte jetzt einmal auf \"Verkaufsanalyse aktualisieren\" klicken.\nDer Rest läuft automatisch.");
+  safeAlert_("✅ Zurückgesetzt!\n\nBitte jetzt einmal auf \"Verkaufsanalyse aktualisieren\" klicken.\nDer Rest läuft automatisch.");
 }
 
 // ==========================================
@@ -6788,7 +9264,7 @@ function resetVerkaufsanalyse() {
 function debugVAProductData() {
   const raw_props = PropertiesService.getScriptProperties();
   const rawData = loadChunked_(raw_props, "VA_PRODUCT_DATA");
-  if (!rawData) { SpreadsheetApp.getUi().alert("Keine VA_PRODUCT_DATA gefunden. Bitte zuerst Verkaufsanalyse aktualisieren."); return; }
+  if (!rawData) { safeAlert_("Keine VA_PRODUCT_DATA gefunden. Bitte zuerst Verkaufsanalyse aktualisieren."); return; }
   const data = rawData;
 
   const COLL_MAP_DEBUG = {
@@ -6827,7 +9303,7 @@ function debugVAProductData() {
   sheet.getRange(sumRow,1,1,7).setValues([["SUMME 30d (kg)","Wellig:",Math.round(totalWellig30/100)/10,"Russisch:",Math.round(totalRussisch30/100)/10,"Unbekannt:",Math.round(totalUnbekannt30/100)/10]]);
   sheet.getRange(sumRow,1,1,7).setFontWeight("bold").setBackground("#fff9c4");
 
-  SpreadsheetApp.getUi().alert("✅ Debug-Tab 'DEBUG_VA' erstellt!\n\n" +
+  safeAlert_("✅ Debug-Tab 'DEBUG_VA' erstellt!\n\n" +
     "Wellig 30d: " + Math.round(totalWellig30/100)/10 + " kg\n" +
     "Russisch 30d: " + Math.round(totalRussisch30/100)/10 + " kg\n" +
     "Unbekannt 30d: " + Math.round(totalUnbekannt30/100)/10 + " kg\n" +
@@ -6893,7 +9369,79 @@ function onOpen() {
     .addSeparator()
     .addItem('🔍 Debug: VA-Produktdaten analysieren', 'debugVAProductData')
     .addItem('🔍 Debug: Order Tabs analysieren', 'debugOrderTabs')
+    .addSeparator()
+    .addItem('🔧 CATALOG Debug-Übersicht (Snapshot-Tab)', 'debugCatalogV2')
+    .addItem('⚙️ Budget-Auto-Update aktivieren', 'installBudgetTriggerWithAlert_')
     .addToUi();
+}
+
+// Wrapper der installBudgetTrigger aufruft und Feedback gibt
+function installBudgetTriggerWithAlert_() {
+  installBudgetTrigger();
+  safeAlert_("✅ Budget-Auto-Update aktiviert!\n\nWenn du in Zelle I2 (Vorschlag - China) oder J2 (Vorschlag - Amanda) das Budget änderst, wird die Bestellung automatisch neu berechnet.\n\nFormate werden akzeptiert:\n- \"250\" (= 250 kg)\n- \"250 kg\"\n- \"250000\" (= Gramm)\n\nHinweis: Das Neu-Berechnen dauert 1-3 Minuten.");
+}
+
+/**
+ * Debug-Funktion: Zeigt CATALOG-Inhalt in einem neuen Tab zur Verifikation.
+ * Keine Seiteneffekte — nur Lesen + neuer Debug-Tab.
+ */
+function debugCatalogV2() {
+  Logger.log("🏷️ CODE_VERSION: " + CODE_VERSION);
+
+  const catalog = buildCatalogFromInventory();
+  const vaProductData = loadChunked_(PropertiesService.getScriptProperties(), "VA_PRODUCT_DATA");
+  joinCatalogWithSales(catalog, vaProductData);
+  rankCatalog(catalog, 50);
+
+  // Sortieren für Anzeige: nach quality, typ, länge, rang
+  catalog.sort((a, b) => {
+    if (a.quality !== b.quality) return a.quality.localeCompare(b.quality);
+    if (a.typ !== b.typ) return a.typ.localeCompare(b.typ);
+    if (a.länge !== b.länge) return a.länge.localeCompare(b.länge);
+    return a.rang - b.rang;
+  });
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("DEBUG_CATALOG_V2");
+  if (!sheet) sheet = ss.insertSheet("DEBUG_CATALOG_V2");
+  sheet.clear();
+
+  const header = ["Quality", "Typ", "Länge", "Collection", "Vollständiger Name", "FarbeKey",
+                  "UnitWeight", "Qty", "Lager (g)", "g30d", "g90d", "qty90d", "Rang", "Tier", "Premium?"];
+  sheet.getRange(1, 1, 1, header.length).setValues([header])
+    .setFontWeight("bold").setBackground("#333").setFontColor("#fff");
+
+  const rows = catalog.map(p => [
+    p.quality, p.typ, p.länge, p.collection, p.fullName, p.farbeKey,
+    p.unitWeight, p.quantity, p.lager, p.g30d, p.g90d, p.qty90d,
+    p.rang, p.tier, p.isPremium ? "Y" : ""
+  ]);
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, header.length).setValues(rows);
+  }
+
+  sheet.setColumnWidth(1, 120);
+  sheet.setColumnWidth(2, 120);
+  sheet.setColumnWidth(3, 60);
+  sheet.setColumnWidth(4, 220);
+  sheet.setColumnWidth(5, 350);
+  sheet.setColumnWidth(6, 150);
+  sheet.setFrozenRows(1);
+
+  // Summary
+  const summary = {};
+  for (const p of catalog) {
+    const k = p.quality + " | " + p.typ + " | " + (p.länge || "-");
+    if (!summary[k]) summary[k] = { count: 0, lagerTotal: 0 };
+    summary[k].count++;
+    summary[k].lagerTotal += p.lager;
+  }
+  Logger.log("📊 CATALOG Summary:");
+  for (const k in summary) {
+    Logger.log("  " + k + " → " + summary[k].count + " Products, " + summary[k].lagerTotal + "g Lager");
+  }
+
+  safeAlert_("✅ CATALOG v1 Test fertig!\n\nTab 'DEBUG_CATALOG_V2' enthält alle " + catalog.length + " Products.\n\nDetails siehe Ausführungsprotokoll.");
 }
 
 /**
@@ -6992,7 +9540,7 @@ function debugCollectionHandles() {
     }
   }
   
-  SpreadsheetApp.getUi().alert("Collection-Handles (auch in Logger):\n\n" + results.filter(r => r.toLowerCase().includes("85") || r.toLowerCase().includes("tape") || r.toLowerCase().includes("clip")).join("\n"));
+  safeAlert_("Collection-Handles (auch in Logger):\n\n" + results.filter(r => r.toLowerCase().includes("85") || r.toLowerCase().includes("tape") || r.toLowerCase().includes("clip")).join("\n"));
 }
 
 // ==============================================================

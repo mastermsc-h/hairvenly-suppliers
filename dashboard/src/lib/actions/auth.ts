@@ -239,8 +239,31 @@ export async function updateUser(userId: string, formData: FormData) {
   const language = String(formData.get("language") ?? "de").trim();
   const supplierId = String(formData.get("supplier_id") ?? "").trim() || null;
   const role = String(formData.get("role") ?? "").trim() || undefined;
+  const email = String(formData.get("email") ?? "").trim() || null;
   const deniedFeaturesRaw = String(formData.get("denied_features") ?? "").trim();
   const deniedFeatures = deniedFeaturesRaw ? deniedFeaturesRaw.split(",").filter(Boolean) : [];
+
+  // If email changed, update auth.users via service role first
+  if (email) {
+    const { data: current } = await supabase
+      .from("profiles")
+      .select("email")
+      .eq("id", userId)
+      .single();
+    if (current && current.email !== email) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "Ungültige E-Mail-Adresse." };
+      const admin = createServiceClient();
+      const { error: emailError } = await admin.auth.admin.updateUserById(userId, {
+        email,
+        email_confirm: true,
+      });
+      if (emailError) {
+        if (emailError.message.includes("already been registered") || emailError.message.includes("already exists"))
+          return { error: "Diese E-Mail ist bereits vergeben." };
+        return { error: emailError.message };
+      }
+    }
+  }
 
   const updates: Record<string, unknown> = {
     username,
@@ -248,6 +271,7 @@ export async function updateUser(userId: string, formData: FormData) {
     language,
     supplier_id: supplierId,
   };
+  if (email) updates.email = email;
   if (role) {
     updates.role = role;
     updates.is_admin = role === "admin" || role === "employee";
@@ -261,6 +285,27 @@ export async function updateUser(userId: string, formData: FormData) {
   if (error) return { error: error.message };
 
   revalidatePath("/admin/users");
+  return { ok: true };
+}
+
+export async function changeOwnPassword(currentPassword: string, newPassword: string) {
+  const supabase = await createClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.email) return { error: "Nicht eingeloggt." };
+  if (!newPassword || newPassword.length < 6) return { error: "Neues Passwort muss mind. 6 Zeichen lang sein." };
+  if (!currentPassword) return { error: "Aktuelles Passwort ist erforderlich." };
+
+  // Verify current password by attempting sign-in
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email: user.email,
+    password: currentPassword,
+  });
+  if (signInError) return { error: "Aktuelles Passwort ist falsch." };
+
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) return { error: error.message };
+
   return { ok: true };
 }
 

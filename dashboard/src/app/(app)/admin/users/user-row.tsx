@@ -70,6 +70,7 @@ export default function UserRow({
   // Edit form state
   const [editUsername, setEditUsername] = useState(profile.username ?? "");
   const [editDisplayName, setEditDisplayName] = useState(profile.display_name ?? "");
+  const [editEmail, setEditEmail] = useState(profile.email ?? "");
   const [editLanguage, setEditLanguage] = useState(profile.language ?? "de");
   const [editSupplierId, setEditSupplierId] = useState(profile.supplier_id ?? "");
   const [editRole, setEditRole] = useState(profile.role || "supplier");
@@ -119,6 +120,7 @@ export default function UserRow({
   function handleEdit() {
     setEditUsername(profile.username ?? "");
     setEditDisplayName(profile.display_name ?? "");
+    setEditEmail(profile.email ?? "");
     setEditLanguage(profile.language ?? "de");
     setEditSupplierId(profile.supplier_id ?? "");
     setEditRole(profile.role || "supplier");
@@ -137,6 +139,7 @@ export default function UserRow({
     const fd = new FormData();
     fd.set("username", editUsername);
     fd.set("display_name", editDisplayName);
+    fd.set("email", editEmail);
     fd.set("language", editLanguage);
     fd.set("supplier_id", editRole === "supplier" ? editSupplierId : "");
     fd.set("role", editRole);
@@ -197,6 +200,15 @@ export default function UserRow({
               type="text"
               value={editDisplayName}
               onChange={(e) => setEditDisplayName(e.target.value)}
+              className="mt-1 block w-full text-sm rounded-lg border border-neutral-300 px-3 py-1.5 bg-white"
+            />
+          </label>
+          <label className="block col-span-2">
+            <span className="text-xs font-medium text-neutral-600">E-Mail</span>
+            <input
+              type="email"
+              value={editEmail}
+              onChange={(e) => setEditEmail(e.target.value)}
               className="mt-1 block w-full text-sm rounded-lg border border-neutral-300 px-3 py-1.5 bg-white"
             />
           </label>
