@@ -32,7 +32,14 @@ export async function updateSession(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
   const isAuthRoute = path.startsWith("/login") || path.startsWith("/register");
-  const isPublic = isAuthRoute || path.startsWith("/pending") || path.startsWith("/_next") || path === "/favicon.ico";
+  // /api/qr ist public — wird vom Shopify-Lieferschein-Renderer aufgerufen,
+  // der keine Login-Cookies hat. Reine QR-Generierung, keine sensiblen Daten.
+  const isPublic =
+    isAuthRoute ||
+    path.startsWith("/pending") ||
+    path.startsWith("/_next") ||
+    path.startsWith("/api/qr") ||
+    path === "/favicon.ico";
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

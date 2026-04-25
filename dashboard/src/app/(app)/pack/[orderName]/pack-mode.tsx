@@ -1,0 +1,408 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { recordPackScan, completePackSession, uploadPackPhoto } from "@/lib/actions/pack";
+import { t, type Locale } from "@/lib/i18n";
+import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine } from "lucide-react";
+import CameraScanner from "./camera-scanner";
+
+interface ExpectedItem {
+  variantId: string | null;
+  barcode: string | null;
+  title: string;
+  quantity: number;
+  imageUrl: string | null;
+}
+
+type FlashState = { kind: "match" | "mismatch" | "overflow" | null; message?: string };
+
+const PHOTO_TYPES = ["products_invoice", "products_in_box", "package_on_scale"] as const;
+type PhotoType = (typeof PHOTO_TYPES)[number];
+
+function detectMethod(title: string): { label: string; cls: string } {
+  const upper = title.toUpperCase();
+  if (upper.includes("BONDING")) return { label: "BONDINGS", cls: "bg-orange-700" };
+  if (upper.includes("MINI TAPE") || upper.includes("MINI-TAPE"))
+    return { label: "MINI-TAPES", cls: "bg-blue-700" };
+  if (upper.includes("TAPE")) return { label: "TAPES", cls: "bg-blue-700" };
+  if (upper.includes("TRESSE")) return { label: "TRESSEN", cls: "bg-green-700" };
+  if (upper.includes("CLIP")) return { label: "CLIP-IN", cls: "bg-violet-600" };
+  if (upper.includes("PONYTAIL")) return { label: "PONYTAIL", cls: "bg-pink-700" };
+  return { label: "", cls: "" };
+}
+
+function playBeep(success: boolean) {
+  try {
+    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    if (success) {
+      osc.frequency.value = 1200;
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.12);
+    } else {
+      osc.frequency.value = 220;
+      gain.gain.setValueAtTime(0.45, ctx.currentTime);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.6);
+    }
+  } catch {
+    // Audio not available
+  }
+}
+
+export default function PackMode({
+  sessionId,
+  initialStatus,
+  orderName,
+  expectedItems,
+  initialCounts,
+  initialPhotos,
+  shippingAddress,
+  locale,
+}: {
+  sessionId: string;
+  initialStatus: string;
+  orderName: string;
+  expectedItems: ExpectedItem[];
+  initialCounts: Record<string, number>;
+  initialPhotos: Record<string, string>;
+  shippingAddress: { name: string | null; address1: string | null; zip: string | null; city: string | null; country: string | null } | null;
+  locale: Locale;
+}) {
+  const [counts, setCounts] = useState<Record<string, number>>(initialCounts);
+  const [photos, setPhotos] = useState<Record<string, string>>(initialPhotos);
+  const [flash, setFlash] = useState<FlashState>({ kind: null });
+  const [scanInput, setScanInput] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  const [isPending, startTransition] = useTransition();
+  const [fulfillError, setFulfillError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Autofocus aufs Eingabefeld nach jedem Scan
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [counts]);
+
+  // Flash auto-clear
+  useEffect(() => {
+    if (flash.kind === null) return;
+    const ms = flash.kind === "match" ? 800 : 2400;
+    const tm = setTimeout(() => setFlash({ kind: null }), ms);
+    return () => clearTimeout(tm);
+  }, [flash]);
+
+  const isComplete = useMemo(() => {
+    return expectedItems.every((e) => (counts[e.barcode ?? ""] ?? 0) >= e.quantity);
+  }, [counts, expectedItems]);
+
+  const allPhotosUploaded = PHOTO_TYPES.every((p) => !!photos[p]);
+  const canFulfill = isComplete && allPhotosUploaded && status !== "shipped";
+
+  const submitBarcode = useCallback(
+    (barcode: string) => {
+      const trimmed = barcode.trim();
+      if (!trimmed) return;
+      startTransition(async () => {
+        try {
+          const res = await recordPackScan(sessionId, trimmed);
+          setCounts(res.scannedCounts);
+          if (res.status === "match") {
+            playBeep(true);
+            setFlash({ kind: "match", message: res.matchedTitle });
+            if (status === "open") setStatus("in_progress");
+          } else if (res.status === "overflow") {
+            playBeep(false);
+            setFlash({
+              kind: "overflow",
+              message: t(locale, "shipping.scan_overflow"),
+            });
+          } else {
+            playBeep(false);
+            setFlash({
+              kind: "mismatch",
+              message: t(locale, "shipping.scan_mismatch"),
+            });
+          }
+        } catch (err) {
+          playBeep(false);
+          setFlash({ kind: "mismatch", message: err instanceof Error ? err.message : "Fehler" });
+        }
+      });
+    },
+    [sessionId, status, locale],
+  );
+
+  function handleScan(e: React.FormEvent) {
+    e.preventDefault();
+    const barcode = scanInput.trim();
+    if (!barcode) return;
+    setScanInput("");
+    submitBarcode(barcode);
+  }
+
+  async function handlePhoto(type: PhotoType, file: File) {
+    const fd = new FormData();
+    fd.append("photo", file);
+    startTransition(async () => {
+      const res = await uploadPackPhoto(sessionId, type, fd);
+      if (res.success && res.storagePath) {
+        // Lokale Vorschau via FileReader für sofortiges Feedback
+        const reader = new FileReader();
+        reader.onload = () => {
+          setPhotos((p) => ({ ...p, [type]: String(reader.result) }));
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+  }
+
+  function handleFulfill() {
+    setFulfillError(null);
+    startTransition(async () => {
+      const res = await completePackSession(sessionId);
+      if (res.success) {
+        setStatus("shipped");
+      } else {
+        setFulfillError(res.error ?? "Fehler");
+      }
+    });
+  }
+
+  return (
+    <>
+      {/* Flash Overlay */}
+      {flash.kind && flash.kind !== "match" && (
+        <div
+          className={`fixed inset-0 z-50 flex items-center justify-center pointer-events-none animate-pulse ${
+            flash.kind === "mismatch" ? "bg-red-600/90" : "bg-amber-500/90"
+          }`}
+        >
+          <div className="text-center text-white">
+            <AlertTriangle size={120} className="mx-auto" />
+            <div className="text-3xl font-bold mt-4">{flash.message}</div>
+          </div>
+        </div>
+      )}
+      {flash.kind === "match" && (
+        <div className="fixed inset-x-0 top-0 h-2 bg-emerald-500 z-50 animate-pulse" />
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Left: Scanner + Status */}
+        <div className="md:col-span-1 space-y-4">
+          <CameraScanner onScan={submitBarcode} paused={isPending} />
+
+          <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm">
+            <form onSubmit={handleScan}>
+              <label className="text-xs font-medium text-neutral-600 uppercase tracking-wide flex items-center gap-1">
+                <ScanLine size={14} />
+                {t(locale, "shipping.scan_product")}
+              </label>
+              <input
+                ref={inputRef}
+                type="text"
+                value={scanInput}
+                onChange={(e) => setScanInput(e.target.value)}
+                autoFocus
+                inputMode="text"
+                autoComplete="off"
+                className="mt-2 w-full text-2xl font-mono px-4 py-4 rounded-lg border-2 border-neutral-300 focus:outline-none focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900"
+                placeholder="Barcode..."
+              />
+              <div className="text-xs text-neutral-500 mt-2">
+                Tipp: USB-Scanner oder iPhone-Kamera tippt direkt rein.
+              </div>
+            </form>
+          </div>
+
+          {shippingAddress && (
+            <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm text-sm">
+              <div className="text-xs font-medium text-neutral-600 uppercase tracking-wide mb-2">
+                Lieferadresse
+              </div>
+              <div className="text-neutral-700 leading-relaxed">
+                {shippingAddress.name}<br />
+                {shippingAddress.address1}<br />
+                {shippingAddress.zip} {shippingAddress.city}<br />
+                {shippingAddress.country}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right: Items + Photos */}
+        <div className="md:col-span-2 space-y-4">
+          <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm">
+            <div className="text-xs font-medium text-neutral-600 uppercase tracking-wide mb-3">
+              {t(locale, "shipping.expected_items")}
+            </div>
+            <div className="space-y-3">
+              {expectedItems.map((it, idx) => {
+                const got = counts[it.barcode ?? ""] ?? 0;
+                const done = got >= it.quantity;
+                const method = detectMethod(it.title);
+                return (
+                  <div
+                    key={idx}
+                    className={`flex items-center gap-4 p-3 rounded-xl border-2 transition ${
+                      done
+                        ? "border-emerald-300 bg-emerald-50"
+                        : "border-neutral-200 bg-neutral-50"
+                    }`}
+                  >
+                    {it.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={it.imageUrl}
+                        alt=""
+                        className="w-16 h-16 rounded-lg object-cover bg-white"
+                      />
+                    ) : (
+                      <div className="w-16 h-16 rounded-lg bg-neutral-200" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      {method.label && (
+                        <span
+                          className={`inline-block ${method.cls} text-white text-xs font-bold px-2 py-0.5 rounded mr-2 tracking-wider`}
+                        >
+                          {method.label}
+                        </span>
+                      )}
+                      <div className="text-sm font-medium text-neutral-900 truncate">
+                        {it.title}
+                      </div>
+                      {it.barcode && (
+                        <div className="text-xs text-neutral-500 font-mono mt-0.5">
+                          EAN: {it.barcode}
+                        </div>
+                      )}
+                    </div>
+                    <div
+                      className={`text-2xl font-bold ${
+                        done ? "text-emerald-600" : "text-neutral-400"
+                      }`}
+                    >
+                      {got} / {it.quantity}
+                    </div>
+                    {done && <CheckCircle2 className="text-emerald-500" size={28} />}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Photo Stations */}
+          {isComplete && (
+            <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm">
+              <div className="text-xs font-medium text-neutral-600 uppercase tracking-wide mb-3">
+                {t(locale, "shipping.photos_required")}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {PHOTO_TYPES.map((type) => (
+                  <PhotoStation
+                    key={type}
+                    type={type}
+                    label={t(locale, `shipping.photo_${type === "products_invoice" ? "invoice" : type === "products_in_box" ? "in_box" : "on_scale"}`)}
+                    currentUrl={photos[type]}
+                    onPhoto={handlePhoto}
+                    disabled={isPending}
+                    locale={locale}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Ready / Fulfill */}
+          {canFulfill && (
+            <div className="bg-emerald-50 border-2 border-emerald-300 rounded-2xl p-6 text-center">
+              <CheckCircle2 className="mx-auto text-emerald-600 mb-3" size={48} />
+              <div className="text-2xl font-bold text-emerald-900 mb-3">
+                {t(locale, "shipping.ready")}
+              </div>
+              <button
+                onClick={handleFulfill}
+                disabled={isPending}
+                className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 transition disabled:opacity-50"
+              >
+                {isPending ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
+                {t(locale, "shipping.fulfill")}
+              </button>
+              {fulfillError && (
+                <div className="text-sm text-red-700 mt-3 bg-red-50 border border-red-200 p-2 rounded">
+                  {fulfillError}
+                </div>
+              )}
+            </div>
+          )}
+
+          {status === "shipped" && (
+            <div className="bg-blue-50 border-2 border-blue-300 rounded-2xl p-6 text-center">
+              <Send className="mx-auto text-blue-700 mb-3" size={40} />
+              <div className="text-xl font-bold text-blue-900">
+                {t(locale, "shipping.fulfill_success")}
+              </div>
+              <div className="text-sm text-blue-700 mt-1">{orderName}</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function PhotoStation({
+  type,
+  label,
+  currentUrl,
+  onPhoto,
+  disabled,
+  locale,
+}: {
+  type: PhotoType;
+  label: string;
+  currentUrl: string | undefined;
+  onPhoto: (type: PhotoType, file: File) => void;
+  disabled: boolean;
+  locale: Locale;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="border-2 border-dashed border-neutral-300 rounded-xl p-3 text-center">
+      <div className="text-xs font-medium text-neutral-700 mb-2">{label}</div>
+      {currentUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={currentUrl} alt={label} className="w-full h-32 object-cover rounded-lg mb-2" />
+      ) : (
+        <div className="w-full h-32 bg-neutral-100 rounded-lg flex items-center justify-center mb-2">
+          <Camera className="text-neutral-400" size={28} />
+        </div>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onPhoto(type, f);
+          e.target.value = "";
+        }}
+      />
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => inputRef.current?.click()}
+        className="w-full py-2 rounded-lg bg-neutral-900 text-white text-xs font-medium hover:bg-neutral-700 transition disabled:opacity-50 flex items-center justify-center gap-1"
+      >
+        <Camera size={14} />
+        {currentUrl ? t(locale, "shipping.photo_taken") + " ✓" : t(locale, "shipping.photo_take")}
+      </button>
+    </div>
+  );
+}

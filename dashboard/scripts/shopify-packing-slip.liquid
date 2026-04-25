@@ -1,0 +1,169 @@
+{% comment %}
+  Hairvenly Lieferschein-Template
+  --------------------------------
+  Inhalt im Shopify Admin einfügen unter:
+  Einstellungen → Versand und Lieferung → Lieferschein → Vorlage bearbeiten
+
+  Erweitert das Standard-Template um:
+  - QR-Code oben rechts (verweist auf Pack-Modus im Dashboard)
+  - Methoden-Hervorhebung (BONDINGS/TAPES/TRESSEN/CLIP-IN/PONYTAIL)
+  - Klare Artikel-Anzeige mit Produktbild
+
+  WICHTIG: Variable `pack_base_url` weiter unten ggf. anpassen.
+{% endcomment %}
+
+{% assign pack_base_url = "https://suppliers.hairvenly.de" %}
+{% assign order_number_clean = order.name | remove: "#" %}
+{% assign pack_url = pack_base_url | append: "/pack/" | append: order_number_clean %}
+{% assign qr_image_url = pack_base_url | append: "/api/qr?size=240&text=" | append: pack_url %}
+
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1f1f1f; }
+
+  .header-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; }
+  .header-left h1 { margin: 0; font-size: 28px; letter-spacing: 2px; }
+  .header-right { text-align: right; }
+  .pack-qr { display: block; width: 90px; height: 90px; margin-left: auto; }
+  .pack-qr-label { font-size: 8px; color: #999; text-align: center; margin-top: 2px; letter-spacing: 1px; }
+  .order-number { font-size: 14px; font-weight: 600; margin-top: 8px; }
+
+  .method-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 1.2px;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+  .method-bondings { background: #c2410c; }
+  .method-tapes    { background: #1d4ed8; }
+  .method-tressen  { background: #15803d; }
+  .method-clipin   { background: #7c3aed; }
+  .method-ponytail { background: #be185d; }
+
+  .addresses { display: flex; gap: 60px; margin: 24px 0; }
+  .address-block { flex: 1; }
+  .address-label { font-size: 11px; letter-spacing: 1px; font-weight: 700; color: #555; }
+  .address-text { font-size: 13px; line-height: 1.5; margin-top: 8px; }
+
+  table.items { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  table.items th { text-align: left; font-size: 11px; letter-spacing: 1px; color: #555; border-bottom: 2px solid #000; padding: 8px 6px; }
+  table.items td { vertical-align: top; padding: 14px 6px; border-bottom: 1px solid #e5e5e5; }
+  table.items .col-image { width: 70px; }
+  table.items .col-qty { width: 80px; text-align: right; }
+  table.items .item-image { width: 60px; height: 60px; object-fit: cover; border-radius: 4px; }
+  table.items .item-title { font-size: 13px; line-height: 1.4; }
+  table.items .item-variant { font-size: 11px; color: #666; margin-top: 2px; }
+  table.items .item-qty { font-weight: 700; font-size: 16px; }
+
+  .footer { text-align: center; margin-top: 40px; font-size: 12px; color: #555; line-height: 1.6; }
+</style>
+
+<div class="header-row">
+  <div class="header-left">
+    <h1>{{ shop.name | upcase }}</h1>
+  </div>
+  <div class="header-right">
+    <img src="{{ qr_image_url }}" width="90" height="90" alt="" style="display:block;margin-left:auto;" />
+    <div class="pack-qr-label">{{ order.name }}</div>
+    <div class="order-number">Bestellung {{ order.name }}</div>
+    <div style="font-size: 12px; color: #555;">{{ order.created_at | date: "%d. %B %Y" }}</div>
+  </div>
+</div>
+
+<div class="addresses">
+  {% if order.shipping_address %}
+    <div class="address-block">
+      <div class="address-label">LIEFERN AN</div>
+      <div class="address-text">
+        {{ order.shipping_address.name }}<br/>
+        {{ order.shipping_address.address1 }}<br/>
+        {% if order.shipping_address.address2 != blank %}{{ order.shipping_address.address2 }}<br/>{% endif %}
+        {{ order.shipping_address.zip }} {{ order.shipping_address.city }}<br/>
+        {{ order.shipping_address.country }}
+      </div>
+    </div>
+  {% endif %}
+  {% if order.billing_address %}
+    <div class="address-block">
+      <div class="address-label">RECHNUNG AN</div>
+      <div class="address-text">
+        {{ order.billing_address.name }}<br/>
+        {{ order.billing_address.address1 }}<br/>
+        {% if order.billing_address.address2 != blank %}{{ order.billing_address.address2 }}<br/>{% endif %}
+        {{ order.billing_address.zip }} {{ order.billing_address.city }}<br/>
+        {{ order.billing_address.country }}
+      </div>
+    </div>
+  {% endif %}
+</div>
+
+<table class="items">
+  <thead>
+    <tr>
+      <th class="col-image"></th>
+      <th>ARTIKEL</th>
+      <th class="col-qty">ANZAHL</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for line_item in order.line_items %}
+      {% capture upper_title %}{{ line_item.title | upcase }} {{ line_item.variant.title | upcase }}{% endcapture %}
+      {% assign method_label = "" %}
+      {% assign method_class = "" %}
+      {% if upper_title contains "BONDING" %}
+        {% assign method_label = "BONDINGS" %}
+        {% assign method_class = "method-bondings" %}
+      {% elsif upper_title contains "MINI TAPE" or upper_title contains "MINI-TAPE" %}
+        {% assign method_label = "MINI-TAPES" %}
+        {% assign method_class = "method-tapes" %}
+      {% elsif upper_title contains "TAPE" %}
+        {% assign method_label = "TAPES" %}
+        {% assign method_class = "method-tapes" %}
+      {% elsif upper_title contains "TRESSE" %}
+        {% assign method_label = "TRESSEN" %}
+        {% assign method_class = "method-tressen" %}
+      {% elsif upper_title contains "CLIP" %}
+        {% assign method_label = "CLIP-IN" %}
+        {% assign method_class = "method-clipin" %}
+      {% elsif upper_title contains "PONYTAIL" %}
+        {% assign method_label = "PONYTAIL" %}
+        {% assign method_class = "method-ponytail" %}
+      {% endif %}
+
+      <tr>
+        <td class="col-image">
+          {% if line_item.image %}
+            <img class="item-image" src="{{ line_item.image | img_url: '120x120', crop: 'center' }}" alt="" />
+          {% endif %}
+        </td>
+        <td>
+          {% if method_label != "" %}
+            <div><span class="method-badge {{ method_class }}">{{ method_label }}</span></div>
+          {% endif %}
+          <div class="item-title">{{ line_item.title }}</div>
+          {% if line_item.variant.title != blank and line_item.variant.title != "Default Title" %}
+            <div class="item-variant">{{ line_item.variant.title }}</div>
+          {% endif %}
+        </td>
+        <td class="col-qty">
+          <span class="item-qty">{{ line_item.quantity }}×</span>
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="footer">
+  <div>Danke, dass du bei uns eingekauft hast!</div>
+  <div style="margin-top: 14px; font-weight: 600;">{{ shop.name | upcase }}</div>
+  {% if shop.address.address1 != blank %}
+    <div>
+      {{ shop.address.address1 }}{% if shop.address.zip != blank %}, {{ shop.address.zip }} {{ shop.address.city }}{% endif %}{% if shop.address.country != blank %}, {{ shop.address.country }}{% endif %}
+    </div>
+  {% endif %}
+  {% if shop.email != blank %}<div>{{ shop.email }}</div>{% endif %}
+  <div>{{ shop.domain }}</div>
+</div>

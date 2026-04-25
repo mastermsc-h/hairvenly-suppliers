@@ -3,10 +3,11 @@ import { requireProfile, hasFeature } from "@/lib/auth";
 import { signOut } from "@/lib/actions/auth";
 import { t, type Locale } from "@/lib/i18n";
 import type { FeatureKey } from "@/lib/types";
-import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings } from "lucide-react";
+import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings, Truck } from "lucide-react";
 import SidebarGroup from "./sidebar-group";
 import LanguageSwitcher from "./language-switcher";
 import { MobileSidebarWrapper } from "./mobile-sidebar";
+import ChangePassword from "./change-password";
 import TopProgress from "./top-progress";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -124,6 +125,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               </>
             )}
 
+            {has("shipping") && (
+              <>
+                <div className="border-t border-neutral-200 my-2" />
+                <SidebarGroup
+                  label={t(locale, "nav.shipping")}
+                  icon={<Truck size={16} />}
+                  href="/pack"
+                  items={[
+                    { href: "/pack", label: t(locale, "nav.shipping.list") },
+                    { href: "/pack/display", label: t(locale, "nav.shipping.display") },
+                  ]}
+                />
+              </>
+            )}
+
             {(has("suppliers") || has("users")) && (
               <>
                 <div className="border-t border-neutral-200 my-2" />
@@ -154,6 +170,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             {t(locale, `role.${profile.role}`)}
           </div>
         </div>
+        <ChangePassword label={t(locale, "nav.change_password")} />
         <form action={signOut}>
           <button
             type="submit"

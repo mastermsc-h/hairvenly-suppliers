@@ -270,7 +270,13 @@ interface CustomsOrderNode {
       node: {
         title: string;
         quantity: number;
-        variant: { weight: number | null; weightUnit: string | null } | null;
+        variant: {
+          inventoryItem: {
+            measurement: {
+              weight: { value: number; unit: string } | null;
+            } | null;
+          } | null;
+        } | null;
       };
     }[];
   };
@@ -297,11 +303,14 @@ function gramsFromVariant(weight: number | null, unit: string | null): number {
 }
 
 function mapCustomsOrder(node: CustomsOrderNode): ShopifyCustomsOrder {
-  const lineItems: ShopifyCustomsLineItem[] = node.lineItems.edges.map((e) => ({
-    title: e.node.title,
-    quantity: e.node.quantity,
-    grams: gramsFromVariant(e.node.variant?.weight ?? null, e.node.variant?.weightUnit ?? null),
-  }));
+  const lineItems: ShopifyCustomsLineItem[] = node.lineItems.edges.map((e) => {
+    const w = e.node.variant?.inventoryItem?.measurement?.weight ?? null;
+    return {
+      title: e.node.title,
+      quantity: e.node.quantity,
+      grams: gramsFromVariant(w?.value ?? null, w?.unit ?? null),
+    };
+  });
   const totalQuantity = lineItems.reduce((s, li) => s + li.quantity, 0);
   const totalNetGrams = lineItems.reduce((s, li) => s + li.grams * li.quantity, 0);
   const numericId = node.id.split("/").pop() ?? node.id;
@@ -336,40 +345,110 @@ const CUSTOMS_ORDER_FIELDS = `
     edges { node {
       title
       quantity
-      variant { weight weightUnit }
+      variant {
+        inventoryItem {
+          measurement { weight { value unit } }
+        }
+      }
     } }
   }
 `;
 
+export interface FetchOrdersByCountryDiagnostics {
+  totalFetched: number;
+  countryBreakdown: Record<string, number>;
+  sampleAddresses: { orderName: string; countryCode: string | null; country: string | null; city: string | null }[];
+  rawQuery?: string;
+  graphqlErrors?: string[];
+  pagesFetched?: number;
+  firstPageEdgeCount?: number;
+}
+
 /**
  * Fetch recent orders shipping to a specific country (ISO-2 code, e.g. "CH").
- * Returns unfulfilled + paid orders from the last `daysBack` days.
+ * Shopify's order search doesn't reliably support shipping-country filters,
+ * so we fetch by date window and filter client-side. Paginates up to `maxPages`.
  */
 export async function fetchOrdersByCountry(
   countryCode: string,
-  daysBack = 60,
-  limit = 100,
+  daysBack = 180,
+  maxPages = 20,
+  diagnostics?: FetchOrdersByCountryDiagnostics,
 ): Promise<ShopifyCustomsOrder[]> {
   const since = new Date();
   since.setDate(since.getDate() - daysBack);
   const sinceStr = since.toISOString().slice(0, 10);
 
   const query = `
-    query customsOrders($q: String!, $first: Int!) {
-      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: true) {
+    query customsOrders($q: String!, $first: Int!, $after: String) {
+      orders(first: $first, after: $after, query: $q, sortKey: CREATED_AT, reverse: true) {
+        pageInfo { hasNextPage endCursor }
         edges { node { ${CUSTOMS_ORDER_FIELDS} } }
       }
     }
   `;
 
-  const q = `shipping_address_country_code:${countryCode} AND created_at:>=${sinceStr}`;
+  const q = `created_at:>=${sinceStr}`;
+  const target = countryCode.toUpperCase();
+  const results: ShopifyCustomsOrder[] = [];
+  let cursor: string | null = null;
+  if (diagnostics) {
+    diagnostics.rawQuery = q;
+    diagnostics.pagesFetched = 0;
+  }
 
-  const res = await shopifyGraphQL<{ orders: { edges: { node: CustomsOrderNode }[] } }>(
-    query,
-    { q, first: limit },
-  );
+  type CustomsResp = {
+    orders: {
+      pageInfo: { hasNextPage: boolean; endCursor: string };
+      edges: { node: CustomsOrderNode }[];
+    };
+  };
 
-  return (res.data?.orders.edges ?? []).map((e) => mapCustomsOrder(e.node));
+  for (let page = 0; page < maxPages; page++) {
+    const res: GraphQLResponse<CustomsResp> = await shopifyGraphQL<CustomsResp>(
+      query,
+      { q, first: 100, after: cursor },
+    );
+
+    const edges = res.data?.orders.edges ?? [];
+    if (diagnostics) {
+      diagnostics.pagesFetched = (diagnostics.pagesFetched ?? 0) + 1;
+      if (page === 0) diagnostics.firstPageEdgeCount = edges.length;
+      if (res.errors && res.errors.length > 0) {
+        diagnostics.graphqlErrors = [
+          ...(diagnostics.graphqlErrors ?? []),
+          ...res.errors.map((e) => e.message),
+        ];
+      }
+    }
+    for (const e of edges) {
+      const mapped = mapCustomsOrder(e.node);
+      if (diagnostics) {
+        diagnostics.totalFetched++;
+        const cc = mapped.shippingAddress?.countryCode ?? "(none)";
+        diagnostics.countryBreakdown[cc] = (diagnostics.countryBreakdown[cc] ?? 0) + 1;
+        if (diagnostics.sampleAddresses.length < 10) {
+          diagnostics.sampleAddresses.push({
+            orderName: mapped.name,
+            countryCode: mapped.shippingAddress?.countryCode ?? null,
+            country: mapped.shippingAddress?.country ?? null,
+            city: mapped.shippingAddress?.city ?? null,
+          });
+        }
+      }
+      const cc = mapped.shippingAddress?.countryCode?.toUpperCase();
+      const cn = mapped.shippingAddress?.country?.toLowerCase();
+      // Match both ISO code ("CH") and full country name ("Switzerland"/"Schweiz")
+      if (cc === target || cn === "switzerland" || cn === "schweiz" || cn === "suisse") {
+        results.push(mapped);
+      }
+    }
+
+    if (!res.data?.orders.pageInfo.hasNextPage) break;
+    cursor = res.data.orders.pageInfo.endCursor;
+  }
+
+  return results;
 }
 
 /** Fetch one order by numeric id (for PDF generation). */
@@ -983,6 +1062,264 @@ export async function fetchMonthlyRevenue(
   return Array.from(monthly.entries())
     .map(([month, v]) => ({ month: `${month}-01`, revenue: v.revenue, orderCount: v.orderCount }))
     .sort((a, b) => a.month.localeCompare(b.month));
+}
+
+// ── Pack-Verifikations-System: Order-Fetching für /pack ───────
+
+export interface PackOrderLineItem {
+  title: string;                  // Produkt-Titel
+  variantTitle: string | null;    // Variant-Titel (z.B. "25 (10 Tapes)")
+  quantity: number;
+  barcode: string | null;         // EAN aus variant.barcode
+  variantId: string | null;       // GID der Variante (für Fulfillment)
+  inventoryItemId: string | null; // für spätere Inventory-Updates
+  imageUrl: string | null;
+  fulfillmentOrderLineItemId: string | null; // GID — wird beim Fulfill benötigt
+}
+
+export interface PackOrder {
+  id: string;                     // GID
+  numericId: string;              // numeric only
+  name: string;                   // "#22264"
+  numberClean: string;            // "22264"
+  createdAt: string;
+  displayFinancialStatus: string;
+  displayFulfillmentStatus: string;
+  customerName: string | null;
+  customerEmail: string | null;
+  shippingAddress: {
+    name: string | null;
+    address1: string | null;
+    zip: string | null;
+    city: string | null;
+    country: string | null;
+  } | null;
+  lineItems: PackOrderLineItem[];
+  totalQuantity: number;
+  fulfillmentOrders: { id: string; status: string }[]; // für Auto-Fulfill
+}
+
+interface PackOrderNode {
+  id: string;
+  name: string;
+  createdAt: string;
+  displayFinancialStatus: string;
+  displayFulfillmentStatus: string;
+  customer: { firstName: string | null; lastName: string | null; displayName: string | null; email: string | null } | null;
+  shippingAddress: {
+    name: string | null;
+    address1: string | null;
+    zip: string | null;
+    city: string | null;
+    country: string | null;
+  } | null;
+  lineItems: {
+    edges: {
+      node: {
+        title: string;
+        quantity: number;
+        image: { url: string } | null;
+        variant: {
+          id: string;
+          title: string | null;
+          barcode: string | null;
+          image: { url: string } | null;
+          inventoryItem: { id: string } | null;
+          product: { featuredImage: { url: string } | null } | null;
+        } | null;
+      };
+    }[];
+  };
+  fulfillmentOrders: {
+    edges: {
+      node: {
+        id: string;
+        status: string;
+        lineItems: {
+          edges: {
+            node: {
+              id: string;
+              lineItem: { id: string; title: string };
+              remainingQuantity: number;
+            };
+          }[];
+        };
+      };
+    }[];
+  };
+}
+
+const PACK_ORDER_FIELDS = `
+  id
+  name
+  createdAt
+  displayFinancialStatus
+  displayFulfillmentStatus
+  customer { firstName lastName displayName email }
+  shippingAddress { name address1 zip city country }
+  lineItems(first: 50) {
+    edges { node {
+      title
+      quantity
+      image { url }
+      variant {
+        id
+        title
+        barcode
+        image { url }
+        inventoryItem { id }
+        product { featuredImage { url } }
+      }
+    } }
+  }
+  fulfillmentOrders(first: 5) {
+    edges { node {
+      id
+      status
+      lineItems(first: 50) {
+        edges { node {
+          id
+          lineItem { id title }
+          remainingQuantity
+        } }
+      }
+    } }
+  }
+`;
+
+function mapPackOrder(node: PackOrderNode): PackOrder {
+  const numericId = node.id.split("/").pop() ?? node.id;
+  const numberClean = node.name.replace(/^#/, "");
+
+  // Build a map from line-item-title -> fulfillmentOrderLineItem id, so we can later
+  // call fulfillmentCreate with the correct GIDs.
+  const folMap = new Map<string, string>(); // line title → fulfillmentOrderLineItem GID
+  for (const foEdge of node.fulfillmentOrders.edges) {
+    for (const liEdge of foEdge.node.lineItems.edges) {
+      folMap.set(liEdge.node.lineItem.title, liEdge.node.id);
+    }
+  }
+
+  const lineItems: PackOrderLineItem[] = node.lineItems.edges.map((e) => {
+    const v = e.node.variant;
+    const imageUrl =
+      e.node.image?.url ?? v?.image?.url ?? v?.product?.featuredImage?.url ?? null;
+    return {
+      title: e.node.title,
+      variantTitle: v?.title ?? null,
+      quantity: e.node.quantity,
+      barcode: v?.barcode ?? null,
+      variantId: v?.id ?? null,
+      inventoryItemId: v?.inventoryItem?.id ?? null,
+      imageUrl,
+      fulfillmentOrderLineItemId: folMap.get(e.node.title) ?? null,
+    };
+  });
+
+  const customer = node.customer;
+  const customerName =
+    customer?.displayName ??
+    [customer?.firstName, customer?.lastName].filter(Boolean).join(" ").trim() ??
+    null;
+
+  return {
+    id: node.id,
+    numericId,
+    name: node.name,
+    numberClean,
+    createdAt: node.createdAt,
+    displayFinancialStatus: node.displayFinancialStatus,
+    displayFulfillmentStatus: node.displayFulfillmentStatus,
+    customerName: customerName || null,
+    customerEmail: customer?.email ?? null,
+    shippingAddress: node.shippingAddress,
+    lineItems,
+    totalQuantity: lineItems.reduce((s, li) => s + li.quantity, 0),
+    fulfillmentOrders: node.fulfillmentOrders.edges.map((e) => ({
+      id: e.node.id,
+      status: e.node.status,
+    })),
+  };
+}
+
+/**
+ * Fetch unfulfilled, paid orders — these need to be packed.
+ * Sorted oldest-first (FIFO) so the oldest orders are packed first.
+ */
+export async function fetchUnfulfilledPaidOrders(limit = 100): Promise<PackOrder[]> {
+  const query = `
+    query packQueue($q: String!, $first: Int!) {
+      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: false) {
+        edges { node { ${PACK_ORDER_FIELDS} } }
+      }
+    }
+  `;
+  const q = "financial_status:paid AND fulfillment_status:unfulfilled";
+  const res = await shopifyGraphQL<{ orders: { edges: { node: PackOrderNode }[] } }>(
+    query,
+    { q, first: limit },
+  );
+  return res.data?.orders.edges.map((e) => mapPackOrder(e.node)) ?? [];
+}
+
+/** Fetch one order by name (e.g. "#22264" or "22264") for Pack-Modus. */
+export async function fetchOrderForPack(orderName: string): Promise<PackOrder | null> {
+  const clean = orderName.replace(/^#/, "");
+  const query = `
+    query packOrder($q: String!) {
+      orders(first: 1, query: $q) {
+        edges { node { ${PACK_ORDER_FIELDS} } }
+      }
+    }
+  `;
+  const res = await shopifyGraphQL<{ orders: { edges: { node: PackOrderNode }[] } }>(
+    query,
+    { q: `name:#${clean}` },
+  );
+  const node = res.data?.orders.edges[0]?.node;
+  return node ? mapPackOrder(node) : null;
+}
+
+// ── Auto-Fulfillment nach Pack-Verifikation ──────────────────
+
+/**
+ * Markiert eine Order als ausgeführt (fulfilled) in Shopify.
+ * Nutzt fulfillmentCreate (GraphQL) — fulfillt alle offenen Mengen aller
+ * fulfillmentOrders der Order in einem Rutsch.
+ */
+export async function fulfillOrderInShopify(
+  fulfillmentOrderIds: string[],
+  notifyCustomer = true,
+): Promise<{ success: boolean; fulfillmentId?: string; errors?: string[] }> {
+  const query = `
+    mutation fulfillmentCreate($fulfillment: FulfillmentInput!) {
+      fulfillmentCreate(fulfillment: $fulfillment) {
+        fulfillment { id status }
+        userErrors { field message }
+      }
+    }
+  `;
+  const variables = {
+    fulfillment: {
+      lineItemsByFulfillmentOrder: fulfillmentOrderIds.map((id) => ({ fulfillmentOrderId: id })),
+      notifyCustomer,
+    },
+  };
+  const res = await shopifyGraphQL<{
+    fulfillmentCreate: {
+      fulfillment: { id: string; status: string } | null;
+      userErrors: { field: string[] | null; message: string }[];
+    };
+  }>(query, variables);
+
+  const errors = res.data?.fulfillmentCreate.userErrors ?? [];
+  if (errors.length > 0) {
+    return { success: false, errors: errors.map((e) => e.message) };
+  }
+  return {
+    success: true,
+    fulfillmentId: res.data?.fulfillmentCreate.fulfillment?.id,
+  };
 }
 
 // ── Ensure metafield definitions exist ────────────────────────
