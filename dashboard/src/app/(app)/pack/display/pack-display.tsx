@@ -69,6 +69,14 @@ export default function PackDisplay({
   const [session, setSession] = useState<DisplaySession | null>(initialSession);
   const [counts, setCounts] = useState<Record<string, number>>(initialCounts);
   const [flash, setFlash] = useState<"match" | "mismatch" | null>(null);
+  const [bigSuccessTitle, setBigSuccessTitle] = useState<string | null>(null);
+
+  // Big success auto-clear
+  useEffect(() => {
+    if (!bigSuccessTitle) return;
+    const tm = setTimeout(() => setBigSuccessTitle(null), 700);
+    return () => clearTimeout(tm);
+  }, [bigSuccessTitle]);
 
   const isComplete = useMemo(() => {
     if (!session) return false;
@@ -130,11 +138,17 @@ export default function PackDisplay({
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "pack_scans" },
         (payload) => {
-          const row = payload.new as { session_id: string; scanned_barcode: string; status: string };
+          const row = payload.new as {
+            session_id: string;
+            scanned_barcode: string;
+            status: string;
+            matched_title: string | null;
+          };
           if (!session || row.session_id !== session.id) return;
           if (row.status === "match") {
             setCounts((prev) => ({ ...prev, [row.scanned_barcode]: (prev[row.scanned_barcode] ?? 0) + 1 }));
             setFlash("match");
+            setBigSuccessTitle(row.matched_title || "OK");
             setTimeout(() => setFlash(null), 600);
           } else if (row.status === "mismatch" || row.status === "overflow") {
             setFlash("mismatch");
@@ -172,8 +186,13 @@ export default function PackDisplay({
           </div>
         </div>
       )}
-      {flash === "match" && (
-        <div className="fixed inset-x-0 top-0 h-3 bg-emerald-400 z-50" />
+      {bigSuccessTitle && (
+        <div className="fixed inset-0 z-50 bg-emerald-500/90 flex items-center justify-center pointer-events-none">
+          <div className="text-center text-white px-12">
+            <CheckCircle2 size={220} className="mx-auto" strokeWidth={2.5} />
+            <div className="text-7xl font-black mt-6">{bigSuccessTitle}</div>
+          </div>
+        </div>
       )}
 
       <div className="p-8 md:p-12">

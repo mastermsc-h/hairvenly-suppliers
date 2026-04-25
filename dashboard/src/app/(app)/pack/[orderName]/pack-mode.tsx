@@ -1,9 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { recordPackScan, recordManualConfirm, completePackSession, uploadPackPhoto } from "@/lib/actions/pack";
+import {
+  recordPackScan,
+  recordManualConfirm,
+  completePackSession,
+  uploadPackPhoto,
+  resetItemConfirms,
+  fetchSessionScans,
+} from "@/lib/actions/pack";
 import { t, type Locale } from "@/lib/i18n";
-import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X } from "lucide-react";
+import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X, RotateCcw, History } from "lucide-react";
 import CameraScanner from "./camera-scanner";
 
 interface ExpectedItem {
@@ -107,6 +114,10 @@ export default function PackMode({
   const inputRef = useRef<HTMLInputElement>(null);
   // Pro Item: Manual-Confirm Form aufgeklappt + Checkbox-States (5: Methode/Länge/Herkunft/Farbe/Menge)
   const [manualForms, setManualForms] = useState<Record<number, { open: boolean; checks: boolean[] }>>({});
+  // Live-Scan-Historie
+  const [scanHistory, setScanHistory] = useState<Awaited<ReturnType<typeof fetchSessionScans>>>([]);
+  // Großer Vollbild-Erfolgsflash (klar sichtbar bei Kamera-Scan)
+  const [bigSuccess, setBigSuccess] = useState<string | null>(null);
 
   function setManualOpen(idx: number, open: boolean) {
     setManualForms((prev) => ({
@@ -127,6 +138,27 @@ export default function PackMode({
   useEffect(() => {
     inputRef.current?.focus();
   }, [counts]);
+
+  // Scan-History initial laden + nach Änderungen aktualisieren
+  const refreshHistory = useCallback(async () => {
+    try {
+      const scans = await fetchSessionScans(sessionId, 50);
+      setScanHistory(scans);
+    } catch {
+      // ignore
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    refreshHistory();
+  }, [refreshHistory]);
+
+  // Big-success Flash auto-clear
+  useEffect(() => {
+    if (!bigSuccess) return;
+    const tm = setTimeout(() => setBigSuccess(null), 700);
+    return () => clearTimeout(tm);
+  }, [bigSuccess]);
 
   // Flash auto-clear
   useEffect(() => {
@@ -152,8 +184,8 @@ export default function PackMode({
           if (res.status === "match") {
             playBeep(true);
             setFlash({ kind: "match", message: res.matchedTitle });
+            setBigSuccess(res.matchedTitle ?? "OK");
             if (status === "open") setStatus("in_progress");
-            // Form schließen + checks zurücksetzen
             setManualForms((prev) => ({
               ...prev,
               [idx]: { open: false, checks: [false, false, false, false, false] },
@@ -162,13 +194,14 @@ export default function PackMode({
             playBeep(false);
             setFlash({ kind: "overflow", message: t(locale, "shipping.scan_overflow") });
           }
+          await refreshHistory();
         } catch (err) {
           playBeep(false);
           setFlash({ kind: "mismatch", message: err instanceof Error ? err.message : "Fehler" });
         }
       });
     },
-    [sessionId, status, locale],
+    [sessionId, status, locale, refreshHistory],
   );
 
   const allPhotosUploaded = PHOTO_TYPES.every((p) => !!photos[p]);
@@ -185,6 +218,7 @@ export default function PackMode({
           if (res.status === "match") {
             playBeep(true);
             setFlash({ kind: "match", message: res.matchedTitle });
+            setBigSuccess(res.matchedTitle ?? "OK");
             if (status === "open") setStatus("in_progress");
           } else if (res.status === "overflow") {
             playBeep(false);
@@ -199,13 +233,30 @@ export default function PackMode({
               message: t(locale, "shipping.scan_mismatch"),
             });
           }
+          await refreshHistory();
         } catch (err) {
           playBeep(false);
           setFlash({ kind: "mismatch", message: err instanceof Error ? err.message : "Fehler" });
         }
       });
     },
-    [sessionId, status, locale],
+    [sessionId, status, locale, refreshHistory],
+  );
+
+  const handleResetItem = useCallback(
+    (idx: number) => {
+      if (typeof window !== "undefined" && !window.confirm("Diese Position auf 0 zurücksetzen? (Audit-Log bleibt.)")) {
+        return;
+      }
+      startTransition(async () => {
+        const res = await resetItemConfirms(sessionId, idx);
+        if (res.success) {
+          setCounts(res.scannedCounts);
+          await refreshHistory();
+        }
+      });
+    },
+    [sessionId, refreshHistory],
   );
 
   function handleScan(e: React.FormEvent) {
@@ -259,8 +310,13 @@ export default function PackMode({
           </div>
         </div>
       )}
-      {flash.kind === "match" && (
-        <div className="fixed inset-x-0 top-0 h-2 bg-emerald-500 z-50 animate-pulse" />
+      {bigSuccess && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none bg-emerald-500/85">
+          <div className="text-center text-white">
+            <CheckCircle2 size={140} className="mx-auto" strokeWidth={2.5} />
+            <div className="text-4xl font-black mt-4 px-6 max-w-3xl">{bigSuccess}</div>
+          </div>
+        </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -392,6 +448,17 @@ export default function PackMode({
                         >
                           {got}/{it.quantity}
                         </div>
+                        {got > 0 && (
+                          <button
+                            onClick={() => handleResetItem(idx)}
+                            disabled={isPending}
+                            className="text-[11px] text-neutral-500 hover:text-red-700 hover:underline flex items-center gap-1 disabled:opacity-50"
+                            title="Diese Position zurücksetzen"
+                          >
+                            <RotateCcw size={11} />
+                            Zurücksetzen
+                          </button>
+                        )}
                         {!done && !(manualForms[idx]?.open) && (
                           <button
                             onClick={() => setManualOpen(idx, true)}
@@ -464,6 +531,80 @@ export default function PackMode({
                 );
               })}
             </div>
+          </div>
+
+          {/* Scan-Historie (alle Scans dieser Session, dauerhaft) */}
+          <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-xs font-medium text-neutral-600 uppercase tracking-wide flex items-center gap-1">
+                <History size={14} />
+                Scan-Verlauf ({scanHistory.length})
+              </div>
+              <div className="text-xs text-neutral-500 flex items-center gap-3">
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  {scanHistory.filter((s) => s.status === "match").length} OK
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-red-500" />
+                  {scanHistory.filter((s) => s.status === "mismatch").length} Fehlscan
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-amber-500" />
+                  {scanHistory.filter((s) => s.status === "overflow").length} Überzählig
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-neutral-400" />
+                  {scanHistory.filter((s) => s.status === "reset").length} Reset
+                </span>
+              </div>
+            </div>
+            {scanHistory.length === 0 ? (
+              <div className="text-xs text-neutral-400 italic">Noch keine Scans.</div>
+            ) : (
+              <div className="space-y-1 text-xs font-mono max-h-64 overflow-y-auto">
+                {scanHistory.map((s) => {
+                  const cls =
+                    s.status === "match"
+                      ? "bg-emerald-50/60 text-emerald-900"
+                      : s.status === "mismatch"
+                      ? "bg-red-50/60 text-red-900"
+                      : s.status === "overflow"
+                      ? "bg-amber-50/60 text-amber-900"
+                      : "bg-neutral-100 text-neutral-500 line-through";
+                  const icon =
+                    s.status === "match" ? (
+                      <CheckCircle2 size={12} className="text-emerald-600 shrink-0" />
+                    ) : s.status === "mismatch" ? (
+                      <AlertTriangle size={12} className="text-red-600 shrink-0" />
+                    ) : (
+                      <span className="w-3 shrink-0" />
+                    );
+                  return (
+                    <div key={s.id} className={`flex items-center gap-2 px-2 py-1 rounded ${cls}`}>
+                      {icon}
+                      <span className="text-neutral-500 w-20 shrink-0">
+                        {new Date(s.scannedAt).toLocaleTimeString(locale === "de" ? "de-DE" : "en-US", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                        })}
+                      </span>
+                      <span className="w-20 shrink-0 truncate text-neutral-700">{s.scannedBarcode}</span>
+                      <span className="flex-1 truncate">
+                        {s.matchedTitle ?? <span className="italic text-neutral-500">unbekannt / falsch</span>}
+                      </span>
+                      <span className="text-[10px] uppercase tracking-wider text-neutral-500 shrink-0">
+                        {s.scanMethod === "manual" ? "manuell" : "scan"}
+                      </span>
+                      {s.scannedByName && (
+                        <span className="text-[10px] text-neutral-500 shrink-0">{s.scannedByName}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Photo Stations */}

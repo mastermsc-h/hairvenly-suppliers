@@ -451,6 +451,96 @@ export async function completePackSession(sessionId: string): Promise<{
 }
 
 /**
+ * Setzt alle Match-Scans einer Item-Position auf 'reset' zurück (Counter -> 0).
+ * Audit-Log bleibt erhalten (status='reset' statt löschen).
+ */
+export async function resetItemConfirms(
+  sessionId: string,
+  itemIndex: number,
+): Promise<{
+  success: boolean;
+  error?: string;
+  scannedCounts: Record<string, number>;
+}> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) {
+    return { success: false, error: "Forbidden", scannedCounts: {} };
+  }
+  const supabase = await createClient();
+  const { data: session } = await supabase
+    .from("pack_sessions")
+    .select("expected_items")
+    .eq("id", sessionId)
+    .single();
+  if (!session) return { success: false, error: "Session nicht gefunden", scannedCounts: {} };
+
+  const expected = (session.expected_items as ExpectedItem[]) ?? [];
+  const item = expected[itemIndex];
+  if (!item) return { success: false, error: "Item nicht gefunden", scannedCounts: {} };
+
+  const counterKey = item.barcode || `manual:${itemIndex}`;
+
+  await supabase
+    .from("pack_scans")
+    .update({ status: "reset" })
+    .eq("session_id", sessionId)
+    .eq("scanned_barcode", counterKey)
+    .eq("status", "match");
+
+  // Counter neu berechnen
+  const { data: matches } = await supabase
+    .from("pack_scans")
+    .select("scanned_barcode")
+    .eq("session_id", sessionId)
+    .eq("status", "match");
+  const counts: Record<string, number> = {};
+  for (const s of matches ?? []) {
+    counts[s.scanned_barcode] = (counts[s.scanned_barcode] ?? 0) + 1;
+  }
+  return { success: true, scannedCounts: counts };
+}
+
+/**
+ * Lädt die letzten N Scans einer Session (für Live-Statistik im Pack-Modus).
+ */
+export async function fetchSessionScans(
+  sessionId: string,
+  limit = 30,
+): Promise<
+  {
+    id: string;
+    scannedBarcode: string;
+    matchedTitle: string | null;
+    status: string;
+    scanMethod: string;
+    scannedAt: string;
+    scannedByName: string | null;
+  }[]
+> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) return [];
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("pack_scans")
+    .select("id, scanned_barcode, matched_title, status, scan_method, scanned_at, profiles:scanned_by(display_name, username)")
+    .eq("session_id", sessionId)
+    .order("scanned_at", { ascending: false })
+    .limit(limit);
+  return (data ?? []).map((s) => {
+    const p = (s as { profiles?: { display_name?: string | null; username?: string | null } | null }).profiles;
+    return {
+      id: s.id,
+      scannedBarcode: s.scanned_barcode,
+      matchedTitle: s.matched_title,
+      status: s.status,
+      scanMethod: s.scan_method,
+      scannedAt: s.scanned_at,
+      scannedByName: p?.display_name || p?.username || null,
+    };
+  });
+}
+
+/**
  * Notizen einer Pack-Session speichern (z.B. "Karton beschädigt", Reklamations-Hinweis).
  */
 export async function savePackSessionNotes(
