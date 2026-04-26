@@ -12,7 +12,7 @@ import {
   cancelPackSession,
 } from "@/lib/actions/pack";
 import { t, type Locale } from "@/lib/i18n";
-import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X, RotateCcw, History, Package2, ImagePlus } from "lucide-react";
+import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X, RotateCcw, History, Package2, ImagePlus, ChevronDown, ChevronUp } from "lucide-react";
 import CameraScanner from "./camera-scanner";
 import OrderQrScanner from "../order-qr-scanner";
 
@@ -257,6 +257,13 @@ export default function PackMode({
   const readySectionRef = useRef<HTMLDivElement>(null);
   const lastPhaseRef = useRef<typeof phase>(phase);
 
+  // "Scanne als Nächstes" collapsen wenn Kamera aktiv (sonst zu viel Platz auf iPhone)
+  const [cameraActive, setCameraActive] = useState(false);
+  const [hintExpanded, setHintExpanded] = useState(true);
+  useEffect(() => {
+    if (cameraActive) setHintExpanded(false);
+  }, [cameraActive]);
+
   useEffect(() => {
     if (lastPhaseRef.current === phase) return;
     lastPhaseRef.current = phase;
@@ -482,65 +489,82 @@ export default function PackMode({
         {/* Left: Scanner + Status */}
         <div className="md:col-span-1 space-y-4">
           {phase === "scan" && nextItem && (
-            <div className="bg-blue-50 border-2 border-blue-300 rounded-2xl p-4 shadow-sm">
-              <div className="text-[11px] font-bold text-blue-900 uppercase tracking-widest mb-2">
-                Scanne als Nächstes
-              </div>
-              <div className="flex gap-3">
-                {nextItem.item.imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={nextItem.item.imageUrl}
-                    alt=""
-                    className="w-16 h-16 rounded-lg object-cover bg-white shrink-0"
-                  />
-                ) : (
-                  <div className="w-16 h-16 rounded-lg bg-neutral-200 shrink-0" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex flex-wrap gap-1.5 mb-1">
-                    {nextItem.attrs.method.label && (
-                      <span
-                        className={`inline-block ${nextItem.attrs.method.cls} text-white text-xs font-bold px-2 py-0.5 rounded tracking-wider`}
-                      >
-                        {nextItem.attrs.method.label}
-                      </span>
-                    )}
-                    {nextItem.attrs.length && (
-                      <span className="inline-block bg-slate-700 text-white text-xs font-bold px-2 py-0.5 rounded tracking-wider">
-                        {nextItem.attrs.length}
-                      </span>
-                    )}
-                    {nextItem.attrs.origin && (
-                      <span className="inline-block bg-slate-900 text-white text-xs font-bold px-2 py-0.5 rounded tracking-wider">
-                        {nextItem.attrs.origin}
-                      </span>
-                    )}
-                    {nextItem.attrs.color && (
-                      <span className="inline-block bg-amber-600 text-white text-xs font-bold px-2 py-0.5 rounded font-mono">
-                        {nextItem.attrs.color}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs text-neutral-700 line-clamp-2">{nextItem.item.title}</div>
-                  {nextItem.item.variantTitle &&
-                    nextItem.item.variantTitle !== "Default Title" && (
-                      <div className="text-xs font-semibold text-emerald-700 mt-0.5">
-                        Variante: {nextItem.item.variantTitle}
-                      </div>
-                    )}
+            <div className="bg-blue-50 border-2 border-blue-300 rounded-2xl shadow-sm overflow-hidden">
+              {/* Kompakte Header-Zeile — immer sichtbar */}
+              <button
+                onClick={() => setHintExpanded((e) => !e)}
+                className="w-full flex items-center gap-2 p-2.5 hover:bg-blue-100 transition"
+              >
+                <span className="text-[10px] font-bold text-blue-900 uppercase tracking-widest shrink-0">
+                  Nächste:
+                </span>
+                <div className="flex flex-wrap gap-1 flex-1 min-w-0 justify-start">
+                  {nextItem.attrs.method.label && (
+                    <span
+                      className={`inline-block ${nextItem.attrs.method.cls} text-white text-[11px] font-bold px-1.5 py-0.5 rounded tracking-wider`}
+                    >
+                      {nextItem.attrs.method.label}
+                    </span>
+                  )}
+                  {nextItem.attrs.length && (
+                    <span className="inline-block bg-slate-700 text-white text-[11px] font-bold px-1.5 py-0.5 rounded">
+                      {nextItem.attrs.length}
+                    </span>
+                  )}
+                  {nextItem.attrs.origin && (
+                    <span className="inline-block bg-slate-900 text-white text-[11px] font-bold px-1.5 py-0.5 rounded">
+                      {nextItem.attrs.origin}
+                    </span>
+                  )}
+                  {nextItem.attrs.color && (
+                    <span className="inline-block bg-amber-600 text-white text-[11px] font-bold px-1.5 py-0.5 rounded font-mono">
+                      {nextItem.attrs.color}
+                    </span>
+                  )}
                 </div>
-                <div className="text-2xl font-black text-blue-900 shrink-0">
+                <span className="text-base font-black text-blue-900 shrink-0">
                   {nextItem.got}/{nextItem.item.quantity}
+                </span>
+                {hintExpanded ? (
+                  <ChevronUp size={14} className="text-blue-700 shrink-0" />
+                ) : (
+                  <ChevronDown size={14} className="text-blue-700 shrink-0" />
+                )}
+              </button>
+
+              {/* Erweiterte Details — collapsable */}
+              {hintExpanded && (
+                <div className="px-3 pb-3 pt-1 border-t border-blue-200">
+                  <div className="flex gap-3">
+                    {nextItem.item.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={nextItem.item.imageUrl}
+                        alt=""
+                        className="w-14 h-14 rounded-lg object-cover bg-white shrink-0"
+                      />
+                    ) : (
+                      <div className="w-14 h-14 rounded-lg bg-neutral-200 shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-neutral-700 line-clamp-2">{nextItem.item.title}</div>
+                      {nextItem.item.variantTitle &&
+                        nextItem.item.variantTitle !== "Default Title" && (
+                          <div className="text-xs font-semibold text-emerald-700 mt-0.5">
+                            Variante: {nextItem.item.variantTitle}
+                          </div>
+                        )}
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-neutral-500 mt-2 italic">
+                    Andere Reihenfolge ist auch ok — nur ein Vorschlag.
+                  </div>
                 </div>
-              </div>
-              <div className="text-[10px] text-neutral-500 mt-2 italic">
-                Tipp: andere Reihenfolge ist auch ok — das hier ist nur ein Vorschlag.
-              </div>
+              )}
             </div>
           )}
 
-          {phase === "scan" && <CameraScanner onScan={submitBarcode} paused={isPending} />}
+          {phase === "scan" && <CameraScanner onScan={submitBarcode} paused={isPending} onActiveChange={setCameraActive} />}
 
           {phase === "photos" && (
             <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 shadow-sm text-center">

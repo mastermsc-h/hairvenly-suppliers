@@ -9,11 +9,17 @@ const READER_ID = "pack-camera-reader";
 export default function CameraScanner({
   onScan,
   paused = false,
+  onActiveChange,
 }: {
   onScan: (barcode: string) => void;
   paused?: boolean;
+  onActiveChange?: (active: boolean) => void;
 }) {
   const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    onActiveChange?.(active);
+  }, [active, onActiveChange]);
   const [error, setError] = useState<string | null>(null);
   const [restartTick, setRestartTick] = useState(0);
   const scannerRef = useRef<Html5Qrcode | null>(null);
