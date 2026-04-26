@@ -547,6 +547,53 @@ export async function fetchSessionScans(
 }
 
 /**
+ * Pack-Vorgang abbrechen — alle Scans auf "reset", Fotos löschen, Session zurück auf "open".
+ * User kann die Bestellung danach erneut von vorn packen.
+ * Audit-Log der Scans bleibt mit status='reset' erhalten.
+ */
+export async function cancelPackSession(
+  sessionId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) {
+    return { success: false, error: "Forbidden" };
+  }
+  const supabase = await createClient();
+
+  // 1. Alle erfolgreichen Scans auf "reset" setzen
+  await supabase
+    .from("pack_scans")
+    .update({ status: "reset" })
+    .eq("session_id", sessionId)
+    .eq("status", "match");
+
+  // 2. Fotos: aus Storage entfernen + DB-Einträge löschen
+  const { data: photos } = await supabase
+    .from("pack_photos")
+    .select("storage_path")
+    .eq("session_id", sessionId);
+  if (photos && photos.length > 0) {
+    const paths = photos.map((p) => p.storage_path);
+    await supabase.storage.from("pack-photos").remove(paths);
+    await supabase.from("pack_photos").delete().eq("session_id", sessionId);
+  }
+
+  // 3. Session-Status zurück auf "open"
+  await supabase
+    .from("pack_sessions")
+    .update({
+      status: "open",
+      started_at: null,
+      finished_at: null,
+    })
+    .eq("id", sessionId);
+
+  revalidatePath("/pack");
+  revalidatePath(`/pack/${sessionId}`);
+  return { success: true };
+}
+
+/**
  * Notizen einer Pack-Session speichern (z.B. "Karton beschädigt", Reklamations-Hinweis).
  */
 export async function savePackSessionNotes(

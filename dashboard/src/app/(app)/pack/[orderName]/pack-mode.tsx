@@ -9,6 +9,7 @@ import {
   uploadPackPhoto,
   resetItemConfirms,
   fetchSessionScans,
+  cancelPackSession,
 } from "@/lib/actions/pack";
 import { t, type Locale } from "@/lib/i18n";
 import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X, RotateCcw, History, Package2, ImagePlus } from "lucide-react";
@@ -321,6 +322,28 @@ export default function PackMode({
     [sessionId, status, locale, refreshHistory, bigSuccess, expectedItems],
   );
 
+  const handleCancelSession = useCallback(() => {
+    if (typeof window !== "undefined") {
+      const ok = window.confirm(
+        "Pack-Vorgang wirklich abbrechen? Alle Scans + Fotos werden gelöscht. Audit-Log bleibt erhalten. Die Bestellung kann danach erneut bearbeitet werden.",
+      );
+      if (!ok) return;
+    }
+    startTransition(async () => {
+      const res = await cancelPackSession(sessionId);
+      if (res.success) {
+        setCounts({});
+        setPhotos({});
+        setBigSuccess(null);
+        setStatus("open");
+        setManualForms({});
+        setFulfillError(null);
+        setFlash({ kind: null });
+        await refreshHistory();
+      }
+    });
+  }, [sessionId, refreshHistory]);
+
   const handleResetItem = useCallback(
     (idx: number) => {
       if (typeof window !== "undefined" && !window.confirm("Diese Position auf 0 zurücksetzen? (Audit-Log bleibt.)")) {
@@ -587,6 +610,17 @@ export default function PackMode({
                 {shippingAddress.country}
               </div>
             </div>
+          )}
+
+          {phase !== "shipped" && (
+            <button
+              onClick={handleCancelSession}
+              disabled={isPending}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-red-200 text-red-700 text-xs font-medium hover:bg-red-50 hover:border-red-300 transition disabled:opacity-50"
+            >
+              <X size={14} />
+              Pack-Vorgang abbrechen
+            </button>
           )}
         </div>
 
