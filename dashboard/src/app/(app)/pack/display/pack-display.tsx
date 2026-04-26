@@ -23,6 +23,8 @@ interface DisplaySession {
   packedBy: string | null;
   startedAt: string | null;
   finishedAt: string | null;
+  photosSkipped: boolean;
+  photosSkipReason: string | null;
 }
 
 function detectAttributes(title: string): {
@@ -115,7 +117,7 @@ export default function PackDisplay({
       const { data: rows } = await supabase
         .from("pack_sessions")
         .select(
-          "id, order_name, status, expected_items, started_at, finished_at, packed_by, profiles:packed_by(display_name, username)",
+          "id, order_name, status, expected_items, started_at, finished_at, packed_by, photos_skipped, photos_skip_reason, profiles:packed_by(display_name, username)",
         )
         .in("status", ["in_progress", "verified"])
         .order("updated_at", { ascending: false })
@@ -137,9 +139,16 @@ export default function PackDisplay({
         packedBy: profileRel?.display_name || profileRel?.username || null,
         startedAt: row.started_at,
         finishedAt: row.finished_at,
+        photosSkipped: row.photos_skipped ?? false,
+        photosSkipReason: (row.photos_skip_reason as string | null) ?? null,
       };
       setSession((prev) =>
-        prev && prev.id === next.id && prev.status === next.status ? prev : next,
+        prev &&
+        prev.id === next.id &&
+        prev.status === next.status &&
+        prev.photosSkipped === next.photosSkipped
+          ? prev
+          : next,
       );
       // Scan-counts + Foto-counts neu laden
       sessionIdRef.current = row.id;
@@ -189,8 +198,9 @@ export default function PackDisplay({
   }, [session, counts]);
 
   const photosDone = useMemo(() => {
+    if (session?.photosSkipped) return true;
     return PHOTO_TYPES.every((p) => (photoCounts[p] ?? 0) > 0);
-  }, [photoCounts]);
+  }, [photoCounts, session?.photosSkipped]);
 
   const reallyReady = isComplete && photosDone;
   const missingPhotoTypes = PHOTO_TYPES.filter((p) => (photoCounts[p] ?? 0) === 0);
@@ -225,7 +235,7 @@ export default function PackDisplay({
           const { data: rows } = await supabase
             .from("pack_sessions")
             .select(
-              "id, order_name, status, expected_items, started_at, finished_at, packed_by, profiles:packed_by(display_name, username)",
+              "id, order_name, status, expected_items, started_at, finished_at, packed_by, photos_skipped, photos_skip_reason, profiles:packed_by(display_name, username)",
             )
             .in("status", ["in_progress", "verified"])
             .order("updated_at", { ascending: false })
@@ -246,6 +256,8 @@ export default function PackDisplay({
             packedBy,
             startedAt: newSession.started_at,
             finishedAt: newSession.finished_at,
+            photosSkipped: newSession.photos_skipped ?? false,
+            photosSkipReason: (newSession.photos_skip_reason as string | null) ?? null,
           });
           // Counts neu laden
           const { data: scans } = await supabase
@@ -276,7 +288,7 @@ export default function PackDisplay({
             const { data: rows } = await supabase
               .from("pack_sessions")
               .select(
-                "id, order_name, status, expected_items, started_at, finished_at, packed_by, profiles:packed_by(display_name, username)",
+                "id, order_name, status, expected_items, started_at, finished_at, packed_by, photos_skipped, photos_skip_reason, profiles:packed_by(display_name, username)",
               )
               .in("status", ["in_progress", "verified"])
               .order("updated_at", { ascending: false })
@@ -292,6 +304,8 @@ export default function PackDisplay({
                 packedBy: profileRel?.display_name || profileRel?.username || null,
                 startedAt: newSession.started_at,
                 finishedAt: newSession.finished_at,
+                photosSkipped: newSession.photos_skipped ?? false,
+                photosSkipReason: (newSession.photos_skip_reason as string | null) ?? null,
               });
               const { data: scans } = await supabase
                 .from("pack_scans")

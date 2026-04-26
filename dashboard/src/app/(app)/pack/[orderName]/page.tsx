@@ -33,7 +33,8 @@ export default async function PackOrderPage({
   if (!order) notFound();
 
   // Session anlegen oder laden
-  const { sessionId, status, expectedItems } = await getOrCreatePackSession(orderName);
+  const { sessionId, status, expectedItems, photosSkipped, photosSkipReason } =
+    await getOrCreatePackSession(orderName);
 
   // Bereits erfolgreiche Scans laden, um initialen Counter aufzubauen
   const supabase = await createClient();
@@ -93,6 +94,8 @@ export default async function PackOrderPage({
         expectedItems={expectedItems as ExpectedItem[]}
         initialCounts={initialCounts}
         initialPhotos={photoMap}
+        initialPhotosSkipped={photosSkipped}
+        initialPhotosSkipReason={photosSkipReason}
         shippingAddress={order.shippingAddress}
         locale={locale}
       />

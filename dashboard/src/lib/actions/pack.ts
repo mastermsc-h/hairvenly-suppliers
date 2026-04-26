@@ -13,6 +13,54 @@ import { revalidatePath } from "next/cache";
 
 const PACK_BASE_URL = "https://suppliers.hairvenly.de";
 
+// Collections deren Produkte keine Pflicht-Beweisfotos brauchen (Kleinmaterial).
+// Auto-Skip greift nur wenn ALLE Items der Order in einer dieser Collections sind.
+const SKIP_PHOTO_COLLECTIONS = {
+  accessories: ["accessoires-werkzeuge", "extensions-zubehoer"],
+  care_products: ["blessed-haarpflege", "haarpflegeprodukte", "sonstige-haarpflege"],
+  digital_goods: ["extensions-schulungen"],
+} as const;
+
+export type PhotoSkipReason =
+  | "accessories"
+  | "care_products"
+  | "digital_goods"
+  | "auto_accessories"
+  | "auto_care_products"
+  | "auto_digital_goods"
+  | "auto_mixed_skip";
+
+/**
+ * Bestimmt ob alle Items der Order aus skip-Collections stammen.
+ * Returns null wenn mindestens ein Item NICHT überspringbar ist.
+ */
+function detectAutoSkipReason(items: PackOrderLineItem[]): PhotoSkipReason | null {
+  if (items.length === 0) return null;
+  const accessoriesSet = new Set<string>(SKIP_PHOTO_COLLECTIONS.accessories);
+  const careSet = new Set<string>(SKIP_PHOTO_COLLECTIONS.care_products);
+  const digitalSet = new Set<string>(SKIP_PHOTO_COLLECTIONS.digital_goods);
+
+  let allAccessories = true;
+  let allCare = true;
+  let allDigital = true;
+  for (const li of items) {
+    const handles = li.collectionHandles ?? [];
+    const isAcc = handles.some((h) => accessoriesSet.has(h));
+    const isCare = handles.some((h) => careSet.has(h));
+    const isDigital = handles.some((h) => digitalSet.has(h));
+    if (!isAcc) allAccessories = false;
+    if (!isCare) allCare = false;
+    if (!isDigital) allDigital = false;
+    // Wenn ein Item in keiner skip-Collection ist → keine Auto-Skip möglich
+    if (!isAcc && !isCare && !isDigital) return null;
+  }
+  if (allAccessories) return "auto_accessories";
+  if (allCare) return "auto_care_products";
+  if (allDigital) return "auto_digital_goods";
+  // Gemischt aber alles aus skip-Collections
+  return "auto_mixed_skip";
+}
+
 /**
  * Generiert ein QR-SVG für die Pack-Modus-URL der Order und speichert es als
  * Order-Metafield "custom.pack_qr_svg". Wird vom Lieferschein-Liquid inline
@@ -69,6 +117,8 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
   sessionId: string;
   status: string;
   expectedItems: ExpectedItem[];
+  photosSkipped: boolean;
+  photosSkipReason: PhotoSkipReason | null;
 }> {
   const profile = await requireProfile();
   if (!hasFeature(profile, "shipping")) {
@@ -81,7 +131,7 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
   // Existierende Session?
   const { data: existing } = await supabase
     .from("pack_sessions")
-    .select("id, status, expected_items, shopify_order_id, packed_by")
+    .select("id, status, expected_items, shopify_order_id, packed_by, photos_skipped, photos_skip_reason")
     .eq("order_name", cleanName)
     .maybeSingle();
 
@@ -102,6 +152,8 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
       sessionId: existing.id,
       status: existing.status === "open" ? "in_progress" : existing.status,
       expectedItems: (existing.expected_items as ExpectedItem[]) ?? [],
+      photosSkipped: existing.photos_skipped ?? false,
+      photosSkipReason: (existing.photos_skip_reason as PhotoSkipReason | null) ?? null,
     };
   }
 
@@ -114,6 +166,9 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
   const expected = toExpected(order.lineItems);
   const numericId = parseInt(order.numericId, 10);
 
+  // Auto-Skip prüfen: alle Items aus Zubehör- oder Pflegeprodukt-Collections?
+  const autoSkip = detectAutoSkipReason(order.lineItems);
+
   const { data: created, error } = await supabase
     .from("pack_sessions")
     .insert({
@@ -123,6 +178,10 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
       started_at: new Date().toISOString(),
       expected_items: expected,
       packed_by: profile.id,
+      photos_skipped: autoSkip !== null,
+      photos_skip_reason: autoSkip,
+      photos_skipped_at: autoSkip ? new Date().toISOString() : null,
+      photos_skipped_by: autoSkip ? profile.id : null,
     })
     .select("id, status")
     .single();
@@ -131,7 +190,13 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
     throw new Error(`Pack-Session konnte nicht angelegt werden: ${error?.message}`);
   }
 
-  return { sessionId: created.id, status: created.status, expectedItems: expected };
+  return {
+    sessionId: created.id,
+    status: created.status,
+    expectedItems: expected,
+    photosSkipped: autoSkip !== null,
+    photosSkipReason: autoSkip,
+  };
 }
 
 /**
@@ -362,26 +427,28 @@ export async function completePackSession(sessionId: string): Promise<{
   // Session laden
   const { data: session, error: sErr } = await supabase
     .from("pack_sessions")
-    .select("id, status, expected_items, order_name, shopify_order_id")
+    .select("id, status, expected_items, order_name, shopify_order_id, photos_skipped")
     .eq("id", sessionId)
     .single();
 
   if (sErr || !session) return { success: false, error: "Session nicht gefunden" };
 
-  // Foto-Check: alle 3 müssen vorhanden sein
-  const { data: photos } = await supabase
-    .from("pack_photos")
-    .select("photo_type")
-    .eq("session_id", sessionId);
+  // Foto-Check: alle 3 müssen vorhanden sein — außer Foto-Pflicht ist übersprungen
+  if (!session.photos_skipped) {
+    const { data: photos } = await supabase
+      .from("pack_photos")
+      .select("photo_type")
+      .eq("session_id", sessionId);
 
-  const photoTypes = new Set((photos ?? []).map((p) => p.photo_type));
-  const requiredPhotos = ["products_invoice", "products_in_box", "package_on_scale"];
-  const missingPhotos = requiredPhotos.filter((t) => !photoTypes.has(t));
-  if (missingPhotos.length > 0) {
-    return {
-      success: false,
-      error: `Fehlende Fotos: ${missingPhotos.join(", ")}`,
-    };
+    const photoTypes = new Set((photos ?? []).map((p) => p.photo_type));
+    const requiredPhotos = ["products_invoice", "products_in_box", "package_on_scale"];
+    const missingPhotos = requiredPhotos.filter((t) => !photoTypes.has(t));
+    if (missingPhotos.length > 0) {
+      return {
+        success: false,
+        error: `Fehlende Fotos: ${missingPhotos.join(", ")}`,
+      };
+    }
   }
 
   // Scan-Check: alle erwarteten Items vollständig (barcode + manual confirms)
@@ -652,6 +719,54 @@ export async function cancelPackSession(
 
   revalidatePath("/pack");
   revalidatePath(`/pack/${sessionId}`);
+  return { success: true };
+}
+
+/**
+ * Foto-Pflicht manuell überspringen (Mitarbeiter-Entscheidung).
+ * Zulässige Gründe: 'accessories' | 'care_products' | 'digital_goods'.
+ */
+export async function skipPackPhotos(
+  sessionId: string,
+  reason: "accessories" | "care_products" | "digital_goods",
+): Promise<{ success: boolean; error?: string }> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) return { success: false, error: "Forbidden" };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("pack_sessions")
+    .update({
+      photos_skipped: true,
+      photos_skip_reason: reason,
+      photos_skipped_at: new Date().toISOString(),
+      photos_skipped_by: profile.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", sessionId);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+/**
+ * Skip rückgängig machen — Mitarbeiter entscheidet doch Fotos zu machen.
+ */
+export async function unskipPackPhotos(
+  sessionId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) return { success: false, error: "Forbidden" };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("pack_sessions")
+    .update({
+      photos_skipped: false,
+      photos_skip_reason: null,
+      photos_skipped_at: null,
+      photos_skipped_by: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", sessionId);
+  if (error) return { success: false, error: error.message };
   return { success: true };
 }
 

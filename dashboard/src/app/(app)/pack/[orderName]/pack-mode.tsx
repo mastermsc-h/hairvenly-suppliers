@@ -11,6 +11,9 @@ import {
   resetItemConfirms,
   fetchSessionScans,
   cancelPackSession,
+  skipPackPhotos,
+  unskipPackPhotos,
+  type PhotoSkipReason,
 } from "@/lib/actions/pack";
 import { t, type Locale } from "@/lib/i18n";
 import QRCode from "qrcode";
@@ -153,6 +156,8 @@ export default function PackMode({
   expectedItems,
   initialCounts,
   initialPhotos,
+  initialPhotosSkipped,
+  initialPhotosSkipReason,
   shippingAddress,
   locale,
 }: {
@@ -162,11 +167,16 @@ export default function PackMode({
   expectedItems: ExpectedItem[];
   initialCounts: Record<string, number>;
   initialPhotos: Record<string, { id: string; url: string }[]>;
+  initialPhotosSkipped: boolean;
+  initialPhotosSkipReason: PhotoSkipReason | null;
   shippingAddress: { name: string | null; address1: string | null; zip: string | null; city: string | null; country: string | null } | null;
   locale: Locale;
 }) {
   const [counts, setCounts] = useState<Record<string, number>>(initialCounts);
   const [photos, setPhotos] = useState<Record<string, { id: string; url: string }[]>>(initialPhotos);
+  const [photosSkipped, setPhotosSkipped] = useState(initialPhotosSkipped);
+  const [photosSkipReason, setPhotosSkipReason] = useState<PhotoSkipReason | null>(initialPhotosSkipReason);
+  const [skipModalOpen, setSkipModalOpen] = useState(false);
   const [flash, setFlash] = useState<FlashState>({ kind: null });
   const [scanInput, setScanInput] = useState("");
   const [status, setStatus] = useState(initialStatus);
@@ -299,7 +309,8 @@ export default function PackMode({
     [sessionId, status, locale, refreshHistory, expectedItems],
   );
 
-  const allPhotosUploaded = PHOTO_TYPES.every((p) => (photos[p]?.length ?? 0) > 0);
+  const allPhotosUploaded =
+    photosSkipped || PHOTO_TYPES.every((p) => (photos[p]?.length ?? 0) > 0);
   const canFulfill = isComplete && allPhotosUploaded && status !== "shipped";
 
   // QR-Code zum Wechsel auf iPhone für Foto-Aufnahme (nur auf desktop sichtbar)
@@ -1008,11 +1019,54 @@ export default function PackMode({
             </div>
           )}
 
+          {/* Foto-Pflicht übersprungen — Banner statt Foto-Stations */}
+          {isComplete && photosSkipped && (
+            <div ref={photoSectionRef} className="bg-emerald-50 border-2 border-emerald-300 rounded-2xl p-5 shadow-sm scroll-mt-6 flex items-start gap-4">
+              <div className="shrink-0 mt-0.5">
+                <CheckCircle2 className="text-emerald-700" size={32} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-bold text-emerald-900 uppercase tracking-wide">
+                  {t(locale, "shipping.photos_skipped_title")}
+                </div>
+                <div className="text-sm text-emerald-900/90 mt-1">
+                  {t(locale, `shipping.photos_skip_reason_${photosSkipReason ?? "accessories"}`)}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  startTransition(async () => {
+                    const res = await unskipPackPhotos(sessionId);
+                    if (res.success) {
+                      setPhotosSkipped(false);
+                      setPhotosSkipReason(null);
+                    }
+                  })
+                }
+                disabled={isPending}
+                className="shrink-0 px-3 py-2 text-xs font-medium text-emerald-900 hover:bg-emerald-100 rounded-lg border border-emerald-300 disabled:opacity-50"
+              >
+                {t(locale, "shipping.photos_skip_undo")}
+              </button>
+            </div>
+          )}
+
           {/* Photo Stations */}
-          {isComplete && (
+          {isComplete && !photosSkipped && (
             <div ref={photoSectionRef} className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm scroll-mt-6">
-              <div className="text-xs font-medium text-neutral-600 uppercase tracking-wide mb-3">
-                {t(locale, "shipping.photos_required")}
+              <div className="flex items-center justify-between mb-3 gap-3">
+                <div className="text-xs font-medium text-neutral-600 uppercase tracking-wide">
+                  {t(locale, "shipping.photos_required")}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSkipModalOpen(true)}
+                  disabled={isPending}
+                  className="text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 px-2 py-1 rounded-lg disabled:opacity-50"
+                >
+                  {t(locale, "shipping.photos_skip_button")}
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {PHOTO_TYPES.map((type, idx) => {
@@ -1080,6 +1134,60 @@ export default function PackMode({
           )}
         </div>
       </div>
+
+      {/* Skip-Modal: Foto-Pflicht überspringen */}
+      {skipModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setSkipModalOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <div className="text-lg font-bold text-neutral-900">
+                  {t(locale, "shipping.photos_skip_modal_title")}
+                </div>
+                <div className="text-sm text-neutral-600 mt-1">
+                  {t(locale, "shipping.photos_skip_modal_subtitle")}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSkipModalOpen(false)}
+                className="text-neutral-400 hover:text-neutral-700 shrink-0"
+                aria-label="schließen"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="space-y-2">
+              {(["accessories", "care_products", "digital_goods"] as const).map((reason) => (
+                <button
+                  key={reason}
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => {
+                    setSkipModalOpen(false);
+                    startTransition(async () => {
+                      const res = await skipPackPhotos(sessionId, reason);
+                      if (res.success) {
+                        setPhotosSkipped(true);
+                        setPhotosSkipReason(reason);
+                      }
+                    });
+                  }}
+                  className="w-full px-4 py-3 rounded-lg border border-neutral-300 hover:border-neutral-900 hover:bg-neutral-50 text-left text-sm font-medium text-neutral-900 disabled:opacity-50"
+                >
+                  {t(locale, `shipping.photos_skip_reason_${reason}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

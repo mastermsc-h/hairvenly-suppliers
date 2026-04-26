@@ -1107,6 +1107,7 @@ export interface PackOrderLineItem {
   inventoryItemId: string | null; // für spätere Inventory-Updates
   imageUrl: string | null;
   fulfillmentOrderLineItemId: string | null; // GID — wird beim Fulfill benötigt
+  collectionHandles: string[];    // Shopify-Collections des Produkts (für Auto-Skip Foto-Pflicht)
 }
 
 export interface PackOrder {
@@ -1160,7 +1161,10 @@ interface PackOrderNode {
           barcode: string | null;
           image: { url: string } | null;
           inventoryItem: { id: string } | null;
-          product: { featuredImage: { url: string } | null } | null;
+          product: {
+            featuredImage: { url: string } | null;
+            collections: { edges: { node: { handle: string } }[] };
+          } | null;
         } | null;
       };
     }[];
@@ -1192,7 +1196,10 @@ const PACK_ORDER_FIELDS = `
         barcode
         image { url }
         inventoryItem { id }
-        product { featuredImage { url } }
+        product {
+          featuredImage { url }
+          collections(first: 25) { edges { node { handle } } }
+        }
       }
     } }
   }
@@ -1216,6 +1223,7 @@ function mapPackOrder(node: PackOrderNode): PackOrder {
       inventoryItemId: v?.inventoryItem?.id ?? null,
       imageUrl,
       fulfillmentOrderLineItemId: null, // wird separat geholt für Auto-Fulfill
+      collectionHandles: v?.product?.collections.edges.map((c) => c.node.handle) ?? [],
     };
   });
 
