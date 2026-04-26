@@ -327,7 +327,9 @@ export default function PackMode({
   // Refs für Auto-Scroll bei Phase-Wechsel
   const photoSectionRef = useRef<HTMLDivElement>(null);
   const readySectionRef = useRef<HTMLDivElement>(null);
-  const lastPhaseRef = useRef<typeof phase>(phase);
+  // null beim ersten Render → auto-scroll greift auch beim Initial-Mount
+  // (wichtig wenn iPhone via QR direkt in der Foto-Phase aufmacht)
+  const lastPhaseRef = useRef<typeof phase | null>(null);
 
   // "Scanne als Nächstes" standardmäßig zugeklappt — nur kompakte Header-Zeile
   const [cameraActive, setCameraActive] = useState(false);
