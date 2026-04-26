@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { t, type Locale } from "@/lib/i18n";
-import { CheckCircle2, ScanLine, Send, Package2, Camera } from "lucide-react";
+import Link from "next/link";
+import { CheckCircle2, ScanLine, Send, Package2, Camera, Pencil } from "lucide-react";
 
 interface ExpectedItem {
   barcode: string | null;
@@ -357,7 +358,18 @@ export default function PackDisplay({
               </div>
             )}
           </div>
-          <StatusBadge status={session.status} locale={locale} />
+          <div className="flex items-center gap-3">
+            {session.status !== "shipped" && (
+              <Link
+                href={`/pack/${encodeURIComponent(session.orderName)}`}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-neutral-400 hover:text-white hover:bg-neutral-800 border border-neutral-800 transition"
+              >
+                <Pencil size={14} />
+                {t(locale, "shipping.display_edit")}
+              </Link>
+            )}
+            <StatusBadge status={session.status} locale={locale} />
+          </div>
         </div>
 
         {/* 3-Schritte Progress (kompakt — Fokus bleibt auf Produkten) */}
