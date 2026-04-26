@@ -131,7 +131,9 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
   // Existierende Session?
   const { data: existing } = await supabase
     .from("pack_sessions")
-    .select("id, status, expected_items, shopify_order_id, packed_by, photos_skipped, photos_skip_reason")
+    .select(
+      "id, status, expected_items, shopify_order_id, packed_by, photos_skipped, photos_skip_reason, photos_skipped_at",
+    )
     .eq("order_name", cleanName)
     .maybeSingle();
 
@@ -148,12 +150,44 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
     }
     await supabase.from("pack_sessions").update(updates).eq("id", existing.id);
 
+    // Auto-Skip nachträglich anwenden für Sessions die VOR Auto-Skip-Feature
+    // angelegt wurden (oder bei denen die Order-Daten beim Anlegen nicht
+    // korrekt evaluiert wurden). Nur wenn niemand jemals etwas am Foto-Status
+    // verändert hat (kein Skip, kein Unskip, kein Foto hochgeladen).
+    let photosSkipped = existing.photos_skipped ?? false;
+    let photosSkipReason = (existing.photos_skip_reason as PhotoSkipReason | null) ?? null;
+    if (!photosSkipped && existing.photos_skipped_at === null) {
+      const { count: photoCount } = await supabase
+        .from("pack_photos")
+        .select("id", { count: "exact", head: true })
+        .eq("session_id", existing.id);
+      if ((photoCount ?? 0) === 0) {
+        const order = await fetchOrderForPack(orderName);
+        if (order) {
+          const auto = detectAutoSkipReason(order.lineItems);
+          if (auto) {
+            await supabase
+              .from("pack_sessions")
+              .update({
+                photos_skipped: true,
+                photos_skip_reason: auto,
+                photos_skipped_at: new Date().toISOString(),
+                photos_skipped_by: profile.id,
+              })
+              .eq("id", existing.id);
+            photosSkipped = true;
+            photosSkipReason = auto;
+          }
+        }
+      }
+    }
+
     return {
       sessionId: existing.id,
       status: existing.status === "open" ? "in_progress" : existing.status,
       expectedItems: (existing.expected_items as ExpectedItem[]) ?? [],
-      photosSkipped: existing.photos_skipped ?? false,
-      photosSkipReason: (existing.photos_skip_reason as PhotoSkipReason | null) ?? null,
+      photosSkipped,
+      photosSkipReason,
     };
   }
 
