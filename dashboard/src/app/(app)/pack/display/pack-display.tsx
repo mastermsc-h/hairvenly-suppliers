@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { t, type Locale } from "@/lib/i18n";
 import Link from "next/link";
-import { CheckCircle2, ScanLine, Send, Package2, Camera, Pencil } from "lucide-react";
+import QRCode from "qrcode";
+import { CheckCircle2, ScanLine, Send, Package2, Camera, Pencil, Smartphone } from "lucide-react";
 
 interface ExpectedItem {
   barcode: string | null;
@@ -82,6 +83,7 @@ export default function PackDisplay({
   const [flash, setFlash] = useState<"match" | "mismatch" | null>(null);
   const [bigSuccessTitle, setBigSuccessTitle] = useState<string | null>(null);
   const [highlightKey, setHighlightKey] = useState<string | null>(null);
+  const [phoneQrDataUrl, setPhoneQrDataUrl] = useState<string | null>(null);
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Auto-Scroll + Hervorhebung beim Highlight
@@ -192,6 +194,23 @@ export default function PackDisplay({
 
   const reallyReady = isComplete && photosDone;
   const missingPhotoTypes = PHOTO_TYPES.filter((p) => (photoCounts[p] ?? 0) === 0);
+
+  // QR-Code zum Wechsel auf iPhone für Foto-Aufnahme
+  useEffect(() => {
+    if (!session) {
+      setPhoneQrDataUrl(null);
+      return;
+    }
+    const orderClean = session.orderName.replace(/^#/, "");
+    const url = `${window.location.origin}/pack/${orderClean}`;
+    void QRCode.toDataURL(url, {
+      width: 360,
+      margin: 1,
+      color: { dark: "#000000", light: "#FFFFFF" },
+    })
+      .then((dataUrl) => setPhoneQrDataUrl(dataUrl))
+      .catch(() => setPhoneQrDataUrl(null));
+  }, [session]);
 
   // Realtime: pack_sessions + pack_scans
   useEffect(() => {
@@ -489,30 +508,49 @@ export default function PackDisplay({
                     <div className="text-4xl font-black text-white">{t(locale, "shipping.ready")}</div>
                   </>
                 ) : (
-                  <>
-                    <Camera className="mx-auto mb-3 text-white" size={56} />
-                    <div className="text-3xl font-black text-white mb-3">
-                      Noch {missingPhotoTypes.length} Foto{missingPhotoTypes.length === 1 ? "" : "s"} machen
+                  <div className="grid md:grid-cols-2 gap-6 items-center text-left">
+                    <div className="flex flex-col items-center justify-center bg-white rounded-xl p-4">
+                      {phoneQrDataUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={phoneQrDataUrl}
+                          alt="QR-Code: auf iPhone öffnen"
+                          className="w-64 h-64 md:w-72 md:h-72"
+                        />
+                      ) : (
+                        <div className="w-64 h-64 md:w-72 md:h-72 bg-neutral-200 animate-pulse rounded-lg" />
+                      )}
                     </div>
-                    <div className="grid grid-cols-3 gap-2 mt-4 text-sm">
-                      {PHOTO_TYPES.map((t) => {
-                        const got = (photoCounts[t] ?? 0) > 0;
-                        return (
-                          <div
-                            key={t}
-                            className={`px-3 py-2 rounded-lg flex items-center gap-2 justify-center font-semibold ${
-                              got
-                                ? "bg-white/95 text-emerald-700"
-                                : "bg-black/25 text-white/90 border border-white/20"
-                            }`}
-                          >
-                            {got ? <CheckCircle2 size={16} /> : <Camera size={16} />}
-                            <span>{PHOTO_LABELS[t]}</span>
-                          </div>
-                        );
-                      })}
+                    <div>
+                      <div className="flex items-center gap-3 text-white mb-2">
+                        <Smartphone size={36} />
+                        <div className="text-3xl font-black leading-tight">
+                          {t(locale, "shipping.display_phone_qr_title")}
+                        </div>
+                      </div>
+                      <div className="text-sm text-white/90 mb-4 leading-relaxed">
+                        {t(locale, "shipping.display_phone_qr_hint")}
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 text-sm">
+                        {PHOTO_TYPES.map((p) => {
+                          const got = (photoCounts[p] ?? 0) > 0;
+                          return (
+                            <div
+                              key={p}
+                              className={`px-3 py-2 rounded-lg flex items-center gap-2 font-semibold ${
+                                got
+                                  ? "bg-white/95 text-emerald-700"
+                                  : "bg-black/25 text-white/90 border border-white/20"
+                              }`}
+                            >
+                              {got ? <CheckCircle2 size={16} /> : <Camera size={16} />}
+                              <span>{PHOTO_LABELS[p]}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </>
+                  </div>
                 )}
               </div>
             )}
