@@ -444,33 +444,37 @@ export default function PackDisplay({
 
             {isComplete && session.status !== "shipped" && (
               <div
-                className={`mt-8 p-8 rounded-2xl text-center ${
-                  reallyReady ? "bg-emerald-700" : "bg-amber-600"
+                className={`mt-8 p-6 rounded-2xl text-center border-2 ${
+                  reallyReady
+                    ? "bg-emerald-900/40 border-emerald-500/60"
+                    : "bg-neutral-800 border-amber-500/40"
                 }`}
               >
                 {reallyReady ? (
                   <>
-                    <CheckCircle2 className="mx-auto mb-4" size={80} />
-                    <div className="text-5xl font-black">{t(locale, "shipping.ready")}</div>
+                    <CheckCircle2 className="mx-auto mb-3 text-emerald-300" size={64} />
+                    <div className="text-4xl font-black text-emerald-200">{t(locale, "shipping.ready")}</div>
                   </>
                 ) : (
                   <>
-                    <Camera className="mx-auto mb-4" size={80} />
-                    <div className="text-4xl font-black mb-3">
+                    <Camera className="mx-auto mb-3 text-amber-300" size={56} />
+                    <div className="text-3xl font-black text-amber-200 mb-3">
                       Noch {missingPhotoTypes.length} Foto{missingPhotoTypes.length === 1 ? "" : "s"} machen
                     </div>
-                    <div className="grid grid-cols-3 gap-3 mt-5 text-base">
+                    <div className="grid grid-cols-3 gap-2 mt-4 text-sm">
                       {PHOTO_TYPES.map((t) => {
                         const got = (photoCounts[t] ?? 0) > 0;
                         return (
                           <div
                             key={t}
-                            className={`px-3 py-3 rounded-xl flex items-center gap-2 justify-center ${
-                              got ? "bg-emerald-600" : "bg-white/15 border border-white/30"
+                            className={`px-3 py-2 rounded-lg flex items-center gap-2 justify-center ${
+                              got
+                                ? "bg-emerald-900/50 text-emerald-200 border border-emerald-700/50"
+                                : "bg-neutral-900 text-neutral-400 border border-neutral-700"
                             }`}
                           >
-                            {got ? <CheckCircle2 size={20} /> : <Camera size={20} />}
-                            <span className="font-bold">{PHOTO_LABELS[t]}</span>
+                            {got ? <CheckCircle2 size={16} /> : <Camera size={16} />}
+                            <span className="font-semibold">{PHOTO_LABELS[t]}</span>
                           </div>
                         );
                       })}
