@@ -507,6 +507,8 @@ export default function PackMode({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Left: Scanner + Status */}
         <div className="md:col-span-1 space-y-4">
+          {phase === "scan" && <CameraScanner onScan={submitBarcode} paused={isPending} onActiveChange={setCameraActive} />}
+
           {phase === "scan" && nextItem && (
             <div className="bg-blue-50 border-2 border-blue-300 rounded-2xl shadow-sm overflow-hidden">
               {/* Kompakte Header-Zeile — immer sichtbar */}
@@ -582,8 +584,6 @@ export default function PackMode({
               )}
             </div>
           )}
-
-          {phase === "scan" && <CameraScanner onScan={submitBarcode} paused={isPending} onActiveChange={setCameraActive} />}
 
           {phase === "photos" && (
             <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 shadow-sm text-center">
