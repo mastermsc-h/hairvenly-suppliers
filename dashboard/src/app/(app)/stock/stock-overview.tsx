@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { Scale, Package, AlertTriangle, AlertCircle, Truck, ArrowRight, Snowflake, Flame, PackagePlus, Skull, TrendingUp, ShoppingCart } from "lucide-react";
+import { Scale, Package, AlertTriangle, AlertCircle, Truck, ArrowRight, Snowflake, Flame, PackagePlus, Skull, TrendingUp, ShoppingCart, ChevronDown } from "lucide-react";
 import { t, type Locale } from "@/lib/i18n";
 import SyncBadge from "./sync-badge";
 
@@ -50,6 +51,7 @@ interface StockStats {
 }
 
 export default function StockOverviewClient({ stats, locale }: { stats: StockStats; locale: Locale }) {
+  const [insightsOpen, setInsightsOpen] = useState(false);
   return (
     <div className="p-4 md:p-8 space-y-6 max-w-7xl">
       <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -136,56 +138,67 @@ export default function StockOverviewClient({ stats, locale }: { stats: StockSta
         />
       </section>
 
-      {/* Insights */}
-      <section className="space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold text-neutral-900">📊 Insights</h2>
-          <p className="text-xs text-neutral-500 mt-0.5">Auffälligkeiten basierend auf Topseller-Daten</p>
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <InsightCard
-            title="Auf Lager — kein Verkauf (90T)"
-            description="Hoher Bestand, aber 0 Verkäufe in 90 Tagen — Kapital liegt brach"
-            icon={<Skull size={16} />}
-            color="rose"
-            products={stats.insights.deadStock}
+      {/* Insights — collapsible */}
+      <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
+        <button
+          onClick={() => setInsightsOpen(!insightsOpen)}
+          className="w-full flex items-center justify-between px-5 py-4 hover:bg-neutral-50 transition"
+        >
+          <div className="text-left">
+            <h2 className="text-lg font-semibold text-neutral-900">📊 Mehr Insights und Analysen</h2>
+            <p className="text-xs text-neutral-500 mt-0.5">Auffälligkeiten basierend auf Topseller-Daten</p>
+          </div>
+          <ChevronDown
+            size={20}
+            className={`text-neutral-400 transition-transform ${insightsOpen ? "rotate-180" : ""}`}
           />
-          <InsightCard
-            title="Slow Mover"
-            description="Lager > 150g, aber kaum Bewegung in 90 Tagen"
-            icon={<Snowflake size={16} />}
-            color="blue"
-            products={stats.insights.slowMovers}
-          />
-          <InsightCard
-            title="🔥 Topseller mit niedrigem Lager"
-            description="TOP7-Produkte unter 200g & nichts unterwegs — dringend nachbestellen"
-            icon={<Flame size={16} />}
-            color="orange"
-            products={stats.insights.hotMissing}
-          />
-          <InsightCard
-            title="Nachbestellen empfohlen"
-            description="Lager < Bedarfsprognose und kein Nachschub unterwegs"
-            icon={<ShoppingCart size={16} />}
-            color="amber"
-            products={stats.insights.needsReorder}
-          />
-          <InsightCard
-            title="Wachsende Verkäufe"
-            description="30-Tage-Trend deutlich höher als 90-Tage-Schnitt"
-            icon={<TrendingUp size={16} />}
-            color="emerald"
-            products={stats.insights.trendingUp}
-          />
-          <InsightCard
-            title="Eventuell überbestellt"
-            description="Mehr als 2× des Bedarfs unterwegs — könnten Lagerproblem werden"
-            icon={<PackagePlus size={16} />}
-            color="purple"
-            products={stats.insights.overOrdered}
-          />
-        </div>
+        </button>
+        {insightsOpen && (
+          <div className="px-4 pb-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <InsightCard
+              title="Auf Lager — kein Verkauf (90T)"
+              description="Hoher Bestand, aber 0 Verkäufe in 90 Tagen — Kapital liegt brach"
+              icon={<Skull size={16} />}
+              color="rose"
+              products={stats.insights.deadStock}
+            />
+            <InsightCard
+              title="Slow Mover"
+              description="Lager > 150g, aber kaum Bewegung in 90 Tagen"
+              icon={<Snowflake size={16} />}
+              color="blue"
+              products={stats.insights.slowMovers}
+            />
+            <InsightCard
+              title="🔥 Topseller mit niedrigem Lager"
+              description="TOP7-Produkte unter 200g & nichts unterwegs — dringend nachbestellen"
+              icon={<Flame size={16} />}
+              color="orange"
+              products={stats.insights.hotMissing}
+            />
+            <InsightCard
+              title="Nachbestellen empfohlen"
+              description="Lager < Bedarfsprognose und kein Nachschub unterwegs"
+              icon={<ShoppingCart size={16} />}
+              color="amber"
+              products={stats.insights.needsReorder}
+            />
+            <InsightCard
+              title="Wachsende Verkäufe"
+              description="30-Tage-Trend deutlich höher als 90-Tage-Schnitt"
+              icon={<TrendingUp size={16} />}
+              color="emerald"
+              products={stats.insights.trendingUp}
+            />
+            <InsightCard
+              title="Eventuell überbestellt"
+              description="Mehr als 2× des Bedarfs unterwegs — könnten Lagerproblem werden"
+              icon={<PackagePlus size={16} />}
+              color="purple"
+              products={stats.insights.overOrdered}
+            />
+          </div>
+        )}
       </section>
     </div>
   );
