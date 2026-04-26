@@ -564,7 +564,7 @@ export default function PackMode({
           {phase === "scan" && <CameraScanner onScan={submitBarcode} paused={isPending} onActiveChange={setCameraActive} />}
 
           {phase === "scan" && nextItem && (
-            <div className="bg-blue-50 border-2 border-blue-300 rounded-2xl shadow-sm overflow-hidden">
+            <div className="md:hidden bg-blue-50 border-2 border-blue-300 rounded-2xl shadow-sm overflow-hidden">
               {/* Kompakte Header-Zeile — immer sichtbar */}
               <button
                 onClick={() => setHintExpanded((e) => !e)}
