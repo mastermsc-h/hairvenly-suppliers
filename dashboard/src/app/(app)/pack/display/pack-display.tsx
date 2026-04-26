@@ -465,16 +465,16 @@ export default function PackDisplay({
 
             {isComplete && session.status !== "shipped" && (
               <div
-                className={`mt-8 p-6 rounded-2xl text-center border-2 ${
+                className={`mt-8 p-6 rounded-2xl text-center ${
                   reallyReady
-                    ? "bg-emerald-900/40 border-emerald-500/60"
-                    : "bg-orange-600/55 border-orange-300/70"
+                    ? "bg-emerald-700"
+                    : "bg-amber-600"
                 }`}
               >
                 {reallyReady ? (
                   <>
-                    <CheckCircle2 className="mx-auto mb-3 text-emerald-300" size={64} />
-                    <div className="text-4xl font-black text-emerald-200">{t(locale, "shipping.ready")}</div>
+                    <CheckCircle2 className="mx-auto mb-3 text-white" size={64} />
+                    <div className="text-4xl font-black text-white">{t(locale, "shipping.ready")}</div>
                   </>
                 ) : (
                   <>
@@ -488,14 +488,14 @@ export default function PackDisplay({
                         return (
                           <div
                             key={t}
-                            className={`px-3 py-2 rounded-lg flex items-center gap-2 justify-center ${
+                            className={`px-3 py-2 rounded-lg flex items-center gap-2 justify-center font-semibold ${
                               got
-                                ? "bg-emerald-900/50 text-emerald-200 border border-emerald-700/50"
-                                : "bg-neutral-900 text-neutral-400 border border-neutral-700"
+                                ? "bg-white/95 text-emerald-700"
+                                : "bg-black/25 text-white/90 border border-white/20"
                             }`}
                           >
                             {got ? <CheckCircle2 size={16} /> : <Camera size={16} />}
-                            <span className="font-semibold">{PHOTO_LABELS[t]}</span>
+                            <span>{PHOTO_LABELS[t]}</span>
                           </div>
                         );
                       })}
