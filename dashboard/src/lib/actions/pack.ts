@@ -96,6 +96,21 @@ interface ExpectedItem {
   variantTitle: string | null;
   quantity: number;
   imageUrl: string | null;
+  // true für Haar-Extensions (zeigt Methode/Länge/Herkunft/Farbe-Badges).
+  // false für Zubehör/Pflege/Schulungen — diese Items haben keine solchen Attribute.
+  // undefined für Legacy-Sessions ohne dieses Feld → wird wie true behandelt.
+  isExtension?: boolean;
+}
+
+const ALL_SKIP_HANDLES = new Set<string>([
+  ...SKIP_PHOTO_COLLECTIONS.accessories,
+  ...SKIP_PHOTO_COLLECTIONS.care_products,
+  ...SKIP_PHOTO_COLLECTIONS.digital_goods,
+]);
+
+function isExtensionItem(handles: string[] | undefined): boolean {
+  if (!handles || handles.length === 0) return true; // unbekannt → default auf Extension
+  return !handles.some((h) => ALL_SKIP_HANDLES.has(h));
 }
 
 function toExpected(items: PackOrderLineItem[]): ExpectedItem[] {
@@ -106,6 +121,7 @@ function toExpected(items: PackOrderLineItem[]): ExpectedItem[] {
     variantTitle: li.variantTitle,
     quantity: li.quantity,
     imageUrl: li.imageUrl,
+    isExtension: isExtensionItem(li.collectionHandles),
   }));
 }
 

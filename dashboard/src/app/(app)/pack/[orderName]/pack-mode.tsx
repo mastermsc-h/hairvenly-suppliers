@@ -28,6 +28,8 @@ interface ExpectedItem {
   variantTitle: string | null;
   quantity: number;
   imageUrl: string | null;
+  // true für Haar-Extensions, false für Zubehör/Pflege/Schulungen, undefined = Legacy
+  isExtension?: boolean;
 }
 
 type FlashState = { kind: "match" | "mismatch" | "overflow" | null; message?: string };
@@ -602,26 +604,34 @@ export default function PackMode({
                   Nächste:
                 </span>
                 <div className="flex flex-wrap gap-1 flex-1 min-w-0 justify-start">
-                  {nextItem.attrs.method.label && (
-                    <span
-                      className={`inline-block ${nextItem.attrs.method.cls} text-white text-[11px] font-bold px-1.5 py-0.5 rounded tracking-wider`}
-                    >
-                      {nextItem.attrs.method.label}
-                    </span>
-                  )}
-                  {nextItem.attrs.length && (
-                    <span className="inline-block bg-slate-700 text-white text-[11px] font-bold px-1.5 py-0.5 rounded">
-                      {nextItem.attrs.length}
-                    </span>
-                  )}
-                  {nextItem.attrs.origin && (
-                    <span className="inline-block bg-slate-900 text-white text-[11px] font-bold px-1.5 py-0.5 rounded">
-                      {nextItem.attrs.origin}
-                    </span>
-                  )}
-                  {nextItem.attrs.color && (
-                    <span className="inline-block bg-amber-600 text-white text-[11px] font-bold px-1.5 py-0.5 rounded font-mono">
-                      {nextItem.attrs.color}
+                  {nextItem.item.isExtension !== false ? (
+                    <>
+                      {nextItem.attrs.method.label && (
+                        <span
+                          className={`inline-block ${nextItem.attrs.method.cls} text-white text-[11px] font-bold px-1.5 py-0.5 rounded tracking-wider`}
+                        >
+                          {nextItem.attrs.method.label}
+                        </span>
+                      )}
+                      {nextItem.attrs.length && (
+                        <span className="inline-block bg-slate-700 text-white text-[11px] font-bold px-1.5 py-0.5 rounded">
+                          {nextItem.attrs.length}
+                        </span>
+                      )}
+                      {nextItem.attrs.origin && (
+                        <span className="inline-block bg-slate-900 text-white text-[11px] font-bold px-1.5 py-0.5 rounded">
+                          {nextItem.attrs.origin}
+                        </span>
+                      )}
+                      {nextItem.attrs.color && (
+                        <span className="inline-block bg-amber-600 text-white text-[11px] font-bold px-1.5 py-0.5 rounded font-mono">
+                          {nextItem.attrs.color}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-[11px] text-blue-900 font-medium truncate">
+                      {nextItem.item.title}
                     </span>
                   )}
                 </div>
@@ -782,31 +792,33 @@ export default function PackMode({
                     )}
 
                     <div className="flex-1 min-w-0">
-                      {/* Große Tags */}
-                      <div className="flex flex-wrap gap-2 mb-2">
-                        {attrs.method.label && (
-                          <span
-                            className={`inline-block ${attrs.method.cls} text-white text-base md:text-lg font-bold px-3 py-1 rounded tracking-wider`}
-                          >
-                            {attrs.method.label}
-                          </span>
-                        )}
-                        {attrs.length && (
-                          <span className="inline-block bg-slate-700 text-white text-base md:text-lg font-bold px-3 py-1 rounded tracking-wider">
-                            {attrs.length}
-                          </span>
-                        )}
-                        {attrs.origin && (
-                          <span className="inline-block bg-slate-900 text-white text-base md:text-lg font-bold px-3 py-1 rounded tracking-wider">
-                            {attrs.origin}
-                          </span>
-                        )}
-                        {attrs.color && (
-                          <span className="inline-block bg-amber-600 text-white text-base md:text-lg font-bold px-3 py-1 rounded font-mono">
-                            {attrs.color}
-                          </span>
-                        )}
-                      </div>
+                      {/* Große Tags — nur bei Haar-Extensions, nicht bei Zubehör/Pflege/Schulungen */}
+                      {it.isExtension !== false && (
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {attrs.method.label && (
+                            <span
+                              className={`inline-block ${attrs.method.cls} text-white text-base md:text-lg font-bold px-3 py-1 rounded tracking-wider`}
+                            >
+                              {attrs.method.label}
+                            </span>
+                          )}
+                          {attrs.length && (
+                            <span className="inline-block bg-slate-700 text-white text-base md:text-lg font-bold px-3 py-1 rounded tracking-wider">
+                              {attrs.length}
+                            </span>
+                          )}
+                          {attrs.origin && (
+                            <span className="inline-block bg-slate-900 text-white text-base md:text-lg font-bold px-3 py-1 rounded tracking-wider">
+                              {attrs.origin}
+                            </span>
+                          )}
+                          {attrs.color && (
+                            <span className="inline-block bg-amber-600 text-white text-base md:text-lg font-bold px-3 py-1 rounded font-mono">
+                              {attrs.color}
+                            </span>
+                          )}
+                        </div>
+                      )}
 
                       <div className="text-sm text-neutral-700 line-clamp-2">{it.title}</div>
                       {it.variantTitle && it.variantTitle !== "Default Title" && (
@@ -872,11 +884,17 @@ export default function PackMode({
                             </button>
                           </div>
                           {(() => {
+                            // Bei Zubehör/Pflege/Schulungen die Extension-Attribute weglassen
+                            const showExtensionAttrs = it.isExtension !== false;
                             const rows = [
-                              { label: "Methode", value: attrs.method.label || "korrekt" },
-                              { label: "Länge", value: attrs.length || "korrekt" },
-                              { label: "Herkunft", value: attrs.origin || "korrekt" },
-                              { label: "Farbe", value: attrs.color || "korrekt" },
+                              ...(showExtensionAttrs
+                                ? [
+                                    { label: "Methode", value: attrs.method.label || "korrekt" },
+                                    { label: "Länge", value: attrs.length || "korrekt" },
+                                    { label: "Herkunft", value: attrs.origin || "korrekt" },
+                                    { label: "Farbe", value: attrs.color || "korrekt" },
+                                  ]
+                                : [{ label: "Produkt", value: it.title }]),
                               ...(it.variantTitle && it.variantTitle !== "Default Title"
                                 ? [{ label: "Variante", value: it.variantTitle }]
                                 : []),

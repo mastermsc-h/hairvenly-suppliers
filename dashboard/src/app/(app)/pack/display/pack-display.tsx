@@ -13,6 +13,8 @@ interface ExpectedItem {
   variantTitle: string | null;
   quantity: number;
   imageUrl: string | null;
+  // true für Haar-Extensions, false für Zubehör/Pflege/Schulungen, undefined = Legacy
+  isExtension?: boolean;
 }
 
 interface DisplaySession {
@@ -470,28 +472,31 @@ export default function PackDisplay({
                       <div className="w-28 h-28 rounded-lg bg-neutral-800 shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap gap-2 mb-2">
-                        {a.method.label && (
-                          <span className={`inline-block ${a.method.cls} text-white text-lg font-bold px-3 py-1 rounded tracking-widest`}>
-                            {a.method.label}
-                          </span>
-                        )}
-                        {a.length && (
-                          <span className="inline-block bg-slate-600 text-white text-lg font-bold px-3 py-1 rounded tracking-wider">
-                            {a.length}
-                          </span>
-                        )}
-                        {a.origin && (
-                          <span className="inline-block bg-slate-800 text-white text-lg font-bold px-3 py-1 rounded tracking-wider">
-                            {a.origin}
-                          </span>
-                        )}
-                        {a.color && (
-                          <span className="inline-block bg-amber-500 text-white text-lg font-bold px-3 py-1 rounded font-mono">
-                            {a.color}
-                          </span>
-                        )}
-                      </div>
+                      {/* Methode/Länge/Herkunft/Farbe-Badges nur bei Haar-Extensions */}
+                      {it.isExtension !== false && (
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {a.method.label && (
+                            <span className={`inline-block ${a.method.cls} text-white text-lg font-bold px-3 py-1 rounded tracking-widest`}>
+                              {a.method.label}
+                            </span>
+                          )}
+                          {a.length && (
+                            <span className="inline-block bg-slate-600 text-white text-lg font-bold px-3 py-1 rounded tracking-wider">
+                              {a.length}
+                            </span>
+                          )}
+                          {a.origin && (
+                            <span className="inline-block bg-slate-800 text-white text-lg font-bold px-3 py-1 rounded tracking-wider">
+                              {a.origin}
+                            </span>
+                          )}
+                          {a.color && (
+                            <span className="inline-block bg-amber-500 text-white text-lg font-bold px-3 py-1 rounded font-mono">
+                              {a.color}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       <div className="text-base text-neutral-300 mt-1 line-clamp-2">{it.title}</div>
                       {it.variantTitle && it.variantTitle !== "Default Title" && (
                         <div className="text-base font-bold text-emerald-300 mt-1">
