@@ -13,7 +13,8 @@ import {
   cancelPackSession,
 } from "@/lib/actions/pack";
 import { t, type Locale } from "@/lib/i18n";
-import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X, RotateCcw, History, Package2, ImagePlus, ChevronDown, ChevronUp } from "lucide-react";
+import QRCode from "qrcode";
+import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X, RotateCcw, History, Package2, ImagePlus, ChevronDown, ChevronUp, Smartphone } from "lucide-react";
 import CameraScanner from "./camera-scanner";
 import OrderQrScanner from "../order-qr-scanner";
 
@@ -300,6 +301,20 @@ export default function PackMode({
 
   const allPhotosUploaded = PHOTO_TYPES.every((p) => (photos[p]?.length ?? 0) > 0);
   const canFulfill = isComplete && allPhotosUploaded && status !== "shipped";
+
+  // QR-Code zum Wechsel auf iPhone für Foto-Aufnahme (nur auf desktop sichtbar)
+  const [phoneQrDataUrl, setPhoneQrDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = `${window.location.origin}/pack/${orderName.replace(/^#/, "")}`;
+    void QRCode.toDataURL(url, {
+      width: 320,
+      margin: 1,
+      color: { dark: "#000000", light: "#FFFFFF" },
+    })
+      .then((dataUrl) => setPhoneQrDataUrl(dataUrl))
+      .catch(() => setPhoneQrDataUrl(null));
+  }, [orderName]);
 
   // Phase-State für den Assistent-Workflow
   const phase: "scan" | "photos" | "ready" | "shipped" = useMemo(() => {
@@ -965,6 +980,31 @@ export default function PackMode({
               </div>
             )}
           </div>
+
+          {/* Phone hand-off — nur desktop, nur solange noch Fotos fehlen */}
+          {isComplete && !allPhotosUploaded && (
+            <div className="hidden md:flex items-center gap-6 bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 shadow-sm scroll-mt-6">
+              <div className="bg-white rounded-xl p-3 shrink-0">
+                {phoneQrDataUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={phoneQrDataUrl} alt="QR-Code: auf iPhone öffnen" className="w-44 h-44" />
+                ) : (
+                  <div className="w-44 h-44 bg-neutral-200 animate-pulse rounded-lg" />
+                )}
+              </div>
+              <div>
+                <div className="flex items-center gap-2 text-amber-900 mb-1">
+                  <Smartphone size={28} />
+                  <div className="text-2xl font-black leading-tight">
+                    {t(locale, "shipping.display_phone_qr_title")}
+                  </div>
+                </div>
+                <div className="text-sm text-amber-900/90 leading-relaxed">
+                  {t(locale, "shipping.display_phone_qr_hint")}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Photo Stations */}
           {isComplete && (
