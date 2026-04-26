@@ -547,14 +547,16 @@ export async function fetchSessionScans(
 }
 
 /**
- * Komplettes Pack-Statistik-Reset (NUR ADMIN). Löscht:
- * - alle pack_sessions (cascade -> pack_scans + pack_photos via FK)
- * - alle Foto-Dateien aus Supabase Storage
+ * Pack-Statistik-Reset (NUR ADMIN). Zwei Modi:
+ * - "completed" (Default, sicher): nur verified + shipped Sessions löschen
+ * - "all" (destruktiv): zusätzlich auch open + in_progress (laufende Pack-Vorgänge)
  *
- * Liefert Anzahl gelöschter Records zurück. NICHT umkehrbar.
+ * Storage-Files der gelöschten Sessions werden mit entfernt.
+ * NICHT umkehrbar. Shopify-Bestellungen bleiben unangetastet.
  */
 export async function resetPackStats(
   confirm: string,
+  scope: "completed" | "all" = "completed",
 ): Promise<{ success: boolean; error?: string; sessionsDeleted?: number; photosDeleted?: number }> {
   const profile = await requireProfile();
   if (profile.role !== "admin") {
@@ -566,20 +568,33 @@ export async function resetPackStats(
 
   const supabase = await createClient();
 
-  // 1. Storage-Pfade aller Fotos sammeln
-  const { data: photos } = await supabase.from("pack_photos").select("storage_path");
-  const photoPaths = (photos ?? []).map((p) => p.storage_path);
+  // 1. IDs der zu löschenden Sessions ermitteln
+  let sessionsQuery = supabase.from("pack_sessions").select("id");
+  if (scope === "completed") {
+    sessionsQuery = sessionsQuery.in("status", ["verified", "shipped"]);
+  }
+  const { data: sessionRows } = await sessionsQuery;
+  const sessionIds = (sessionRows ?? []).map((s) => s.id);
 
-  // 2. Files aus Storage löschen
+  if (sessionIds.length === 0) {
+    return { success: true, sessionsDeleted: 0, photosDeleted: 0 };
+  }
+
+  // 2. Storage-Pfade nur der zu löschenden Sessions sammeln
+  const { data: photos } = await supabase
+    .from("pack_photos")
+    .select("storage_path")
+    .in("session_id", sessionIds);
+  const photoPaths = (photos ?? []).map((p) => p.storage_path);
   if (photoPaths.length > 0) {
     await supabase.storage.from("pack-photos").remove(photoPaths);
   }
 
-  // 3. Sessions löschen (cascade entfernt pack_scans + pack_photos automatisch)
+  // 3. Sessions löschen (cascade entfernt scans + photos)
   const { error, count } = await supabase
     .from("pack_sessions")
     .delete({ count: "exact" })
-    .neq("id", "00000000-0000-0000-0000-000000000000");
+    .in("id", sessionIds);
 
   if (error) return { success: false, error: error.message };
 

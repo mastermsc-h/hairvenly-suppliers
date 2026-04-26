@@ -9,12 +9,13 @@ export default function ResetStatsButton() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  const [scope, setScope] = useState<"completed" | "all">("completed");
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<string | null>(null);
 
   function handleReset() {
     startTransition(async () => {
-      const r = await resetPackStats(confirmText);
+      const r = await resetPackStats(confirmText, scope);
       if (r.success) {
         setResult(`✓ ${r.sessionsDeleted ?? 0} Sessions + ${r.photosDeleted ?? 0} Fotos gelöscht.`);
         setConfirmText("");
@@ -35,6 +36,7 @@ export default function ResetStatsButton() {
         onClick={() => {
           setResult(null);
           setConfirmText("");
+          setScope("completed");
           setOpen(true);
         }}
         className="px-3 py-1.5 rounded-lg border border-red-300 text-red-700 text-xs font-medium hover:bg-red-50 transition flex items-center gap-1"
@@ -53,10 +55,46 @@ export default function ResetStatsButton() {
               <div>
                 <h2 className="text-lg font-bold text-neutral-900">Statistik zurücksetzen</h2>
                 <p className="text-sm text-neutral-600 mt-1">
-                  Diese Aktion löscht <strong>alle Pack-Sessions, Scans, Fotos und Notizen</strong>.
-                  Die Bestellungen in Shopify bleiben unangetastet. Nicht umkehrbar.
+                  Diese Aktion löscht ausgewählte Pack-Sessions inkl. Scans, Fotos und Notizen.
+                  Shopify-Bestellungen bleiben unangetastet. Nicht umkehrbar.
                 </p>
               </div>
+            </div>
+
+            {/* Scope-Auswahl */}
+            <div className="space-y-2 mb-4">
+              <label className="flex items-start gap-2 p-3 rounded-lg border-2 border-neutral-200 hover:border-neutral-300 cursor-pointer has-[:checked]:border-emerald-400 has-[:checked]:bg-emerald-50">
+                <input
+                  type="radio"
+                  name="scope"
+                  value="completed"
+                  checked={scope === "completed"}
+                  onChange={() => setScope("completed")}
+                  className="mt-1 accent-emerald-600"
+                />
+                <div className="flex-1">
+                  <div className="text-sm font-semibold text-neutral-900">Nur abgeschlossene</div>
+                  <div className="text-xs text-neutral-600 mt-0.5">
+                    verified + shipped Sessions. Laufende Pack-Vorgänge bleiben erhalten.
+                  </div>
+                </div>
+              </label>
+              <label className="flex items-start gap-2 p-3 rounded-lg border-2 border-neutral-200 hover:border-neutral-300 cursor-pointer has-[:checked]:border-red-400 has-[:checked]:bg-red-50">
+                <input
+                  type="radio"
+                  name="scope"
+                  value="all"
+                  checked={scope === "all"}
+                  onChange={() => setScope("all")}
+                  className="mt-1 accent-red-600"
+                />
+                <div className="flex-1">
+                  <div className="text-sm font-semibold text-neutral-900">Alles, auch laufende</div>
+                  <div className="text-xs text-red-700 mt-0.5">
+                    ⚠ MA mitten im Pack-Vorgang verlieren ihren Fortschritt.
+                  </div>
+                </div>
+              </label>
             </div>
 
             <label className="block text-xs font-medium text-neutral-700 mb-1">
