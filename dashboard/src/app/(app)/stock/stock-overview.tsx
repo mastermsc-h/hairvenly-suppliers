@@ -217,6 +217,8 @@ function InsightCard({ title, description, icon, color, products, focused, onTog
   const visible = products.slice(0, effectiveLimit);
   const hasMore = !focused && products.length > limit;
   const remaining = products.length - limit;
+  const totalLagerG = products.reduce((s, p) => s + (p.lagerG || 0), 0);
+  const totalLagerLabel = totalLagerG >= 1000 ? `${(totalLagerG / 1000).toFixed(2)} kg` : `${totalLagerG} g`;
 
   return (
     <div className={`bg-white rounded-2xl border ${c.border} shadow-sm overflow-hidden ${focused ? "lg:col-span-2 ring-2 ring-offset-2 ring-neutral-300" : ""}`}>
@@ -261,6 +263,10 @@ function InsightCard({ title, description, icon, color, products, focused, onTog
               </li>
             ))}
           </ul>
+          <div className={`px-4 py-2 border-t ${c.border} ${c.bg} flex items-center justify-between gap-2`}>
+            <span className="text-[10px] uppercase tracking-wide text-neutral-500 font-medium">Σ Lager gesamt</span>
+            <span className={`text-sm font-bold ${c.text}`}>{totalLagerLabel}</span>
+          </div>
           {!focused && (hasMore || limit > INITIAL_LIMIT) && (
             <div className="px-4 py-2 border-t border-neutral-100 bg-neutral-50/50 flex items-center justify-between gap-2">
               <span className="text-[10px] text-neutral-500">{visible.length} von {products.length}</span>
