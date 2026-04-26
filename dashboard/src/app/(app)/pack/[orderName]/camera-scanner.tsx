@@ -59,7 +59,10 @@ export default function CameraScanner({
           (decodedText) => {
             const now = Date.now();
             const last = lastScanRef.current;
-            if (last && last.code === decodedText && now - last.ts < 1200) return;
+            // De-Dupe-Fenster: 3000ms — verhindert dass ein lange im Bild
+            // gehaltener Code mehrfach gewertet wird, auch wenn der Server-Call
+            // länger als 1.2s dauert.
+            if (last && last.code === decodedText && now - last.ts < 3000) return;
             lastScanRef.current = { code: decodedText, ts: now };
             onScanRef.current(decodedText);
           },

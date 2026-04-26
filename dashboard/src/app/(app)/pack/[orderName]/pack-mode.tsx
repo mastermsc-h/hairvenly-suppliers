@@ -114,6 +114,8 @@ export default function PackMode({
   const [isPending, startTransition] = useTransition();
   const [fulfillError, setFulfillError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Verhindert parallele Server-Calls (Camera kann während laufendem Call erneut scannen)
+  const inFlightRef = useRef(false);
   // Pro Item: Manual-Confirm Form aufgeklappt + Checkbox-States (5: Methode/Länge/Herkunft/Farbe/Menge)
   const [manualForms, setManualForms] = useState<Record<number, { open: boolean; checks: boolean[] }>>({});
   // Live-Scan-Historie
@@ -245,8 +247,11 @@ export default function PackMode({
     (barcode: string) => {
       // Solange Erfolgs-Overlay offen ist → keine neuen Scans annehmen
       if (bigSuccess) return;
+      // Solange ein Server-Call läuft → keine parallelen Scans
+      if (inFlightRef.current) return;
       const trimmed = barcode.trim();
       if (!trimmed) return;
+      inFlightRef.current = true;
       startTransition(async () => {
         try {
           const res = await recordPackScan(sessionId, trimmed);
@@ -285,6 +290,8 @@ export default function PackMode({
         } catch (err) {
           playBeep(false);
           setFlash({ kind: "mismatch", message: err instanceof Error ? err.message : "Fehler" });
+        } finally {
+          inFlightRef.current = false;
         }
       });
     },
