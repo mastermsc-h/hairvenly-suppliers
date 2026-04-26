@@ -372,15 +372,15 @@ export default function PackDisplay({
               return (
                 <div
                   key={step.key}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border ${
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-900/80 border ${
                     step.done
-                      ? "bg-emerald-900/30 text-emerald-300/90 border-emerald-700/40"
+                      ? "text-emerald-400/80 border-emerald-800/40"
                       : step.active
-                      ? "bg-blue-900/25 text-blue-200 border-blue-600/40"
-                      : "bg-neutral-900 text-neutral-500 border-neutral-800"
+                      ? "text-blue-300/90 border-blue-700/50"
+                      : "text-neutral-600 border-neutral-800"
                   }`}
                 >
-                  {step.done ? <CheckCircle2 size={16} /> : <Icon size={16} />}
+                  {step.done ? <CheckCircle2 size={14} /> : <Icon size={14} />}
                   {step.label}
                 </div>
               );
