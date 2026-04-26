@@ -361,7 +361,7 @@ export default function PackDisplay({
           <div className="flex items-center gap-3">
             {session.status !== "shipped" && (
               <Link
-                href={`/pack/${encodeURIComponent(session.orderName)}`}
+                href={`/pack/${session.orderName.replace(/^#/, "")}`}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-neutral-400 hover:text-white hover:bg-neutral-800 border border-neutral-800 transition"
               >
                 <Pencil size={14} />
