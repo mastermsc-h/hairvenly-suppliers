@@ -204,6 +204,9 @@ export default function StockOverviewClient({ stats, locale }: { stats: StockSta
   );
 }
 
+const INITIAL_LIMIT = 15;
+const STEP = 25;
+
 function InsightCard({ title, description, icon, color, products }: {
   title: string;
   description: string;
@@ -220,6 +223,11 @@ function InsightCard({ title, description, icon, color, products }: {
     purple: { bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200", chip: "bg-purple-100 text-purple-800" },
   };
   const c = colors[color];
+
+  const [limit, setLimit] = useState(INITIAL_LIMIT);
+  const visible = products.slice(0, limit);
+  const hasMore = products.length > limit;
+  const remaining = products.length - limit;
 
   return (
     <div className={`bg-white rounded-2xl border ${c.border} shadow-sm overflow-hidden`}>
@@ -238,22 +246,55 @@ function InsightCard({ title, description, icon, color, products }: {
       {products.length === 0 ? (
         <div className="px-4 py-6 text-center text-xs text-neutral-400">Keine Produkte gefunden</div>
       ) : (
-        <ul className="divide-y divide-neutral-100 max-h-[280px] overflow-y-auto">
-          {products.map((p, i) => (
-            <li key={i} className="px-4 py-2 flex items-start gap-2 text-xs hover:bg-neutral-50 transition">
-              <span className={`shrink-0 mt-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold ${p.quality === "Usbekisch Wellig" ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"}`}>
-                {p.quality === "Usbekisch Wellig" ? "WELLIG" : "GLATT"}
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-neutral-900 truncate" title={p.farbe}>{p.farbe}</div>
-                <div className="text-[10px] text-neutral-500 truncate">{p.group}</div>
+        <>
+          <ul className="divide-y divide-neutral-100 max-h-[400px] overflow-y-auto">
+            {visible.map((p, i) => (
+              <li key={i} className="px-4 py-2 flex items-start gap-2 text-xs hover:bg-neutral-50 transition">
+                <span className={`shrink-0 mt-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold ${p.quality === "Usbekisch Wellig" ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"}`}>
+                  {p.quality === "Usbekisch Wellig" ? "WELLIG" : "GLATT"}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-neutral-900 truncate" title={p.farbe}>{p.farbe}</div>
+                  <div className="text-[10px] text-neutral-500 truncate">{p.group}</div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className={`text-[11px] font-semibold ${c.text}`}>{p.value}</div>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {(hasMore || limit > INITIAL_LIMIT) && (
+            <div className="px-4 py-2 border-t border-neutral-100 bg-neutral-50/50 flex items-center justify-between gap-2">
+              <span className="text-[10px] text-neutral-500">{visible.length} von {products.length}</span>
+              <div className="flex items-center gap-1.5">
+                {hasMore && (
+                  <>
+                    <button
+                      onClick={() => setLimit((l) => l + STEP)}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-medium ${c.chip} hover:opacity-80 transition`}
+                    >
+                      +{Math.min(STEP, remaining)}
+                    </button>
+                    <button
+                      onClick={() => setLimit(products.length)}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-medium ${c.chip} hover:opacity-80 transition`}
+                    >
+                      Alle ({products.length})
+                    </button>
+                  </>
+                )}
+                {limit > INITIAL_LIMIT && (
+                  <button
+                    onClick={() => setLimit(INITIAL_LIMIT)}
+                    className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-neutral-200 text-neutral-600 hover:bg-neutral-300 transition"
+                  >
+                    Weniger
+                  </button>
+                )}
               </div>
-              <div className="shrink-0 text-right">
-                <div className={`text-[11px] font-semibold ${c.text}`}>{p.value}</div>
-              </div>
-            </li>
-          ))}
-        </ul>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
