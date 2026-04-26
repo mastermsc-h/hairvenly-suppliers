@@ -468,7 +468,7 @@ export default function PackDisplay({
                 className={`mt-8 p-6 rounded-2xl text-center border-2 ${
                   reallyReady
                     ? "bg-emerald-900/40 border-emerald-500/60"
-                    : "bg-amber-600/25 border-amber-400/60"
+                    : "bg-amber-600/45 border-amber-300/70"
                 }`}
               >
                 {reallyReady ? (
@@ -478,8 +478,8 @@ export default function PackDisplay({
                   </>
                 ) : (
                   <>
-                    <Camera className="mx-auto mb-3 text-amber-300" size={56} />
-                    <div className="text-3xl font-black text-amber-200 mb-3">
+                    <Camera className="mx-auto mb-3 text-white" size={56} />
+                    <div className="text-3xl font-black text-white mb-3">
                       Noch {missingPhotoTypes.length} Foto{missingPhotoTypes.length === 1 ? "" : "s"} machen
                     </div>
                     <div className="grid grid-cols-3 gap-2 mt-4 text-sm">
