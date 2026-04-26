@@ -166,12 +166,9 @@ export default function PackMode({
     };
   }, [sessionId]);
 
-  // Big-success Flash auto-clear
-  useEffect(() => {
-    if (!bigSuccess) return;
-    const tm = setTimeout(() => setBigSuccess(null), 700);
-    return () => clearTimeout(tm);
-  }, [bigSuccess]);
+  // Big-success Flash bleibt bis User auf "Weiter" klickt — verhindert
+  // dass dieselbe Camera-Detection als zwei Scans gewertet wird, weil der
+  // Code nach Erfolg noch im Bild ist.
 
   // Flash auto-clear
   useEffect(() => {
@@ -222,6 +219,8 @@ export default function PackMode({
 
   const submitBarcode = useCallback(
     (barcode: string) => {
+      // Solange Erfolgs-Overlay offen ist → keine neuen Scans annehmen
+      if (bigSuccess) return;
       const trimmed = barcode.trim();
       if (!trimmed) return;
       startTransition(async () => {
@@ -253,7 +252,7 @@ export default function PackMode({
         }
       });
     },
-    [sessionId, status, locale, refreshHistory],
+    [sessionId, status, locale, refreshHistory, bigSuccess],
   );
 
   const handleResetItem = useCallback(
@@ -324,10 +323,21 @@ export default function PackMode({
         </div>
       )}
       {bigSuccess && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none bg-emerald-500/85">
-          <div className="text-center text-white">
-            <CheckCircle2 size={140} className="mx-auto" strokeWidth={2.5} />
-            <div className="text-4xl font-black mt-4 px-6 max-w-3xl">{bigSuccess}</div>
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-emerald-500/95 p-6">
+          <div className="text-center text-white max-w-3xl">
+            <CheckCircle2 size={120} className="mx-auto" strokeWidth={2.5} />
+            <div className="text-3xl md:text-4xl font-black mt-4">{bigSuccess}</div>
+          </div>
+          <button
+            onClick={() => setBigSuccess(null)}
+            className="mt-10 px-12 py-6 bg-white text-emerald-700 text-2xl md:text-3xl font-black rounded-2xl shadow-lg hover:bg-emerald-50 active:scale-95 transition flex items-center gap-3"
+            autoFocus
+          >
+            <Check size={32} strokeWidth={3} />
+            Weiter
+          </button>
+          <div className="mt-4 text-white/80 text-sm">
+            Tippe „Weiter", um den nächsten Artikel zu scannen.
           </div>
         </div>
       )}
