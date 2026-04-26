@@ -468,7 +468,7 @@ export default function PackDisplay({
                 className={`mt-8 p-6 rounded-2xl text-center border-2 ${
                   reallyReady
                     ? "bg-emerald-900/40 border-emerald-500/60"
-                    : "bg-amber-900/40 border-amber-500/50"
+                    : "bg-amber-600/25 border-amber-400/60"
                 }`}
               >
                 {reallyReady ? (
