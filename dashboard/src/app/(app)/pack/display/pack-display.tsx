@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { t, type Locale } from "@/lib/i18n";
 import { CheckCircle2, ScanLine, Send, Package2, Camera } from "lucide-react";
@@ -80,6 +80,19 @@ export default function PackDisplay({
   const [photoCounts, setPhotoCounts] = useState<Record<string, number>>(initialPhotoCounts);
   const [flash, setFlash] = useState<"match" | "mismatch" | null>(null);
   const [bigSuccessTitle, setBigSuccessTitle] = useState<string | null>(null);
+  const [highlightKey, setHighlightKey] = useState<string | null>(null);
+  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // Auto-Scroll + Hervorhebung beim Highlight
+  useEffect(() => {
+    if (!highlightKey) return;
+    const el = itemRefs.current[highlightKey];
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    const tm = setTimeout(() => setHighlightKey(null), 1500);
+    return () => clearTimeout(tm);
+  }, [highlightKey]);
 
   // Big success auto-clear
   useEffect(() => {
@@ -273,6 +286,7 @@ export default function PackDisplay({
             if (row.status === "match") {
               setFlash("match");
               setBigSuccessTitle(row.matched_title || "OK");
+              setHighlightKey(row.scanned_barcode);
             } else if (row.status === "mismatch" || row.status === "overflow") {
               setFlash("mismatch");
             }
@@ -285,6 +299,7 @@ export default function PackDisplay({
             setCounts((prev) => ({ ...prev, [row.scanned_barcode]: (prev[row.scanned_barcode] ?? 0) + 1 }));
             setFlash("match");
             setBigSuccessTitle(row.matched_title || "OK");
+            setHighlightKey(row.scanned_barcode);
             setTimeout(() => setFlash(null), 600);
           } else if (row.status === "mismatch" || row.status === "overflow") {
             setFlash("mismatch");
@@ -388,11 +403,17 @@ export default function PackDisplay({
                 const got = counts[counterKey] ?? 0;
                 const done = got >= it.quantity;
                 const a = detectAttributes(it.title);
+                const isHighlighted = highlightKey === counterKey;
                 return (
                   <div
                     key={idx}
-                    className={`flex items-center gap-4 p-5 rounded-2xl border-2 ${
-                      done
+                    ref={(el) => {
+                      itemRefs.current[counterKey] = el;
+                    }}
+                    className={`flex items-center gap-4 p-5 rounded-2xl border-2 transition-all duration-300 scroll-mt-32 ${
+                      isHighlighted
+                        ? "border-emerald-300 bg-emerald-700/40 ring-4 ring-emerald-300/50 scale-[1.02]"
+                        : done
                         ? "border-emerald-500 bg-emerald-900/30"
                         : "border-neutral-700 bg-neutral-900"
                     }`}
