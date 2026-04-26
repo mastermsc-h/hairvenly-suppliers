@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Search, Archive, ExternalLink, Camera, FileText, ArrowRight } from "lucide-react";
+import { Search, Archive, ExternalLink, Camera, FileText, ArrowRight, Calendar } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { t, type Locale } from "@/lib/i18n";
 import type { ArchivedSession } from "./page";
 
@@ -16,12 +17,33 @@ const statusBadge: Record<string, string> = {
 export default function ArchiveList({
   sessions,
   locale,
+  from,
+  to,
 }: {
   sessions: ArchivedSession[];
   locale: Locale;
+  from: string;
+  to: string;
 }) {
+  const router = useRouter();
   const [query, setQuery] = useState("");
+  const [fromDate, setFromDate] = useState(from);
+  const [toDate, setToDate] = useState(to);
   const localeStr = locale === "de" ? "de-DE" : locale === "tr" ? "tr-TR" : "en-US";
+
+  function applyRange(newFrom: string, newTo: string) {
+    router.push(`/pack/archive?from=${newFrom}&to=${newTo}`);
+  }
+  function quickRange(days: number) {
+    const t = new Date();
+    const f = new Date();
+    f.setDate(f.getDate() - days);
+    const fs = f.toISOString().slice(0, 10);
+    const ts = t.toISOString().slice(0, 10);
+    setFromDate(fs);
+    setToDate(ts);
+    applyRange(fs, ts);
+  }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -33,6 +55,55 @@ export default function ArchiveList({
 
   return (
     <div className="space-y-4">
+      <div className="bg-white rounded-2xl border border-neutral-200 p-3 md:p-4 shadow-sm flex flex-col md:flex-row md:items-end gap-3">
+        <div className="flex items-end gap-2 flex-wrap">
+          <div>
+            <label className="text-xs font-medium text-neutral-600 uppercase tracking-wide flex items-center gap-1">
+              <Calendar size={12} /> Von
+            </label>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="mt-1 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-neutral-600 uppercase tracking-wide flex items-center gap-1">
+              <Calendar size={12} /> Bis
+            </label>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="mt-1 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
+            />
+          </div>
+          <button
+            onClick={() => applyRange(fromDate, toDate)}
+            className="px-4 py-1.5 rounded-lg bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700 transition"
+          >
+            Anwenden
+          </button>
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {[
+            { label: "7 Tage", days: 7 },
+            { label: "30 Tage", days: 30 },
+            { label: "90 Tage", days: 90 },
+            { label: "1 Jahr", days: 365 },
+          ].map((q) => (
+            <button
+              key={q.days}
+              onClick={() => quickRange(q.days)}
+              className="px-3 py-1.5 rounded-lg border border-neutral-300 text-xs hover:bg-neutral-50"
+            >
+              {q.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="flex flex-col md:flex-row md:items-center gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" size={16} />

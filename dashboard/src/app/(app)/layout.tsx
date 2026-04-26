@@ -120,6 +120,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 items={[
                   { href: "/pack", label: t(locale, "nav.shipping.list") },
                   { href: "/pack/archive", label: t(locale, "nav.shipping.archive") },
+                  { href: "/pack/stats", label: t(locale, "nav.shipping.stats") },
                   { href: "/pack/display", label: t(locale, "nav.shipping.display") },
                 ]}
               />

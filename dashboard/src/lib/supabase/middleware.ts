@@ -40,6 +40,7 @@ export async function updateSession(request: NextRequest) {
     path.startsWith("/_next") ||
     path.startsWith("/api/qr") ||  // covers /api/qr und /api/qr/[order]
     path.startsWith("/api/webhooks/") ||  // shopify ruft webhooks ohne login auf
+    path === "/api/pack/cleanup" ||  // vercel cron job (mit eigenem secret)
     path === "/favicon.ico";
 
   if (!user && !isPublic) {

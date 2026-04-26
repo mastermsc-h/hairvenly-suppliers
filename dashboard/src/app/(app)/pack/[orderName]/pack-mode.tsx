@@ -66,6 +66,62 @@ function detectAttributes(title: string): {
   return { method, length, origin, color };
 }
 
+/**
+ * Skaliert ein Foto im Browser auf max. lange-Seite × kurze-Seite px,
+ * komprimiert als JPEG. Reduziert iPhone-Originale (5 MB) auf ~300-500 KB.
+ */
+async function resizeImage(
+  file: File,
+  maxLong = 2000,
+  maxShort = 1500,
+  quality = 0.85,
+): Promise<File> {
+  try {
+    const blobUrl = URL.createObjectURL(file);
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("image load failed"));
+      img.src = blobUrl;
+    });
+    URL.revokeObjectURL(blobUrl);
+
+    const isPortrait = img.height >= img.width;
+    const longSide = isPortrait ? img.height : img.width;
+    const shortSide = isPortrait ? img.width : img.height;
+
+    let targetLong = Math.min(longSide, maxLong);
+    let targetShort = Math.round(shortSide * (targetLong / longSide));
+    if (targetShort > maxShort) {
+      targetShort = maxShort;
+      targetLong = Math.round(longSide * (targetShort / shortSide));
+    }
+    const targetW = isPortrait ? targetShort : targetLong;
+    const targetH = isPortrait ? targetLong : targetShort;
+
+    // Wenn Bild eh schon kleiner ist als Ziel und JPEG → Original behalten
+    if (longSide <= maxLong && shortSide <= maxShort && file.type === "image/jpeg") {
+      return file;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(img, 0, 0, targetW, targetH);
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", quality),
+    );
+    if (!blob) return file;
+    const newName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+    return new File([blob], newName, { type: "image/jpeg" });
+  } catch {
+    return file;
+  }
+}
+
 function playBeep(success: boolean) {
   try {
     const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
@@ -377,12 +433,14 @@ export default function PackMode({
   }
 
   async function handlePhoto(type: PhotoType, file: File) {
+    // Vor dem Upload client-seitig auf max. 2000×1500 px JPEG-0.85 verkleinern
+    // (spart ~10× Storage gegenüber iPhone-Originalen)
+    const compressed = await resizeImage(file, 2000, 1500, 0.85);
     const fd = new FormData();
-    fd.append("photo", file);
+    fd.append("photo", compressed);
     startTransition(async () => {
       const res = await uploadPackPhoto(sessionId, type, fd);
       if (res.success && res.storagePath) {
-        // Lokale Vorschau via FileReader (DB-Eintrag wird beim nächsten Reload geladen)
         const reader = new FileReader();
         reader.onload = () => {
           setPhotos((p) => ({
@@ -390,7 +448,7 @@ export default function PackMode({
             [type]: [...(p[type] ?? []), { id: `local-${Date.now()}`, url: String(reader.result) }],
           }));
         };
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(compressed);
       }
     });
   }

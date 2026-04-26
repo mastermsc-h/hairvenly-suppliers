@@ -21,10 +21,30 @@ export interface ArchivedSession {
   photoCount: number;
 }
 
-export default async function ArchivePage() {
+function defaultRange(): { from: string; to: string } {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 30);
+  return {
+    from: from.toISOString().slice(0, 10),
+    to: to.toISOString().slice(0, 10),
+  };
+}
+
+export default async function ArchivePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; to?: string }>;
+}) {
   const profile = await requireProfile();
   if (!hasFeature(profile, "shipping")) redirect("/");
   const locale = (profile.language ?? "de") as Locale;
+  const sp = await searchParams;
+  const def = defaultRange();
+  const from = sp.from && /^\d{4}-\d{2}-\d{2}$/.test(sp.from) ? sp.from : def.from;
+  const to = sp.to && /^\d{4}-\d{2}-\d{2}$/.test(sp.to) ? sp.to : def.to;
+  const fromIso = `${from}T00:00:00Z`;
+  const toIso = `${to}T23:59:59Z`;
 
   const supabase = await createClient();
   const { data: rows } = await supabase
@@ -33,8 +53,10 @@ export default async function ArchivePage() {
       "id, order_name, shopify_order_id, status, started_at, finished_at, fulfilled_at, expected_items, notes, profiles:packed_by(display_name, username)",
     )
     .in("status", ["verified", "shipped"])
+    .gte("finished_at", fromIso)
+    .lte("finished_at", toIso)
     .order("finished_at", { ascending: false, nullsFirst: false })
-    .limit(500);
+    .limit(1000);
 
   // Foto-Counts pro Session laden
   const sessionIds = (rows ?? []).map((r) => r.id);
@@ -76,7 +98,7 @@ export default async function ArchivePage() {
           {t(locale, "shipping.archive_subtitle")}
         </p>
       </header>
-      <ArchiveList sessions={sessions} locale={locale} />
+      <ArchiveList sessions={sessions} locale={locale} from={from} to={to} />
     </div>
   );
 }
