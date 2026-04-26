@@ -78,6 +78,83 @@ export default function PackDisplay({
     return () => clearTimeout(tm);
   }, [bigSuccessTitle]);
 
+  // Polling-Fallback: alle 3 Sek aktive Session + Counts neu laden.
+  // Realtime ist tricky mit RLS, Polling garantiert Updates innerhalb 3s.
+  useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+    const sessionIdRef = { current: session?.id };
+
+    async function refresh() {
+      const { data: rows } = await supabase
+        .from("pack_sessions")
+        .select(
+          "id, order_name, status, expected_items, started_at, finished_at, packed_by, profiles:packed_by(display_name, username)",
+        )
+        .in("status", ["in_progress", "verified"])
+        .order("updated_at", { ascending: false })
+        .limit(1);
+      if (cancelled) return;
+      const row = rows?.[0];
+      if (!row) {
+        setSession(null);
+        setCounts({});
+        sessionIdRef.current = undefined;
+        return;
+      }
+      const profileRel = (row as { profiles?: { display_name?: string | null; username?: string | null } | null }).profiles;
+      const next: DisplaySession = {
+        id: row.id,
+        orderName: row.order_name,
+        status: row.status,
+        expectedItems: (row.expected_items as ExpectedItem[]) ?? [],
+        packedBy: profileRel?.display_name || profileRel?.username || null,
+        startedAt: row.started_at,
+        finishedAt: row.finished_at,
+      };
+      setSession((prev) =>
+        prev && prev.id === next.id && prev.status === next.status ? prev : next,
+      );
+      // Counts nur neu laden wenn Session-ID gewechselt oder erstmals
+      if (sessionIdRef.current !== row.id) {
+        sessionIdRef.current = row.id;
+        const { data: scans } = await supabase
+          .from("pack_scans")
+          .select("scanned_barcode")
+          .eq("session_id", row.id)
+          .eq("status", "match");
+        if (cancelled) return;
+        const c: Record<string, number> = {};
+        for (const s of scans ?? []) c[s.scanned_barcode] = (c[s.scanned_barcode] ?? 0) + 1;
+        setCounts(c);
+      } else {
+        // gleiche Session — counts via aggregate refresh
+        const { data: scans } = await supabase
+          .from("pack_scans")
+          .select("scanned_barcode")
+          .eq("session_id", row.id)
+          .eq("status", "match");
+        if (cancelled) return;
+        const c: Record<string, number> = {};
+        for (const s of scans ?? []) c[s.scanned_barcode] = (c[s.scanned_barcode] ?? 0) + 1;
+        setCounts((prev) => {
+          // Vergleich: alle keys identisch?
+          const same =
+            Object.keys(prev).length === Object.keys(c).length &&
+            Object.keys(prev).every((k) => prev[k] === c[k]);
+          return same ? prev : c;
+        });
+      }
+    }
+
+    void refresh();
+    const interval = setInterval(refresh, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [session?.id]);
+
   const isComplete = useMemo(() => {
     if (!session) return false;
     return session.expectedItems.every((e, idx) => {
