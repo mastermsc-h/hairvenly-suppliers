@@ -48,18 +48,22 @@ export default async function PackOrderPage({
     initialCounts[s.scanned_barcode] = (initialCounts[s.scanned_barcode] ?? 0) + 1;
   }
 
-  // Vorhandene Fotos laden
+  // Vorhandene Fotos laden — mehrere pro Typ möglich
   const { data: photos } = await supabase
     .from("pack_photos")
-    .select("photo_type, storage_path")
-    .eq("session_id", sessionId);
+    .select("id, photo_type, storage_path, taken_at")
+    .eq("session_id", sessionId)
+    .order("taken_at", { ascending: true });
 
-  const photoMap: Record<string, string> = {};
+  const photoMap: Record<string, { id: string; url: string }[]> = {};
   for (const p of photos ?? []) {
     const { data: signed } = await supabase.storage
       .from("pack-photos")
-      .createSignedUrl(p.storage_path, 60 * 60); // 1h signed URL
-    if (signed?.signedUrl) photoMap[p.photo_type] = signed.signedUrl;
+      .createSignedUrl(p.storage_path, 60 * 60);
+    if (signed?.signedUrl) {
+      if (!photoMap[p.photo_type]) photoMap[p.photo_type] = [];
+      photoMap[p.photo_type].push({ id: p.id, url: signed.signedUrl });
+    }
   }
 
   return (

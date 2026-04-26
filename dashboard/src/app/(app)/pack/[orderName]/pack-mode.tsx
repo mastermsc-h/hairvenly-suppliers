@@ -7,6 +7,7 @@ import {
   recordManualConfirm,
   completePackSession,
   uploadPackPhoto,
+  deletePackPhoto,
   resetItemConfirms,
   fetchSessionScans,
   cancelPackSession,
@@ -103,12 +104,12 @@ export default function PackMode({
   orderName: string;
   expectedItems: ExpectedItem[];
   initialCounts: Record<string, number>;
-  initialPhotos: Record<string, string>;
+  initialPhotos: Record<string, { id: string; url: string }[]>;
   shippingAddress: { name: string | null; address1: string | null; zip: string | null; city: string | null; country: string | null } | null;
   locale: Locale;
 }) {
   const [counts, setCounts] = useState<Record<string, number>>(initialCounts);
-  const [photos, setPhotos] = useState<Record<string, string>>(initialPhotos);
+  const [photos, setPhotos] = useState<Record<string, { id: string; url: string }[]>>(initialPhotos);
   const [flash, setFlash] = useState<FlashState>({ kind: null });
   const [scanInput, setScanInput] = useState("");
   const [status, setStatus] = useState(initialStatus);
@@ -241,7 +242,7 @@ export default function PackMode({
     [sessionId, status, locale, refreshHistory, expectedItems],
   );
 
-  const allPhotosUploaded = PHOTO_TYPES.every((p) => !!photos[p]);
+  const allPhotosUploaded = PHOTO_TYPES.every((p) => (photos[p]?.length ?? 0) > 0);
   const canFulfill = isComplete && allPhotosUploaded && status !== "shipped";
 
   // Phase-State für den Assistent-Workflow
@@ -381,12 +382,30 @@ export default function PackMode({
     startTransition(async () => {
       const res = await uploadPackPhoto(sessionId, type, fd);
       if (res.success && res.storagePath) {
-        // Lokale Vorschau via FileReader für sofortiges Feedback
+        // Lokale Vorschau via FileReader (DB-Eintrag wird beim nächsten Reload geladen)
         const reader = new FileReader();
         reader.onload = () => {
-          setPhotos((p) => ({ ...p, [type]: String(reader.result) }));
+          setPhotos((p) => ({
+            ...p,
+            [type]: [...(p[type] ?? []), { id: `local-${Date.now()}`, url: String(reader.result) }],
+          }));
         };
         reader.readAsDataURL(file);
+      }
+    });
+  }
+
+  async function handleDeletePhoto(type: PhotoType, photoId: string) {
+    if (photoId.startsWith("local-")) {
+      // Wurde noch nicht persistiert — einfach lokal entfernen
+      setPhotos((p) => ({ ...p, [type]: (p[type] ?? []).filter((x) => x.id !== photoId) }));
+      return;
+    }
+    if (typeof window !== "undefined" && !window.confirm("Foto wirklich löschen?")) return;
+    startTransition(async () => {
+      const r = await deletePackPhoto(photoId);
+      if (r.success) {
+        setPhotos((p) => ({ ...p, [type]: (p[type] ?? []).filter((x) => x.id !== photoId) }));
       }
     });
   }
@@ -901,16 +920,16 @@ export default function PackMode({
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {PHOTO_TYPES.map((type, idx) => {
-                  // Nächstes Foto = erstes nicht-aufgenommenes
-                  const nextIdx = PHOTO_TYPES.findIndex((t) => !photos[t]);
+                  const nextIdx = PHOTO_TYPES.findIndex((t) => (photos[t]?.length ?? 0) === 0);
                   const isNext = idx === nextIdx;
                   return (
                     <PhotoStation
                       key={type}
                       type={type}
                       label={t(locale, `shipping.photo_${type === "products_invoice" ? "invoice" : type === "products_in_box" ? "in_box" : "on_scale"}`)}
-                      currentUrl={photos[type]}
+                      photos={photos[type] ?? []}
                       onPhoto={handlePhoto}
+                      onDelete={handleDeletePhoto}
                       disabled={isPending}
                       locale={locale}
                       isNext={isNext}
@@ -972,39 +991,74 @@ export default function PackMode({
 function PhotoStation({
   type,
   label,
-  currentUrl,
+  photos,
   onPhoto,
+  onDelete,
   disabled,
   locale,
   isNext,
 }: {
   type: PhotoType;
   label: string;
-  currentUrl: string | undefined;
+  photos: { id: string; url: string }[];
   onPhoto: (type: PhotoType, file: File) => void;
+  onDelete: (type: PhotoType, photoId: string) => void;
   disabled: boolean;
   locale: Locale;
   isNext?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const done = !!currentUrl;
+  const done = photos.length > 0;
   const containerCls = done
-    ? "border-2 border-emerald-400 bg-emerald-50 rounded-xl p-3 text-center"
+    ? "border-2 border-emerald-400 bg-emerald-50 rounded-xl p-3"
     : isNext
-    ? "border-2 border-blue-400 bg-blue-50 rounded-xl p-3 text-center ring-2 ring-blue-200 ring-offset-2"
-    : "border-2 border-dashed border-neutral-300 rounded-xl p-3 text-center opacity-60";
+    ? "border-2 border-blue-400 bg-blue-50 rounded-xl p-3 ring-2 ring-blue-200 ring-offset-2"
+    : "border-2 border-dashed border-neutral-300 rounded-xl p-3 opacity-60";
   return (
     <div className={containerCls}>
       <div
-        className={`text-xs font-bold mb-2 leading-tight ${
+        className={`text-xs font-bold mb-2 leading-tight text-center ${
           done ? "text-emerald-800" : isNext ? "text-blue-900" : "text-neutral-600"
         }`}
       >
         {label}
       </div>
-      {currentUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={currentUrl} alt={label} className="w-full h-32 object-cover rounded-lg mb-2" />
+      {photos.length > 0 ? (
+        <div className="space-y-2 mb-2">
+          {/* Erstes Foto groß */}
+          <div className="relative">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={photos[0].url} alt={label} className="w-full h-32 object-cover rounded-lg" />
+            <button
+              type="button"
+              onClick={() => onDelete(type, photos[0].id)}
+              disabled={disabled}
+              className="absolute top-1 right-1 w-6 h-6 bg-red-600 hover:bg-red-700 text-white rounded-full flex items-center justify-center text-xs disabled:opacity-50"
+              title="Foto löschen"
+            >
+              <X size={12} />
+            </button>
+          </div>
+          {/* Weitere Fotos als Thumbnail-Strip */}
+          {photos.length > 1 && (
+            <div className="flex gap-1.5 flex-wrap">
+              {photos.slice(1).map((p) => (
+                <div key={p.id} className="relative w-12 h-12 shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={p.url} alt="" className="w-full h-full object-cover rounded" />
+                  <button
+                    type="button"
+                    onClick={() => onDelete(type, p.id)}
+                    disabled={disabled}
+                    className="absolute -top-1 -right-1 w-4 h-4 bg-red-600 hover:bg-red-700 text-white rounded-full flex items-center justify-center disabled:opacity-50"
+                  >
+                    <X size={8} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       ) : (
         <div
           className={`w-full h-32 rounded-lg flex items-center justify-center mb-2 ${
@@ -1040,7 +1094,7 @@ function PhotoStation({
       >
         <Camera size={14} />
         {done
-          ? t(locale, "shipping.photo_taken") + " ✓"
+          ? `+ Weiteres Foto (${photos.length})`
           : isNext
           ? "Jetzt aufnehmen"
           : "wartet"}

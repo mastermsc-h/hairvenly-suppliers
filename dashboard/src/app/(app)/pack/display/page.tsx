@@ -23,6 +23,11 @@ export default async function PackDisplayPage() {
 
   const session = activeSessions?.[0] ?? null;
   const initialCounts: Record<string, number> = {};
+  const initialPhotoCounts: Record<string, number> = {
+    products_invoice: 0,
+    products_in_box: 0,
+    package_on_scale: 0,
+  };
   if (session) {
     const { data: scans } = await supabase
       .from("pack_scans")
@@ -31,6 +36,13 @@ export default async function PackDisplayPage() {
       .eq("status", "match");
     for (const s of scans ?? []) {
       initialCounts[s.scanned_barcode] = (initialCounts[s.scanned_barcode] ?? 0) + 1;
+    }
+    const { data: photos } = await supabase
+      .from("pack_photos")
+      .select("photo_type")
+      .eq("session_id", session.id);
+    for (const p of photos ?? []) {
+      initialPhotoCounts[p.photo_type] = (initialPhotoCounts[p.photo_type] ?? 0) + 1;
     }
   }
 
@@ -56,6 +68,7 @@ export default async function PackDisplayPage() {
             : null
         }
         initialCounts={initialCounts}
+        initialPhotoCounts={initialPhotoCounts}
         locale={locale}
       />
     </div>

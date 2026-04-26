@@ -640,13 +640,7 @@ export async function uploadPackPhoto(
 
   if (upErr) return { success: false, error: upErr.message };
 
-  // Vorherige Foto-Records dieses Typs für die Session löschen (Re-Upload)
-  await supabase
-    .from("pack_photos")
-    .delete()
-    .eq("session_id", sessionId)
-    .eq("photo_type", photoType);
-
+  // Mehrere Fotos pro Typ erlaubt — einfach neu einfügen, alte bleiben.
   const { error: insErr } = await supabase.from("pack_photos").insert({
     session_id: sessionId,
     photo_type: photoType,
@@ -657,4 +651,26 @@ export async function uploadPackPhoto(
   if (insErr) return { success: false, error: insErr.message };
 
   return { success: true, storagePath: path };
+}
+
+/**
+ * Löscht ein einzelnes Pack-Foto (für "Foto entfernen"-Button bei mehreren Fotos pro Typ).
+ */
+export async function deletePackPhoto(
+  photoId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) return { success: false, error: "Forbidden" };
+  const supabase = await createClient();
+  const { data: photo } = await supabase
+    .from("pack_photos")
+    .select("storage_path")
+    .eq("id", photoId)
+    .single();
+  if (photo?.storage_path) {
+    await supabase.storage.from("pack-photos").remove([photo.storage_path]);
+  }
+  const { error } = await supabase.from("pack_photos").delete().eq("id", photoId);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
 }

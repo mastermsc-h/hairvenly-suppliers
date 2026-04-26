@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { t, type Locale } from "@/lib/i18n";
-import { CheckCircle2, ScanLine, Send, Package2 } from "lucide-react";
+import { CheckCircle2, ScanLine, Send, Package2, Camera } from "lucide-react";
 
 interface ExpectedItem {
   barcode: string | null;
@@ -57,17 +57,27 @@ function detectAttributes(title: string): {
   return { method, length, origin, color };
 }
 
+const PHOTO_TYPES = ["products_invoice", "products_in_box", "package_on_scale"] as const;
+const PHOTO_LABELS: Record<string, string> = {
+  products_invoice: "1. Produkte + Rechnung",
+  products_in_box: "2. Im Versandkarton",
+  package_on_scale: "3. Auf der Waage",
+};
+
 export default function PackDisplay({
   initialSession,
   initialCounts,
+  initialPhotoCounts,
   locale,
 }: {
   initialSession: DisplaySession | null;
   initialCounts: Record<string, number>;
+  initialPhotoCounts: Record<string, number>;
   locale: Locale;
 }) {
   const [session, setSession] = useState<DisplaySession | null>(initialSession);
   const [counts, setCounts] = useState<Record<string, number>>(initialCounts);
+  const [photoCounts, setPhotoCounts] = useState<Record<string, number>>(initialPhotoCounts);
   const [flash, setFlash] = useState<"match" | "mismatch" | null>(null);
   const [bigSuccessTitle, setBigSuccessTitle] = useState<string | null>(null);
 
@@ -115,36 +125,35 @@ export default function PackDisplay({
       setSession((prev) =>
         prev && prev.id === next.id && prev.status === next.status ? prev : next,
       );
-      // Counts nur neu laden wenn Session-ID gewechselt oder erstmals
-      if (sessionIdRef.current !== row.id) {
-        sessionIdRef.current = row.id;
-        const { data: scans } = await supabase
+      // Scan-counts + Foto-counts neu laden
+      sessionIdRef.current = row.id;
+      const [{ data: scans }, { data: photos }] = await Promise.all([
+        supabase
           .from("pack_scans")
           .select("scanned_barcode")
           .eq("session_id", row.id)
-          .eq("status", "match");
-        if (cancelled) return;
-        const c: Record<string, number> = {};
-        for (const s of scans ?? []) c[s.scanned_barcode] = (c[s.scanned_barcode] ?? 0) + 1;
-        setCounts(c);
-      } else {
-        // gleiche Session — counts via aggregate refresh
-        const { data: scans } = await supabase
-          .from("pack_scans")
-          .select("scanned_barcode")
-          .eq("session_id", row.id)
-          .eq("status", "match");
-        if (cancelled) return;
-        const c: Record<string, number> = {};
-        for (const s of scans ?? []) c[s.scanned_barcode] = (c[s.scanned_barcode] ?? 0) + 1;
-        setCounts((prev) => {
-          // Vergleich: alle keys identisch?
-          const same =
-            Object.keys(prev).length === Object.keys(c).length &&
-            Object.keys(prev).every((k) => prev[k] === c[k]);
-          return same ? prev : c;
-        });
-      }
+          .eq("status", "match"),
+        supabase.from("pack_photos").select("photo_type").eq("session_id", row.id),
+      ]);
+      if (cancelled) return;
+      const c: Record<string, number> = {};
+      for (const s of scans ?? []) c[s.scanned_barcode] = (c[s.scanned_barcode] ?? 0) + 1;
+      setCounts((prev) => {
+        const same =
+          Object.keys(prev).length === Object.keys(c).length &&
+          Object.keys(prev).every((k) => prev[k] === c[k]);
+        return same ? prev : c;
+      });
+      const pc: Record<string, number> = {
+        products_invoice: 0,
+        products_in_box: 0,
+        package_on_scale: 0,
+      };
+      for (const p of photos ?? []) pc[p.photo_type] = (pc[p.photo_type] ?? 0) + 1;
+      setPhotoCounts((prev) => {
+        const same = PHOTO_TYPES.every((t) => prev[t] === pc[t]);
+        return same ? prev : pc;
+      });
     }
 
     void refresh();
@@ -162,6 +171,13 @@ export default function PackDisplay({
       return (counts[key] ?? 0) >= e.quantity;
     });
   }, [session, counts]);
+
+  const photosDone = useMemo(() => {
+    return PHOTO_TYPES.every((p) => (photoCounts[p] ?? 0) > 0);
+  }, [photoCounts]);
+
+  const reallyReady = isComplete && photosDone;
+  const missingPhotoTypes = PHOTO_TYPES.filter((p) => (photoCounts[p] ?? 0) === 0);
 
   // Realtime: pack_sessions + pack_scans
   useEffect(() => {
@@ -316,7 +332,7 @@ export default function PackDisplay({
       )}
 
       <div className="p-8 md:p-12">
-        <div className="flex items-baseline justify-between mb-8">
+        <div className="flex items-baseline justify-between mb-6">
           <div>
             <div className="text-sm uppercase tracking-widest text-neutral-500">{t(locale, "shipping.title")}</div>
             <div className="text-6xl font-black tracking-tight">{session.orderName}</div>
@@ -328,6 +344,34 @@ export default function PackDisplay({
           </div>
           <StatusBadge status={session.status} locale={locale} />
         </div>
+
+        {/* 3-Schritte Progress (1.Scannen 2.Fotos 3.Versenden) */}
+        {session.status !== "shipped" && (
+          <div className="grid grid-cols-3 gap-3 mb-8">
+            {([
+              { key: "scan", label: "1. Scannen", icon: ScanLine, done: isComplete, active: !isComplete },
+              { key: "photos", label: "2. Fotos", icon: Camera, done: photosDone, active: isComplete && !photosDone },
+              { key: "ship", label: "3. Versenden", icon: Send, done: false, active: reallyReady },
+            ] as const).map((step) => {
+              const Icon = step.icon;
+              return (
+                <div
+                  key={step.key}
+                  className={`flex items-center gap-3 px-5 py-4 rounded-xl text-xl font-bold ${
+                    step.done
+                      ? "bg-emerald-700 text-white"
+                      : step.active
+                      ? "bg-blue-600 text-white ring-4 ring-blue-400/40"
+                      : "bg-neutral-800 text-neutral-500"
+                  }`}
+                >
+                  {step.done ? <CheckCircle2 size={28} /> : <Icon size={28} />}
+                  {step.label}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {session.status === "shipped" ? (
           <div className="text-center py-20">
@@ -399,9 +443,40 @@ export default function PackDisplay({
             </div>
 
             {isComplete && session.status !== "shipped" && (
-              <div className="mt-8 p-8 bg-emerald-700 rounded-2xl text-center">
-                <CheckCircle2 className="mx-auto mb-4" size={80} />
-                <div className="text-5xl font-black">{t(locale, "shipping.ready")}</div>
+              <div
+                className={`mt-8 p-8 rounded-2xl text-center ${
+                  reallyReady ? "bg-emerald-700" : "bg-amber-600"
+                }`}
+              >
+                {reallyReady ? (
+                  <>
+                    <CheckCircle2 className="mx-auto mb-4" size={80} />
+                    <div className="text-5xl font-black">{t(locale, "shipping.ready")}</div>
+                  </>
+                ) : (
+                  <>
+                    <Camera className="mx-auto mb-4" size={80} />
+                    <div className="text-4xl font-black mb-3">
+                      Noch {missingPhotoTypes.length} Foto{missingPhotoTypes.length === 1 ? "" : "s"} machen
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 mt-5 text-base">
+                      {PHOTO_TYPES.map((t) => {
+                        const got = (photoCounts[t] ?? 0) > 0;
+                        return (
+                          <div
+                            key={t}
+                            className={`px-3 py-3 rounded-xl flex items-center gap-2 justify-center ${
+                              got ? "bg-emerald-600" : "bg-white/15 border border-white/30"
+                            }`}
+                          >
+                            {got ? <CheckCircle2 size={20} /> : <Camera size={20} />}
+                            <span className="font-bold">{PHOTO_LABELS[t]}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </>
