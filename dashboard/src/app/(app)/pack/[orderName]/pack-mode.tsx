@@ -118,8 +118,12 @@ export default function PackMode({
   const [manualForms, setManualForms] = useState<Record<number, { open: boolean; checks: boolean[] }>>({});
   // Live-Scan-Historie
   const [scanHistory, setScanHistory] = useState<Awaited<ReturnType<typeof fetchSessionScans>>>([]);
-  // Großer Vollbild-Erfolgsflash (klar sichtbar bei Kamera-Scan)
-  const [bigSuccess, setBigSuccess] = useState<string | null>(null);
+  // Großer Vollbild-Erfolgsflash (bleibt offen bis User „Weiter" klickt)
+  const [bigSuccess, setBigSuccess] = useState<{
+    title: string;
+    count: number;
+    total: number;
+  } | null>(null);
 
   function setManualOpen(idx: number, open: boolean) {
     setManualForms((prev) => ({
@@ -194,7 +198,14 @@ export default function PackMode({
           if (res.status === "match") {
             playBeep(true);
             setFlash({ kind: "match", message: res.matchedTitle });
-            setBigSuccess(res.matchedTitle ?? "OK");
+            const item = expectedItems[idx];
+            const counterKey = item.barcode || `manual:${idx}`;
+            const count = res.scannedCounts[counterKey] ?? item.quantity;
+            setBigSuccess({
+              title: res.matchedTitle ?? item.title ?? "OK",
+              count,
+              total: item.quantity,
+            });
             if (status === "open") setStatus("in_progress");
             setManualForms((prev) => ({
               ...prev,
@@ -211,7 +222,7 @@ export default function PackMode({
         }
       });
     },
-    [sessionId, status, locale, refreshHistory],
+    [sessionId, status, locale, refreshHistory, expectedItems],
   );
 
   const allPhotosUploaded = PHOTO_TYPES.every((p) => !!photos[p]);
@@ -230,7 +241,19 @@ export default function PackMode({
           if (res.status === "match") {
             playBeep(true);
             setFlash({ kind: "match", message: res.matchedTitle });
-            setBigSuccess(res.matchedTitle ?? "OK");
+            // Item finden + Count anzeigen
+            const matchedIdx = expectedItems.findIndex(
+              (it) => it.variantId === res.matchedVariantId,
+            );
+            const it = matchedIdx >= 0 ? expectedItems[matchedIdx] : null;
+            const counterKey = it ? it.barcode || `manual:${matchedIdx}` : trimmed;
+            const count = res.scannedCounts[counterKey] ?? 0;
+            const total = it?.quantity ?? 0;
+            setBigSuccess({
+              title: res.matchedTitle ?? "OK",
+              count,
+              total,
+            });
             if (status === "open") setStatus("in_progress");
           } else if (res.status === "overflow") {
             playBeep(false);
@@ -252,7 +275,7 @@ export default function PackMode({
         }
       });
     },
-    [sessionId, status, locale, refreshHistory, bigSuccess],
+    [sessionId, status, locale, refreshHistory, bigSuccess, expectedItems],
   );
 
   const handleResetItem = useCallback(
@@ -326,11 +349,23 @@ export default function PackMode({
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-emerald-500/95 p-6">
           <div className="text-center text-white max-w-3xl">
             <CheckCircle2 size={120} className="mx-auto" strokeWidth={2.5} />
-            <div className="text-3xl md:text-4xl font-black mt-4">{bigSuccess}</div>
+            {bigSuccess.total > 0 && (
+              <div className="text-7xl md:text-8xl font-black mt-2 tracking-tight">
+                {bigSuccess.count}/{bigSuccess.total}
+              </div>
+            )}
+            <div className="text-2xl md:text-3xl font-black mt-3 leading-tight">
+              {bigSuccess.title}
+            </div>
+            {bigSuccess.total > 0 && bigSuccess.count >= bigSuccess.total && (
+              <div className="mt-3 text-white/90 text-lg font-semibold">
+                Diese Position ist komplett ✓
+              </div>
+            )}
           </div>
           <button
             onClick={() => setBigSuccess(null)}
-            className="mt-10 px-12 py-6 bg-white text-emerald-700 text-2xl md:text-3xl font-black rounded-2xl shadow-lg hover:bg-emerald-50 active:scale-95 transition flex items-center gap-3"
+            className="mt-8 px-12 py-6 bg-white text-emerald-700 text-2xl md:text-3xl font-black rounded-2xl shadow-lg hover:bg-emerald-50 active:scale-95 transition flex items-center gap-3"
             autoFocus
           >
             <Check size={32} strokeWidth={3} />
