@@ -876,17 +876,23 @@ export default function PackMode({
                 {t(locale, "shipping.photos_required")}
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {PHOTO_TYPES.map((type) => (
-                  <PhotoStation
-                    key={type}
-                    type={type}
-                    label={t(locale, `shipping.photo_${type === "products_invoice" ? "invoice" : type === "products_in_box" ? "in_box" : "on_scale"}`)}
-                    currentUrl={photos[type]}
-                    onPhoto={handlePhoto}
-                    disabled={isPending}
-                    locale={locale}
-                  />
-                ))}
+                {PHOTO_TYPES.map((type, idx) => {
+                  // Nächstes Foto = erstes nicht-aufgenommenes
+                  const nextIdx = PHOTO_TYPES.findIndex((t) => !photos[t]);
+                  const isNext = idx === nextIdx;
+                  return (
+                    <PhotoStation
+                      key={type}
+                      type={type}
+                      label={t(locale, `shipping.photo_${type === "products_invoice" ? "invoice" : type === "products_in_box" ? "in_box" : "on_scale"}`)}
+                      currentUrl={photos[type]}
+                      onPhoto={handlePhoto}
+                      disabled={isPending}
+                      locale={locale}
+                      isNext={isNext}
+                    />
+                  );
+                })}
               </div>
             </div>
           )}
@@ -946,6 +952,7 @@ function PhotoStation({
   onPhoto,
   disabled,
   locale,
+  isNext,
 }: {
   type: PhotoType;
   label: string;
@@ -953,17 +960,34 @@ function PhotoStation({
   onPhoto: (type: PhotoType, file: File) => void;
   disabled: boolean;
   locale: Locale;
+  isNext?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const done = !!currentUrl;
+  const containerCls = done
+    ? "border-2 border-emerald-400 bg-emerald-50 rounded-xl p-3 text-center"
+    : isNext
+    ? "border-2 border-blue-400 bg-blue-50 rounded-xl p-3 text-center ring-2 ring-blue-200 ring-offset-2"
+    : "border-2 border-dashed border-neutral-300 rounded-xl p-3 text-center opacity-60";
   return (
-    <div className="border-2 border-dashed border-neutral-300 rounded-xl p-3 text-center">
-      <div className="text-xs font-medium text-neutral-700 mb-2">{label}</div>
+    <div className={containerCls}>
+      <div
+        className={`text-xs font-bold mb-2 leading-tight ${
+          done ? "text-emerald-800" : isNext ? "text-blue-900" : "text-neutral-600"
+        }`}
+      >
+        {label}
+      </div>
       {currentUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={currentUrl} alt={label} className="w-full h-32 object-cover rounded-lg mb-2" />
       ) : (
-        <div className="w-full h-32 bg-neutral-100 rounded-lg flex items-center justify-center mb-2">
-          <Camera className="text-neutral-400" size={28} />
+        <div
+          className={`w-full h-32 rounded-lg flex items-center justify-center mb-2 ${
+            isNext ? "bg-white" : "bg-neutral-100"
+          }`}
+        >
+          <Camera className={isNext ? "text-blue-500" : "text-neutral-400"} size={isNext ? 36 : 28} />
         </div>
       )}
       <input
@@ -980,12 +1004,22 @@ function PhotoStation({
       />
       <button
         type="button"
-        disabled={disabled}
+        disabled={disabled || (!done && !isNext)}
         onClick={() => inputRef.current?.click()}
-        className="w-full py-2 rounded-lg bg-neutral-900 text-white text-xs font-medium hover:bg-neutral-700 transition disabled:opacity-50 flex items-center justify-center gap-1"
+        className={`w-full py-2 rounded-lg text-xs font-medium transition disabled:opacity-50 flex items-center justify-center gap-1 ${
+          done
+            ? "bg-emerald-600 text-white hover:bg-emerald-700"
+            : isNext
+            ? "bg-blue-600 text-white hover:bg-blue-700"
+            : "bg-neutral-300 text-neutral-600 cursor-not-allowed"
+        }`}
       >
         <Camera size={14} />
-        {currentUrl ? t(locale, "shipping.photo_taken") + " ✓" : t(locale, "shipping.photo_take")}
+        {done
+          ? t(locale, "shipping.photo_taken") + " ✓"
+          : isNext
+          ? "Jetzt aufnehmen"
+          : "wartet"}
       </button>
     </div>
   );
