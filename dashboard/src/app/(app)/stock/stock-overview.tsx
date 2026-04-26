@@ -1,13 +1,35 @@
 "use client";
 
 import Link from "next/link";
-import { Scale, Package, AlertTriangle, AlertCircle, Truck, ArrowRight } from "lucide-react";
+import { Scale, Package, AlertTriangle, AlertCircle, Truck, ArrowRight, Snowflake, Flame, PackagePlus, Skull, TrendingUp, ShoppingCart } from "lucide-react";
 import { t, type Locale } from "@/lib/i18n";
 import SyncBadge from "./sync-badge";
 
 interface CollectionStat {
   name: string;
   kg: number;
+}
+
+export interface InsightProduct {
+  farbe: string;
+  quality: string;
+  group: string;
+  laenge: string;
+  lagerG: number;
+  verkauftG: number;
+  verkauft30d: number;
+  unterwegsG: number;
+  tier: string;
+  value: string;
+}
+
+export interface InsightsData {
+  slowMovers: InsightProduct[];
+  hotMissing: InsightProduct[];
+  overOrdered: InsightProduct[];
+  deadStock: InsightProduct[];
+  trendingUp: InsightProduct[];
+  needsReorder: InsightProduct[];
 }
 
 interface StockStats {
@@ -24,6 +46,7 @@ interface StockStats {
   welligCollections: CollectionStat[];
   glattCollections: CollectionStat[];
   lastUpdated: string | null;
+  insights: InsightsData;
 }
 
 export default function StockOverviewClient({ stats, locale }: { stats: StockStats; locale: Locale }) {
@@ -112,6 +135,113 @@ export default function StockOverviewClient({ stats, locale }: { stats: StockSta
           accentColor="green"
         />
       </section>
+
+      {/* Insights */}
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-neutral-900">📊 Insights</h2>
+          <p className="text-xs text-neutral-500 mt-0.5">Auffälligkeiten basierend auf Topseller-Daten</p>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <InsightCard
+            title="Auf Lager — kein Verkauf (90T)"
+            description="Hoher Bestand, aber 0 Verkäufe in 90 Tagen — Kapital liegt brach"
+            icon={<Skull size={16} />}
+            color="rose"
+            products={stats.insights.deadStock}
+          />
+          <InsightCard
+            title="Slow Mover"
+            description="Lager > 150g, aber kaum Bewegung in 90 Tagen"
+            icon={<Snowflake size={16} />}
+            color="blue"
+            products={stats.insights.slowMovers}
+          />
+          <InsightCard
+            title="🔥 Topseller mit niedrigem Lager"
+            description="TOP7-Produkte unter 200g & nichts unterwegs — dringend nachbestellen"
+            icon={<Flame size={16} />}
+            color="orange"
+            products={stats.insights.hotMissing}
+          />
+          <InsightCard
+            title="Nachbestellen empfohlen"
+            description="Lager < Bedarfsprognose und kein Nachschub unterwegs"
+            icon={<ShoppingCart size={16} />}
+            color="amber"
+            products={stats.insights.needsReorder}
+          />
+          <InsightCard
+            title="Wachsende Verkäufe"
+            description="30-Tage-Trend deutlich höher als 90-Tage-Schnitt"
+            icon={<TrendingUp size={16} />}
+            color="emerald"
+            products={stats.insights.trendingUp}
+          />
+          <InsightCard
+            title="Eventuell überbestellt"
+            description="Mehr als 2× des Bedarfs unterwegs — könnten Lagerproblem werden"
+            icon={<PackagePlus size={16} />}
+            color="purple"
+            products={stats.insights.overOrdered}
+          />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function InsightCard({ title, description, icon, color, products }: {
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  color: "rose" | "blue" | "orange" | "amber" | "emerald" | "purple";
+  products: InsightProduct[];
+}) {
+  const colors: Record<string, { bg: string; text: string; border: string; chip: string }> = {
+    rose: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", chip: "bg-rose-100 text-rose-800" },
+    blue: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", chip: "bg-blue-100 text-blue-800" },
+    orange: { bg: "bg-orange-50", text: "text-orange-700", border: "border-orange-200", chip: "bg-orange-100 text-orange-800" },
+    amber: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", chip: "bg-amber-100 text-amber-800" },
+    emerald: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", chip: "bg-emerald-100 text-emerald-800" },
+    purple: { bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200", chip: "bg-purple-100 text-purple-800" },
+  };
+  const c = colors[color];
+
+  return (
+    <div className={`bg-white rounded-2xl border ${c.border} shadow-sm overflow-hidden`}>
+      <div className={`${c.bg} px-4 py-3 border-b ${c.border}`}>
+        <div className="flex items-center gap-2">
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${c.chip}`}>{icon}</div>
+          <div className="flex-1 min-w-0">
+            <div className={`font-semibold text-sm ${c.text}`}>{title}</div>
+            <div className="text-[11px] text-neutral-500 mt-0.5">{description}</div>
+          </div>
+          <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold ${c.chip}`}>
+            {products.length}
+          </span>
+        </div>
+      </div>
+      {products.length === 0 ? (
+        <div className="px-4 py-6 text-center text-xs text-neutral-400">Keine Produkte gefunden</div>
+      ) : (
+        <ul className="divide-y divide-neutral-100 max-h-[280px] overflow-y-auto">
+          {products.map((p, i) => (
+            <li key={i} className="px-4 py-2 flex items-start gap-2 text-xs hover:bg-neutral-50 transition">
+              <span className={`shrink-0 mt-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold ${p.quality === "Usbekisch Wellig" ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"}`}>
+                {p.quality === "Usbekisch Wellig" ? "WELLIG" : "GLATT"}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-neutral-900 truncate" title={p.farbe}>{p.farbe}</div>
+                <div className="text-[10px] text-neutral-500 truncate">{p.group}</div>
+              </div>
+              <div className="shrink-0 text-right">
+                <div className={`text-[11px] font-semibold ${c.text}`}>{p.value}</div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
