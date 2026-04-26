@@ -258,9 +258,9 @@ export default function PackMode({
   const readySectionRef = useRef<HTMLDivElement>(null);
   const lastPhaseRef = useRef<typeof phase>(phase);
 
-  // "Scanne als Nächstes" collapsen wenn Kamera aktiv (sonst zu viel Platz auf iPhone)
+  // "Scanne als Nächstes" standardmäßig zugeklappt — nur kompakte Header-Zeile
   const [cameraActive, setCameraActive] = useState(false);
-  const [hintExpanded, setHintExpanded] = useState(true);
+  const [hintExpanded, setHintExpanded] = useState(false);
   useEffect(() => {
     if (cameraActive) setHintExpanded(false);
   }, [cameraActive]);
@@ -469,13 +469,13 @@ export default function PackMode({
         </div>
       )}
 
-      {/* Phase Indicator */}
-      <div className="bg-white rounded-2xl border border-neutral-200 p-3 shadow-sm flex items-center gap-2 text-sm">
+      {/* Phase Indicator (kompakt) */}
+      <div className="bg-white rounded-xl border border-neutral-200 p-1.5 shadow-sm flex items-center gap-1 text-xs">
         {([
           { key: "scan", label: "1. Scannen", icon: ScanLine },
           { key: "photos", label: "2. Fotos", icon: Camera },
           { key: "ready", label: "3. Versenden", icon: Send },
-        ] as const).map((step, i, arr) => {
+        ] as const).map((step) => {
           const order = ["scan", "photos", "ready", "shipped"];
           const stepIdx = order.indexOf(step.key);
           const phaseIdx = order.indexOf(phase);
@@ -483,22 +483,18 @@ export default function PackMode({
           const active = phaseIdx === stepIdx;
           const Icon = step.icon;
           return (
-            <div key={step.key} className="flex items-center gap-2 flex-1">
-              <div
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg flex-1 transition ${
-                  done
-                    ? "bg-emerald-50 text-emerald-800 border border-emerald-300"
-                    : active
-                    ? "bg-blue-50 text-blue-900 border-2 border-blue-400 font-semibold"
-                    : "bg-neutral-50 text-neutral-400 border border-neutral-200"
-                }`}
-              >
-                {done ? <CheckCircle2 size={16} /> : <Icon size={16} />}
-                <span className="text-xs md:text-sm">{step.label}</span>
-              </div>
-              {i < arr.length - 1 && (
-                <div className={`hidden md:block h-0.5 w-4 ${done ? "bg-emerald-300" : "bg-neutral-200"}`} />
-              )}
+            <div
+              key={step.key}
+              className={`flex items-center gap-1 px-2 py-1 rounded-lg flex-1 justify-center transition ${
+                done
+                  ? "bg-emerald-50 text-emerald-800"
+                  : active
+                  ? "bg-blue-50 text-blue-900 font-semibold ring-1 ring-blue-400"
+                  : "bg-neutral-50 text-neutral-400"
+              }`}
+            >
+              {done ? <CheckCircle2 size={12} /> : <Icon size={12} />}
+              <span className="text-[11px]">{step.label}</span>
             </div>
           );
         })}
