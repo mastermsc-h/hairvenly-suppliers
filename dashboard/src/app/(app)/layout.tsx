@@ -3,7 +3,7 @@ import { requireProfile, hasFeature } from "@/lib/auth";
 import { signOut } from "@/lib/actions/auth";
 import { t, type Locale } from "@/lib/i18n";
 import type { FeatureKey } from "@/lib/types";
-import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings, Truck } from "lucide-react";
+import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings, Truck, Globe2 } from "lucide-react";
 import SidebarGroup from "./sidebar-group";
 import LanguageSwitcher from "./language-switcher";
 import { MobileSidebarWrapper } from "./mobile-sidebar";
@@ -24,64 +24,108 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </div>
 
       <nav className="p-3 space-y-1 text-sm">
-        <NavLink href="/" icon={<LayoutDashboard size={16} />} label={t(locale, "nav.overview")} />
-        <NavLink href="/orders" icon={<Package size={16} />} label={t(locale, "nav.orders")} />
+        {/* 1) Auslandsbestellungen + Neue Bestellung */}
+        <NavLink href="/" icon={<Globe2 size={16} />} label={t(locale, "nav.overview")} />
+        {profile.role === "supplier" && (
+          <NavLink href="/orders" icon={<Package size={16} />} label={t(locale, "nav.orders")} />
+        )}
         {profile.role !== "supplier" && (
           <>
-            <div className="border-t border-neutral-200 my-2" />
             {has("wizard") && <NavLink href="/orders/wizard" icon={<FilePlus size={16} />} label={t(locale, "nav.wizard")} />}
-            {has("catalog") && <NavLink href="/catalog" icon={<Palette size={16} />} label={t(locale, "nav.catalog")} />}
-            {has("prices") && <NavLink href="/prices" icon={<DollarSign size={16} />} label={t(locale, "nav.prices")} />}
 
+            {/* 2) Produktlager · Preistabellen · Farbcodes */}
+            {(has("stock") || has("prices") || has("catalog")) && (
+              <div className="border-t border-neutral-200 my-2" />
+            )}
             {has("stock") && (
+              <SidebarGroup
+                label={t(locale, "nav.stock")}
+                icon={<Warehouse size={16} />}
+                href="/stock"
+                items={[
+                  { href: "/stock/uzbek", label: t(locale, "nav.stock.uzbek") },
+                  { href: "/stock/russian", label: t(locale, "nav.stock.russian") },
+                  {
+                    href: "/stock/topseller",
+                    label: t(locale, "nav.stock.topseller"),
+                    children: [
+                      { href: "/stock/topseller/uzbek", label: t(locale, "nav.stock.uzbek") },
+                      { href: "/stock/topseller/russian", label: t(locale, "nav.stock.russian") },
+                    ],
+                  },
+                  {
+                    href: "/stock/zero",
+                    label: t(locale, "nav.stock.zero"),
+                    children: [
+                      { href: "/stock/zero/uzbek", label: t(locale, "nav.stock.uzbek") },
+                      { href: "/stock/zero/russian", label: t(locale, "nav.stock.russian") },
+                    ],
+                  },
+                  {
+                    href: "/stock/critical",
+                    label: t(locale, "nav.stock.critical"),
+                    children: [
+                      { href: "/stock/critical/uzbek", label: t(locale, "nav.stock.uzbek") },
+                      { href: "/stock/critical/russian", label: t(locale, "nav.stock.russian") },
+                    ],
+                  },
+                  {
+                    href: "/stock/transit",
+                    label: t(locale, "nav.stock.transit"),
+                    children: [
+                      { href: "/stock/transit/uzbek", label: t(locale, "nav.stock.uzbek") },
+                      { href: "/stock/transit/russian", label: t(locale, "nav.stock.russian") },
+                    ],
+                  },
+                  { href: "/stock/sales", label: t(locale, "nav.stock.sales") },
+                  { href: "/stock/preorders", label: t(locale, "nav.stock.preorders") },
+                ]}
+              />
+            )}
+            {has("prices") && <NavLink href="/prices" icon={<DollarSign size={16} />} label={t(locale, "nav.prices")} />}
+            {has("catalog") && <NavLink href="/catalog" icon={<Palette size={16} />} label={t(locale, "nav.catalog")} />}
+
+            {/* 3) Zoll Schweiz */}
+            {has("customs_ch") && (
               <>
                 <div className="border-t border-neutral-200 my-2" />
-                <SidebarGroup
-                  label={t(locale, "nav.stock")}
-                  icon={<Warehouse size={16} />}
-                  href="/stock"
-                  items={[
-                    { href: "/stock/uzbek", label: t(locale, "nav.stock.uzbek") },
-                    { href: "/stock/russian", label: t(locale, "nav.stock.russian") },
-                    {
-                      href: "/stock/topseller",
-                      label: t(locale, "nav.stock.topseller"),
-                      children: [
-                        { href: "/stock/topseller/uzbek", label: t(locale, "nav.stock.uzbek") },
-                        { href: "/stock/topseller/russian", label: t(locale, "nav.stock.russian") },
-                      ],
-                    },
-                    {
-                      href: "/stock/zero",
-                      label: t(locale, "nav.stock.zero"),
-                      children: [
-                        { href: "/stock/zero/uzbek", label: t(locale, "nav.stock.uzbek") },
-                        { href: "/stock/zero/russian", label: t(locale, "nav.stock.russian") },
-                      ],
-                    },
-                    {
-                      href: "/stock/critical",
-                      label: t(locale, "nav.stock.critical"),
-                      children: [
-                        { href: "/stock/critical/uzbek", label: t(locale, "nav.stock.uzbek") },
-                        { href: "/stock/critical/russian", label: t(locale, "nav.stock.russian") },
-                      ],
-                    },
-                    {
-                      href: "/stock/transit",
-                      label: t(locale, "nav.stock.transit"),
-                      children: [
-                        { href: "/stock/transit/uzbek", label: t(locale, "nav.stock.uzbek") },
-                        { href: "/stock/transit/russian", label: t(locale, "nav.stock.russian") },
-                      ],
-                    },
-                    { href: "/stock/sales", label: t(locale, "nav.stock.sales") },
-                    { href: "/stock/preorders", label: t(locale, "nav.stock.preorders") },
-                  ]}
+                <NavLink
+                  href="/customs-ch"
+                  icon={<FileText size={16} />}
+                  label={t(locale, "nav.customs_ch")}
                 />
               </>
             )}
 
+            {/* 4) Retouren · Versand */}
+            {(has("returns") || has("shipping")) && (
+              <div className="border-t border-neutral-200 my-2" />
+            )}
+            {has("returns") && (
+              <SidebarGroup
+                label={t(locale, "nav.returns")}
+                icon={<RotateCcw size={16} />}
+                href="/returns"
+                items={[
+                  { href: "/returns", label: t(locale, "nav.returns.list") },
+                  { href: "/returns/analytics", label: t(locale, "nav.returns.analytics") },
+                ]}
+              />
+            )}
+            {has("shipping") && (
+              <SidebarGroup
+                label={t(locale, "nav.shipping")}
+                icon={<Truck size={16} />}
+                href="/pack"
+                items={[
+                  { href: "/pack", label: t(locale, "nav.shipping.list") },
+                  { href: "/pack/archive", label: t(locale, "nav.shipping.archive") },
+                  { href: "/pack/display", label: t(locale, "nav.shipping.display") },
+                ]}
+              />
+            )}
+
+            {/* Finanzen — bleibt erreichbar, aber gruppiert ans Ende vor den Bold-Separator */}
             {has("finances") && (
               <>
                 <div className="border-t border-neutral-200 my-2" />
@@ -99,51 +143,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               </>
             )}
 
-            {has("returns") && (
-              <>
-                <div className="border-t border-neutral-200 my-2" />
-                <SidebarGroup
-                  label={t(locale, "nav.returns")}
-                  icon={<RotateCcw size={16} />}
-                  href="/returns"
-                  items={[
-                    { href: "/returns", label: t(locale, "nav.returns.list") },
-                    { href: "/returns/analytics", label: t(locale, "nav.returns.analytics") },
-                  ]}
-                />
-              </>
-            )}
-
-            {has("customs_ch") && (
-              <>
-                <div className="border-t border-neutral-200 my-2" />
-                <NavLink
-                  href="/customs-ch"
-                  icon={<FileText size={16} />}
-                  label={t(locale, "nav.customs_ch")}
-                />
-              </>
-            )}
-
-            {has("shipping") && (
-              <>
-                <div className="border-t border-neutral-200 my-2" />
-                <SidebarGroup
-                  label={t(locale, "nav.shipping")}
-                  icon={<Truck size={16} />}
-                  href="/pack"
-                  items={[
-                    { href: "/pack", label: t(locale, "nav.shipping.list") },
-                    { href: "/pack/archive", label: t(locale, "nav.shipping.archive") },
-                    { href: "/pack/display", label: t(locale, "nav.shipping.display") },
-                  ]}
-                />
-              </>
-            )}
-
+            {/* 5) Bold-Separator + Einstellungen */}
             {(has("suppliers") || has("users")) && (
               <>
-                <div className="border-t border-neutral-200 my-2" />
+                <div className="border-t-2 border-neutral-300 my-3" />
                 <SidebarGroup
                   label={t(locale, "nav.settings")}
                   icon={<Settings size={16} />}

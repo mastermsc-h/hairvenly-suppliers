@@ -3,7 +3,7 @@ export type Locale = "de" | "en" | "tr";
 export const messages: Record<Locale, Record<string, string>> = {
   de: {
     // Navigation
-    "nav.overview": "Übersicht",
+    "nav.overview": "Auslandsbestellungen",
     "nav.orders": "Bestellungen",
     "nav.users": "Benutzer",
     "nav.logout": "Abmelden",
@@ -655,7 +655,7 @@ export const messages: Record<Locale, Record<string, string>> = {
 
   en: {
     // Navigation
-    "nav.overview": "Order",
+    "nav.overview": "Foreign Orders",
     "nav.orders": "Orders",
     "nav.users": "Users",
     "nav.logout": "Log out",
@@ -1306,7 +1306,7 @@ export const messages: Record<Locale, Record<string, string>> = {
 
   tr: {
     // Navigation
-    "nav.overview": "Genel Bakış",
+    "nav.overview": "Yurtdışı Siparişleri",
     "nav.orders": "Siparişler",
     "nav.users": "Kullanıcılar",
     "nav.logout": "Çıkış Yap",
