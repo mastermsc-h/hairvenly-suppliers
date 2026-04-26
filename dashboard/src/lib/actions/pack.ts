@@ -547,6 +547,53 @@ export async function fetchSessionScans(
 }
 
 /**
+ * Komplettes Pack-Statistik-Reset (NUR ADMIN). Löscht:
+ * - alle pack_sessions (cascade -> pack_scans + pack_photos via FK)
+ * - alle Foto-Dateien aus Supabase Storage
+ *
+ * Liefert Anzahl gelöschter Records zurück. NICHT umkehrbar.
+ */
+export async function resetPackStats(
+  confirm: string,
+): Promise<{ success: boolean; error?: string; sessionsDeleted?: number; photosDeleted?: number }> {
+  const profile = await requireProfile();
+  if (profile.role !== "admin") {
+    return { success: false, error: "Nur Administratoren dürfen die Statistik zurücksetzen." };
+  }
+  if (confirm !== "LÖSCHEN") {
+    return { success: false, error: "Bestätigung fehlt." };
+  }
+
+  const supabase = await createClient();
+
+  // 1. Storage-Pfade aller Fotos sammeln
+  const { data: photos } = await supabase.from("pack_photos").select("storage_path");
+  const photoPaths = (photos ?? []).map((p) => p.storage_path);
+
+  // 2. Files aus Storage löschen
+  if (photoPaths.length > 0) {
+    await supabase.storage.from("pack-photos").remove(photoPaths);
+  }
+
+  // 3. Sessions löschen (cascade entfernt pack_scans + pack_photos automatisch)
+  const { error, count } = await supabase
+    .from("pack_sessions")
+    .delete({ count: "exact" })
+    .neq("id", "00000000-0000-0000-0000-000000000000");
+
+  if (error) return { success: false, error: error.message };
+
+  revalidatePath("/pack");
+  revalidatePath("/pack/archive");
+  revalidatePath("/pack/stats");
+  return {
+    success: true,
+    sessionsDeleted: count ?? 0,
+    photosDeleted: photoPaths.length,
+  };
+}
+
+/**
  * Pack-Vorgang abbrechen — alle Scans auf "reset", Fotos löschen, Session zurück auf "open".
  * User kann die Bestellung danach erneut von vorn packen.
  * Audit-Log der Scans bleibt mit status='reset' erhalten.

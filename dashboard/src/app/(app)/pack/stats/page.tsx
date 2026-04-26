@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { BarChart3, Users, Camera, AlertTriangle, RotateCcw, Clock, Package2 } from "lucide-react";
 import StatsChart from "./stats-chart";
+import ResetStatsButton from "./reset-button";
 
 export const dynamic = "force-dynamic";
 
@@ -144,6 +145,7 @@ export default async function StatsPage({
               {d === 365 ? "1 Jahr" : `${d} Tage`}
             </a>
           ))}
+          {profile.role === "admin" && <ResetStatsButton />}
         </div>
       </header>
 
