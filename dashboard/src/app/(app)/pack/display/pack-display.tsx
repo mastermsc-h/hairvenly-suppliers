@@ -345,9 +345,9 @@ export default function PackDisplay({
           <StatusBadge status={session.status} locale={locale} />
         </div>
 
-        {/* 3-Schritte Progress (1.Scannen 2.Fotos 3.Versenden) */}
+        {/* 3-Schritte Progress (kompakt — Fokus bleibt auf Produkten) */}
         {session.status !== "shipped" && (
-          <div className="grid grid-cols-3 gap-3 mb-8">
+          <div className="grid grid-cols-3 gap-2 mb-4">
             {([
               { key: "scan", label: "1. Scannen", icon: ScanLine, done: isComplete, active: !isComplete },
               { key: "photos", label: "2. Fotos", icon: Camera, done: photosDone, active: isComplete && !photosDone },
@@ -357,15 +357,15 @@ export default function PackDisplay({
               return (
                 <div
                   key={step.key}
-                  className={`flex items-center gap-3 px-5 py-4 rounded-xl text-xl font-bold ${
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold ${
                     step.done
                       ? "bg-emerald-700 text-white"
                       : step.active
-                      ? "bg-blue-600 text-white ring-4 ring-blue-400/40"
+                      ? "bg-blue-600 text-white ring-2 ring-blue-400/40"
                       : "bg-neutral-800 text-neutral-500"
                   }`}
                 >
-                  {step.done ? <CheckCircle2 size={28} /> : <Icon size={28} />}
+                  {step.done ? <CheckCircle2 size={16} /> : <Icon size={16} />}
                   {step.label}
                 </div>
               );
