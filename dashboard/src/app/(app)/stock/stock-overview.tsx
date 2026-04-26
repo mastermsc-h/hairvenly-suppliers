@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Scale, Package, AlertTriangle, AlertCircle, Truck, ArrowRight, Snowflake, Flame, PackagePlus, Skull, TrendingUp, ShoppingCart, ChevronDown } from "lucide-react";
+import { Scale, Package, AlertTriangle, AlertCircle, Truck, ArrowRight, Snowflake, Flame, PackagePlus, Skull, TrendingUp, ShoppingCart, ChevronDown, Maximize2, Minimize2 } from "lucide-react";
 import { t, type Locale } from "@/lib/i18n";
 import SyncBadge from "./sync-badge";
 
@@ -52,6 +52,8 @@ interface StockStats {
 
 export default function StockOverviewClient({ stats, locale }: { stats: StockStats; locale: Locale }) {
   const [insightsOpen, setInsightsOpen] = useState(false);
+  const [focusedCard, setFocusedCard] = useState<string | null>(null);
+  const toggleFocus = (id: string) => setFocusedCard((cur) => (cur === id ? null : id));
   return (
     <div className="p-4 md:p-8 space-y-6 max-w-7xl">
       <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -155,48 +157,32 @@ export default function StockOverviewClient({ stats, locale }: { stats: StockSta
         </button>
         {insightsOpen && (
           <div className="px-4 pb-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <InsightCard
-              title="Auf Lager — kein Verkauf (90T)"
-              description="Hoher Bestand, aber 0 Verkäufe in 90 Tagen — Kapital liegt brach"
-              icon={<Skull size={16} />}
-              color="rose"
-              products={stats.insights.deadStock}
-            />
-            <InsightCard
-              title="Slow Mover"
-              description="Lager > 150g, aber kaum Bewegung in 90 Tagen"
-              icon={<Snowflake size={16} />}
-              color="blue"
-              products={stats.insights.slowMovers}
-            />
-            <InsightCard
-              title="🔥 Topseller mit niedrigem Lager"
-              description="TOP7-Produkte unter 200g & nichts unterwegs — dringend nachbestellen"
-              icon={<Flame size={16} />}
-              color="orange"
-              products={stats.insights.hotMissing}
-            />
-            <InsightCard
-              title="Nachbestellen empfohlen"
-              description="Lager < Bedarfsprognose und kein Nachschub unterwegs"
-              icon={<ShoppingCart size={16} />}
-              color="amber"
-              products={stats.insights.needsReorder}
-            />
-            <InsightCard
-              title="Wachsende Verkäufe"
-              description="30-Tage-Trend deutlich höher als 90-Tage-Schnitt"
-              icon={<TrendingUp size={16} />}
-              color="emerald"
-              products={stats.insights.trendingUp}
-            />
-            <InsightCard
-              title="Eventuell überbestellt"
-              description="Mehr als 2× des Bedarfs unterwegs — könnten Lagerproblem werden"
-              icon={<PackagePlus size={16} />}
-              color="purple"
-              products={stats.insights.overOrdered}
-            />
+            {([
+              { id: "deadStock", title: "Auf Lager — kein Verkauf (90T)", description: "Hoher Bestand, aber 0 Verkäufe in 90 Tagen — Kapital liegt brach", icon: <Skull size={16} />, color: "rose" as const, products: stats.insights.deadStock },
+              { id: "slowMovers", title: "Slow Mover", description: "Lager > 150g, aber kaum Bewegung in 90 Tagen", icon: <Snowflake size={16} />, color: "blue" as const, products: stats.insights.slowMovers },
+              { id: "hotMissing", title: "🔥 Topseller mit niedrigem Lager", description: "TOP7-Produkte unter 200g & nichts unterwegs — dringend nachbestellen", icon: <Flame size={16} />, color: "orange" as const, products: stats.insights.hotMissing },
+              { id: "needsReorder", title: "Nachbestellen empfohlen", description: "Lager < Bedarfsprognose und kein Nachschub unterwegs", icon: <ShoppingCart size={16} />, color: "amber" as const, products: stats.insights.needsReorder },
+              { id: "trendingUp", title: "Wachsende Verkäufe", description: "30-Tage-Trend deutlich höher als 90-Tage-Schnitt", icon: <TrendingUp size={16} />, color: "emerald" as const, products: stats.insights.trendingUp },
+              { id: "overOrdered", title: "Eventuell überbestellt", description: "Mehr als 2× des Bedarfs unterwegs — könnten Lagerproblem werden", icon: <PackagePlus size={16} />, color: "purple" as const, products: stats.insights.overOrdered },
+            ])
+              .slice()
+              .sort((a, b) => {
+                if (focusedCard === a.id) return -1;
+                if (focusedCard === b.id) return 1;
+                return 0;
+              })
+              .map((card) => (
+                <InsightCard
+                  key={card.id}
+                  title={card.title}
+                  description={card.description}
+                  icon={card.icon}
+                  color={card.color}
+                  products={card.products}
+                  focused={focusedCard === card.id}
+                  onToggleFocus={() => toggleFocus(card.id)}
+                />
+              ))}
           </div>
         )}
       </section>
@@ -207,12 +193,14 @@ export default function StockOverviewClient({ stats, locale }: { stats: StockSta
 const INITIAL_LIMIT = 15;
 const STEP = 25;
 
-function InsightCard({ title, description, icon, color, products }: {
+function InsightCard({ title, description, icon, color, products, focused, onToggleFocus }: {
   title: string;
   description: string;
   icon: React.ReactNode;
   color: "rose" | "blue" | "orange" | "amber" | "emerald" | "purple";
   products: InsightProduct[];
+  focused?: boolean;
+  onToggleFocus?: () => void;
 }) {
   const colors: Record<string, { bg: string; text: string; border: string; chip: string }> = {
     rose: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", chip: "bg-rose-100 text-rose-800" },
@@ -225,12 +213,13 @@ function InsightCard({ title, description, icon, color, products }: {
   const c = colors[color];
 
   const [limit, setLimit] = useState(INITIAL_LIMIT);
-  const visible = products.slice(0, limit);
-  const hasMore = products.length > limit;
+  const effectiveLimit = focused ? products.length : limit;
+  const visible = products.slice(0, effectiveLimit);
+  const hasMore = !focused && products.length > limit;
   const remaining = products.length - limit;
 
   return (
-    <div className={`bg-white rounded-2xl border ${c.border} shadow-sm overflow-hidden`}>
+    <div className={`bg-white rounded-2xl border ${c.border} shadow-sm overflow-hidden ${focused ? "lg:col-span-2 ring-2 ring-offset-2 ring-neutral-300" : ""}`}>
       <div className={`${c.bg} px-4 py-3 border-b ${c.border}`}>
         <div className="flex items-center gap-2">
           <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${c.chip}`}>{icon}</div>
@@ -241,13 +230,22 @@ function InsightCard({ title, description, icon, color, products }: {
           <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold ${c.chip}`}>
             {products.length}
           </span>
+          {onToggleFocus && products.length > 0 && (
+            <button
+              onClick={onToggleFocus}
+              title={focused ? "Verkleinern" : "Ganze Tabelle anzeigen"}
+              className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${c.chip} hover:opacity-80 transition`}
+            >
+              {focused ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            </button>
+          )}
         </div>
       </div>
       {products.length === 0 ? (
         <div className="px-4 py-6 text-center text-xs text-neutral-400">Keine Produkte gefunden</div>
       ) : (
         <>
-          <ul className="divide-y divide-neutral-100 max-h-[400px] overflow-y-auto">
+          <ul className={`divide-y divide-neutral-100 ${focused ? "" : "max-h-[400px] overflow-y-auto"}`}>
             {visible.map((p, i) => (
               <li key={i} className="px-4 py-2 flex items-start gap-2 text-xs hover:bg-neutral-50 transition">
                 <span className={`shrink-0 mt-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold ${p.quality === "Usbekisch Wellig" ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"}`}>
@@ -263,7 +261,7 @@ function InsightCard({ title, description, icon, color, products }: {
               </li>
             ))}
           </ul>
-          {(hasMore || limit > INITIAL_LIMIT) && (
+          {!focused && (hasMore || limit > INITIAL_LIMIT) && (
             <div className="px-4 py-2 border-t border-neutral-100 bg-neutral-50/50 flex items-center justify-between gap-2">
               <span className="text-[10px] text-neutral-500">{visible.length} von {products.length}</span>
               <div className="flex items-center gap-1.5">

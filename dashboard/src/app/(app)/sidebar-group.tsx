@@ -8,6 +8,7 @@ import { ChevronDown } from "lucide-react";
 export interface SidebarItem {
   href: string;
   label: string;
+  exact?: boolean;
   children?: { href: string; label: string }[];
 }
 
@@ -55,7 +56,7 @@ export default function SidebarGroup({ label, icon, href, items }: SidebarGroupP
             item.children ? (
               <SubGroup key={item.href} item={item} pathname={pathname} />
             ) : (
-              <NavItem key={item.href} href={item.href} label={item.label} pathname={pathname} />
+              <NavItem key={item.href} href={item.href} label={item.label} pathname={pathname} exact={item.exact} />
             ),
           )}
         </div>
@@ -64,8 +65,8 @@ export default function SidebarGroup({ label, icon, href, items }: SidebarGroupP
   );
 }
 
-function NavItem({ href, label, pathname }: { href: string; label: string; pathname: string }) {
-  const isActive = pathname === href || pathname.startsWith(href + "/");
+function NavItem({ href, label, pathname, exact }: { href: string; label: string; pathname: string; exact?: boolean }) {
+  const isActive = exact ? pathname === href : (pathname === href || pathname.startsWith(href + "/"));
   return (
     <Link
       href={href}

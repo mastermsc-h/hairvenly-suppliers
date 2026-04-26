@@ -43,6 +43,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 icon={<Warehouse size={16} />}
                 href="/stock"
                 items={[
+                  { href: "/stock", label: "Übersicht", exact: true },
                   { href: "/stock/uzbek", label: t(locale, "nav.stock.uzbek") },
                   { href: "/stock/russian", label: t(locale, "nav.stock.russian") },
                   {
