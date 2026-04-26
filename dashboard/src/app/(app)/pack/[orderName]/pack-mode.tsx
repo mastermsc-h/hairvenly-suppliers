@@ -11,7 +11,7 @@ import {
   fetchSessionScans,
 } from "@/lib/actions/pack";
 import { t, type Locale } from "@/lib/i18n";
-import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X, RotateCcw, History, Package2 } from "lucide-react";
+import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X, RotateCcw, History, Package2, ImagePlus } from "lucide-react";
 import CameraScanner from "./camera-scanner";
 import OrderQrScanner from "../order-qr-scanner";
 
@@ -243,6 +243,29 @@ export default function PackMode({
   const allPhotosUploaded = PHOTO_TYPES.every((p) => !!photos[p]);
   const canFulfill = isComplete && allPhotosUploaded && status !== "shipped";
 
+  // Phase-State für den Assistent-Workflow
+  const phase: "scan" | "photos" | "ready" | "shipped" = useMemo(() => {
+    if (status === "shipped") return "shipped";
+    if (!isComplete) return "scan";
+    if (!allPhotosUploaded) return "photos";
+    return "ready";
+  }, [isComplete, allPhotosUploaded, status]);
+
+  // Refs für Auto-Scroll bei Phase-Wechsel
+  const photoSectionRef = useRef<HTMLDivElement>(null);
+  const readySectionRef = useRef<HTMLDivElement>(null);
+  const lastPhaseRef = useRef<typeof phase>(phase);
+
+  useEffect(() => {
+    if (lastPhaseRef.current === phase) return;
+    lastPhaseRef.current = phase;
+    if (phase === "photos") {
+      setTimeout(() => photoSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+    } else if (phase === "ready" || phase === "shipped") {
+      setTimeout(() => readySectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+    }
+  }, [phase]);
+
   const submitBarcode = useCallback(
     (barcode: string) => {
       // Solange Erfolgs-Overlay offen ist → keine neuen Scans annehmen
@@ -397,10 +420,45 @@ export default function PackMode({
         </div>
       )}
 
+      {/* Phase Indicator */}
+      <div className="bg-white rounded-2xl border border-neutral-200 p-3 shadow-sm flex items-center gap-2 text-sm">
+        {([
+          { key: "scan", label: "1. Scannen", icon: ScanLine },
+          { key: "photos", label: "2. Fotos", icon: Camera },
+          { key: "ready", label: "3. Versenden", icon: Send },
+        ] as const).map((step, i, arr) => {
+          const order = ["scan", "photos", "ready", "shipped"];
+          const stepIdx = order.indexOf(step.key);
+          const phaseIdx = order.indexOf(phase);
+          const done = phaseIdx > stepIdx || phase === "shipped";
+          const active = phaseIdx === stepIdx;
+          const Icon = step.icon;
+          return (
+            <div key={step.key} className="flex items-center gap-2 flex-1">
+              <div
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg flex-1 transition ${
+                  done
+                    ? "bg-emerald-50 text-emerald-800 border border-emerald-300"
+                    : active
+                    ? "bg-blue-50 text-blue-900 border-2 border-blue-400 font-semibold"
+                    : "bg-neutral-50 text-neutral-400 border border-neutral-200"
+                }`}
+              >
+                {done ? <CheckCircle2 size={16} /> : <Icon size={16} />}
+                <span className="text-xs md:text-sm">{step.label}</span>
+              </div>
+              {i < arr.length - 1 && (
+                <div className={`hidden md:block h-0.5 w-4 ${done ? "bg-emerald-300" : "bg-neutral-200"}`} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Left: Scanner + Status */}
         <div className="md:col-span-1 space-y-4">
-          {nextItem && (
+          {phase === "scan" && nextItem && (
             <div className="bg-blue-50 border-2 border-blue-300 rounded-2xl p-4 shadow-sm">
               <div className="text-[11px] font-bold text-blue-900 uppercase tracking-widest mb-2">
                 Scanne als Nächstes
@@ -459,8 +517,40 @@ export default function PackMode({
             </div>
           )}
 
-          <CameraScanner onScan={submitBarcode} paused={isPending} />
+          {phase === "scan" && <CameraScanner onScan={submitBarcode} paused={isPending} />}
 
+          {phase === "photos" && (
+            <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 shadow-sm text-center">
+              <ImagePlus className="mx-auto text-amber-700 mb-2" size={48} />
+              <div className="text-sm font-bold text-amber-900 uppercase tracking-wide">
+                Schritt 2 von 3
+              </div>
+              <div className="text-xl font-black text-amber-900 mt-1">
+                Beweis-Fotos aufnehmen
+              </div>
+              <div className="text-xs text-amber-800 mt-2 leading-relaxed">
+                Alle Artikel sind bestätigt ✓<br />
+                Bitte 3 Fotos machen: Artikel + Rechnung, Artikel im Karton, Karton auf Waage.
+              </div>
+            </div>
+          )}
+
+          {phase === "ready" && (
+            <div className="bg-emerald-50 border-2 border-emerald-400 rounded-2xl p-5 shadow-sm text-center">
+              <CheckCircle2 className="mx-auto text-emerald-700 mb-2" size={48} />
+              <div className="text-sm font-bold text-emerald-900 uppercase tracking-wide">
+                Schritt 3 von 3
+              </div>
+              <div className="text-xl font-black text-emerald-900 mt-1">
+                Bereit zum Versenden
+              </div>
+              <div className="text-xs text-emerald-800 mt-2">
+                Karton schließen und Bestellung als versendet markieren.
+              </div>
+            </div>
+          )}
+
+          {phase === "scan" && (
           <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm">
             <form onSubmit={handleScan}>
               <label className="text-xs font-medium text-neutral-600 uppercase tracking-wide flex items-center gap-1">
@@ -483,6 +573,7 @@ export default function PackMode({
               </div>
             </form>
           </div>
+          )}
 
           {shippingAddress && (
             <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm text-sm">
@@ -746,7 +837,7 @@ export default function PackMode({
 
           {/* Photo Stations */}
           {isComplete && (
-            <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm">
+            <div ref={photoSectionRef} className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm scroll-mt-6">
               <div className="text-xs font-medium text-neutral-600 uppercase tracking-wide mb-3">
                 {t(locale, "shipping.photos_required")}
               </div>
@@ -768,7 +859,7 @@ export default function PackMode({
 
           {/* Ready / Fulfill */}
           {canFulfill && (
-            <div className="bg-emerald-50 border-2 border-emerald-300 rounded-2xl p-6 text-center">
+            <div ref={readySectionRef} className="bg-emerald-50 border-2 border-emerald-300 rounded-2xl p-6 text-center scroll-mt-6">
               <CheckCircle2 className="mx-auto text-emerald-600 mb-3" size={48} />
               <div className="text-2xl font-bold text-emerald-900 mb-3">
                 {t(locale, "shipping.ready")}
