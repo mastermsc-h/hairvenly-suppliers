@@ -161,6 +161,8 @@ export default function PackMode({
   initialPhotosSkipped,
   initialPhotosSkipReason,
   shippingAddress,
+  shopifyOrderUrl,
+  shopifyLabelUrl,
   locale,
 }: {
   sessionId: string;
@@ -172,6 +174,8 @@ export default function PackMode({
   initialPhotosSkipped: boolean;
   initialPhotosSkipReason: PhotoSkipReason | null;
   shippingAddress: { name: string | null; address1: string | null; zip: string | null; city: string | null; country: string | null } | null;
+  shopifyOrderUrl: string | null;
+  shopifyLabelUrl: string | null;
   locale: Locale;
 }) {
   const [counts, setCounts] = useState<Record<string, number>>(initialCounts);
@@ -504,6 +508,11 @@ export default function PackMode({
       const res = await completePackSession(sessionId);
       if (res.success) {
         setStatus("shipped");
+        // Shopify-Order-Seite (für Lexware-Rechnung-Download) + Versandetikett-
+        // Erstellungsseite in neuen Tabs öffnen. Browser erlauben den Aufruf
+        // weil es aus einem direkten User-Click stammt.
+        if (shopifyOrderUrl) window.open(shopifyOrderUrl, "_blank", "noopener");
+        if (shopifyLabelUrl) window.open(shopifyLabelUrl, "_blank", "noopener");
       } else {
         setFulfillError(res.error ?? "Fehler");
       }
@@ -1138,6 +1147,32 @@ export default function PackMode({
                 {t(locale, "shipping.fulfill_success")}
               </div>
               <div className="text-sm text-blue-700 mt-1">{orderName}</div>
+
+              {(shopifyOrderUrl || shopifyLabelUrl) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-5 max-w-xl mx-auto">
+                  {shopifyOrderUrl && (
+                    <a
+                      href={shopifyOrderUrl}
+                      target="_blank"
+                      rel="noopener"
+                      className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-white border-2 border-blue-300 text-blue-900 text-sm font-semibold hover:bg-blue-100 transition"
+                    >
+                      🧾 Rechnung drucken
+                    </a>
+                  )}
+                  {shopifyLabelUrl && (
+                    <a
+                      href={shopifyLabelUrl}
+                      target="_blank"
+                      rel="noopener"
+                      className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-white border-2 border-blue-300 text-blue-900 text-sm font-semibold hover:bg-blue-100 transition"
+                    >
+                      📦 Versandetikett erstellen
+                    </a>
+                  )}
+                </div>
+              )}
+
               <div className="flex flex-col md:flex-row items-stretch justify-center gap-3 mt-5">
                 <OrderQrScanner buttonLabel="Nächste Bestellung scannen" />
                 <Link

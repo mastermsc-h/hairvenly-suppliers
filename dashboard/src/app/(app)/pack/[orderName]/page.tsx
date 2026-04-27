@@ -32,6 +32,15 @@ export default async function PackOrderPage({
   const order = await fetchOrderForPack(orderName);
   if (!order) notFound();
 
+  // Shopify-Admin-URLs für Post-Fulfill-Hand-off (Rechnung/Lexware + Versandetikett)
+  const shopHandle = (process.env.SHOPIFY_SHOP_DOMAIN ?? "").replace(/\.myshopify\.com$/, "");
+  const shopifyOrderUrl = shopHandle
+    ? `https://admin.shopify.com/store/${shopHandle}/orders/${order.numericId}`
+    : null;
+  const shopifyLabelUrl = shopHandle
+    ? `https://admin.shopify.com/store/${shopHandle}/orders/${order.numericId}/labels/new`
+    : null;
+
   // Session anlegen oder laden
   const { sessionId, status, expectedItems, photosSkipped, photosSkipReason } =
     await getOrCreatePackSession(orderName);
@@ -97,6 +106,8 @@ export default async function PackOrderPage({
         initialPhotosSkipped={photosSkipped}
         initialPhotosSkipReason={photosSkipReason}
         shippingAddress={order.shippingAddress}
+        shopifyOrderUrl={shopifyOrderUrl}
+        shopifyLabelUrl={shopifyLabelUrl}
         locale={locale}
       />
     </div>
