@@ -502,17 +502,16 @@ export default function PackMode({
     });
   }
 
+  // Lokaler State: hat der Mitarbeiter den Versandlabel-Tab schon geöffnet?
+  // Klick darauf = Ende des Prozesses → UI wechselt auf "abgeschlossen".
+  const [labelClicked, setLabelClicked] = useState(false);
+
   function handleFulfill() {
     setFulfillError(null);
     startTransition(async () => {
       const res = await completePackSession(sessionId);
       if (res.success) {
         setStatus("shipped");
-        // Shopify-Order-Seite (für Lexware-Rechnung-Download) + Versandetikett-
-        // Erstellungsseite in neuen Tabs öffnen. Browser erlauben den Aufruf
-        // weil es aus einem direkten User-Click stammt.
-        if (shopifyOrderUrl) window.open(shopifyOrderUrl, "_blank", "noopener");
-        if (shopifyLabelUrl) window.open(shopifyLabelUrl, "_blank", "noopener");
       } else {
         setFulfillError(res.error ?? "Fehler");
       }
@@ -1140,40 +1139,64 @@ export default function PackMode({
             </div>
           )}
 
-          {status === "shipped" && (
+          {status === "shipped" && !labelClicked && (
             <div className="bg-blue-50 border-2 border-blue-300 rounded-2xl p-6 text-center">
               <Send className="mx-auto text-blue-700 mb-3" size={40} />
               <div className="text-xl font-bold text-blue-900">
                 {t(locale, "shipping.fulfill_success")}
               </div>
               <div className="text-sm text-blue-700 mt-1">{orderName}</div>
+              <div className="text-xs text-blue-700/80 mt-3">
+                Letzter Schritt: Rechnung + Versandetikett drucken.
+              </div>
 
-              {(shopifyOrderUrl || shopifyLabelUrl) && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-5 max-w-xl mx-auto">
-                  {shopifyOrderUrl && (
-                    <a
-                      href={shopifyOrderUrl}
-                      target="_blank"
-                      rel="noopener"
-                      className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-white border-2 border-blue-300 text-blue-900 text-sm font-semibold hover:bg-blue-100 transition"
-                    >
-                      🧾 Rechnung drucken
-                    </a>
-                  )}
-                  {shopifyLabelUrl && (
-                    <a
-                      href={shopifyLabelUrl}
-                      target="_blank"
-                      rel="noopener"
-                      className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-white border-2 border-blue-300 text-blue-900 text-sm font-semibold hover:bg-blue-100 transition"
-                    >
-                      📦 Versandetikett erstellen
-                    </a>
-                  )}
-                </div>
-              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-5 max-w-xl mx-auto">
+                {shopifyOrderUrl ? (
+                  <a
+                    href={shopifyOrderUrl}
+                    target="_blank"
+                    rel="noopener"
+                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-white border-2 border-blue-300 text-blue-900 text-sm font-semibold hover:bg-blue-100 transition"
+                  >
+                    🧾 Rechnung drucken
+                  </a>
+                ) : (
+                  <div />
+                )}
+                {shopifyLabelUrl ? (
+                  <a
+                    href={shopifyLabelUrl}
+                    target="_blank"
+                    rel="noopener"
+                    onClick={() => setLabelClicked(true)}
+                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-emerald-600 border-2 border-emerald-700 text-white text-sm font-semibold hover:bg-emerald-700 transition"
+                  >
+                    📦 Versandetikett drucken &amp; abschließen
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setLabelClicked(true)}
+                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-emerald-600 border-2 border-emerald-700 text-white text-sm font-semibold hover:bg-emerald-700 transition"
+                  >
+                    Bestellung abschließen
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
-              <div className="flex flex-col md:flex-row items-stretch justify-center gap-3 mt-5">
+          {status === "shipped" && labelClicked && (
+            <div className="bg-emerald-50 border-2 border-emerald-400 rounded-2xl p-6 text-center">
+              <CheckCircle2 className="mx-auto text-emerald-700 mb-3" size={48} />
+              <div className="text-2xl font-bold text-emerald-900">
+                Vorgang abgeschlossen
+              </div>
+              <div className="text-sm text-emerald-700 mt-1">
+                {orderName} — versendet, Rechnung &amp; Versandetikett gedruckt
+              </div>
+
+              <div className="flex flex-col md:flex-row items-stretch justify-center gap-3 mt-6">
                 <OrderQrScanner buttonLabel="Nächste Bestellung scannen" />
                 <Link
                   href="/pack"
@@ -1183,6 +1206,21 @@ export default function PackMode({
                   Zur Versand-Liste
                 </Link>
               </div>
+
+              {(shopifyOrderUrl || shopifyLabelUrl) && (
+                <div className="flex flex-wrap items-center justify-center gap-3 mt-4 text-xs text-emerald-800/80">
+                  {shopifyOrderUrl && (
+                    <a href={shopifyOrderUrl} target="_blank" rel="noopener" className="hover:underline">
+                      Rechnung erneut öffnen
+                    </a>
+                  )}
+                  {shopifyLabelUrl && (
+                    <a href={shopifyLabelUrl} target="_blank" rel="noopener" className="hover:underline">
+                      Versandetikett erneut öffnen
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
