@@ -144,7 +144,19 @@
     </tr>
   </thead>
   <tbody>
+    {% assign skip_handles = "accessoires-werkzeuge,extensions-zubehoer,blessed-haarpflege,haarpflegeprodukte,sonstige-haarpflege,extensions-schulungen" | split: "," %}
     {% for line_item in order.line_items %}
+      {% comment %} Skip-Collection-Check: keine Methode/Länge/Herkunft-Badges
+         für Zubehör, Pflegeprodukte oder Schulungen — title-heuristik
+         matcht z.B. "Bonding Löser" sonst falsch als BONDINGS. {% endcomment %}
+      {% assign is_skip_product = false %}
+      {% for col in line_item.product.collections %}
+        {% if skip_handles contains col.handle %}
+          {% assign is_skip_product = true %}
+          {% break %}
+        {% endif %}
+      {% endfor %}
+
       {% capture upper_title %}{{ line_item.title | upcase }} {{ line_item.variant.title | upcase }}{% endcapture %}
       {% assign method_label = "" %}
       {% assign method_class = "" %}
@@ -190,11 +202,13 @@
           {% endif %}
         </td>
         <td>
-          <div>
-            {% if method_label != "" %}<span class="method-badge {{ method_class }}">{{ method_label }}</span>{% endif %}
-            {% if length_label != "" %}<span class="tag-length">{{ length_label }}</span>{% endif %}
-            {% if origin_label != "" %}<span class="tag-origin">{{ origin_label }}</span>{% endif %}
-          </div>
+          {% unless is_skip_product %}
+            <div>
+              {% if method_label != "" %}<span class="method-badge {{ method_class }}">{{ method_label }}</span>{% endif %}
+              {% if length_label != "" %}<span class="tag-length">{{ length_label }}</span>{% endif %}
+              {% if origin_label != "" %}<span class="tag-origin">{{ origin_label }}</span>{% endif %}
+            </div>
+          {% endunless %}
           <div class="item-title">{{ line_item.title }}</div>
           {% if line_item.variant.title != blank and line_item.variant.title != "Default Title" %}
             <div class="item-variant">{{ line_item.variant.title }}</div>
