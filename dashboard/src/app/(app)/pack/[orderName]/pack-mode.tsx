@@ -508,6 +508,9 @@ export default function PackMode({
 
   function handleFulfill() {
     setFulfillError(null);
+    // Versandetikett-Tab vor dem Server-Call öffnen, damit der Browser den
+    // window.open noch als direkten user-click wertet (kein popup-block).
+    if (shopifyLabelUrl) window.open(shopifyLabelUrl, "_blank", "noopener");
     startTransition(async () => {
       const res = await completePackSession(sessionId);
       if (res.success) {
