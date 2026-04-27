@@ -69,6 +69,12 @@ export default async function PackPage() {
   // Anzahl orders ohne QR (von der aktuellen Liste) — Hinweis für Backfill-Button
   const ordersWithoutQrInList = orders.filter((o) => !o.hasPackQr).length;
 
+  // Shopify-Admin-Bulk-Lieferscheine: Liste aller bezahlten, nicht ausgeführten Bestellungen
+  const shopHandle = (process.env.SHOPIFY_SHOP_DOMAIN ?? "").replace(/\.myshopify\.com$/, "");
+  const shopifyBulkOrdersUrl = shopHandle
+    ? `https://admin.shopify.com/store/${shopHandle}/orders?status=open&financial_status=paid&fulfillment_status=unfulfilled`
+    : null;
+
   return (
     <div className="p-4 md:p-8 space-y-6 max-w-7xl">
       <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
@@ -83,6 +89,17 @@ export default async function PackPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {shopifyBulkOrdersUrl && (
+            <a
+              href={shopifyBulkOrdersUrl}
+              target="_blank"
+              rel="noopener"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-neutral-300 text-neutral-900 text-sm font-medium hover:bg-neutral-50 transition"
+              title="Shopify Admin öffnen → alle auswählen → Lieferscheine drucken"
+            >
+              🧾 Alle Lieferscheine drucken
+            </a>
+          )}
           <OrderQrScanner />
           <BackfillButton />
         </div>
