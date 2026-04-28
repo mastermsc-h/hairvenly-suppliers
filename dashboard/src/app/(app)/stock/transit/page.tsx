@@ -2,6 +2,7 @@ import { requireProfile } from "@/lib/auth";
 import { t, type Locale } from "@/lib/i18n";
 import { readDashboardAlerts } from "@/lib/stock-sheets";
 import { fetchOrderIdByName } from "@/lib/order-name-map";
+import { filterArchivedFromStock } from "@/lib/filter-archived-orders";
 import AlertsClient from "../alerts-client";
 
 export const revalidate = 120;
@@ -16,9 +17,13 @@ export default async function TransitStockPage() {
     fetchOrderIdByName(),
   ]);
 
+  const filtered = filterArchivedFromStock(unterwegs, orderIdByName)
+    // For transit view: drop products that have no transit left after filtering
+    .filter((d) => d.unterwegsG > 0);
+
   return (
     <AlertsClient
-      data={unterwegs}
+      data={filtered}
       title={t(locale, "stock.title.transit")}
       subtitle={t(locale, "stock.subtitle.transit")}
       mode="transit"

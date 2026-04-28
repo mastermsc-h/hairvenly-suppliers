@@ -1,6 +1,8 @@
 import { requireProfile } from "@/lib/auth";
 import { t, type Locale } from "@/lib/i18n";
 import { readInventorySheet, readDashboardAlerts } from "@/lib/stock-sheets";
+import { fetchOrderIdByName } from "@/lib/order-name-map";
+import { filterArchivedFromStock } from "@/lib/filter-archived-orders";
 import InventoryPageClient, { type InventoryWithTransit } from "../inventory-page";
 
 export const revalidate = 60;
@@ -10,14 +12,17 @@ export default async function UzbekStockPage() {
   if (!profile.is_admin) return <div className="p-8 text-neutral-500">Nur für Admins.</div>;
   const locale = (profile.language ?? "de") as Locale;
 
-  const [inventoryResult, alerts] = await Promise.all([
+  const [inventoryResult, alerts, orderIdByName] = await Promise.all([
     readInventorySheet("Usbekisch - WELLIG"),
     readDashboardAlerts(),
+    fetchOrderIdByName(),
   ]);
 
-  const transitByShopifyKey = buildTransitLookup(
+  const filteredUnterwegs = filterArchivedFromStock(
     alerts.unterwegs.filter((u) => u.sheetKey === "wellig"),
+    orderIdByName,
   );
+  const transitByShopifyKey = buildTransitLookup(filteredUnterwegs);
 
   const data: InventoryWithTransit[] = inventoryResult.rows.map((row) => {
     const isClipIn = row.collection.toUpperCase().includes("CLIP");

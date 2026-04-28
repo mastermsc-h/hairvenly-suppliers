@@ -7,6 +7,14 @@ export interface OrderMeta {
   id: string;
   trackingNumber: string | null;
   trackingUrl: string | null;
+  status: string | null;
+}
+
+/** Statuses where the order is considered archived and should be hidden everywhere. */
+export const ARCHIVED_STATUS = new Set(["stocked", "cancelled"]);
+
+export function isArchived(meta: OrderMeta | undefined | null): boolean {
+  return !!meta && !!meta.status && ARCHIVED_STATUS.has(meta.status);
 }
 
 /**
@@ -68,6 +76,7 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
     order_date: string | null;
     tracking_number: string | null;
     tracking_url: string | null;
+    status: string | null;
   };
 
   // Build keys: "family|YYYY-MM-DD" → OrderMeta (canonical date = ISO).
@@ -77,6 +86,7 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
       id: o.id,
       trackingNumber: o.tracking_number,
       trackingUrl: o.tracking_url,
+      status: o.status ?? null,
     };
 
     const iso = toIsoDate(o.order_date);

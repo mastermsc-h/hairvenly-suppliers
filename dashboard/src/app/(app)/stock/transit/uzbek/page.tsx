@@ -2,6 +2,7 @@ import { requireProfile } from "@/lib/auth";
 import { t, type Locale } from "@/lib/i18n";
 import { readDashboardAlerts } from "@/lib/stock-sheets";
 import { fetchOrderIdByName } from "@/lib/order-name-map";
+import { filterArchivedFromStock } from "@/lib/filter-archived-orders";
 import AlertsClient from "../../alerts-client";
 
 export const revalidate = 120;
@@ -16,9 +17,14 @@ export default async function TransitUzbekPage() {
     fetchOrderIdByName(),
   ]);
 
+  const data = filterArchivedFromStock(
+    unterwegs.filter((d) => d.sheetKey === "wellig"),
+    orderIdByName,
+  ).filter((d) => d.unterwegsG > 0);
+
   return (
     <AlertsClient
-      data={unterwegs.filter((d) => d.sheetKey === "wellig")}
+      data={data}
       title={`${t(locale, "stock.title.transit")} — Usbekisch Wellig`}
       subtitle="Bestellte Ware unterwegs (China/Eyfel)"
       mode="transit"
