@@ -19,7 +19,9 @@ export default async function OrdersPage() {
   const isSupplierRole = profile.role === "supplier";
   const mySupplierId = profile.supplier_id;
   // Suppliers always see their own documents and invoices
-  const showDocs = hasFeature(profile, "documents") || isSupplierRole;
+  const showAllDocs = hasFeature(profile, "documents") || isSupplierRole;
+  const showPackingLists = hasFeature(profile, "packing_lists") || showAllDocs;
+  const showDocs = showAllDocs || showPackingLists;
   const showInvoices = hasFeature(profile, "invoices") || isSupplierRole;
   const canEditOrder = profile.is_admin || isSupplierRole;
 
@@ -47,6 +49,13 @@ export default async function OrdersPage() {
     const arr = docsByOrder.get(d.order_id) ?? [];
     arr.push(d);
     docsByOrder.set(d.order_id, arr);
+  }
+
+  function visibleDocsFor(orderId: string) {
+    const all = docsByOrder.get(orderId) ?? [];
+    if (showAllDocs) return all;
+    if (showPackingLists) return all.filter((d) => d.kind === "packing_details");
+    return [];
   }
 
   // Sort by order_date desc, then created_at desc
@@ -142,7 +151,7 @@ export default async function OrdersPage() {
                           </div>
                         )}
                         {showDocs && (() => {
-                          const inv = (docsByOrder.get(o.id) ?? []).find(
+                          const inv = visibleDocsFor(o.id).find(
                             (d) => d.kind === "supplier_invoice",
                           );
                           return inv ? (
@@ -173,8 +182,8 @@ export default async function OrdersPage() {
                       {showDocs && (
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} remainingBalance={o.remaining_balance} locale={locale} hideFinancials={!showInvoices} />
-                            <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
+                            <QuickDocs documents={visibleDocsFor(o.id)} compact paidTotal={o.paid_total} remainingBalance={o.remaining_balance} locale={locale} hideFinancials={!showInvoices} />
+                            <DocIndicators documents={visibleDocsFor(o.id)} />
                           </div>
                         </td>
                       )}
@@ -236,8 +245,8 @@ export default async function OrdersPage() {
                     </div>
                     {showDocs && (
                       <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                        <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} remainingBalance={o.remaining_balance} locale={locale} hideFinancials={!showInvoices} />
-                        <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
+                        <QuickDocs documents={visibleDocsFor(o.id)} compact paidTotal={o.paid_total} remainingBalance={o.remaining_balance} locale={locale} hideFinancials={!showInvoices} />
+                        <DocIndicators documents={visibleDocsFor(o.id)} />
                       </div>
                     )}
                     <div className="mt-2">

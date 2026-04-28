@@ -87,9 +87,20 @@ export default async function DashboardPage() {
 
   // Suppliers always see their own financial data and documents
   const showInvoices = hasFeature(profile, "invoices") || isSupplierRole;
-  const showDocs = hasFeature(profile, "documents") || isSupplierRole;
+  const showAllDocs = hasFeature(profile, "documents") || isSupplierRole;
+  const showPackingLists = hasFeature(profile, "packing_lists") || showAllDocs;
+  // Documents column is visible if user can see at least one kind
+  const showDocs = showAllDocs || showPackingLists;
   const showDebt = hasFeature(profile, "debt") || isSupplierRole;
   const canEditOrder = profile.is_admin || isSupplierRole;
+
+  // Filter docs map per row to what the current user is allowed to see
+  function visibleDocsFor(orderId: string) {
+    const all = docsByOrder.get(orderId) ?? [];
+    if (showAllDocs) return all;
+    if (showPackingLists) return all.filter((d) => d.kind === "packing_details");
+    return [];
+  }
 
   return (
     <div className="p-4 md:p-8 space-y-6 md:space-y-8 max-w-7xl">
@@ -275,11 +286,11 @@ export default async function DashboardPage() {
                           {showDocs && (
                             <td className="px-5 py-2.5">
                               <div className="flex flex-wrap items-center gap-1.5">
-                                <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} remainingBalance={o.remaining_balance} locale={locale} hideFinancials={!showInvoices} />
-                                <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
+                                <QuickDocs documents={visibleDocsFor(o.id)} compact paidTotal={o.paid_total} remainingBalance={o.remaining_balance} locale={locale} hideFinancials={!showInvoices} />
+                                <DocIndicators documents={visibleDocsFor(o.id)} />
                               </div>
                               {(() => {
-                                const inv = (docsByOrder.get(o.id) ?? []).find((d) => d.kind === "supplier_invoice");
+                                const inv = visibleDocsFor(o.id).find((d) => d.kind === "supplier_invoice");
                                 return inv ? (
                                   <div className="text-[9px] text-neutral-400 truncate max-w-[180px] mt-0.5">{inv.file_name}</div>
                                 ) : null;
@@ -348,8 +359,8 @@ export default async function DashboardPage() {
                         </div>
                         {showDocs && (
                           <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                            <QuickDocs documents={docsByOrder.get(o.id) ?? []} compact paidTotal={o.paid_total} remainingBalance={o.remaining_balance} locale={locale} hideFinancials={!showInvoices} />
-                            <DocIndicators documents={docsByOrder.get(o.id) ?? []} />
+                            <QuickDocs documents={visibleDocsFor(o.id)} compact paidTotal={o.paid_total} remainingBalance={o.remaining_balance} locale={locale} hideFinancials={!showInvoices} />
+                            <DocIndicators documents={visibleDocsFor(o.id)} />
                           </div>
                         )}
                         <div className="mt-2">
