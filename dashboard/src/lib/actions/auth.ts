@@ -202,6 +202,11 @@ export async function createUser(formData: FormData) {
     return { error: createError.message };
   }
 
+  // Defensively ensure email is confirmed (some Supabase configs ignore email_confirm on create)
+  if (!newUser.user.email_confirmed_at) {
+    await admin.auth.admin.updateUserById(newUser.user.id, { email_confirm: true });
+  }
+
   // Update profile with role, approval, etc. — use service client (RLS bypass)
   const { error: updateError } = await admin
     .from("profiles")

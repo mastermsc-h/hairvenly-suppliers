@@ -1,11 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
-import { requireFeature } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 import type { Supplier } from "@/lib/types";
 import SupplierRow from "./supplier-row";
 import NewSupplierForm from "./new-supplier-form";
 
 export default async function SuppliersPage() {
-  const profile = await requireFeature("suppliers");
+  const profile = await requireAdmin();
 
   const supabase = await createClient();
   const { data: suppliers } = await supabase

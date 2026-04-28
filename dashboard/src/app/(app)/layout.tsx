@@ -145,16 +145,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               </>
             )}
 
-            {/* 5) Bold-Separator + Einstellungen */}
-            {(has("suppliers") || has("users")) && (
+            {/* 5) Bold-Separator + Einstellungen — nur fuer Admins */}
+            {profile.role === "admin" && (
               <>
                 <div className="border-t-2 border-neutral-300 my-3" />
                 <SidebarGroup
                   label={t(locale, "nav.settings")}
                   icon={<Settings size={16} />}
                   items={[
-                    ...(has("suppliers") ? [{ href: "/admin/suppliers", label: t(locale, "nav.suppliers") }] : []),
-                    ...(has("users") ? [{ href: "/admin/users", label: t(locale, "nav.users") }] : []),
+                    { href: "/admin/suppliers", label: t(locale, "nav.suppliers") },
+                    { href: "/admin/users", label: t(locale, "nav.users") },
                   ]}
                 />
               </>

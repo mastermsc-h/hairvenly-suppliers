@@ -150,7 +150,7 @@ export default function PriceTables({ priceLists, supplierColors, locale }: Prop
                     : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
                 }`}
               >
-                {m === "netto" ? "Netto" : m === "brutto" ? "Brutto" : "Gewerbe"}
+                {m === "netto" ? "Netto" : m === "brutto" ? "Brutto" : "Gewerbe (Netto)"}
               </button>
             ))}
           </div>
@@ -223,17 +223,17 @@ function OverviewTable({
   const totals = useMemo(() => {
     let ekSum = 0;
     let ekZollSum = 0;
-    let vkNettoSum = 0;
+    let vkSum = 0;
     let count = 0;
 
     for (const group of groups) {
       for (const row of group.rows) {
         if (row.avgEk != null && row.vk) {
-          const vkNetto = row.vk.netto;
-          if (vkNetto && vkNetto > 0) {
+          const vkVal = row.vk[vkMode];
+          if (vkVal && vkVal > 0) {
             ekSum += row.avgEk;
             ekZollSum += row.avgEk * zollFactor;
-            vkNettoSum += vkNetto;
+            vkSum += vkVal;
             count++;
           }
         }
@@ -244,15 +244,17 @@ function OverviewTable({
 
     const avgEk = ekSum / count;
     const avgEkZoll = ekZollSum / count;
-    const avgVkNetto = vkNettoSum / count;
-    // When ekInEur: convert EK+Zoll to EUR, then compare with VK netto EUR
-    const ekForMargin = ekInEur ? avgEkZoll * usdEurRate : avgEkZoll;
-    const vkForMargin = ekInEur ? avgVkNetto : avgVkNetto;
-    const aufschlag = ((vkForMargin - ekForMargin) / ekForMargin) * 100;
-    const marge = ((vkForMargin - ekForMargin) / vkForMargin) * 100;
+    const avgVk = vkSum / count;
 
-    return { avgEk, avgEkZoll, avgVkNetto, aufschlag, marge, count };
-  }, [groups, zollFactor, ekInEur, usdEurRate]);
+    // Calculate EK to compare with VK based on mode
+    let ekForMargin = ekInEur ? avgEkZoll * usdEurRate : avgEkZoll;
+    if (vkMode === "brutto") ekForMargin = ekForMargin * 1.19;
+
+    const aufschlag = ((avgVk - ekForMargin) / ekForMargin) * 100;
+    const marge = ((avgVk - ekForMargin) / avgVk) * 100;
+
+    return { avgEk, avgEkZoll, avgVk, aufschlag, marge, count };
+  }, [groups, zollFactor, ekInEur, usdEurRate, vkMode]);
 
   return (
     <div className="space-y-4">
@@ -318,16 +320,22 @@ function OverviewTable({
           </div>
           <div className="flex items-center gap-6 text-sm tabular-nums">
             <div className="text-center">
-              <div className="text-[10px] text-neutral-400 uppercase">Ø EK</div>
-              <div>${Math.round(totals.avgEk).toLocaleString("de-DE")}</div>
+              <div className="text-[10px] text-neutral-400 uppercase">Ø EK {vkMode === "brutto" ? "Brutto" : ""}</div>
+              <div>
+                {ekInEur || vkMode === "brutto" ? "€" : "$"}
+                {Math.round(totals.avgEk * (ekInEur ? usdEurRate : 1) * (vkMode === "brutto" ? 1.19 : 1)).toLocaleString("de-DE")}
+              </div>
             </div>
             <div className="text-center">
               <div className="text-[10px] text-neutral-400 uppercase">+ Zoll</div>
-              <div>${Math.round(totals.avgEkZoll).toLocaleString("de-DE")}</div>
+              <div>
+                {ekInEur || vkMode === "brutto" ? "€" : "$"}
+                {Math.round(totals.avgEkZoll * (ekInEur ? usdEurRate : 1) * (vkMode === "brutto" ? 1.19 : 1)).toLocaleString("de-DE")}
+              </div>
             </div>
             <div className="text-center">
-              <div className="text-[10px] text-neutral-400 uppercase">Ø VK Netto</div>
-              <div className="text-blue-400">€{totals.avgVkNetto.toLocaleString("de-DE", { maximumFractionDigits: 0 })}</div>
+              <div className="text-[10px] text-neutral-400 uppercase">Ø VK {vkMode === "brutto" ? "Brutto" : vkMode === "gewerbe" ? "Gew." : "Netto"}</div>
+              <div className="text-blue-400">€{totals.avgVk.toLocaleString("de-DE", { maximumFractionDigits: 0 })}</div>
             </div>
             <div className="text-center">
               <div className="text-[10px] text-neutral-400 uppercase">Aufschlag</div>
@@ -376,12 +384,15 @@ function ProductRowView({
   const [isPending, startTransition] = useTransition();
 
   const vkDisplay = row.vk ? row.vk[vkMode] : null;
-  const vkNetto = row.vk ? row.vk.netto : null;
   const ekWithZoll = row.avgEk != null ? row.avgEk * zollFactor : null;
-  // When ekInEur: convert to EUR for real margin
-  const ekForMargin = ekWithZoll != null ? (ekInEur ? ekWithZoll * usdEurRate : ekWithZoll) : null;
-  const aufschlagPct = ekForMargin && vkNetto ? ((vkNetto - ekForMargin) / ekForMargin) * 100 : null;
-  const margePct = ekForMargin && vkNetto ? ((vkNetto - ekForMargin) / vkNetto) * 100 : null;
+  // EK for comparison: convert to EUR if requested + add 19% in brutto mode
+  let ekForMargin = ekWithZoll;
+  if (ekForMargin != null) {
+    if (ekInEur) ekForMargin = ekForMargin * usdEurRate;
+    if (vkMode === "brutto") ekForMargin = ekForMargin * 1.19;
+  }
+  const aufschlagPct = ekForMargin && vkDisplay ? ((vkDisplay - ekForMargin) / ekForMargin) * 100 : null;
+  const margePct = ekForMargin && vkDisplay ? ((vkDisplay - ekForMargin) / vkDisplay) * 100 : null;
 
   const aufschlagColor =
     aufschlagPct == null ? "" : aufschlagPct >= 80 ? "text-green-600" : aufschlagPct >= 50 ? "text-yellow-600" : "text-red-600";
@@ -417,18 +428,24 @@ function ProductRowView({
           </div>
         </td>
         <td className="text-right px-3 py-2.5 tabular-nums text-neutral-700">
-          {row.avgEk != null
-            ? ekInEur
-              ? `€${Math.round(row.avgEk * usdEurRate).toLocaleString("de-DE")}`
-              : `$${Math.round(row.avgEk).toLocaleString("de-DE")}`
-            : "—"}
+          {(() => {
+            if (row.avgEk == null) return "—";
+            let val = row.avgEk;
+            const useEur = ekInEur || vkMode === "brutto";
+            if (ekInEur) val = val * usdEurRate;
+            if (vkMode === "brutto") val = val * 1.19;
+            return `${useEur ? "€" : "$"}${Math.round(val).toLocaleString("de-DE")}`;
+          })()}
         </td>
         <td className="text-right px-3 py-2.5 tabular-nums text-neutral-500 text-xs">
-          {ekWithZoll != null
-            ? ekInEur
-              ? `€${Math.round(ekWithZoll * usdEurRate).toLocaleString("de-DE")}`
-              : `$${Math.round(ekWithZoll).toLocaleString("de-DE")}`
-            : "—"}
+          {(() => {
+            if (ekWithZoll == null) return "—";
+            let val = ekWithZoll;
+            const useEur = ekInEur || vkMode === "brutto";
+            if (ekInEur) val = val * usdEurRate;
+            if (vkMode === "brutto") val = val * 1.19;
+            return `${useEur ? "€" : "$"}${Math.round(val).toLocaleString("de-DE")}`;
+          })()}
         </td>
         <td className="text-right px-3 py-2.5 tabular-nums text-blue-600 font-medium" onClick={(e) => e.stopPropagation()}>
           {editingVk ? (
@@ -527,14 +544,18 @@ function CategoryBreakdown({
   locale: Locale;
   isLastParent: boolean;
 }) {
-  const vkNetto = row.vk ? row.vk.netto : null;
+  const vkVal = row.vk ? row.vk[vkMode] : null;
 
   return (
     <>
       {row.categories.map(({ entry, ek }, i) => {
         const ekWithZoll = ek != null ? ek * zollFactor : null;
-        const ekForMargin = ekWithZoll != null ? (ekInEur ? ekWithZoll * usdEurRate : ekWithZoll) : null;
-        const marginPct = ekForMargin && vkNetto ? ((vkNetto - ekForMargin) / ekForMargin) * 100 : null;
+        let ekForMargin = ekWithZoll;
+        if (ekForMargin != null) {
+          if (ekInEur) ekForMargin = ekForMargin * usdEurRate;
+          if (vkMode === "brutto") ekForMargin = ekForMargin * 1.19;
+        }
+        const marginPct = ekForMargin && vkVal ? ((vkVal - ekForMargin) / ekForMargin) * 100 : null;
         const isLastCat = i === row.categories.length - 1;
         return (
           <CategoryRow
@@ -661,11 +682,14 @@ function CategoryRow({
           ) : (
             <div className="flex items-center justify-end gap-1 group/ek">
               <span>
-                {ek != null
-                  ? ekInEur
-                    ? `€${Math.round(ek * usdEurRate).toLocaleString("de-DE")}`
-                    : `$${ek.toLocaleString("de-DE")}`
-                  : "—"}
+                {(() => {
+                  if (ek == null) return "—";
+                  let val = ek;
+                  const useEur = ekInEur || vkMode === "brutto";
+                  if (ekInEur) val = val * usdEurRate;
+                  if (vkMode === "brutto") val = val * 1.19;
+                  return `${useEur ? "€" : "$"}${val.toLocaleString("de-DE", { maximumFractionDigits: 2 })}`;
+                })()}
               </span>
               <button
                 onClick={() => {
@@ -681,11 +705,14 @@ function CategoryRow({
         </td>
         {/* Zoll */}
         <td className="text-right px-3 py-1.5 tabular-nums text-xs text-neutral-400">
-          {ekWithZoll != null
-            ? ekInEur
-              ? `€${Math.round(ekWithZoll * usdEurRate).toLocaleString("de-DE")}`
-              : `$${Math.round(ekWithZoll).toLocaleString("de-DE")}`
-            : ""}
+          {(() => {
+            if (ekWithZoll == null) return "";
+            let val = ekWithZoll;
+            const useEur = ekInEur || vkMode === "brutto";
+            if (ekInEur) val = val * usdEurRate;
+            if (vkMode === "brutto") val = val * 1.19;
+            return `${useEur ? "€" : "$"}${Math.round(val).toLocaleString("de-DE")}`;
+          })()}
         </td>
         {/* VK — empty in detail */}
         <td className="px-3 py-1.5" />
