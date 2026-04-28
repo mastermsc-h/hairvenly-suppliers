@@ -108,6 +108,7 @@ export const FEATURE_KEYS = [
   "debt",
   "invoices",
   "documents",
+  "packing_lists",
   "overview_docs",
   "suppliers",
   "users",

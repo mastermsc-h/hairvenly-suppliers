@@ -17,6 +17,7 @@ const FEATURE_LABELS: Record<string, string> = {
   debt: "Schulden / Offene Betr\u00E4ge",
   invoices: "Rechnungen / EK-Preise",
   documents: "Dokumente (Bestellungen)",
+  packing_lists: "Lieferscheine",
   overview_docs: "\u00DCbersicht hochladen",
   suppliers: "Lieferanten-Verwaltung",
   users: "Benutzer-Verwaltung",
@@ -26,6 +27,9 @@ const FEATURE_LABELS: Record<string, string> = {
   charts: "Dashboard-Charts",
   supplier_kg: "Kg pro Lieferant",
   finances: "Finanzen",
+  returns: "Retouren",
+  customs_ch: "Zoll Schweiz",
+  shipping: "Versand",
 };
 
 const DEFAULT_EMPLOYEE_DENIED = ["prices", "debt", "invoices", "documents", "overview_docs"];

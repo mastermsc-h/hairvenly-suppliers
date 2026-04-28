@@ -78,7 +78,10 @@ export default async function OrderDetailPage({
   // Suppliers see everything about their own orders (finance + documents)
   const isSupplier = profile.role === "supplier";
   const canSeeFinance = hasFeature(profile, "invoices") || isSupplier;
-  const canSeeDocs = hasFeature(profile, "documents") || isSupplier;
+  const canSeeAllDocs = hasFeature(profile, "documents") || isSupplier;
+  const canSeePackingLists = hasFeature(profile, "packing_lists") || canSeeAllDocs;
+  // Documents section is shown if user can see at least one kind of document
+  const canSeeDocs = canSeeAllDocs || canSeePackingLists;
 
   // Group order items by method + length
   const itemGroups: { label: string; items: OrderItem[] }[] = [];
@@ -228,9 +231,13 @@ export default async function OrderDetailPage({
           {/* Documents */}
           {canSeeDocs && (() => {
             const financialKinds = ["supplier_invoice", "payment_proof"];
-            const visibleDocs = canSeeFinance
-              ? docs
-              : docs.filter((d) => !financialKinds.includes(d.kind));
+            // Build visible doc list per role:
+            //   - canSeeAllDocs (admin/employee w/ documents OR supplier): see everything;
+            //     finance kinds only when canSeeFinance.
+            //   - else if canSeePackingLists only: ONLY packing_details.
+            const visibleDocs = canSeeAllDocs
+              ? (canSeeFinance ? docs : docs.filter((d) => !financialKinds.includes(d.kind)))
+              : docs.filter((d) => d.kind === "packing_details");
             return (
               <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
                 <h2 className="text-sm font-medium text-neutral-700 mb-4">{t(locale, "order.documents_title")}</h2>
