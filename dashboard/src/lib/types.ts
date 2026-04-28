@@ -9,6 +9,7 @@ export type OrderStatus =
   | "shipped"
   | "in_customs"
   | "delivered"
+  | "stocked"
   | "cancelled";
 
 export const ORDER_STATUSES: OrderStatus[] = [
@@ -20,8 +21,12 @@ export const ORDER_STATUSES: OrderStatus[] = [
   "shipped",
   "in_customs",
   "delivered",
+  "stocked",
   "cancelled",
 ];
+
+// Statuses that hide an order from the active overview (treated as archived)
+export const ARCHIVED_STATUSES: OrderStatus[] = ["stocked", "cancelled"];
 
 export const STATUS_LABELS: Record<OrderStatus, string> = {
   draft: "Entwurf",
@@ -31,7 +36,8 @@ export const STATUS_LABELS: Record<OrderStatus, string> = {
   ready_to_ship: "Versandbereit",
   shipped: "Versandt",
   in_customs: "In Verzollung",
-  delivered: "Geliefert",
+  delivered: "Angekommen",
+  stocked: "Ins Lager eingepflegt",
   cancelled: "Storniert",
 };
 

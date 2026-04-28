@@ -59,7 +59,7 @@ export default async function DashboardPage() {
 
   const totalOpen = list.reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
   const activeOrders = list.filter(
-    (o) => o.status !== "delivered" && o.status !== "cancelled",
+    (o) => o.status !== "stocked" && o.status !== "cancelled",
   ).length;
 
   // Kg pro Lieferant: gesamt bestellt + davon unterwegs
@@ -155,7 +155,7 @@ export default async function DashboardPage() {
           items={supplierList.map((s) => {
             const sOrders = list.filter((o) => o.supplier_id === s.id);
             const openOrders = sOrders
-              .filter((o) => o.status !== "delivered" && o.status !== "cancelled")
+              .filter((o) => o.status !== "stocked" && o.status !== "cancelled")
               .sort((a, b) => {
                 const da = a.order_date ?? a.created_at;
                 const db = b.order_date ?? b.created_at;

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { Plus, Archive } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { usd, date } from "@/lib/format";
@@ -58,8 +58,11 @@ export default async function OrdersPage() {
     return [];
   }
 
+  // Hide archived (stocked / cancelled) — those live in /orders/archive
+  const active = list.filter((o) => o.status !== "stocked" && o.status !== "cancelled");
+
   // Sort by order_date desc, then created_at desc
-  const sorted = [...list].sort((a, b) => {
+  const sorted = [...active].sort((a, b) => {
     const da = a.order_date ?? a.created_at;
     const db = b.order_date ?? b.created_at;
     return db.localeCompare(da);
@@ -72,23 +75,41 @@ export default async function OrdersPage() {
     }))
     .filter((g) => g.orders.length > 0);
 
+  const archivedCount = list.length - active.length;
+
   return (
     <div className="p-4 md:p-8 space-y-6 md:space-y-8 max-w-7xl">
       <header className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-neutral-900">{t(locale, "nav.orders")}</h1>
           <p className="text-sm text-neutral-500 mt-1">
-            {list.length} {t(locale, "orders.total")} · {grouped.length} {t(locale, "orders.suppliers")}
+            {active.length} {t(locale, "orders.total")} · {grouped.length} {t(locale, "orders.suppliers")}
+            {archivedCount > 0 && (
+              <>
+                {" · "}
+                <Link href="/orders/archive" className="text-indigo-600 hover:text-indigo-800 font-medium">
+                  {t(locale, "orders.archive")} ({archivedCount})
+                </Link>
+              </>
+            )}
           </p>
         </div>
-        {profile.is_admin && (
+        <div className="flex items-center gap-2">
           <Link
-            href="/orders/new"
-            className="inline-flex items-center gap-2 bg-neutral-900 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-neutral-800 transition"
+            href="/orders/archive"
+            className="inline-flex items-center gap-1.5 text-xs text-neutral-600 hover:text-neutral-900 px-3 py-2 rounded-lg border border-neutral-300 hover:bg-neutral-50 transition"
           >
-            <Plus size={16} /> {t(locale, "dashboard.new_order")}
+            <Archive size={14} /> {t(locale, "orders.archive")}
           </Link>
-        )}
+          {profile.is_admin && (
+            <Link
+              href="/orders/new"
+              className="inline-flex items-center gap-2 bg-neutral-900 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-neutral-800 transition"
+            >
+              <Plus size={16} /> {t(locale, "dashboard.new_order")}
+            </Link>
+          )}
+        </div>
       </header>
 
       {list.length === 0 && (
@@ -277,6 +298,7 @@ const STATUS_COLORS: Record<string, string> = {
   shipped: "bg-cyan-50 text-cyan-700",
   in_customs: "bg-orange-50 text-orange-700",
   delivered: "bg-emerald-50 text-emerald-700",
+  stocked: "bg-teal-50 text-teal-700",
   cancelled: "bg-red-50 text-red-700",
 };
 

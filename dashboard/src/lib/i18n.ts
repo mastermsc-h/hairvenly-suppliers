@@ -119,6 +119,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "order.status.shipped": "Versandt",
     "order.status.in_customs": "In Verzollung",
     "order.status.delivered": "Angekommen",
+    "order.status.stocked": "Ins Lager eingepflegt",
     "order.status.cancelled": "Storniert",
 
     // Payment form
@@ -388,6 +389,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     "orders.total": "insgesamt",
     "orders.suppliers": "Lieferanten",
     "orders.no_orders": "Noch keine Bestellungen.",
+    "orders.archive": "Archiv",
+    "orders.archived_total": "archivierte Bestellungen",
+    "orders.archive_empty": "Keine archivierten Bestellungen.",
 
     // Wizard
     "wizard.title": "Neue Bestellung",
@@ -787,6 +791,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "order.status.shipped": "Shipped",
     "order.status.in_customs": "In customs",
     "order.status.delivered": "Arrived",
+    "order.status.stocked": "Stocked",
     "order.status.cancelled": "Cancelled",
 
     // Payment form
@@ -1055,6 +1060,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     "orders.total": "total",
     "orders.suppliers": "suppliers",
     "orders.no_orders": "No orders yet.",
+    "orders.archive": "Archive",
+    "orders.archived_total": "archived orders",
+    "orders.archive_empty": "No archived orders.",
 
     // Wizard
     "wizard.title": "New Order",
@@ -1454,6 +1462,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "order.status.shipped": "Gönderildi",
     "order.status.in_customs": "Gümrükte",
     "order.status.delivered": "Ulaştı",
+    "order.status.stocked": "Stoğa eklendi",
     "order.status.cancelled": "İptal edildi",
 
     // Payment form
@@ -1722,6 +1731,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     "orders.total": "toplam",
     "orders.suppliers": "tedarikçi",
     "orders.no_orders": "Henüz sipariş yok.",
+    "orders.archive": "Arşiv",
+    "orders.archived_total": "arşivlenmiş sipariş",
+    "orders.archive_empty": "Arşivlenmiş sipariş yok.",
 
     // Wizard
     "wizard.title": "Yeni Sipariş",
