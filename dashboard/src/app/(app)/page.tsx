@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ExternalLink, Package, Wallet, Plus } from "lucide-react";
+import { ExternalLink, Package, Wallet, Plus, Archive } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { usd, date } from "@/lib/format";
@@ -61,6 +61,9 @@ export default async function DashboardPage() {
   const activeOrders = list.filter(
     (o) => o.status !== "stocked" && o.status !== "cancelled",
   ).length;
+  const archivedCount = list.filter(
+    (o) => o.status === "stocked" || o.status === "cancelled",
+  ).length;
 
   // Kg pro Lieferant: gesamt bestellt + davon unterwegs
   const kgRows: SupplierKgRow[] = supplierList
@@ -104,9 +107,22 @@ export default async function DashboardPage() {
 
   return (
     <div className="p-4 md:p-8 space-y-6 md:space-y-8 max-w-7xl">
-      <header>
-        <h1 className="text-2xl font-semibold text-neutral-900">{t(locale, "nav.overview")}</h1>
-        <p className="text-sm text-neutral-500 mt-1">{t(locale, "dashboard.subtitle")}</p>
+      <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-neutral-900">{t(locale, "nav.overview")}</h1>
+          <p className="text-sm text-neutral-500 mt-1">{t(locale, "dashboard.subtitle")}</p>
+        </div>
+        <Link
+          href="/orders/archive"
+          className="inline-flex items-center gap-1.5 text-xs text-neutral-600 hover:text-neutral-900 px-3 py-2 rounded-lg border border-neutral-300 hover:bg-neutral-50 transition self-start"
+        >
+          <Archive size={14} /> {t(locale, "orders.archive")}
+          {archivedCount > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-neutral-100 text-neutral-600 text-[10px] font-medium">
+              {archivedCount}
+            </span>
+          )}
+        </Link>
       </header>
 
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
