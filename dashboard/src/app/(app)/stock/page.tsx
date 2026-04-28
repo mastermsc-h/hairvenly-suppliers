@@ -2,7 +2,7 @@ import { requireProfile } from "@/lib/auth";
 import { t, type Locale } from "@/lib/i18n";
 import { readDashboardAlerts, readInventorySheet, readTopseller } from "@/lib/stock-sheets";
 import { fetchOrderIdByName } from "@/lib/order-name-map";
-import { filterArchivedFromStock } from "@/lib/filter-archived-orders";
+import { filterArchivedFromStock, filterArchivedFromTopseller } from "@/lib/filter-archived-orders";
 import StockOverviewClient, { type InsightProduct } from "./stock-overview";
 
 export const revalidate = 60;
@@ -12,7 +12,7 @@ export default async function StockIndexPage() {
   if (!profile.is_admin) return <div className="p-8 text-neutral-500">Nur für Admins.</div>;
   const locale = (profile.language ?? "de") as Locale;
 
-  const [alertsRaw, wellig, glatt, topseller, orderIdByName] = await Promise.all([
+  const [alertsRaw, wellig, glatt, topsellerRaw, orderIdByName] = await Promise.all([
     readDashboardAlerts(),
     readInventorySheet("Usbekisch - WELLIG"),
     readInventorySheet("Russisch - GLATT"),
@@ -20,13 +20,14 @@ export default async function StockIndexPage() {
     fetchOrderIdByName(),
   ]);
 
-  // Drop archived orders (stocked / cancelled) from all alert lists
+  // Drop archived orders (stocked / cancelled) from all alert lists + topseller
   const alerts = {
     ...alertsRaw,
     unterwegs: filterArchivedFromStock(alertsRaw.unterwegs, orderIdByName).filter((d) => d.unterwegsG > 0),
     nullbestand: filterArchivedFromStock(alertsRaw.nullbestand, orderIdByName),
     kritisch: filterArchivedFromStock(alertsRaw.kritisch, orderIdByName),
   };
+  const topseller = { ...topsellerRaw, sections: filterArchivedFromTopseller(topsellerRaw.sections, orderIdByName) };
 
   // Build insights from topseller data
   const insights = buildInsights(topseller.sections);
