@@ -1169,14 +1169,14 @@ interface PackOrderNode {
       };
     }[];
   };
+  fulfillmentOrders: {
+    edges: { node: { id: string; status: string } }[];
+  };
   packQrMetafield: { value: string } | null;
 }
 
-// Hinweis: customer + fulfillmentOrders fields requirieren read_customers und
-// read_*_fulfillment_orders scopes. Ohne diese liefert die GraphQL-API ACCESS_DENIED
-// → Query failed komplett. Daher hier weggelassen.
-// Customer-Name ziehen wir aus shippingAddress.name als Fallback.
-// Auto-Fulfill in fulfillOrderInShopify holt fulfillmentOrders separat wenn nötig.
+// Hinweis: customer-name fehlt (read_customers scope) — wir nehmen shippingAddress.name als Fallback.
+// fulfillmentOrders wird benötigt für Auto-Fulfill (completePackSession).
 const PACK_ORDER_FIELDS = `
   id
   name
@@ -1202,6 +1202,9 @@ const PACK_ORDER_FIELDS = `
         }
       }
     } }
+  }
+  fulfillmentOrders(first: 10) {
+    edges { node { id status } }
   }
   packQrMetafield: metafield(namespace: "custom", key: "pack_qr_svg") { value }
 `;
@@ -1255,7 +1258,7 @@ function mapPackOrder(node: PackOrderNode): PackOrder {
       : null,
     lineItems,
     totalQuantity: lineItems.reduce((s, li) => s + li.quantity, 0),
-    fulfillmentOrders: [], // werden separat geholt im Auto-Fulfill Workflow
+    fulfillmentOrders: node.fulfillmentOrders?.edges.map((e) => ({ id: e.node.id, status: e.node.status })) ?? [],
     hasPackQr: !!(node.packQrMetafield && node.packQrMetafield.value && node.packQrMetafield.value.length > 0),
   };
 }

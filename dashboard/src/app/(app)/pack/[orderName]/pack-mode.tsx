@@ -1210,18 +1210,11 @@ export default function PackMode({
                 </Link>
               </div>
 
-              {(shopifyOrderUrl || shopifyLabelUrl) && (
+              {shopifyOrderUrl && (
                 <div className="flex flex-wrap items-center justify-center gap-3 mt-4 text-xs text-emerald-800/80">
-                  {shopifyOrderUrl && (
-                    <a href={shopifyOrderUrl} target="_blank" rel="noopener" className="hover:underline">
-                      Rechnung erneut öffnen
-                    </a>
-                  )}
-                  {shopifyLabelUrl && (
-                    <a href={shopifyLabelUrl} target="_blank" rel="noopener" className="hover:underline">
-                      Versandetikett erneut öffnen
-                    </a>
-                  )}
+                  <a href={shopifyOrderUrl} target="_blank" rel="noopener" className="hover:underline">
+                    Bestellung in Shopify öffnen
+                  </a>
                 </div>
               )}
             </div>
