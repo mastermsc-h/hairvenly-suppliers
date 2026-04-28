@@ -1306,6 +1306,107 @@ export async function fetchRecentPaidOrders(daysBack = 30, limit = 250): Promise
   return res.data?.orders.edges.map((e) => mapPackOrder(e.node)) ?? [];
 }
 
+// ── Variant-Liste für Barcode-Drucken ──────────────────────────
+
+export interface BarcodeVariant {
+  productTitle: string;
+  variantTitle: string | null;
+  barcode: string;
+  collectionHandles: string[];
+  imageUrl: string | null;
+}
+
+interface BarcodeProductsResponse {
+  products: {
+    edges: {
+      node: {
+        title: string;
+        featuredImage: { url: string } | null;
+        collections: { edges: { node: { handle: string } }[] };
+        variants: {
+          edges: {
+            node: {
+              title: string | null;
+              barcode: string | null;
+              image: { url: string } | null;
+            };
+          }[];
+        };
+      };
+    }[];
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+
+/**
+ * Holt alle Produkt-Varianten mit Barcode für die Etiketten-Druckseite.
+ * Paginiert bis alle Produkte geladen sind.
+ */
+export async function fetchAllVariantsForBarcodes(): Promise<BarcodeVariant[]> {
+  const out: BarcodeVariant[] = [];
+  let cursor: string | null = null;
+
+  while (true) {
+    const query = `
+      query barcodeVariants($cursor: String) {
+        products(first: 250, after: $cursor) {
+          edges {
+            node {
+              title
+              featuredImage { url }
+              collections(first: 10) { edges { node { handle } } }
+              variants(first: 50) {
+                edges { node { title barcode image { url } } }
+              }
+            }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    `;
+    const res: GraphQLResponse<BarcodeProductsResponse> = await shopifyGraphQL<BarcodeProductsResponse>(
+      query,
+      { cursor },
+    );
+
+    const products = res.data?.products.edges.map((e) => e.node) ?? [];
+    for (const p of products) {
+      const handles = p.collections.edges.map((c) => c.node.handle);
+      for (const ve of p.variants.edges) {
+        const v = ve.node;
+        if (!v.barcode || !v.barcode.trim()) continue;
+        out.push({
+          productTitle: p.title,
+          variantTitle: v.title && v.title !== "Default Title" ? v.title : null,
+          barcode: v.barcode.trim(),
+          collectionHandles: handles,
+          imageUrl: v.image?.url ?? p.featuredImage?.url ?? null,
+        });
+      }
+    }
+    const pageInfo = res.data?.products.pageInfo;
+    if (!pageInfo?.hasNextPage) break;
+    cursor = pageInfo.endCursor;
+  }
+  return out;
+}
+
+export async function fetchAllCollectionHandles(): Promise<{ handle: string; title: string }[]> {
+  const query = `
+    {
+      collections(first: 100) {
+        edges { node { handle title } }
+      }
+    }
+  `;
+  const res = await shopifyGraphQL<{
+    collections: { edges: { node: { handle: string; title: string } }[] };
+  }>(query);
+  return (res.data?.collections.edges.map((e) => e.node) ?? []).sort((a, b) =>
+    a.title.localeCompare(b.title),
+  );
+}
+
 /** Fetch one order by name (e.g. "#22264" or "22264") for Pack-Modus. */
 export async function fetchOrderForPack(orderName: string): Promise<PackOrder | null> {
   const clean = orderName.replace(/^#/, "");
