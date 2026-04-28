@@ -48,7 +48,15 @@ export async function shopifyGraphQL<T = unknown>(
       throw new Error(`Shopify API ${res.status}: ${await res.text()}`);
     }
 
-    return res.json();
+    const json = (await res.json()) as GraphQLResponse<T>;
+    // GraphQL-Level-Errors (200 OK aber errors-array vorhanden) sichtbar machen
+    // statt stillschweigend leeres data zurückzugeben.
+    if (json.errors && json.errors.length > 0 && !json.data) {
+      throw new Error(
+        `Shopify GraphQL error: ${json.errors.map((e) => e.message).join("; ")}`,
+      );
+    }
+    return json;
   }
 
   throw new Error("Shopify API rate limit exceeded after retries");
