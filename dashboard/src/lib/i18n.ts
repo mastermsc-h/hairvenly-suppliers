@@ -603,6 +603,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     // Versand / Pack-Modus
     "nav.shipping": "Versand",
     "nav.shipping.list": "Bestellungen",
+    "nav.shipping.scanner": "Scanner",
     "nav.shipping.display": "Pack-Anzeige (iMac)",
     "shipping.title": "Versand",
     "shipping.subtitle": "Bezahlte, nicht ausgeführte Bestellungen — bereit zum Verpacken.",
@@ -1274,6 +1275,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     // Shipping / Pack mode
     "nav.shipping": "Shipping",
     "nav.shipping.list": "Orders",
+    "nav.shipping.scanner": "Scanner",
     "nav.shipping.display": "Pack Display (iMac)",
     "shipping.title": "Shipping",
     "shipping.subtitle": "Paid, unfulfilled orders — ready to pack.",
@@ -1945,6 +1947,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     // Kargo / Paketleme modu
     "nav.shipping": "Kargo",
     "nav.shipping.list": "Siparişler",
+    "nav.shipping.scanner": "Tarayıcı",
     "nav.shipping.display": "Paketleme Ekranı (iMac)",
     "shipping.title": "Kargo",
     "shipping.subtitle": "Ödenmiş, gönderilmemiş siparişler — paketlemeye hazır.",

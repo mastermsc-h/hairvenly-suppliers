@@ -1446,6 +1446,79 @@ export async function fetchAllCollectionHandles(): Promise<{ handle: string; tit
   );
 }
 
+// ── Produkt-Lookup per Barcode (für /pack/scanner) ─────────────
+
+export interface ProductLookupResult {
+  productTitle: string;
+  variantTitle: string | null;
+  barcode: string;
+  imageUrl: string | null;
+  collectionTitles: string[];
+  productHandle: string;
+  variantId: string;
+}
+
+/**
+ * Sucht ein Produkt per Barcode. Returns null wenn nichts gefunden.
+ * Bei mehreren Treffern (= Daten-Bug in Shopify) gibt's das erste.
+ */
+export async function lookupProductByBarcode(
+  barcode: string,
+): Promise<ProductLookupResult[] | null> {
+  const clean = barcode.trim();
+  if (!clean) return null;
+  const query = `
+    query byBarcode($q: String!) {
+      products(first: 5, query: $q) {
+        edges {
+          node {
+            handle
+            title
+            featuredImage { url }
+            collections(first: 10) { edges { node { title } } }
+            variants(first: 50) {
+              edges { node { id title barcode image { url } } }
+            }
+          }
+        }
+      }
+    }
+  `;
+  const res = await shopifyGraphQL<{
+    products: {
+      edges: {
+        node: {
+          handle: string;
+          title: string;
+          featuredImage: { url: string } | null;
+          collections: { edges: { node: { title: string } }[] };
+          variants: { edges: { node: { id: string; title: string | null; barcode: string | null; image: { url: string } | null } }[] };
+        };
+      }[];
+    };
+  }>(query, { q: `barcode:${clean}` });
+
+  const products = res.data?.products.edges.map((e) => e.node) ?? [];
+  const matches: ProductLookupResult[] = [];
+  for (const p of products) {
+    for (const ve of p.variants.edges) {
+      const v = ve.node;
+      if (v.barcode?.trim() === clean) {
+        matches.push({
+          productTitle: p.title,
+          variantTitle: v.title && v.title !== "Default Title" ? v.title : null,
+          barcode: clean,
+          imageUrl: v.image?.url ?? p.featuredImage?.url ?? null,
+          collectionTitles: p.collections.edges.map((c) => c.node.title),
+          productHandle: p.handle,
+          variantId: v.id,
+        });
+      }
+    }
+  }
+  return matches.length > 0 ? matches : null;
+}
+
 /** Fetch one order by name (e.g. "#22264" or "22264") for Pack-Modus. */
 export async function fetchOrderForPack(orderName: string): Promise<PackOrder | null> {
   const clean = orderName.replace(/^#/, "");

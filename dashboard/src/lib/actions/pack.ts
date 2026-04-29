@@ -7,9 +7,25 @@ import {
   fetchOrderForPack,
   fulfillOrderInShopify,
   setOrderMetafield,
+  lookupProductByBarcode,
   type PackOrderLineItem,
+  type ProductLookupResult,
 } from "@/lib/shopify";
 import { revalidatePath } from "next/cache";
+
+export async function scanProductByBarcode(
+  barcode: string,
+): Promise<{ success: boolean; results?: ProductLookupResult[]; error?: string }> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) return { success: false, error: "Forbidden" };
+  try {
+    const results = await lookupProductByBarcode(barcode);
+    if (!results) return { success: true, results: [] };
+    return { success: true, results };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
 
 const PACK_BASE_URL = "https://suppliers.hairvenly.de";
 
