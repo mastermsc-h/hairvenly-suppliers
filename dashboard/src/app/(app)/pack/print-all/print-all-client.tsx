@@ -28,14 +28,17 @@ interface Slip {
 
 function detectAttributes(title: string, variantTitle: string | null) {
   const upper = (title + " " + (variantTitle ?? "")).toUpperCase();
+  // cls verweist auf eine selbst-definierte CSS-Klasse mit !important-Hintergrund
+  // damit die Farbe im Druck definitiv erhalten bleibt (Tailwind-classes gehen
+  // im Druck oft verloren).
   let method = { label: "", cls: "" };
-  if (upper.includes("BONDING")) method = { label: "BONDINGS", cls: "bg-orange-700" };
+  if (upper.includes("BONDING")) method = { label: "BONDINGS", cls: "method-bondings" };
   else if (upper.includes("MINI TAPE") || upper.includes("MINI-TAPE"))
-    method = { label: "MINI-TAPES", cls: "bg-blue-700" };
-  else if (upper.includes("TAPE")) method = { label: "TAPES", cls: "bg-blue-700" };
-  else if (upper.includes("TRESSE")) method = { label: "TRESSEN", cls: "bg-green-700" };
-  else if (upper.includes("CLIP")) method = { label: "CLIP-IN", cls: "bg-violet-700" };
-  else if (upper.includes("PONYTAIL")) method = { label: "PONYTAIL", cls: "bg-pink-700" };
+    method = { label: "MINI-TAPES", cls: "method-tapes" };
+  else if (upper.includes("TAPE")) method = { label: "TAPES", cls: "method-tapes" };
+  else if (upper.includes("TRESSE")) method = { label: "TRESSEN", cls: "method-tressen" };
+  else if (upper.includes("CLIP")) method = { label: "CLIP-IN", cls: "method-clipin" };
+  else if (upper.includes("PONYTAIL")) method = { label: "PONYTAIL", cls: "method-ponytail" };
 
   let length = "";
   for (const cm of [45, 55, 65, 75, 85]) {
@@ -126,6 +129,13 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
           .print-bar { position: sticky; top: 0; z-index: 10; }
         }
         @media print {
+          /* WICHTIG: Hintergrundfarben im Druck erhalten — sonst druckt der
+             Browser farbige Tags als plain text ("Tinte sparen"-Default). */
+          *, *::before, *::after {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
+          }
           .no-print { display: none !important; }
           /* Sidebar + Mobile-Header aus layout.tsx ausblenden */
           aside, [data-mobile-sidebar], .top-progress { display: none !important; }
@@ -151,6 +161,7 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
           color: #1f1f1f;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         }
+        /* Inline-styles damit Tailwind-classes im Druck nicht verloren gehen */
         .method-badge {
           display: inline-block;
           padding: 3px 8px;
@@ -159,7 +170,14 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
           font-size: 11px;
           letter-spacing: 1.2px;
           color: #fff;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
         }
+        .method-bondings { background: #c2410c !important; }
+        .method-tapes    { background: #1d4ed8 !important; }
+        .method-tressen  { background: #15803d !important; }
+        .method-clipin   { background: #6d28d9 !important; }
+        .method-ponytail { background: #be185d !important; }
         .tag-secondary {
           display: inline-block;
           padding: 3px 8px;
@@ -169,7 +187,11 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
           letter-spacing: 1.2px;
           color: #fff;
           margin-left: 4px;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
         }
+        .tag-length { background: #475569 !important; }
+        .tag-origin { background: #b91c1c !important; }
       `}</style>
 
       <div className="print-bar bg-white border-b border-neutral-200 p-3 flex items-center justify-between gap-3 no-print">
@@ -245,8 +267,8 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
                             {attrs.method.label && (
                               <span className={`method-badge ${attrs.method.cls}`}>{attrs.method.label}</span>
                             )}
-                            {attrs.length && <span className="tag-secondary bg-slate-600">{attrs.length}</span>}
-                            {attrs.origin && <span className="tag-secondary bg-slate-900">{attrs.origin}</span>}
+                            {attrs.length && <span className="tag-secondary tag-length">{attrs.length}</span>}
+                            {attrs.origin && <span className="tag-secondary tag-origin">{attrs.origin}</span>}
                           </div>
                         )}
                         <div className="text-sm leading-snug">{it.title}</div>
