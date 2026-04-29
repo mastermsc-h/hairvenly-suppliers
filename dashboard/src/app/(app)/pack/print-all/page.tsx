@@ -1,6 +1,6 @@
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { fetchUnfulfilledPaidOrders } from "@/lib/shopify";
+import { fetchOrdersForPrintAll } from "@/lib/shopify";
 import PrintAllClient from "./print-all-client";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +23,7 @@ export default async function PrintAllPage() {
   const profile = await requireProfile();
   if (!hasFeature(profile, "shipping")) redirect("/");
 
-  const orders = await fetchUnfulfilledPaidOrders(100);
+  const orders = await fetchOrdersForPrintAll(50);
 
   // Daten für den Client vorbereiten — pro Item ein isExtension-Flag
   const slips = orders.map((o) => ({

@@ -1446,6 +1446,103 @@ export async function fetchAllCollectionHandles(): Promise<{ handle: string; tit
   );
 }
 
+// ── Schlanke Query für /pack/print-all (mit collections) ────────
+
+export interface PrintAllOrder {
+  name: string;
+  numberClean: string;
+  createdAt: string;
+  shippingAddress: {
+    name: string | null;
+    address1: string | null;
+    zip: string | null;
+    city: string | null;
+    country: string | null;
+  } | null;
+  lineItems: {
+    title: string;
+    variantTitle: string | null;
+    quantity: number;
+    collectionHandles: string[];
+  }[];
+}
+
+/**
+ * Holt offene Bestellungen für die Massen-Druck-Seite. Inkludiert collections(first:5)
+ * pro Variante damit isExtension korrekt erkannt wird, ohne den Query-Cost zu sprengen.
+ */
+export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[]> {
+  const query = `
+    query printAll($q: String!, $first: Int!) {
+      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: false) {
+        edges {
+          node {
+            name
+            createdAt
+            shippingAddress { name address1 zip city country }
+            lineItems(first: 30) {
+              edges {
+                node {
+                  title
+                  quantity
+                  variant {
+                    title
+                    product {
+                      collections(first: 5) { edges { node { handle } } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+  const res = await shopifyGraphQL<{
+    orders: {
+      edges: {
+        node: {
+          name: string;
+          createdAt: string;
+          shippingAddress: PrintAllOrder["shippingAddress"];
+          lineItems: {
+            edges: {
+              node: {
+                title: string;
+                quantity: number;
+                variant: {
+                  title: string | null;
+                  product: { collections: { edges: { node: { handle: string } }[] } } | null;
+                } | null;
+              };
+            }[];
+          };
+        };
+      }[];
+    };
+  }>(query, { q: "financial_status:paid AND fulfillment_status:unfulfilled", first: limit });
+
+  return (res.data?.orders.edges ?? []).map((e) => {
+    const o = e.node;
+    return {
+      name: o.name,
+      numberClean: o.name.replace(/^#/, ""),
+      createdAt: o.createdAt,
+      shippingAddress: o.shippingAddress,
+      lineItems: o.lineItems.edges.map((le) => {
+        const li = le.node;
+        return {
+          title: li.title,
+          variantTitle: li.variant?.title && li.variant.title !== "Default Title" ? li.variant.title : null,
+          quantity: li.quantity,
+          collectionHandles: li.variant?.product?.collections.edges.map((c) => c.node.handle) ?? [],
+        };
+      }),
+    };
+  });
+}
+
 // ── Produkt-Lookup per Barcode (für /pack/scanner) ─────────────
 
 export interface ProductLookupResult {
