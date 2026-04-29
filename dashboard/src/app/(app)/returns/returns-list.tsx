@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useMemo } from "react";
+import { useState, useTransition, useMemo, useEffect } from "react";
 import { Plus, RefreshCw, Trash2, Edit2, ChevronDown, ChevronUp, Calendar, Search, FileSpreadsheet } from "lucide-react";
 import {
   type ReturnWithItems,
@@ -653,6 +653,8 @@ export default function ReturnsList({
   const [sourceFilter, setSourceFilter] = useState<"all" | "shopify" | "manual">("all");
   const [repurchaseFilter, setRepurchaseFilter] = useState<"all" | "exchange" | "new_order" | "lost" | "pending">("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -701,6 +703,18 @@ export default function ReturnsList({
       return true;
     });
   }, [returns, typeFilter, statusFilter, handlerFilter, sourceFilter, repurchaseFilter, searchQuery, dateRange]);
+
+  // Reset to page 1 when any filter changes
+  useEffect(() => {
+    setPage(1);
+  }, [typeFilter, statusFilter, handlerFilter, sourceFilter, repurchaseFilter, searchQuery, datePreset, customFrom, customTo]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginated = useMemo(
+    () => filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [filtered, currentPage],
+  );
 
   const handleSync = (from: string, to: string) => {
     startSync(async () => {
@@ -957,7 +971,7 @@ export default function ReturnsList({
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
-                {filtered.map((r) => {
+                {paginated.map((r) => {
                   const isExpanded = expandedId === r.id;
                   return (
                     <tr key={r.id} className="group">
@@ -1084,7 +1098,7 @@ export default function ReturnsList({
 
             {/* Mobile cards */}
             <div className="md:hidden divide-y divide-neutral-100">
-              {filtered.map((r) => (
+              {paginated.map((r) => (
                 <div key={r.id} className="px-3 py-2.5 space-y-1">
                   <div className="flex items-start justify-between">
                     <div>
@@ -1152,6 +1166,38 @@ export default function ReturnsList({
                 </div>
               ))}
             </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-neutral-100 text-sm text-neutral-600">
+                <div className="text-xs text-neutral-500">
+                  {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)} von {filtered.length}
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setPage(1)}
+                    disabled={currentPage === 1}
+                    className="px-2 py-1 rounded hover:bg-neutral-100 disabled:opacity-30 disabled:hover:bg-transparent"
+                  >«</button>
+                  <button
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="px-2 py-1 rounded hover:bg-neutral-100 disabled:opacity-30 disabled:hover:bg-transparent"
+                  >‹</button>
+                  <span className="px-3 text-xs">Seite {currentPage} / {totalPages}</span>
+                  <button
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-2 py-1 rounded hover:bg-neutral-100 disabled:opacity-30 disabled:hover:bg-transparent"
+                  >›</button>
+                  <button
+                    onClick={() => setPage(totalPages)}
+                    disabled={currentPage === totalPages}
+                    className="px-2 py-1 rounded hover:bg-neutral-100 disabled:opacity-30 disabled:hover:bg-transparent"
+                  >»</button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
