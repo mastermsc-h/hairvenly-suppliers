@@ -610,10 +610,15 @@ export default function ReturnsAnalytics({
         default: unknown++;
       }
     }
+    const total = exchange + newOrder + lost + pending; // exclude unknown (no customer data)
     const decided = exchange + newOrder + lost;
     const recovered = exchange + newOrder;
-    const rate = decided > 0 ? (recovered / decided) * 100 : null;
-    return { exchange, newOrder, lost, pending, unknown, decided, recovered, rate };
+    // Conservative rate: pending counts as "not yet recovered". This avoids
+    // showing 100% when the window has only pending+recovered cases.
+    const rate = total > 0 ? (recovered / total) * 100 : null;
+    // Resolved rate: only of decided cases — for context once the window matures.
+    const resolvedRate = decided > 0 ? (recovered / decided) * 100 : null;
+    return { exchange, newOrder, lost, pending, unknown, total, decided, recovered, rate, resolvedRate };
   })();
 
   // ── Handler workload ───────────────────────────────────────
@@ -797,10 +802,20 @@ export default function ReturnsAnalytics({
         <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
           <div>
             <h3 className="text-sm font-semibold text-neutral-900">Wiederkaufsrate nach Retoure</h3>
-            <p className="text-[11px] text-neutral-400 mt-0.5">Hat der Kunde innerhalb von 60 Tagen erneut bei uns gekauft?</p>
+            <p className="text-[11px] text-neutral-400 mt-0.5">
+              {repurchase.recovered} von {repurchase.total} Retouren mit Folgekauf binnen 60 Tagen
+              {repurchase.pending > 0 ? ` · ${repurchase.pending} noch im 60-Tage-Fenster (Rate kann steigen)` : ""}
+            </p>
           </div>
-          <div className="text-2xl font-semibold text-neutral-900">
-            {repurchase.rate != null ? `${repurchase.rate.toFixed(1)}%` : "—"}
+          <div className="text-right">
+            <div className="text-2xl font-semibold text-neutral-900">
+              {repurchase.rate != null ? `${repurchase.rate.toFixed(1)}%` : "—"}
+            </div>
+            {repurchase.resolvedRate != null && repurchase.decided > 0 && repurchase.pending > 0 && (
+              <div className="text-[11px] text-neutral-400">
+                Entschieden: {repurchase.resolvedRate.toFixed(1)}% (von {repurchase.decided})
+              </div>
+            )}
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
