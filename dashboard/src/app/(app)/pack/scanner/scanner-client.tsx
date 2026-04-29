@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { Html5Qrcode } from "html5-qrcode";
-import { Camera, CameraOff, AlertTriangle, Search, X, ArrowLeft, ScanLine, RefreshCw } from "lucide-react";
+import { Camera, CameraOff, AlertTriangle, Search, ArrowLeft, ScanLine, RefreshCw } from "lucide-react";
 import { type Locale } from "@/lib/i18n";
 import { scanProductByBarcode } from "@/lib/actions/pack";
 
@@ -32,6 +32,27 @@ export default function ScannerClient({ locale: _locale }: { locale: Locale }) {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const lastScanRef = useRef<{ code: string; ts: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
+  const wasCameraActiveRef = useRef(false);
+
+  // Wenn ein neues Ergebnis kommt: zum result scrollen
+  useEffect(() => {
+    if ((results || notFound) && !isPending) {
+      setTimeout(() => {
+        resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 50);
+    }
+  }, [results, notFound, isPending]);
+
+  // Wenn ergebnis angezeigt: kamera pausieren (sonst läuft sie im hintergrund)
+  useEffect(() => {
+    const hasResult = !!(results || notFound);
+    if (hasResult && active) {
+      // Merken dass die Kamera AN war, damit Reset sie wieder aktiviert
+      wasCameraActiveRef.current = true;
+      setActive(false);
+    }
+  }, [results, notFound, active]);
 
   const performLookup = useCallback((barcode: string) => {
     const trimmed = barcode.trim();
@@ -119,7 +140,13 @@ export default function ScannerClient({ locale: _locale }: { locale: Locale }) {
     setScanned(null);
     setNotFound(false);
     setScanInput("");
-    inputRef.current?.focus();
+    // Wenn vorher Kamera lief: wieder einschalten, sonst Input fokussieren
+    if (wasCameraActiveRef.current) {
+      wasCameraActiveRef.current = false;
+      setActive(true);
+    } else {
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
   }
 
   return (
@@ -138,7 +165,7 @@ export default function ScannerClient({ locale: _locale }: { locale: Locale }) {
         </p>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${results || notFound || isPending ? "hidden" : ""}`}>
         {/* Kamera-Scanner */}
         <div className="bg-neutral-900 rounded-2xl overflow-hidden border border-neutral-200">
           <div className="flex items-center justify-between p-3 bg-neutral-800 text-white">
@@ -216,25 +243,31 @@ export default function ScannerClient({ locale: _locale }: { locale: Locale }) {
 
       {/* Ergebnis */}
       {(results || notFound || isPending) && scanned && (
-        <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
+        <div ref={resultRef} className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm scroll-mt-4">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <div className="text-xs text-neutral-500">
               Gescannt: <span className="font-mono text-neutral-900">{scanned}</span>
             </div>
-            <button onClick={reset} className="text-neutral-400 hover:text-neutral-700" aria-label="Zurücksetzen">
-              <X size={18} />
-            </button>
+            {!isPending && (
+              <button
+                onClick={reset}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700 transition"
+              >
+                <ScanLine size={14} />
+                Nächster Scan
+              </button>
+            )}
           </div>
 
           {isPending && (
-            <div className="text-center py-6 text-neutral-500 text-sm">Suche…</div>
+            <div className="text-center py-10 text-neutral-500 text-sm">Suche…</div>
           )}
 
           {!isPending && notFound && (
-            <div className="text-center py-6">
-              <AlertTriangle className="mx-auto text-amber-500 mb-2" size={36} />
-              <div className="text-lg font-semibold text-neutral-900">Kein Produkt mit dieser EAN</div>
-              <div className="text-sm text-neutral-500 mt-1">
+            <div className="text-center py-8">
+              <AlertTriangle className="mx-auto text-amber-500 mb-3" size={48} />
+              <div className="text-xl font-semibold text-neutral-900">Kein Produkt mit dieser EAN</div>
+              <div className="text-sm text-neutral-500 mt-2">
                 Möglicherweise ist die EAN nicht in Shopify hinterlegt.
               </div>
             </div>
@@ -243,16 +276,20 @@ export default function ScannerClient({ locale: _locale }: { locale: Locale }) {
           {!isPending && results && results.length > 0 && (
             <>
               {results.length > 1 && (
-                <div className="mb-3 p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-900">
+                <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-900">
                   <strong>⚠ {results.length} Produkte mit dieser EAN gefunden!</strong>
                   <div className="text-xs mt-1">EAN-Konflikt — bitte in Shopify die Codes einzigartig vergeben.</div>
                 </div>
               )}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {results.map((r, i) => (
-                  <ProductCard key={i} result={r} />
-                ))}
-              </div>
+              {results.length === 1 ? (
+                <BigProductCard result={results[0]} />
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {results.map((r, i) => (
+                    <ProductCard key={i} result={r} />
+                  ))}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -290,6 +327,43 @@ export default function ScannerClient({ locale: _locale }: { locale: Locale }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function BigProductCard({ result }: { result: Result }) {
+  return (
+    <div className="flex flex-col md:flex-row gap-5 items-start">
+      {result.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={result.imageUrl}
+          alt=""
+          className="w-full md:w-48 h-48 rounded-xl object-cover bg-neutral-100 shrink-0"
+        />
+      ) : (
+        <div className="w-full md:w-48 h-48 rounded-xl bg-neutral-100 shrink-0" />
+      )}
+      <div className="flex-1 min-w-0">
+        <div className="text-xl md:text-2xl font-bold text-neutral-900 leading-tight">
+          {result.productTitle}
+        </div>
+        {result.variantTitle && (
+          <div className="mt-2 inline-block bg-emerald-100 text-emerald-800 text-sm font-semibold px-3 py-1 rounded">
+            Variante: {result.variantTitle}
+          </div>
+        )}
+        <div className="text-sm font-mono text-neutral-500 mt-3">EAN {result.barcode}</div>
+        {result.collectionTitles.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-3">
+            {result.collectionTitles.map((c, i) => (
+              <span key={i} className="text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-1 rounded">
+                {c}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
