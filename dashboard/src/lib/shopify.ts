@@ -1171,20 +1171,51 @@ interface PackOrderNode {
           inventoryItem: { id: string } | null;
           product: {
             featuredImage: { url: string } | null;
-            collections: { edges: { node: { handle: string } }[] };
+            collections?: { edges: { node: { handle: string } }[] };
           } | null;
         } | null;
       };
     }[];
   };
-  fulfillmentOrders: {
+  fulfillmentOrders?: {
     edges: { node: { id: string; status: string } }[];
   };
   packQrMetafield: { value: string } | null;
 }
 
 // Hinweis: customer-name fehlt (read_customers scope) — wir nehmen shippingAddress.name als Fallback.
-// fulfillmentOrders wird benötigt für Auto-Fulfill (completePackSession).
+//
+// Wir haben ZWEI fragment-varianten:
+//   PACK_ORDER_FIELDS_SLIM — für list-queries (kein collections, kein fulfillmentOrders)
+//   PACK_ORDER_FIELDS      — für single-order detail (alles)
+// Hintergrund: collections+fulfillmentOrders multiplizieren den Shopify-query-cost.
+// Bei `orders(first: 100)` knallt das durch das 1000-Limit.
+const PACK_ORDER_FIELDS_SLIM = `
+  id
+  name
+  createdAt
+  displayFinancialStatus
+  displayFulfillmentStatus
+  email
+  shippingAddress { name firstName lastName address1 zip city country }
+  lineItems(first: 50) {
+    edges { node {
+      title
+      quantity
+      image { url }
+      variant {
+        id
+        title
+        barcode
+        image { url }
+        inventoryItem { id }
+        product { featuredImage { url } }
+      }
+    } }
+  }
+  packQrMetafield: metafield(namespace: "custom", key: "pack_qr_svg") { value }
+`;
+
 const PACK_ORDER_FIELDS = `
   id
   name
@@ -1234,7 +1265,7 @@ function mapPackOrder(node: PackOrderNode): PackOrder {
       inventoryItemId: v?.inventoryItem?.id ?? null,
       imageUrl,
       fulfillmentOrderLineItemId: null, // wird separat geholt für Auto-Fulfill
-      collectionHandles: v?.product?.collections.edges.map((c) => c.node.handle) ?? [],
+      collectionHandles: v?.product?.collections?.edges.map((c) => c.node.handle) ?? [],
     };
   });
 
@@ -1279,7 +1310,7 @@ export async function fetchUnfulfilledPaidOrders(limit = 100): Promise<PackOrder
   const query = `
     query packQueue($q: String!, $first: Int!) {
       orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: false) {
-        edges { node { ${PACK_ORDER_FIELDS} } }
+        edges { node { ${PACK_ORDER_FIELDS_SLIM} } }
       }
     }
   `;
@@ -1302,7 +1333,7 @@ export async function fetchRecentPaidOrders(daysBack = 30, limit = 250): Promise
   const query = `
     query recentPaid($q: String!, $first: Int!) {
       orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: true) {
-        edges { node { ${PACK_ORDER_FIELDS} } }
+        edges { node { ${PACK_ORDER_FIELDS_SLIM} } }
       }
     }
   `;
