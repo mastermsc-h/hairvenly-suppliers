@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Package, AlertTriangle, Scale, Printer, X } from "lucide-react";
 import JsBarcode from "jsbarcode";
 import StockSearch from "./stock-search";
@@ -460,22 +461,24 @@ function PrintModal({
 }
 
 function PrintLabels({ items }: { items: { title: string; barcode: string }[] }) {
-  if (items.length === 0) return null;
-  return (
+  // Mount-Guard fuer SSR
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted || items.length === 0 || typeof document === "undefined") return null;
+
+  // Wir rendern das Label-Sheet als direktes Kind von <body> via Portal.
+  // Das CSS blendet im Druck ALLES andere body-child mit display:none aus,
+  // damit keine Geister-Seiten der Hauptseite mitgedruckt werden.
+  return createPortal(
     <>
       <style>{`
-        @media screen { .stock-label-sheet { display: none; } }
+        @media screen { .stock-label-sheet-portal { display: none; } }
         @media print {
-          /* Alles ausblenden, nur Label-Sheet zeigen — visibility statt display
-             damit Layout des restlichen Dokuments nicht zusammenfaellt */
-          body * { visibility: hidden !important; }
-          .stock-label-sheet-wrap, .stock-label-sheet-wrap * { visibility: visible !important; }
-          .stock-label-sheet-wrap {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-          }
+          body > *:not(.stock-label-sheet-portal) { display: none !important; }
+          .stock-label-sheet-portal { display: block !important; }
           html, body { background: white !important; margin: 0 !important; padding: 0 !important; }
           @page { size: 50mm 25mm; margin: 0; }
           .stock-label {
@@ -509,12 +512,13 @@ function PrintLabels({ items }: { items: { title: string; barcode: string }[] })
           .stock-label-barcode svg { width: 100%; height: 100%; max-height: 14mm; }
         }
       `}</style>
-      <div className="stock-label-sheet-wrap stock-label-sheet">
+      <div className="stock-label-sheet-portal">
         {items.map((it, i) => (
           <SingleLabel key={i} title={it.title} barcode={it.barcode} />
         ))}
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
 
