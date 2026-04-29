@@ -4,6 +4,7 @@ import { readInventorySheet, readDashboardAlerts } from "@/lib/stock-sheets";
 import { fetchOrderIdByName } from "@/lib/order-name-map";
 import { filterArchivedFromStock } from "@/lib/filter-archived-orders";
 import { enrichInventoryWithBarcodes } from "@/lib/stock-barcodes";
+import { getPrintedSummary } from "@/lib/actions/printed-labels";
 import InventoryPageClient, { type InventoryWithTransit } from "../inventory-page";
 
 export const revalidate = 60;
@@ -13,10 +14,11 @@ export default async function RussianStockPage() {
   if (!profile.is_admin) return <div className="p-8 text-neutral-500">Nur für Admins.</div>;
   const locale = (profile.language ?? "de") as Locale;
 
-  const [inventoryResult, alerts, orderIdByName] = await Promise.all([
+  const [inventoryResult, alerts, orderIdByName, printedSummary] = await Promise.all([
     readInventorySheet("Russisch - GLATT"),
     readDashboardAlerts(),
     fetchOrderIdByName(),
+    getPrintedSummary(),
   ]);
 
   const filteredUnterwegs = filterArchivedFromStock(
@@ -53,6 +55,7 @@ export default async function RussianStockPage() {
       subtitle={t(locale, "stock.subtitle.russian")}
       locale={locale}
       lastUpdated={inventoryResult.lastUpdated}
+      printedSummary={printedSummary}
     />
   );
 }
