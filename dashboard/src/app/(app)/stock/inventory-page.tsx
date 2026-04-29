@@ -273,13 +273,32 @@ function PrintModal({
   const itemsWithBarcode = useMemo(() => rows.filter((r) => !!r.barcode), [rows]);
   const skipped = rows.length - itemsWithBarcode.length;
 
-  function setBulk(getQty: (r: InventoryWithTransit) => number) {
-    const next: Record<string, number> = {};
-    for (const r of itemsWithBarcode) {
-      next[`${r.barcode}|${r.unitWeight}`] = Math.max(0, getQty(r));
+  // Bei Clip-Ins: nach Gewichts-Variante (100g/150g/225g) gruppieren + Filter-Tabs.
+  const isClipIn = groupKey.toUpperCase().includes("CLIP");
+  const variantWeights = useMemo(() => {
+    if (!isClipIn) return [] as number[];
+    const set = new Set<number>();
+    for (const r of itemsWithBarcode) if (r.unitWeight > 0) set.add(r.unitWeight);
+    return Array.from(set).sort((a, b) => a - b);
+  }, [isClipIn, itemsWithBarcode]);
+  const [variantFilter, setVariantFilter] = useState<number | null>(null);
+
+  const visibleItems = useMemo(() => {
+    if (!variantFilter) return itemsWithBarcode;
+    return itemsWithBarcode.filter((r) => r.unitWeight === variantFilter);
+  }, [itemsWithBarcode, variantFilter]);
+
+  // Gruppen für Sub-Header-Rendering — nur bei Clip-Ins ohne aktiven Filter
+  const groupedByWeight = useMemo(() => {
+    if (!isClipIn || variantFilter) return null;
+    const groups = new Map<number, InventoryWithTransit[]>();
+    for (const r of visibleItems) {
+      const w = r.unitWeight || 0;
+      if (!groups.has(w)) groups.set(w, []);
+      groups.get(w)!.push(r);
     }
-    setQuantities(next);
-  }
+    return Array.from(groups.entries()).sort((a, b) => a[0] - b[0]);
+  }, [isClipIn, visibleItems, variantFilter]);
 
   function setQty(r: InventoryWithTransit, q: number) {
     setQuantities({ ...quantities, [`${r.barcode}|${r.unitWeight}`]: Math.max(0, q || 0) });
@@ -328,30 +347,74 @@ function PrintModal({
           </button>
         </div>
 
+        {/* Variant-Tabs nur bei Clip-Ins */}
+        {variantWeights.length > 1 && (
+          <div className="flex items-center gap-1 p-3 border-b border-neutral-200 bg-neutral-50">
+            <button
+              type="button"
+              onClick={() => setVariantFilter(null)}
+              className={`px-3 py-1 rounded-md text-xs font-medium transition ${
+                variantFilter === null
+                  ? "bg-neutral-900 text-white"
+                  : "bg-white border border-neutral-300 text-neutral-700 hover:bg-neutral-100"
+              }`}
+            >
+              Alle ({itemsWithBarcode.length})
+            </button>
+            {variantWeights.map((w) => {
+              const count = itemsWithBarcode.filter((r) => r.unitWeight === w).length;
+              return (
+                <button
+                  key={w}
+                  type="button"
+                  onClick={() => setVariantFilter(w)}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition ${
+                    variantFilter === w
+                      ? "bg-neutral-900 text-white"
+                      : "bg-white border border-neutral-300 text-neutral-700 hover:bg-neutral-100"
+                  }`}
+                >
+                  {w}g ({count})
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         <div className="flex items-center gap-2 flex-wrap p-3 border-b border-neutral-200 bg-neutral-50 text-xs">
           <span className="text-neutral-600">Schnellaktionen:</span>
           <button
             type="button"
-            onClick={() => setBulk(() => 0)}
+            onClick={() => {
+              const next = { ...quantities };
+              for (const r of visibleItems) next[`${r.barcode}|${r.unitWeight}`] = 0;
+              setQuantities(next);
+            }}
             className="px-2 py-1 rounded border border-neutral-300 hover:bg-white"
           >
-            Alle auf 0
+            {variantFilter ? "Sichtbare auf 0" : "Alle auf 0"}
           </button>
           <button
             type="button"
-            onClick={() =>
-              setBulk((r) => {
+            onClick={() => {
+              const next = { ...quantities };
+              for (const r of visibleItems) {
                 const printed = printedSummary[r.barcode!]?.totalPrinted ?? 0;
-                return Math.max(0, Math.floor(r.quantity) - printed);
-              })
-            }
+                next[`${r.barcode}|${r.unitWeight}`] = Math.max(0, Math.floor(r.quantity) - printed);
+              }
+              setQuantities(next);
+            }}
             className="px-2 py-1 rounded border border-neutral-300 hover:bg-white"
           >
             Vorschlag wiederherstellen
           </button>
           <button
             type="button"
-            onClick={() => setBulk((r) => Math.floor(r.quantity))}
+            onClick={() => {
+              const next = { ...quantities };
+              for (const r of visibleItems) next[`${r.barcode}|${r.unitWeight}`] = Math.floor(r.quantity);
+              setQuantities(next);
+            }}
             className="px-2 py-1 rounded border border-neutral-300 hover:bg-white"
           >
             = Lager
@@ -369,61 +432,33 @@ function PrintModal({
               </tr>
             </thead>
             <tbody>
-              {itemsWithBarcode.length === 0 ? (
+              {visibleItems.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-3 py-6 text-center text-neutral-500 text-sm">
-                    Keine Produkte mit hinterlegter EAN in dieser Kategorie.
+                    Keine Produkte mit hinterlegter EAN in dieser Auswahl.
                   </td>
                 </tr>
+              ) : groupedByWeight ? (
+                groupedByWeight.map(([weight, weightRows]) => (
+                  <ModalGroupRows
+                    key={weight}
+                    headerLabel={`${weight}g Variante`}
+                    rows={weightRows}
+                    quantities={quantities}
+                    printedSummary={printedSummary}
+                    onQty={setQty}
+                  />
+                ))
               ) : (
-                itemsWithBarcode.map((r, i) => {
-                  const k = `${r.barcode}|${r.unitWeight}`;
-                  const q = quantities[k] ?? 0;
-                  const printedInfo = printedSummary[r.barcode!];
-                  const printed = printedInfo?.totalPrinted ?? 0;
-                  const lastDate = printedInfo?.lastPrintedAt
-                    ? new Date(printedInfo.lastPrintedAt).toLocaleDateString("de-DE")
-                    : null;
-                  const suggested = Math.max(0, Math.floor(r.quantity) - printed);
-                  return (
-                    <tr key={i} className="border-t border-neutral-100 hover:bg-neutral-50">
-                      <td className="px-3 py-2">
-                        <div className="text-neutral-900 line-clamp-1">{r.product}</div>
-                        {r.unitWeight > 0 && (
-                          <div className="text-[10px] text-neutral-500">
-                            {r.unitWeight}g/Stk
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-right text-neutral-700">{r.quantity}</td>
-                      <td className="px-3 py-2 text-right text-xs">
-                        {printed > 0 ? (
-                          <div>
-                            <span className="text-neutral-700">{printed}</span>
-                            {lastDate && (
-                              <div className="text-[10px] text-neutral-400">{lastDate}</div>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-neutral-300">–</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <input
-                          type="number"
-                          min={0}
-                          value={q}
-                          onChange={(e) => setQty(r, parseInt(e.target.value || "0", 10))}
-                          className={`w-16 text-right rounded border px-2 py-1 text-sm focus:ring-2 focus:outline-none ${
-                            q !== suggested
-                              ? "border-amber-400 focus:ring-amber-500"
-                              : "border-neutral-300 focus:ring-neutral-900"
-                          }`}
-                        />
-                      </td>
-                    </tr>
-                  );
-                })
+                visibleItems.map((r, i) => (
+                  <ModalRow
+                    key={i}
+                    row={r}
+                    quantities={quantities}
+                    printedSummary={printedSummary}
+                    onQty={setQty}
+                  />
+                ))
               )}
             </tbody>
           </table>
@@ -457,6 +492,94 @@ function PrintModal({
         </div>
       </div>
     </div>
+  );
+}
+
+function ModalGroupRows({
+  headerLabel,
+  rows,
+  quantities,
+  printedSummary,
+  onQty,
+}: {
+  headerLabel: string;
+  rows: InventoryWithTransit[];
+  quantities: Record<string, number>;
+  printedSummary: Record<string, { totalPrinted: number; lastPrintedAt: string | null }>;
+  onQty: (r: InventoryWithTransit, q: number) => void;
+}) {
+  return (
+    <>
+      <tr className="bg-indigo-50 border-t border-indigo-200">
+        <td colSpan={4} className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">
+          {headerLabel} <span className="ml-1 font-normal text-indigo-400">({rows.length})</span>
+        </td>
+      </tr>
+      {rows.map((r, i) => (
+        <ModalRow
+          key={i}
+          row={r}
+          quantities={quantities}
+          printedSummary={printedSummary}
+          onQty={onQty}
+        />
+      ))}
+    </>
+  );
+}
+
+function ModalRow({
+  row,
+  quantities,
+  printedSummary,
+  onQty,
+}: {
+  row: InventoryWithTransit;
+  quantities: Record<string, number>;
+  printedSummary: Record<string, { totalPrinted: number; lastPrintedAt: string | null }>;
+  onQty: (r: InventoryWithTransit, q: number) => void;
+}) {
+  const k = `${row.barcode}|${row.unitWeight}`;
+  const q = quantities[k] ?? 0;
+  const printedInfo = printedSummary[row.barcode!];
+  const printed = printedInfo?.totalPrinted ?? 0;
+  const lastDate = printedInfo?.lastPrintedAt
+    ? new Date(printedInfo.lastPrintedAt).toLocaleDateString("de-DE")
+    : null;
+  const suggested = Math.max(0, Math.floor(row.quantity) - printed);
+  return (
+    <tr className="border-t border-neutral-100 hover:bg-neutral-50">
+      <td className="px-3 py-2">
+        <div className="text-neutral-900 line-clamp-1">{row.product}</div>
+        {row.unitWeight > 0 && (
+          <div className="text-[10px] text-neutral-500">{row.unitWeight}g/Stk</div>
+        )}
+      </td>
+      <td className="px-3 py-2 text-right text-neutral-700">{row.quantity}</td>
+      <td className="px-3 py-2 text-right text-xs">
+        {printed > 0 ? (
+          <div>
+            <span className="text-neutral-700">{printed}</span>
+            {lastDate && <div className="text-[10px] text-neutral-400">{lastDate}</div>}
+          </div>
+        ) : (
+          <span className="text-neutral-300">–</span>
+        )}
+      </td>
+      <td className="px-3 py-2 text-right">
+        <input
+          type="number"
+          min={0}
+          value={q}
+          onChange={(e) => onQty(row, parseInt(e.target.value || "0", 10))}
+          className={`w-16 text-right rounded border px-2 py-1 text-sm focus:ring-2 focus:outline-none ${
+            q !== suggested
+              ? "border-amber-400 focus:ring-amber-500"
+              : "border-neutral-300 focus:ring-neutral-900"
+          }`}
+        />
+      </td>
+    </tr>
   );
 }
 
