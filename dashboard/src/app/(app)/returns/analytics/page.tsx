@@ -12,12 +12,12 @@ export default async function ReturnsAnalyticsPage() {
 
   // Paginated fetch helpers (Supabase caps each query at 1000 rows)
   async function fetchAllReturns() {
-    const all: { return_type: string; status: string; handler: string | null; initiated_at: string | null; refund_amount: number | null; reason: string | null }[] = [];
+    const all: { return_type: string; status: string; handler: string | null; initiated_at: string | null; refund_amount: number | null; reason: string | null; repurchase_status: string | null }[] = [];
     const pageSize = 1000;
     for (let from = 0; from < 100000; from += pageSize) {
       const { data } = await supabase
         .from("returns")
-        .select("return_type, status, handler, initiated_at, refund_amount, reason")
+        .select("return_type, status, handler, initiated_at, refund_amount, reason, repurchase_status")
         .range(from, from + pageSize - 1);
       if (!data || data.length === 0) break;
       all.push(...data);

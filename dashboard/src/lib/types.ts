@@ -346,6 +346,12 @@ export interface Return {
   shopify_order_id: string | null;
   shopify_return_id: string | null;
   shopify_refund_id: string | null;
+  customer_email: string | null;
+  customer_id: string | null;
+  repurchase_status: "exchange" | "new_order" | "lost" | "pending" | null;
+  repurchase_order_id: string | null;
+  repurchase_order_at: string | null;
+  repurchase_check_at: string | null;
   order_number: string | null;
   customer_name: string;
   return_type: ReturnType;

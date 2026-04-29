@@ -307,6 +307,7 @@ interface ReturnRow {
   initiated_at: string | null;
   refund_amount: number | null;
   reason?: string | null;
+  repurchase_status?: string | null;
 }
 
 function KPICard({
@@ -597,6 +598,24 @@ export default function ReturnsAnalytics({
   const trustedByRate = categoriesByRate.filter((c) => (c.rate ?? 0) <= 100 && c.salesEur >= 500);
   const hasSalesData = collectionSales.length > 0;
 
+  // ── Repurchase / Wiederkaufsrate ───────────────────────────
+  const repurchase = (() => {
+    let exchange = 0, newOrder = 0, lost = 0, pending = 0, unknown = 0;
+    for (const r of filteredReturns) {
+      switch (r.repurchase_status) {
+        case "exchange": exchange++; break;
+        case "new_order": newOrder++; break;
+        case "lost": lost++; break;
+        case "pending": pending++; break;
+        default: unknown++;
+      }
+    }
+    const decided = exchange + newOrder + lost;
+    const recovered = exchange + newOrder;
+    const rate = decided > 0 ? (recovered / decided) * 100 : null;
+    return { exchange, newOrder, lost, pending, unknown, decided, recovered, rate };
+  })();
+
   // ── Handler workload ───────────────────────────────────────
   const handlerMap = new Map<string, number>();
   for (const r of filteredReturns) {
@@ -771,6 +790,41 @@ export default function ReturnsAnalytics({
           value={`${avgRefund.toLocaleString("de-DE", { minimumFractionDigits: 2 })} €`}
           sub={`${refundsWithAmount.length} ${t(locale, "returns.kpi_resolved")}`}
         />
+      </div>
+
+      {/* Wiederkaufsrate nach Retoure */}
+      <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
+        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+          <div>
+            <h3 className="text-sm font-semibold text-neutral-900">Wiederkaufsrate nach Retoure</h3>
+            <p className="text-[11px] text-neutral-400 mt-0.5">Hat der Kunde innerhalb von 60 Tagen erneut bei uns gekauft?</p>
+          </div>
+          <div className="text-2xl font-semibold text-neutral-900">
+            {repurchase.rate != null ? `${repurchase.rate.toFixed(1)}%` : "—"}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+          <div className="rounded-lg bg-emerald-50 px-3 py-2">
+            <div className="text-emerald-700 font-medium">Neue Bestellung</div>
+            <div className="text-lg font-semibold text-emerald-900">{repurchase.newOrder}</div>
+          </div>
+          <div className="rounded-lg bg-blue-50 px-3 py-2">
+            <div className="text-blue-700 font-medium">Umtausch</div>
+            <div className="text-lg font-semibold text-blue-900">{repurchase.exchange}</div>
+          </div>
+          <div className="rounded-lg bg-red-50 px-3 py-2">
+            <div className="text-red-700 font-medium">Verloren</div>
+            <div className="text-lg font-semibold text-red-900">{repurchase.lost}</div>
+          </div>
+          <div className="rounded-lg bg-amber-50 px-3 py-2">
+            <div className="text-amber-700 font-medium">Offen (60 Tage)</div>
+            <div className="text-lg font-semibold text-amber-900">{repurchase.pending}</div>
+          </div>
+          <div className="rounded-lg bg-neutral-100 px-3 py-2">
+            <div className="text-neutral-600 font-medium">Ohne Daten</div>
+            <div className="text-lg font-semibold text-neutral-700">{repurchase.unknown}</div>
+          </div>
+        </div>
       </div>
 
       {/* Secondary KPIs */}

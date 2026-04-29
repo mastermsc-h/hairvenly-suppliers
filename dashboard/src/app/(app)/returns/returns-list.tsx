@@ -651,6 +651,7 @@ export default function ReturnsList({
   const [statusFilter, setStatusFilter] = useState<ReturnStatus | "all">("all");
   const [handlerFilter, setHandlerFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | "shopify" | "manual">("all");
+  const [repurchaseFilter, setRepurchaseFilter] = useState<"all" | "exchange" | "new_order" | "lost" | "pending">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [customFrom, setCustomFrom] = useState("");
@@ -685,6 +686,7 @@ export default function ReturnsList({
         if (sourceFilter === "shopify" && !isShopify) return false;
         if (sourceFilter === "manual" && isShopify) return false;
       }
+      if (repurchaseFilter !== "all" && r.repurchase_status !== repurchaseFilter) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
         const order = (r.order_number ?? "").toLowerCase();
@@ -698,7 +700,7 @@ export default function ReturnsList({
       if (dateRange && !r.initiated_at) return false;
       return true;
     });
-  }, [returns, typeFilter, statusFilter, handlerFilter, sourceFilter, searchQuery, dateRange]);
+  }, [returns, typeFilter, statusFilter, handlerFilter, sourceFilter, repurchaseFilter, searchQuery, dateRange]);
 
   const handleSync = (from: string, to: string) => {
     startSync(async () => {
@@ -790,6 +792,14 @@ export default function ReturnsList({
           <option value="all">Alle Quellen</option>
           <option value="shopify">Nur Shopify</option>
           <option value="manual">Nur manuell</option>
+        </select>
+        <select value={repurchaseFilter} onChange={(e) => setRepurchaseFilter(e.target.value as typeof repurchaseFilter)}
+          className="rounded-lg border border-neutral-300 px-3 py-2 text-sm">
+          <option value="all">Alle Wiederkäufe</option>
+          <option value="new_order">Neue Bestellung</option>
+          <option value="exchange">Umtausch</option>
+          <option value="lost">Verloren</option>
+          <option value="pending">Offen</option>
         </select>
         <div className="flex items-center gap-1.5 rounded-lg border border-neutral-300 px-3 py-2 text-sm min-w-[220px]">
           <Search size={14} className="text-neutral-400" />
