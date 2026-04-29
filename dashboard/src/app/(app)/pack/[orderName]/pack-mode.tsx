@@ -508,9 +508,10 @@ export default function PackMode({
 
   function handleFulfill() {
     setFulfillError(null);
-    // Versandetikett-Tab vor dem Server-Call öffnen, damit der Browser den
+    // Shopify-Order-Tab vor dem Server-Call öffnen, damit der Browser den
     // window.open noch als direkten user-click wertet (kein popup-block).
-    if (shopifyLabelUrl) window.open(shopifyLabelUrl, "_blank", "noopener");
+    // Named target damit alle nachfolgenden Klicks denselben Tab fokussieren.
+    if (shopifyLabelUrl) window.open(shopifyLabelUrl, "shopify-order", "noopener");
     startTransition(async () => {
       const res = await completePackSession(sessionId);
       if (res.success) {
@@ -1157,7 +1158,7 @@ export default function PackMode({
                 {shopifyOrderUrl ? (
                   <a
                     href={shopifyOrderUrl}
-                    target="_blank"
+                    target="shopify-order"
                     rel="noopener"
                     className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-white border-2 border-blue-300 text-blue-900 text-sm font-semibold hover:bg-blue-100 transition"
                   >
@@ -1169,7 +1170,7 @@ export default function PackMode({
                 {shopifyLabelUrl ? (
                   <a
                     href={shopifyLabelUrl}
-                    target="_blank"
+                    target="shopify-order"
                     rel="noopener"
                     onClick={() => setLabelClicked(true)}
                     className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-emerald-600 border-2 border-emerald-700 text-white text-sm font-semibold hover:bg-emerald-700 transition"
