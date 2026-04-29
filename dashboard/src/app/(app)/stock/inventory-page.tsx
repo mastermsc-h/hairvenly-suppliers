@@ -1,6 +1,8 @@
 "use client";
 
-import { Package, AlertTriangle, Scale } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Package, AlertTriangle, Scale, Printer } from "lucide-react";
+import JsBarcode from "jsbarcode";
 import StockSearch from "./stock-search";
 import StockTable, { slugify } from "./stock-table";
 import SyncBadge from "./sync-badge";
@@ -29,6 +31,50 @@ export default function InventoryPageClient({ data, title, subtitle, lastUpdated
   const totalKg = data.reduce((s, r) => s + r.totalWeight, 0) / 1000;
   const totalProducts = data.length;
   const zeroCount = data.filter((r) => r.quantity === 0).length;
+
+  // Druck-State: Liste der zu druckenden Etiketten ([{title, barcode}, ...] mehrfach pro Menge)
+  const [printItems, setPrintItems] = useState<{ title: string; barcode: string }[]>([]);
+
+  // Wenn printItems gesetzt: kurz warten bis SVGs gerendert sind, dann drucken + reset
+  useEffect(() => {
+    if (printItems.length === 0) return;
+    const tm = setTimeout(() => {
+      window.print();
+      // Nach kurzer Zeit reset, damit der Druckbereich verschwindet
+      setTimeout(() => setPrintItems([]), 1000);
+    }, 200);
+    return () => clearTimeout(tm);
+  }, [printItems]);
+
+  function printForGroup(rows: InventoryWithTransit[]) {
+    const list: { title: string; barcode: string }[] = [];
+    let skipped = 0;
+    for (const r of rows) {
+      if (!r.barcode) {
+        skipped += r.quantity;
+        continue;
+      }
+      const qty = Math.max(0, Math.floor(r.quantity));
+      for (let i = 0; i < qty; i++) {
+        list.push({ title: r.product, barcode: r.barcode });
+      }
+    }
+    if (list.length === 0) {
+      alert(
+        skipped > 0
+          ? `Keine Barcodes hinterlegt — ${skipped} Etiketten würden gedruckt, aber keine EAN gefunden.`
+          : "Lagerbestand ist 0 — nichts zu drucken.",
+      );
+      return;
+    }
+    if (skipped > 0) {
+      const ok = confirm(
+        `${list.length} Etiketten werden gedruckt.\n\nHinweis: ${skipped} Etiketten konnten nicht erstellt werden — Produkte ohne EAN.`,
+      );
+      if (!ok) return;
+    }
+    setPrintItems(list);
+  }
 
   // Build category list for quick-jump nav: { name, slug, count, kg }
   const categories = (() => {
@@ -88,6 +134,9 @@ export default function InventoryPageClient({ data, title, subtitle, lastUpdated
         </section>
       )}
 
+      {/* Druckbereich: nur via @media print sichtbar; Hauptseite bleibt erhalten */}
+      <PrintLabels items={printItems} />
+
       <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-neutral-100">
           <StockSearch
@@ -101,6 +150,24 @@ export default function InventoryPageClient({ data, title, subtitle, lastUpdated
                 <StockTable
                   data={filtered}
                   groupBy={"collection" as keyof InventoryWithTransit}
+                  groupAction={(_groupKey, rows) => {
+                    const totalLabels = (rows as InventoryWithTransit[]).reduce(
+                      (s, r) => s + (r.barcode ? Math.max(0, Math.floor(r.quantity)) : 0),
+                      0,
+                    );
+                    if (totalLabels === 0) return null;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => printForGroup(rows as InventoryWithTransit[])}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-white/15 hover:bg-white/25 text-white border border-white/30"
+                        title={`${totalLabels} Etiketten drucken (Menge = Lagerbestand)`}
+                      >
+                        <Printer size={12} />
+                        Barcode drucken ({totalLabels})
+                      </button>
+                    );
+                  }}
                   columns={[
                     { key: "product" as keyof InventoryWithTransit, label: "Produkt" },
                     { key: "unitWeight" as keyof InventoryWithTransit, label: "g/Stk", align: "right" },
@@ -152,6 +219,92 @@ export default function InventoryPageClient({ data, title, subtitle, lastUpdated
           </StockSearch>
         </div>
       </section>
+    </div>
+  );
+}
+
+function PrintLabels({ items }: { items: { title: string; barcode: string }[] }) {
+  if (items.length === 0) return null;
+  return (
+    <>
+      <style>{`
+        @media screen { .stock-label-sheet { display: none; } }
+        @media print {
+          /* Alles ausblenden, nur Label-Sheet zeigen — visibility statt display
+             damit Layout des restlichen Dokuments nicht zusammenfaellt */
+          body * { visibility: hidden !important; }
+          .stock-label-sheet-wrap, .stock-label-sheet-wrap * { visibility: visible !important; }
+          .stock-label-sheet-wrap {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+          }
+          html, body { background: white !important; margin: 0 !important; padding: 0 !important; }
+          @page { size: 50mm 25mm; margin: 0; }
+          .stock-label {
+            width: 50mm;
+            height: 25mm;
+            padding: 1mm;
+            box-sizing: border-box;
+            page-break-after: always;
+            break-after: page;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+          }
+          .stock-label:last-child { page-break-after: auto; break-after: auto; }
+          .stock-label-title {
+            font-size: 6pt;
+            line-height: 1.1;
+            text-align: center;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            color: #000;
+            max-height: 7mm;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            margin-bottom: 0.5mm;
+          }
+          .stock-label-barcode { width: 100%; max-height: 14mm; }
+          .stock-label-barcode svg { width: 100%; height: 100%; max-height: 14mm; }
+        }
+      `}</style>
+      <div className="stock-label-sheet-wrap stock-label-sheet">
+        {items.map((it, i) => (
+          <SingleLabel key={i} title={it.title} barcode={it.barcode} />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function SingleLabel({ title, barcode }: { title: string; barcode: string }) {
+  const ref = useRef<SVGSVGElement>(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    try {
+      JsBarcode(ref.current, barcode, {
+        format: "CODE128",
+        displayValue: true,
+        fontSize: 10,
+        height: 36,
+        margin: 0,
+        textMargin: 1,
+      });
+    } catch {
+      // ignore
+    }
+  }, [barcode]);
+  return (
+    <div className="stock-label">
+      <div className="stock-label-title">{title}</div>
+      <div className="stock-label-barcode">
+        <svg ref={ref} />
+      </div>
     </div>
   );
 }

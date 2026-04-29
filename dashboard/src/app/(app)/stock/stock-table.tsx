@@ -18,6 +18,8 @@ interface StockTableProps<T> {
   groupBy?: keyof T;
   rowClassName?: (row: T) => string;
   emptyMessage?: string;
+  // Optional: Element rechts im Gruppen-Header (z.B. "Barcodes drucken"-Button)
+  groupAction?: (groupKey: string, rows: T[]) => React.ReactNode;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -27,6 +29,7 @@ export default function StockTable<T extends Record<string, any>>({
   groupBy,
   rowClassName,
   emptyMessage = "Keine Daten",
+  groupAction,
 }: StockTableProps<T>) {
   const [sortKey, setSortKey] = useState<keyof T | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -108,6 +111,7 @@ export default function StockTable<T extends Record<string, any>>({
               groupBy={groupBy}
               rowClassName={rowClassName}
               alignClass={alignClass}
+              groupAction={groupAction}
             />
           ))}
         </tbody>
@@ -199,12 +203,14 @@ function GroupRows<T extends Record<string, any>>({
   groupBy,
   rowClassName,
   alignClass,
+  groupAction,
 }: {
   group: { key: string; rows: T[] };
   columns: { key: keyof T; label: string; align?: string; render?: (value: T[keyof T], row: T) => React.ReactNode; className?: string }[];
   groupBy?: keyof T;
   rowClassName?: (row: T) => string;
   alignClass: (a?: string) => string;
+  groupAction?: (groupKey: string, rows: T[]) => React.ReactNode;
 }) {
   const totalWeight = sumField(group.rows, "totalWeight");
   const transitTotal = sumField(group.rows, "transitTotal");
@@ -252,8 +258,17 @@ function GroupRows<T extends Record<string, any>>({
       {groupBy && group.key && (
         <tr id={`cat-${slug}`} className="bg-indigo-600 text-white sticky top-0 z-10 shadow-md scroll-mt-4">
           <td colSpan={columns.length} className="px-3 py-2.5 font-bold text-sm uppercase tracking-wide">
-            {group.key}
-            <span className="ml-2 font-semibold text-indigo-200">({group.rows.length})</span>
+            <div className="flex items-center justify-between gap-3">
+              <span>
+                {group.key}
+                <span className="ml-2 font-semibold text-indigo-200">({group.rows.length})</span>
+              </span>
+              {groupAction && (
+                <span className="font-normal normal-case tracking-normal text-xs">
+                  {groupAction(group.key, group.rows)}
+                </span>
+              )}
+            </div>
           </td>
         </tr>
       )}

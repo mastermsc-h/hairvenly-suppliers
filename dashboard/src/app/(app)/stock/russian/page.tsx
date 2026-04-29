@@ -3,6 +3,7 @@ import { t, type Locale } from "@/lib/i18n";
 import { readInventorySheet, readDashboardAlerts } from "@/lib/stock-sheets";
 import { fetchOrderIdByName } from "@/lib/order-name-map";
 import { filterArchivedFromStock } from "@/lib/filter-archived-orders";
+import { enrichInventoryWithBarcodes } from "@/lib/stock-barcodes";
 import InventoryPageClient, { type InventoryWithTransit } from "../inventory-page";
 
 export const revalidate = 60;
@@ -24,7 +25,10 @@ export default async function RussianStockPage() {
   );
   const transitByShopifyKey = buildTransitLookup(filteredUnterwegs);
 
-  const data: InventoryWithTransit[] = inventoryResult.rows.map((row) => {
+  // Mit EAN-Barcodes aus Shopify anreichern (best-effort, fail-safe)
+  const enrichedRows = await enrichInventoryWithBarcodes(inventoryResult.rows);
+
+  const data: InventoryWithTransit[] = enrichedRows.map((row) => {
     // Match primarily by full product name (Shopify name — unique per product).
     // For clip-ins: include variant (100g/150g/225g) since same name has 3 rows.
     const isClipIn = row.collection.toUpperCase().includes("CLIP");

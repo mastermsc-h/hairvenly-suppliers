@@ -34,6 +34,7 @@ export interface InventoryRow {
   unitWeight: number;
   quantity: number;
   totalWeight: number;
+  barcode?: string | null; // EAN aus Shopify, optional ergänzt für Etiketten-Druck
 }
 
 export interface TopsSellerSection {

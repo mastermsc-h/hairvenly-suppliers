@@ -3,6 +3,7 @@ import { t, type Locale } from "@/lib/i18n";
 import { readInventorySheet, readDashboardAlerts } from "@/lib/stock-sheets";
 import { fetchOrderIdByName } from "@/lib/order-name-map";
 import { filterArchivedFromStock } from "@/lib/filter-archived-orders";
+import { enrichInventoryWithBarcodes } from "@/lib/stock-barcodes";
 import InventoryPageClient, { type InventoryWithTransit } from "../inventory-page";
 
 export const revalidate = 60;
@@ -24,7 +25,9 @@ export default async function UzbekStockPage() {
   );
   const transitByShopifyKey = buildTransitLookup(filteredUnterwegs);
 
-  const data: InventoryWithTransit[] = inventoryResult.rows.map((row) => {
+  const enrichedRows = await enrichInventoryWithBarcodes(inventoryResult.rows);
+
+  const data: InventoryWithTransit[] = enrichedRows.map((row) => {
     const isClipIn = row.collection.toUpperCase().includes("CLIP");
     const fullKey = row.product.toUpperCase();
     const variantKey = isClipIn && row.unitWeight > 0 ? `${fullKey}|${row.unitWeight}` : null;
