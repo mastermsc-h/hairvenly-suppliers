@@ -148,9 +148,20 @@ export async function updateOrder(orderId: string, formData: FormData) {
     if (order?.sheet_url) {
       try {
         const { updateSheetStatus } = await import("@/lib/google-sheets");
-        await updateSheetStatus(order.sheet_url, String(update.status));
-      } catch {
-        // Silent fail — sheet sync is best-effort
+        const res = await updateSheetStatus(order.sheet_url, String(update.status));
+        if (res.ok) {
+          await logEvent(supabase, orderId, profile.id, "sheet_sync",
+            `Status im Google Sheet aktualisiert: ${update.status}`);
+        } else {
+          console.error(`[updateSheetStatus] failed for order ${orderId}:`, res.error);
+          await logEvent(supabase, orderId, profile.id, "sheet_sync",
+            `Sheet-Sync fehlgeschlagen: ${res.error}`);
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[updateSheetStatus] exception for order ${orderId}:`, msg);
+        await logEvent(supabase, orderId, profile.id, "sheet_sync",
+          `Sheet-Sync Fehler: ${msg}`);
       }
     }
   }

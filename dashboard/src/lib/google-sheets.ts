@@ -121,7 +121,8 @@ export async function exportOrderToSheet(
     const STATUS_DE: Record<string, string> = {
       draft: "Entwurf", sent_to_supplier: "An Lieferant gesendet", confirmed: "Bestätigt",
       in_production: "In Produktion", ready_to_ship: "Versandbereit", shipped: "Versendet",
-      in_customs: "Im Zoll", delivered: "Angekommen", cancelled: "Storniert",
+      in_customs: "Im Zoll", delivered: "Angekommen", stocked: "Ins Lager eingepflegt",
+      cancelled: "Storniert",
     };
 
     // Build rows grouped by method + length, tracking row indices for coloring
@@ -405,7 +406,8 @@ export async function importShopifyNames(tabName: string): Promise<{ products: S
 const STATUS_DE: Record<string, string> = {
   draft: "Entwurf", sent_to_supplier: "An Lieferant gesendet", confirmed: "Bestätigt",
   in_production: "In Produktion", ready_to_ship: "Versandbereit", shipped: "Versendet",
-  in_customs: "Im Zoll", delivered: "Angekommen", cancelled: "Storniert",
+  in_customs: "Im Zoll", delivered: "Angekommen", stocked: "Ins Lager eingepflegt",
+  cancelled: "Storniert",
 };
 
 /**
