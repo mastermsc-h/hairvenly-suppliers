@@ -35,7 +35,6 @@ export default async function PrintAllPage() {
       title: li.title,
       variantTitle: li.variantTitle,
       quantity: li.quantity,
-      imageUrl: li.imageUrl,
       isExtension: isExtensionItem(li.collectionHandles),
     })),
   }));

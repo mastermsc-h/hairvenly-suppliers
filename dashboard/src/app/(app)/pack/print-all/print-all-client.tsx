@@ -9,7 +9,6 @@ interface SlipItem {
   title: string;
   variantTitle: string | null;
   quantity: number;
-  imageUrl: string | null;
   isExtension: boolean;
 }
 
@@ -71,22 +70,25 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
     const origin = window.location.origin;
     let cancelled = false;
     (async () => {
-      const map: Record<string, string> = {};
-      for (const slip of slips) {
-        const url = `${origin}/pack/${slip.numberClean}`;
-        try {
-          map[slip.name] = await QRCode.toDataURL(url, {
-            width: 180,
-            margin: 1,
-            errorCorrectionLevel: "M",
-            color: { dark: "#000000", light: "#FFFFFF" },
-          });
-        } catch {
-          // ignore
-        }
-      }
+      // Parallel QR-Codes generieren — bei 30 orders war sequenziell zu langsam
+      const entries = await Promise.all(
+        slips.map(async (slip) => {
+          const url = `${origin}/pack/${slip.numberClean}`;
+          try {
+            const dataUrl = await QRCode.toDataURL(url, {
+              width: 180,
+              margin: 1,
+              errorCorrectionLevel: "M",
+              color: { dark: "#000000", light: "#FFFFFF" },
+            });
+            return [slip.name, dataUrl] as const;
+          } catch {
+            return [slip.name, ""] as const;
+          }
+        }),
+      );
       if (!cancelled) {
-        setQrMap(map);
+        setQrMap(Object.fromEntries(entries.filter(([, v]) => v)));
         setReady(true);
       }
     })();
@@ -228,7 +230,6 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
             <table className="w-full border-collapse mt-2">
               <thead>
                 <tr>
-                  <th className="text-left text-[11px] tracking-widest text-neutral-600 border-b-2 border-black py-2 w-[70px]"></th>
                   <th className="text-left text-[11px] tracking-widest text-neutral-600 border-b-2 border-black py-2">ARTIKEL</th>
                   <th className="text-right text-[11px] tracking-widest text-neutral-600 border-b-2 border-black py-2 w-[80px]">ANZAHL</th>
                 </tr>
@@ -238,14 +239,6 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
                   const attrs = detectAttributes(it.title, it.variantTitle);
                   return (
                     <tr key={i} className="border-b border-neutral-200">
-                      <td className="py-3 align-top">
-                        {it.imageUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={it.imageUrl} alt="" className="w-[60px] h-[60px] object-cover rounded" />
-                        ) : (
-                          <div className="w-[60px] h-[60px] bg-neutral-100 rounded" />
-                        )}
-                      </td>
                       <td className="py-3 align-top">
                         {it.isExtension && (attrs.method.label || attrs.length || attrs.origin) && (
                           <div className="mb-1">
