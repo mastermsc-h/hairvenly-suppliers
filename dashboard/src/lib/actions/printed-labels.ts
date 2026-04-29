@@ -44,6 +44,23 @@ export async function recordPrintedLabels(
 }
 
 /**
+ * Setzt den 'Bisher gedruckt'-Counter für einen Barcode auf 0 zurück
+ * (löscht alle Einträge in printed_labels für diesen Barcode).
+ */
+export async function resetPrintedForBarcode(
+  barcode: string,
+): Promise<{ success: boolean; error?: string }> {
+  const profile = await requireProfile();
+  if (!profile.is_admin) return { success: false, error: "Forbidden" };
+  if (!barcode) return { success: false, error: "Kein Barcode" };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("printed_labels").delete().eq("barcode", barcode);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+/**
  * Holt das Aggregat aller bisher gedruckten Etiketten pro Barcode.
  * Returns Map<barcode, { totalPrinted, lastPrintedAt }>.
  */

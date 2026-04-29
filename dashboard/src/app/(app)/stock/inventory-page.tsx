@@ -8,7 +8,7 @@ import StockSearch from "./stock-search";
 import StockTable, { slugify } from "./stock-table";
 import SyncBadge from "./sync-badge";
 import type { InventoryRow } from "@/lib/stock-sheets";
-import { recordPrintedLabels } from "@/lib/actions/printed-labels";
+import { recordPrintedLabels, resetPrintedForBarcode } from "@/lib/actions/printed-labels";
 
 interface TransitInfo {
   label: string;
@@ -273,6 +273,40 @@ function PrintModal({
   const itemsWithBarcode = useMemo(() => rows.filter((r) => !!r.barcode), [rows]);
   const skipped = rows.length - itemsWithBarcode.length;
 
+  // Lokale Überschreibung des Print-Summary für Reset-Aktionen
+  const [resetBarcodes, setResetBarcodes] = useState<Set<string>>(new Set());
+  const effectiveSummary = useMemo(() => {
+    const out: Record<string, { totalPrinted: number; lastPrintedAt: string | null }> = {
+      ...printedSummary,
+    };
+    for (const bc of resetBarcodes) {
+      out[bc] = { totalPrinted: 0, lastPrintedAt: null };
+    }
+    return out;
+  }, [printedSummary, resetBarcodes]);
+
+  async function handleResetPrinted(r: InventoryWithTransit) {
+    if (!r.barcode) return;
+    if (!confirm(`'Bisher gedruckt'-Zaehler fuer\n${r.product}\nzuruecksetzen?`)) return;
+    const res = await resetPrintedForBarcode(r.barcode);
+    if (!res.success) {
+      alert(`Fehler: ${res.error}`);
+      return;
+    }
+    setResetBarcodes((prev) => new Set([...prev, r.barcode!]));
+    // Auch quantities updaten — neuer Vorschlag = volles Lager
+    setQuantities((prev) => ({ ...prev, [`${r.barcode}|${r.unitWeight}`]: Math.floor(r.quantity) }));
+  }
+
+  // Duplikat-Warnung: gleicher Barcode auf mehreren Zeilen?
+  const duplicateBarcodes = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of itemsWithBarcode) {
+      counts.set(r.barcode!, (counts.get(r.barcode!) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).filter(([, n]) => n > 1).map(([bc]) => bc);
+  }, [itemsWithBarcode]);
+
   // Bei Clip-Ins: nach Gewichts-Variante (100g/150g/225g) gruppieren + Filter-Tabs.
   const isClipIn = groupKey.toUpperCase().includes("CLIP");
   const variantWeights = useMemo(() => {
@@ -347,6 +381,21 @@ function PrintModal({
           </button>
         </div>
 
+        {/* Warnung wenn doppelte EANs in der Gruppe — Daten-Bug in Shopify */}
+        {duplicateBarcodes.length > 0 && (
+          <div className="mx-5 mt-4 p-3 bg-amber-50 border-2 border-amber-300 rounded-lg text-xs text-amber-900">
+            <div className="font-bold uppercase tracking-wide mb-1">
+              ⚠ {duplicateBarcodes.length} doppelt vergebene EAN
+              {duplicateBarcodes.length === 1 ? "" : "s"} erkannt
+            </div>
+            <div>
+              Mehrere Produkte teilen denselben EAN-Code. Etiketten lassen sich
+              dann nicht zuverlässig zum richtigen Produkt zuordnen.
+              Bitte in Shopify die EANs einzigartig vergeben.
+            </div>
+          </div>
+        )}
+
         {/* Variant-Tabs nur bei Clip-Ins */}
         {variantWeights.length > 1 && (
           <div className="flex items-center gap-1 p-3 border-b border-neutral-200 bg-neutral-50">
@@ -399,7 +448,7 @@ function PrintModal({
             onClick={() => {
               const next = { ...quantities };
               for (const r of visibleItems) {
-                const printed = printedSummary[r.barcode!]?.totalPrinted ?? 0;
+                const printed = effectiveSummary[r.barcode!]?.totalPrinted ?? 0;
                 next[`${r.barcode}|${r.unitWeight}`] = Math.max(0, Math.floor(r.quantity) - printed);
               }
               setQuantities(next);
@@ -428,13 +477,14 @@ function PrintModal({
                 <th className="px-3 py-2">Produkt</th>
                 <th className="px-3 py-2 w-[80px] text-right">Lager</th>
                 <th className="px-3 py-2 w-[110px] text-right">Bisher</th>
+                <th className="px-2 py-2 w-[40px]"></th>
                 <th className="px-3 py-2 w-[90px] text-right">Etiketten</th>
               </tr>
             </thead>
             <tbody>
               {visibleItems.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-3 py-6 text-center text-neutral-500 text-sm">
+                  <td colSpan={5} className="px-3 py-6 text-center text-neutral-500 text-sm">
                     Keine Produkte mit hinterlegter EAN in dieser Auswahl.
                   </td>
                 </tr>
@@ -445,8 +495,10 @@ function PrintModal({
                     headerLabel={`${weight}g Variante`}
                     rows={weightRows}
                     quantities={quantities}
-                    printedSummary={printedSummary}
+                    printedSummary={effectiveSummary}
+                    duplicateBarcodes={new Set(duplicateBarcodes)}
                     onQty={setQty}
+                    onResetPrinted={handleResetPrinted}
                   />
                 ))
               ) : (
@@ -455,8 +507,10 @@ function PrintModal({
                     key={i}
                     row={r}
                     quantities={quantities}
-                    printedSummary={printedSummary}
+                    printedSummary={effectiveSummary}
+                    duplicateBarcodes={new Set(duplicateBarcodes)}
                     onQty={setQty}
+                    onResetPrinted={handleResetPrinted}
                   />
                 ))
               )}
@@ -500,18 +554,22 @@ function ModalGroupRows({
   rows,
   quantities,
   printedSummary,
+  duplicateBarcodes,
   onQty,
+  onResetPrinted,
 }: {
   headerLabel: string;
   rows: InventoryWithTransit[];
   quantities: Record<string, number>;
   printedSummary: Record<string, { totalPrinted: number; lastPrintedAt: string | null }>;
+  duplicateBarcodes: Set<string>;
   onQty: (r: InventoryWithTransit, q: number) => void;
+  onResetPrinted: (r: InventoryWithTransit) => void;
 }) {
   return (
     <>
       <tr className="bg-indigo-50 border-t border-indigo-200">
-        <td colSpan={4} className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">
+        <td colSpan={5} className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">
           {headerLabel} <span className="ml-1 font-normal text-indigo-400">({rows.length})</span>
         </td>
       </tr>
@@ -521,7 +579,9 @@ function ModalGroupRows({
           row={r}
           quantities={quantities}
           printedSummary={printedSummary}
+          duplicateBarcodes={duplicateBarcodes}
           onQty={onQty}
+          onResetPrinted={onResetPrinted}
         />
       ))}
     </>
@@ -532,12 +592,16 @@ function ModalRow({
   row,
   quantities,
   printedSummary,
+  duplicateBarcodes,
   onQty,
+  onResetPrinted,
 }: {
   row: InventoryWithTransit;
   quantities: Record<string, number>;
   printedSummary: Record<string, { totalPrinted: number; lastPrintedAt: string | null }>;
+  duplicateBarcodes: Set<string>;
   onQty: (r: InventoryWithTransit, q: number) => void;
+  onResetPrinted: (r: InventoryWithTransit) => void;
 }) {
   const k = `${row.barcode}|${row.unitWeight}`;
   const q = quantities[k] ?? 0;
@@ -547,10 +611,21 @@ function ModalRow({
     ? new Date(printedInfo.lastPrintedAt).toLocaleDateString("de-DE")
     : null;
   const suggested = Math.max(0, Math.floor(row.quantity) - printed);
+  const isDuplicate = !!row.barcode && duplicateBarcodes.has(row.barcode);
   return (
-    <tr className="border-t border-neutral-100 hover:bg-neutral-50">
+    <tr className={`border-t border-neutral-100 hover:bg-neutral-50 ${isDuplicate ? "bg-amber-50/60" : ""}`}>
       <td className="px-3 py-2">
-        <div className="text-neutral-900 line-clamp-1">{row.product}</div>
+        <div className="flex items-center gap-2">
+          {isDuplicate && (
+            <span
+              className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-amber-200 text-amber-900"
+              title={`Diese EAN (${row.barcode}) ist mehreren Produkten zugewiesen — in Shopify reparieren!`}
+            >
+              ⚠ EAN-Konflikt
+            </span>
+          )}
+          <div className="text-neutral-900 line-clamp-1">{row.product}</div>
+        </div>
         {row.unitWeight > 0 && (
           <div className="text-[10px] text-neutral-500">{row.unitWeight}g/Stk</div>
         )}
@@ -564,6 +639,18 @@ function ModalRow({
           </div>
         ) : (
           <span className="text-neutral-300">–</span>
+        )}
+      </td>
+      <td className="px-2 py-2 text-center w-[40px]">
+        {printed > 0 && (
+          <button
+            type="button"
+            onClick={() => onResetPrinted(row)}
+            className="text-neutral-400 hover:text-red-600 p-1 rounded"
+            title="'Bisher gedruckt'-Zähler zurücksetzen"
+          >
+            <X size={14} />
+          </button>
         )}
       </td>
       <td className="px-3 py-2 text-right">
