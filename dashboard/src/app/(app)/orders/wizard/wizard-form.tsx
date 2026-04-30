@@ -1000,18 +1000,34 @@ function CheckerResults({ items, locale }: { items: CartItem[]; locale: Locale }
   );
 }
 
+/** Farbpalette für die Warenkorb-Kategorien — pro Methode konsistente Farbe */
+function getCartGroupColors(label: string): { bg: string; hover: string; text: string; meta: string; border: string; chevron: string } {
+  const lower = label.toLowerCase();
+  if (lower.includes("mini") && lower.includes("tape")) return { bg: "bg-cyan-100", hover: "hover:bg-cyan-200", text: "text-cyan-900", meta: "text-cyan-600", border: "border-cyan-200", chevron: "text-cyan-500" };
+  if (lower.includes("tape")) return { bg: "bg-blue-100", hover: "hover:bg-blue-200", text: "text-blue-900", meta: "text-blue-600", border: "border-blue-200", chevron: "text-blue-500" };
+  if (lower.includes("bonding")) return { bg: "bg-amber-100", hover: "hover:bg-amber-200", text: "text-amber-900", meta: "text-amber-600", border: "border-amber-200", chevron: "text-amber-500" };
+  if (lower.includes("invisible")) return { bg: "bg-purple-100", hover: "hover:bg-purple-200", text: "text-purple-900", meta: "text-purple-600", border: "border-purple-200", chevron: "text-purple-500" };
+  if (lower.includes("genius")) return { bg: "bg-rose-100", hover: "hover:bg-rose-200", text: "text-rose-900", meta: "text-rose-600", border: "border-rose-200", chevron: "text-rose-500" };
+  if (lower.includes("classic")) return { bg: "bg-emerald-100", hover: "hover:bg-emerald-200", text: "text-emerald-900", meta: "text-emerald-600", border: "border-emerald-200", chevron: "text-emerald-500" };
+  if (lower.includes("clip")) return { bg: "bg-indigo-100", hover: "hover:bg-indigo-200", text: "text-indigo-900", meta: "text-indigo-600", border: "border-indigo-200", chevron: "text-indigo-500" };
+  if (lower.includes("ponytail")) return { bg: "bg-pink-100", hover: "hover:bg-pink-200", text: "text-pink-900", meta: "text-pink-600", border: "border-pink-200", chevron: "text-pink-500" };
+  if (lower.includes("keratin")) return { bg: "bg-orange-100", hover: "hover:bg-orange-200", text: "text-orange-900", meta: "text-orange-600", border: "border-orange-200", chevron: "text-orange-500" };
+  return { bg: "bg-neutral-100", hover: "hover:bg-neutral-200", text: "text-neutral-700", meta: "text-neutral-500", border: "border-neutral-200", chevron: "text-neutral-400" };
+}
+
 /** Collapsible cart group */
 function CartGroup({ label, count, totalQty, unit, children }: {
   label: string; count: number; totalQty: number; unit: string; children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(true);
+  const c = getCartGroupColors(label);
   return (
-    <div className="rounded-lg border border-neutral-100 overflow-hidden">
+    <div className={`rounded-lg border ${c.border} overflow-hidden`}>
       <button onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-1.5 px-2.5 py-1.5 bg-neutral-50 hover:bg-neutral-100 transition text-left">
-        {open ? <ChevronDown size={12} className="text-neutral-400" /> : <ChevronRight size={12} className="text-neutral-400" />}
-        <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider flex-1">{label}</span>
-        <span className="text-[10px] text-neutral-400 tabular-nums">{count} · {fmt(totalQty)}{unit}</span>
+        className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 ${c.bg} ${c.hover} transition text-left`}>
+        {open ? <ChevronDown size={12} className={c.chevron} /> : <ChevronRight size={12} className={c.chevron} />}
+        <span className={`text-[10px] font-bold ${c.text} uppercase tracking-wider flex-1`}>{label}</span>
+        <span className={`text-[10px] ${c.meta} tabular-nums font-medium`}>{count} · {fmt(totalQty)}{unit}</span>
       </button>
       {open && <div className="px-2.5 pb-1.5 divide-y divide-neutral-50">{children}</div>}
     </div>
