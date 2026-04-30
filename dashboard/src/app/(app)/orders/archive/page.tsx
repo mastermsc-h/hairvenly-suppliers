@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Archive as ArchiveIcon } from "lucide-react";
+import { ArrowLeft, Archive as ArchiveIcon, Weight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { usd, date } from "@/lib/format";
@@ -156,6 +156,12 @@ export default async function OrdersArchivePage() {
                       </td>
                       <td className="px-4 py-3 text-neutral-700 align-top">
                         {date(o.eta)}
+                        {o.weight_kg != null && Number(o.weight_kg) > 0 && (
+                          <div className="text-[10px] text-neutral-500 inline-flex items-center gap-0.5 mt-0.5">
+                            <Weight size={10} className="text-neutral-400" />
+                            {Number(o.weight_kg)} kg
+                          </div>
+                        )}
                         {o.tracking_number && (
                           <div className="mt-0.5">
                             <TrackingLink number={o.tracking_number} url={o.tracking_url} maxWidth={140} />
@@ -184,9 +190,15 @@ export default async function OrdersArchivePage() {
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="font-medium text-neutral-900 text-sm truncate">{o.label}</div>
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
                           <StatusBadge status={o.status} locale={locale} />
                           {o.eta && <span className="text-xs text-neutral-500">{date(o.eta)}</span>}
+                          {o.weight_kg != null && Number(o.weight_kg) > 0 && (
+                            <span className="text-xs text-neutral-500 inline-flex items-center gap-0.5">
+                              <Weight size={10} className="text-neutral-400" />
+                              {Number(o.weight_kg)} kg
+                            </span>
+                          )}
                         </div>
                       </div>
                       {showInvoices && (

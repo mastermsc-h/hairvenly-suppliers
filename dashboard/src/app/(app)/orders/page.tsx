@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Plus, Archive } from "lucide-react";
+import { Plus, Archive, Weight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { usd, date } from "@/lib/format";
@@ -191,6 +191,12 @@ export default async function OrdersPage() {
                       </td>
                       <td className="px-4 py-3 text-neutral-700 align-top">
                         {date(o.eta)}
+                        {o.weight_kg != null && Number(o.weight_kg) > 0 && (
+                          <div className="text-[10px] text-neutral-500 inline-flex items-center gap-0.5 mt-0.5">
+                            <Weight size={10} className="text-neutral-400" />
+                            {Number(o.weight_kg)} kg
+                          </div>
+                        )}
                         <TrackingCell
                           orderId={o.id}
                           number={o.tracking_number}
@@ -240,13 +246,19 @@ export default async function OrdersPage() {
                         {o.description && (
                           <div className="text-xs text-neutral-500 truncate">{o.description}</div>
                         )}
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
                           {canEditOrder ? (
                             <StatusDropdown orderId={o.id} currentStatus={o.status} locale={locale} />
                           ) : (
                             <StatusBadge status={o.status} locale={locale} />
                           )}
                           {o.eta && <span className="text-xs text-neutral-500">{date(o.eta)}</span>}
+                          {o.weight_kg != null && Number(o.weight_kg) > 0 && (
+                            <span className="text-xs text-neutral-500 inline-flex items-center gap-0.5">
+                              <Weight size={10} className="text-neutral-400" />
+                              {Number(o.weight_kg)} kg
+                            </span>
+                          )}
                         </div>
                         <TrackingCell
                           orderId={o.id}
