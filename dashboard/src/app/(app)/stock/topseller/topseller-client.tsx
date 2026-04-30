@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Search, TrendingUp, TrendingDown } from "lucide-react";
+import { Search, TrendingUp, TrendingDown, ArrowUp, ArrowDown } from "lucide-react";
 import type { TopsSellerSection, TopsSellerItem } from "@/lib/stock-sheets";
 import SyncBadge from "../sync-badge";
 
@@ -33,6 +33,7 @@ interface Props {
 
 type StockFilter = "all" | "zero_no_order" | "zero" | "low";
 type SortBy = "rang" | "verkauftG" | "verkauft30d" | "lagerG" | "unterwegsG";
+type SortDir = "asc" | "desc";
 const ALL_TIERS = ["TOP7", "MID", "REST", "KAUM"] as const;
 
 const SORT_OPTIONS: { key: SortBy; label: string }[] = [
@@ -48,6 +49,18 @@ export default function TopsellerClient({ sections, title, subtitle, lastUpdated
   const [stockFilter, setStockFilter] = useState<StockFilter>("all");
   const [activeTiers, setActiveTiers] = useState<Set<string>>(new Set(ALL_TIERS));
   const [sortBy, setSortBy] = useState<SortBy>("rang");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  const onSortClick = (key: SortBy) => {
+    if (sortBy === key) {
+      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    } else {
+      setSortBy(key);
+      // Rang ist die natürliche Sheet-Reihenfolge → asc als Default,
+      // alle Zahlen-Sortierungen starten mit desc (größte zuerst)
+      setSortDir(key === "rang" ? "asc" : "desc");
+    }
+  };
 
   const toggleTier = (tier: string) => {
     setActiveTiers((prev) => {
@@ -156,36 +169,41 @@ export default function TopsellerClient({ sections, title, subtitle, lastUpdated
           </div>
           <div className="flex flex-wrap gap-1.5">
             <span className="text-[10px] uppercase text-neutral-400 font-medium self-center mr-1">Sortieren:</span>
-            {SORT_OPTIONS.map((opt) => (
-              <button
-                key={opt.key}
-                onClick={() => setSortBy(opt.key)}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
-                  sortBy === opt.key ? "bg-indigo-600 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+            {SORT_OPTIONS.map((opt) => {
+              const isActive = sortBy === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  onClick={() => onSortClick(opt.key)}
+                  title={isActive ? `Richtung umschalten (aktuell ${sortDir === "desc" ? "absteigend" : "aufsteigend"})` : "Sortieren"}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition inline-flex items-center gap-1 ${
+                    isActive ? "bg-indigo-600 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                  }`}
+                >
+                  {opt.label}
+                  {isActive && (sortDir === "desc" ? <ArrowDown size={12} /> : <ArrowUp size={12} />)}
+                </button>
+              );
+            })}
           </div>
         </div>
-        {(stockFilter !== "all" || !allTiersActive || sortBy !== "rang") && (
+        {(stockFilter !== "all" || !allTiersActive || sortBy !== "rang" || sortDir !== "desc") && (
           <div className="text-xs text-neutral-500">
             Filter aktiv
-            <button onClick={() => { setStockFilter("all"); setActiveTiers(new Set(ALL_TIERS)); setSortBy("rang"); }} className="ml-2 text-indigo-600 hover:text-indigo-800 font-medium">Zurücksetzen</button>
+            <button onClick={() => { setStockFilter("all"); setActiveTiers(new Set(ALL_TIERS)); setSortBy("rang"); setSortDir("desc"); }} className="ml-2 text-indigo-600 hover:text-indigo-800 font-medium">Zurücksetzen</button>
           </div>
         )}
       </div>
 
       {/* Topseller Tables */}
       {sections.map((sec) => (
-        <TopsellerSectionView key={sec.quality} section={sec} query={query} stockFilter={stockFilter} activeTiers={activeTiers} sortBy={sortBy} />
+        <TopsellerSectionView key={sec.quality} section={sec} query={query} stockFilter={stockFilter} activeTiers={activeTiers} sortBy={sortBy} sortDir={sortDir} />
       ))}
     </div>
   );
 }
 
-function TopsellerSectionView({ section, query, stockFilter, activeTiers, sortBy }: { section: TopsSellerSection; query: string; stockFilter: StockFilter; activeTiers: Set<string>; sortBy: SortBy }) {
+function TopsellerSectionView({ section, query, stockFilter, activeTiers, sortBy, sortDir }: { section: TopsSellerSection; query: string; stockFilter: StockFilter; activeTiers: Set<string>; sortBy: SortBy; sortDir: SortDir }) {
   const colors = QUALITY_COLORS[section.quality] ?? QUALITY_COLORS["Russisch Glatt"];
   const q = query.toLowerCase();
   const orderHeaders = section.orderHeaders;
@@ -217,12 +235,14 @@ function TopsellerSectionView({ section, query, stockFilter, activeTiers, sortBy
         // Tier filter
         if (!allTiersActive) filtered = filtered.filter((i) => activeTiers.has(i.tier));
 
-        // Sort (default "rang" keeps sheet order)
-        if (sortBy !== "rang") {
+        // Sort
+        if (sortBy === "rang") {
+          if (sortDir === "desc") filtered = [...filtered].reverse();
+        } else {
           filtered = [...filtered].sort((a, b) => {
             const va = (a[sortBy] as number) ?? 0;
             const vb = (b[sortBy] as number) ?? 0;
-            return vb - va; // descending
+            return sortDir === "desc" ? vb - va : va - vb;
           });
         }
 
