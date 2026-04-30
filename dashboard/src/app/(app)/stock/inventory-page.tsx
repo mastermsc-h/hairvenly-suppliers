@@ -377,8 +377,13 @@ function PrintModal({
     for (const r of itemsWithBarcode) {
       const q = quantities[`${r.barcode}|${r.unitWeight}`] ?? 0;
       if (q > 0) {
+        // Bei Clip-Ins die Gewichts-Variante (100g/150g/225g) ans Label-Title anhängen,
+        // damit auf dem gedruckten Etikett klar ist, welche Variante gemeint ist.
+        const titleWithVariant = isClipIn && r.unitWeight > 0
+          ? `${r.product} · ${r.unitWeight}g`
+          : r.product;
         items.push({
-          title: r.product,
+          title: titleWithVariant,
           barcode: r.barcode!,
           collection: r.collection,
           quantity: q,
