@@ -1303,8 +1303,23 @@ function mapPackOrder(node: PackOrderNode): PackOrder {
 }
 
 /**
+ * Tags die Bestellungen aus dem Pack-Workflow ausschließen — z.B. wenn auf
+ * Kundenrückmeldung gewartet wird, oder die Bestellung manuell gestoppt ist.
+ * Erweiterbar — neue Tag-Werte hier eintragen.
+ */
+export const PACK_SKIP_TAGS = [
+  "Warte auf Rückmeldung",
+] as const;
+
+function buildPackOrderQuery(): string {
+  const skipTags = PACK_SKIP_TAGS.map((t) => `-tag:"${t}"`).join(" AND ");
+  return `financial_status:paid AND fulfillment_status:unfulfilled${skipTags ? ` AND ${skipTags}` : ""}`;
+}
+
+/**
  * Fetch unfulfilled, paid orders — these need to be packed.
  * Sorted oldest-first (FIFO) so the oldest orders are packed first.
+ * Excludes orders tagged with PACK_SKIP_TAGS.
  */
 export async function fetchUnfulfilledPaidOrders(limit = 100): Promise<PackOrder[]> {
   const query = `
@@ -1314,7 +1329,7 @@ export async function fetchUnfulfilledPaidOrders(limit = 100): Promise<PackOrder
       }
     }
   `;
-  const q = "financial_status:paid AND fulfillment_status:unfulfilled";
+  const q = buildPackOrderQuery();
   const res = await shopifyGraphQL<{ orders: { edges: { node: PackOrderNode }[] } }>(
     query,
     { q, first: limit },
@@ -1620,7 +1635,7 @@ export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[
         };
       }[];
     };
-  }>(query, { q: "financial_status:paid AND fulfillment_status:unfulfilled", first: limit });
+  }>(query, { q: buildPackOrderQuery(), first: limit });
 
   return (res.data?.orders.edges ?? []).map((e) => {
     const o = e.node;
