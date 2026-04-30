@@ -56,9 +56,10 @@ export default function TopsellerClient({ sections, title, subtitle, lastUpdated
       setSortDir((d) => (d === "desc" ? "asc" : "desc"));
     } else {
       setSortBy(key);
-      // Rang ist die natürliche Sheet-Reihenfolge → asc als Default,
-      // alle Zahlen-Sortierungen starten mit desc (größte zuerst)
-      setSortDir(key === "rang" ? "asc" : "desc");
+      // Default immer desc = "beste oben":
+      // - Rang desc = Sheet-Reihenfolge (Rang 1 oben)
+      // - Zahlen desc = größte zuerst
+      setSortDir("desc");
     }
   };
 
@@ -237,7 +238,8 @@ function TopsellerSectionView({ section, query, stockFilter, activeTiers, sortBy
 
         // Sort
         if (sortBy === "rang") {
-          if (sortDir === "desc") filtered = [...filtered].reverse();
+          // desc = natürliche Sheet-Reihenfolge (Rang 1 = bester Seller oben)
+          if (sortDir === "asc") filtered = [...filtered].reverse();
         } else {
           filtered = [...filtered].sort((a, b) => {
             const va = (a[sortBy] as number) ?? 0;
