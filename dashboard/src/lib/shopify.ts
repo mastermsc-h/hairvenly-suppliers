@@ -1430,6 +1430,105 @@ export async function fetchAllVariantsForBarcodes(): Promise<BarcodeVariant[]> {
   return out;
 }
 
+/**
+ * Wie BarcodeVariant, aber für den Audit erweitert: enthält ALLE Varianten,
+ * auch die ohne Barcode (hasBarcode=false), plus produktHandle für Deep-Links.
+ */
+export interface AuditVariant extends BarcodeVariant {
+  hasBarcode: boolean;
+  productHandle: string;
+  productId: string;
+  variantId: string;
+  sku: string | null;
+}
+
+interface AuditProductsResponse {
+  products: {
+    edges: {
+      node: {
+        id: string;
+        handle: string;
+        title: string;
+        featuredImage: { url: string } | null;
+        collections: { edges: { node: { handle: string } }[] };
+        variants: {
+          edges: {
+            node: {
+              id: string;
+              title: string | null;
+              barcode: string | null;
+              sku: string | null;
+              image: { url: string } | null;
+            };
+          }[];
+        };
+      };
+    }[];
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+
+/**
+ * Holt ALLE Produkt-Varianten für den Barcode-Audit, inklusive der
+ * Varianten ohne Barcode (hasBarcode=false). Liefert zusätzlich
+ * produktHandle/IDs für Deep-Links zur Shopify-Admin.
+ */
+export async function fetchAllVariantsForAudit(): Promise<AuditVariant[]> {
+  const out: AuditVariant[] = [];
+  let cursor: string | null = null;
+
+  while (true) {
+    const query = `
+      query auditVariants($cursor: String) {
+        products(first: 250, after: $cursor) {
+          edges {
+            node {
+              id
+              handle
+              title
+              featuredImage { url }
+              collections(first: 10) { edges { node { handle } } }
+              variants(first: 50) {
+                edges { node { id title barcode sku image { url } } }
+              }
+            }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    `;
+    const res: GraphQLResponse<AuditProductsResponse> = await shopifyGraphQL<AuditProductsResponse>(
+      query,
+      { cursor },
+    );
+
+    const products = res.data?.products.edges.map((e) => e.node) ?? [];
+    for (const p of products) {
+      const handles = p.collections.edges.map((c) => c.node.handle);
+      for (const ve of p.variants.edges) {
+        const v = ve.node;
+        const trimmed = v.barcode?.trim() ?? "";
+        out.push({
+          productTitle: p.title,
+          productHandle: p.handle,
+          productId: p.id,
+          variantId: v.id,
+          variantTitle: v.title && v.title !== "Default Title" ? v.title : null,
+          barcode: trimmed,
+          hasBarcode: trimmed.length > 0,
+          sku: v.sku?.trim() || null,
+          collectionHandles: handles,
+          imageUrl: v.image?.url ?? p.featuredImage?.url ?? null,
+        });
+      }
+    }
+    const pageInfo = res.data?.products.pageInfo;
+    if (!pageInfo?.hasNextPage) break;
+    cursor = pageInfo.endCursor;
+  }
+  return out;
+}
+
 export async function fetchAllCollectionHandles(): Promise<{ handle: string; title: string }[]> {
   const query = `
     {

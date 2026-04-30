@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import JsBarcode from "jsbarcode";
-import { ArrowLeft, Printer, Search } from "lucide-react";
+import { ArrowLeft, Printer, Search, ShieldCheck } from "lucide-react";
 
 interface Variant {
   productTitle: string;
@@ -129,11 +129,19 @@ export default function BarcodesClient({
           <ArrowLeft size={14} /> Zurück zum Katalog
         </Link>
 
-        <header className="mb-5">
-          <h1 className="text-2xl font-semibold text-neutral-900">Barcode-Etiketten drucken</h1>
-          <p className="text-sm text-neutral-500 mt-1">
-            Format 50 × 25 mm · Zebra ZD421 · {variants.length} Varianten verfügbar
-          </p>
+        <header className="mb-5 flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-semibold text-neutral-900">Barcode-Etiketten drucken</h1>
+            <p className="text-sm text-neutral-500 mt-1">
+              Format 50 × 25 mm · Zebra ZD421 · {variants.length} Varianten verfügbar
+            </p>
+          </div>
+          <Link
+            href="/catalog/barcodes/audit"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-neutral-300 text-sm font-medium text-neutral-700 hover:bg-neutral-50 hover:border-neutral-400 transition shrink-0"
+          >
+            <ShieldCheck size={14} /> Barcode-Check
+          </Link>
         </header>
 
         <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-5 shadow-sm space-y-4">
