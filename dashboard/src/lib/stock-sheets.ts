@@ -247,14 +247,20 @@ export async function readTopseller(): Promise<{ sections: TopsSellerSection[]; 
       perOrder.push(parseFloat(row[DETAIL_START + i]) || 0);
     }
 
+    // Prognose: bewusst NICHT die Spalte aus dem Sheet (die ist 30T × 2 und damit
+    // anfällig für Sale-/Kampagnen-Verzerrungen im 30-Tage-Zeitraum). Stattdessen
+    // aus dem stabileren 90T-Wert hochrechnen: prognose = 90T × (forecastDays / 90)
+    const verkauft90T = parseFloat(row[3]) || 0;
+    const prognose = Math.round(verkauft90T * (currentSection.forecastDays / 90));
+
     const item: TopsSellerItem = {
       rang,
       farbe: col1,
       laenge: String(row[2] ?? "").trim(),
-      verkauftG: parseFloat(row[3]) || 0,
+      verkauftG: verkauft90T,
       verkauft30d: parseFloat(row[4]) || 0,
       verkauftStk: parseFloat(row[5]) || 0,
-      prognose: parseFloat(row[6]) || 0,
+      prognose,
       tier: String(row[7] ?? "").trim(),
       ziel: parseFloat(row[8]) || 0,
       lagerG: parseFloat(row[9]) || 0,
