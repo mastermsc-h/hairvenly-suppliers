@@ -8,7 +8,7 @@ import StockSearch from "./stock-search";
 import StockTable, { slugify } from "./stock-table";
 import SyncBadge from "./sync-badge";
 import type { InventoryRow } from "@/lib/stock-sheets";
-import { recordPrintedLabels, resetPrintedForBarcode } from "@/lib/actions/printed-labels";
+import { recordPrintedLabels, resetPrintedForBarcode, resetPrintedForBarcodes } from "@/lib/actions/printed-labels";
 
 interface TransitInfo {
   label: string;
@@ -298,6 +298,40 @@ function PrintModal({
     setQuantities((prev) => ({ ...prev, [`${r.barcode}|${r.unitWeight}`]: Math.floor(r.quantity) }));
   }
 
+  // Reset für ALLE sichtbaren Produkte der Kategorie (respektiert variant-filter).
+  // Wird über den Reset-Button in der Toolbar oben aufgerufen.
+  const [resetting, setResetting] = useState(false);
+  async function handleResetVisible() {
+    const targets = visibleItems
+      .filter((r) => !!r.barcode && (effectiveSummary[r.barcode!]?.totalPrinted ?? 0) > 0);
+    if (targets.length === 0) {
+      alert("Keine Produkte mit gedruckten Etiketten in der aktuellen Auswahl.");
+      return;
+    }
+    if (!confirm(
+      `'Bisher gedruckt'-Zaehler fuer ${targets.length} Produkt(e) der Kategorie\n"${groupKey}"\nzuruecksetzen?`,
+    )) return;
+    setResetting(true);
+    const res = await resetPrintedForBarcodes(targets.map((r) => r.barcode!));
+    setResetting(false);
+    if (!res.success) {
+      alert(`Fehler: ${res.error}`);
+      return;
+    }
+    // Lokal alle resetted-Barcodes merken
+    setResetBarcodes((prev) => {
+      const next = new Set(prev);
+      for (const r of targets) next.add(r.barcode!);
+      return next;
+    });
+    // Quantities = volles Lager fuer alle Targets
+    setQuantities((prev) => {
+      const next = { ...prev };
+      for (const r of targets) next[`${r.barcode}|${r.unitWeight}`] = Math.floor(r.quantity);
+      return next;
+    });
+  }
+
   // Duplikat-Warnung: gleicher Barcode auf mehreren Zeilen?
   const duplicateBarcodes = useMemo(() => {
     const counts = new Map<string, number>();
@@ -467,6 +501,16 @@ function PrintModal({
             className="px-2 py-1 rounded border border-neutral-300 hover:bg-white"
           >
             = Lager
+          </button>
+          <span className="mx-1 text-neutral-300">·</span>
+          <button
+            type="button"
+            onClick={handleResetVisible}
+            disabled={resetting}
+            title="Setzt 'Bisher gedruckt' für alle sichtbaren Produkte der Kategorie auf 0 zurück"
+            className="px-2 py-1 rounded border border-rose-300 text-rose-700 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+          >
+            {resetting ? "Setze zurück..." : "↺ Bisher zurücksetzen (Kategorie)"}
           </button>
         </div>
 

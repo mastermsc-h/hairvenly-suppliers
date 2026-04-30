@@ -61,6 +61,26 @@ export async function resetPrintedForBarcode(
 }
 
 /**
+ * Setzt den 'Bisher gedruckt'-Counter für mehrere Barcodes gleichzeitig
+ * auf 0 zurück. Wird vom Print-Modal aufgerufen, wenn der User die
+ * gesamte Kategorie zurücksetzen will.
+ */
+export async function resetPrintedForBarcodes(
+  barcodes: string[],
+): Promise<{ success: boolean; error?: string; resetCount?: number }> {
+  const profile = await requireProfile();
+  if (!profile.is_admin) return { success: false, error: "Forbidden" };
+
+  const cleaned = Array.from(new Set(barcodes.filter((b) => !!b)));
+  if (cleaned.length === 0) return { success: true, resetCount: 0 };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("printed_labels").delete().in("barcode", cleaned);
+  if (error) return { success: false, error: error.message };
+  return { success: true, resetCount: cleaned.length };
+}
+
+/**
  * Holt das Aggregat aller bisher gedruckten Etiketten pro Barcode.
  * Returns Map<barcode, { totalPrinted, lastPrintedAt }>.
  */
