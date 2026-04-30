@@ -31,6 +31,41 @@ interface CartItem {
 const QUANTITY_PRESETS = [100, 200, 300, 500, 800, 1000, 1500, 2000];
 const fmt = (n: number) => new Intl.NumberFormat("de-DE").format(n);
 
+/** Stop-Wörter, die zur Methoden-/Längen-/Variant-Beschreibung gehören
+ *  und beim Color-Token-Matching ausgeblendet werden müssen. */
+const COLOR_STOP_WORDS = new Set([
+  "STANDARD", "RUSSISCH", "RUSSISCHE", "RUSSISCHES", "US", "WELLIGE", "WELLIG",
+  "TAPE", "TAPES", "BONDING", "BONDINGS", "MINI", "MINITAPE", "MINITAPES",
+  "INVISIBLE", "CLASSIC", "GENIUS", "TRESSEN", "WEFT", "WEFTS",
+  "CLIP", "CLIPS", "CLIPIN", "EXTENSIONS", "EXTENSION", "EXT",
+  "KERATIN", "GLATT", "PONYTAIL", "ECHTHAAR", "BUTTERFLY",
+  "45CM", "55CM", "65CM", "85CM", "100CM",
+]);
+
+/** Normalisiert Farb-Strings für Vergleiche: lowercase, ohne #/♡, Hyphen→Space, Whitespace kompakt. */
+function normalizeColor(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/^#/, "")
+    .replace(/♡/g, "")
+    .replace(/[-_/]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Liefert die Set der Color-Tokens (ohne Stop-Wörter, ohne Pure-Number-Tokens). */
+function colorTokens(s: string): Set<string> {
+  const tokens = normalizeColor(s).split(" ").filter(Boolean);
+  const out = new Set<string>();
+  for (const t of tokens) {
+    const upper = t.toUpperCase();
+    if (COLOR_STOP_WORDS.has(upper)) continue;
+    if (/^\d+G?$/i.test(t)) continue;
+    out.add(t);
+  }
+  return out;
+}
+
 let _nextId = 1;
 const uid = () => `wi-${_nextId++}`;
 
@@ -350,29 +385,60 @@ export default function WizardForm({ suppliers, catalogs, locale }: Props) {
 
   /** Match a sheet color code against catalog colors */
   function matchColor(colors: ProductColor[], sheetColor: string): ProductColor | null {
-    // 1) Exact match on name_supplier
+    const sheet = normalizeColor(sheetColor);
+    const sheetTokens = colorTokens(sheetColor);
+
+    // 1) name_shopify ist das präziseste Mapping (manuell im Katalog gepflegt).
+    //    Erst exakt, dann Substring (eine Seite enthält die andere) — fängt
+    //    auch Fälle ab, wo Sheet zusätzliche Suffixe wie "65CM♡" hat.
     for (const c of colors) {
-      if (c.name_supplier) {
-        const ns = c.name_supplier.toLowerCase().replace(/^#/, "");
-        if (sheetColor === ns || sheetColor.startsWith(ns) || ns.startsWith(sheetColor)) return c;
-      }
+      if (!c.name_shopify) continue;
+      const ns = normalizeColor(c.name_shopify);
+      if (ns === sheet) return c;
     }
-    // 2) Exact match on name_hairvenly
+    const byShopifyLen = [...colors]
+      .filter((c) => c.name_shopify)
+      .sort((a, b) => (b.name_shopify!.length - a.name_shopify!.length));
+    for (const c of byShopifyLen) {
+      const ns = normalizeColor(c.name_shopify!);
+      if (ns.length >= 5 && (sheet.includes(ns) || ns.includes(sheet))) return c;
+    }
+
+    // 2) name_supplier match
     for (const c of colors) {
-      if (c.name_hairvenly.toLowerCase() === sheetColor) return c;
+      if (!c.name_supplier) continue;
+      const ns = normalizeColor(c.name_supplier);
+      if (sheet === ns || sheet.startsWith(ns + " ") || ns.startsWith(sheet + " ")) return c;
     }
-    // 3) name_hairvenly is contained at the start of the sheet color
+
+    // 3) Exact match on name_hairvenly
     for (const c of colors) {
-      const nh = c.name_hairvenly.toLowerCase();
-      if (sheetColor.startsWith(nh + " ") || sheetColor.startsWith(nh + "-")) return c;
+      if (normalizeColor(c.name_hairvenly) === sheet) return c;
     }
-    // 4) Looser: name_hairvenly appears anywhere in the sheet color
-    // Sort by longest name first to avoid partial matches (e.g. "RAW" matching before "RAW RUSSISCHE")
+
+    // 4) name_hairvenly contained anywhere in sheet (longest first to vermeiden,
+    //    dass "RAW" vor "RAW RUSSISCHE" matcht)
     const sorted = [...colors].sort((a, b) => b.name_hairvenly.length - a.name_hairvenly.length);
     for (const c of sorted) {
-      const nh = c.name_hairvenly.toLowerCase();
-      if (nh.length >= 3 && sheetColor.includes(nh)) return c;
+      const nh = normalizeColor(c.name_hairvenly);
+      if (nh.length >= 3 && sheet.includes(nh)) return c;
     }
+
+    // 5) Token-Fallback: alle Color-Tokens des Catalog-Eintrags müssen
+    //    im Sheet vorkommen (Reihenfolge egal, Stop-Wörter ignoriert).
+    //    Fängt Fälle wie "#SOFT BLOND US WELLIGE BALAYAGE TAPE 85CM" gegen
+    //    Catalog "SOFT BLOND BALAYAGE", wo "US WELLIGE" zwischen den Color-
+    //    Tokens steht.
+    for (const c of sorted) {
+      const nhTokens = colorTokens(c.name_hairvenly);
+      if (nhTokens.size === 0) continue;
+      let allPresent = true;
+      for (const t of nhTokens) {
+        if (!sheetTokens.has(t)) { allPresent = false; break; }
+      }
+      if (allPresent) return c;
+    }
+
     return null;
   }
 
