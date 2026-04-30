@@ -445,6 +445,9 @@ export async function generateAndUploadPDF(orderId: string): Promise<{ signedUrl
 
   await logEvent(supabase, orderId, "document", `Bestellübersicht-PDF erstellt und hochgeladen`, profile.id);
 
+  // Re-Sync abgeschlossen — Banner ausblenden
+  await supabase.from("orders").update({ pending_resync: false }).eq("id", orderId);
+
   revalidatePath(`/orders/${orderId}`);
 
   // Return signed URL for immediate viewing
@@ -504,7 +507,7 @@ export async function exportOrderToGoogleSheet(orderId: string): Promise<{ sheet
   // Save sheet URL to order
   await supabase
     .from("orders")
-    .update({ sheet_url: result.sheetUrl })
+    .update({ sheet_url: result.sheetUrl, pending_resync: false })
     .eq("id", orderId);
 
   // Log event
@@ -581,4 +584,156 @@ export async function triggerSuggestionGeneration(supplierName: string, budgetKg
   const result = await triggerAppsScript(supplier, budgetGrams);
   if (!result.ok) return { error: result.error };
   return { title: result.title };
+}
+
+// ── Order Item Editing ──────────────────────────────────────────
+// Erlaubt admins + mitarbeitern, bestellpositionen nachträglich zu
+// ändern (Menge, hinzufügen, entfernen) — solange die Bestellung im
+// editierbaren Status ist (bis inkl. "in_production"). Setzt
+// orders.pending_resync = true, damit das UI den Re-Sync-Banner zeigt.
+
+const EDITABLE_STATUSES = ["draft", "sent_to_supplier", "confirmed", "in_production"] as const;
+
+async function requireOrderEditor(orderId: string) {
+  const profile = await requireProfile();
+  // Nur admins + mitarbeiter (employees haben is_admin=true)
+  if (!profile.is_admin) throw new Error("Keine Berechtigung");
+  if (profile.role !== "admin" && profile.role !== "employee") throw new Error("Keine Berechtigung");
+
+  const supabase = await createClient();
+  const { data: order } = await supabase
+    .from("orders")
+    .select("id, status")
+    .eq("id", orderId)
+    .single();
+
+  if (!order) throw new Error("Bestellung nicht gefunden");
+  if (!(EDITABLE_STATUSES as readonly string[]).includes(order.status)) {
+    throw new Error(`Bestellung kann im Status "${order.status}" nicht mehr bearbeitet werden`);
+  }
+
+  return { profile, supabase };
+}
+
+export async function updateOrderItemQuantity(input: {
+  orderId: string;
+  itemId: string;
+  quantity: number;
+}): Promise<{ error?: string }> {
+  try {
+    const { profile, supabase } = await requireOrderEditor(input.orderId);
+
+    if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
+      return { error: "Menge muss eine positive Zahl sein" };
+    }
+
+    const { data: oldItem } = await supabase
+      .from("order_items")
+      .select("color_name, quantity, unit, order_id")
+      .eq("id", input.itemId)
+      .single();
+    if (!oldItem || oldItem.order_id !== input.orderId) return { error: "Position nicht gefunden" };
+
+    if (oldItem.quantity === input.quantity) return {}; // no-op
+
+    const { error } = await supabase
+      .from("order_items")
+      .update({ quantity: input.quantity })
+      .eq("id", input.itemId);
+    if (error) return { error: error.message };
+
+    await supabase.from("orders").update({ pending_resync: true }).eq("id", input.orderId);
+    await logEvent(
+      supabase,
+      input.orderId,
+      profile.id,
+      "edit",
+      `Menge geändert: #${oldItem.color_name} ${oldItem.quantity}${oldItem.unit} → ${input.quantity}${oldItem.unit}`,
+    );
+
+    revalidatePath(`/orders/${input.orderId}`);
+    return {};
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Fehler" };
+  }
+}
+
+export async function deleteOrderItem(input: {
+  orderId: string;
+  itemId: string;
+}): Promise<{ error?: string }> {
+  try {
+    const { profile, supabase } = await requireOrderEditor(input.orderId);
+
+    const { data: oldItem } = await supabase
+      .from("order_items")
+      .select("color_name, quantity, unit, method_name, length_value, order_id")
+      .eq("id", input.itemId)
+      .single();
+    if (!oldItem || oldItem.order_id !== input.orderId) return { error: "Position nicht gefunden" };
+
+    const { error } = await supabase.from("order_items").delete().eq("id", input.itemId);
+    if (error) return { error: error.message };
+
+    await supabase.from("orders").update({ pending_resync: true }).eq("id", input.orderId);
+    await logEvent(
+      supabase,
+      input.orderId,
+      profile.id,
+      "edit",
+      `Position entfernt: #${oldItem.color_name} ${oldItem.quantity}${oldItem.unit} (${oldItem.method_name} ${oldItem.length_value})`,
+    );
+
+    revalidatePath(`/orders/${input.orderId}`);
+    return {};
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Fehler" };
+  }
+}
+
+export async function addOrderItem(input: {
+  orderId: string;
+  methodName: string;
+  lengthValue: string;
+  colorId: string | null;
+  colorName: string;
+  quantity: number;
+  unit?: string;
+}): Promise<{ error?: string }> {
+  try {
+    const { profile, supabase } = await requireOrderEditor(input.orderId);
+
+    if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
+      return { error: "Menge muss eine positive Zahl sein" };
+    }
+    if (!input.colorName.trim()) return { error: "Farbe darf nicht leer sein" };
+    if (!input.methodName.trim() || !input.lengthValue.trim()) {
+      return { error: "Methode und Länge sind erforderlich" };
+    }
+
+    const { error } = await supabase.from("order_items").insert({
+      order_id: input.orderId,
+      color_id: input.colorId,
+      method_name: input.methodName,
+      length_value: input.lengthValue,
+      color_name: input.colorName,
+      quantity: input.quantity,
+      unit: input.unit ?? "g",
+    });
+    if (error) return { error: error.message };
+
+    await supabase.from("orders").update({ pending_resync: true }).eq("id", input.orderId);
+    await logEvent(
+      supabase,
+      input.orderId,
+      profile.id,
+      "edit",
+      `Position hinzugefügt: #${input.colorName} ${input.quantity}${input.unit ?? "g"} (${input.methodName} ${input.lengthValue})`,
+    );
+
+    revalidatePath(`/orders/${input.orderId}`);
+    return {};
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Fehler" };
+  }
 }

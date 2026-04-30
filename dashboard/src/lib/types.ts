@@ -166,6 +166,7 @@ export interface Order {
   region: string | null;
   last_supplier_update: string | null;
   notes: string | null;
+  pending_resync: boolean;
   created_at: string;
   updated_at: string;
 }

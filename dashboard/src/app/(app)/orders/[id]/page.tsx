@@ -14,6 +14,7 @@ import {
   type OrderItem,
 } from "@/lib/types";
 import { t, type Locale } from "@/lib/i18n";
+import { loadCatalog } from "@/lib/actions/catalog";
 import EditPanel from "./edit-panel";
 import PaymentForm from "./payment-form";
 import PaymentItem from "./payment-item";
@@ -70,6 +71,13 @@ export default async function OrderDetailPage({
     ]);
 
   const sup = supplier as Supplier | null;
+
+  // Editing-Berechtigung: admins + mitarbeiter (employees haben is_admin=true).
+  // Supplier sieht order auch, darf aber items nicht editieren.
+  const canEditItems = profile.is_admin && (profile.role === "admin" || profile.role === "employee");
+  // Catalog nur laden, wenn user editieren darf — sonst spart Bandwidth
+  const supplierCatalog = canEditItems ? await loadCatalog(o.supplier_id) : [];
+
   const pays = (payments ?? []) as Payment[];
   const docs = (documents ?? []) as OrderDocument[];
   const evs = (events ?? []) as OrderEvent[];
@@ -216,7 +224,7 @@ export default async function OrderDetailPage({
           </section>
 
           {/* Order Items (from Wizard) */}
-          {items.length > 0 && (
+          {(items.length > 0 || canEditItems) && (
             <OrderItemsSection
               items={items}
               itemGroups={itemGroups}
@@ -225,6 +233,10 @@ export default async function OrderDetailPage({
               sheetUrl={o.sheet_url}
               orderId={o.id}
               isAdmin={profile.is_admin}
+              canEdit={canEditItems}
+              orderStatus={o.status}
+              pendingResync={o.pending_resync}
+              catalog={supplierCatalog}
             />
           )}
 
