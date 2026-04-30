@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useTransition } from "react";
+import { useState, useMemo, useTransition, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, Trash2, ShoppingCart, Search, Check, X, Copy,
@@ -95,6 +95,10 @@ export default function WizardForm({ suppliers, catalogs, locale }: Props) {
   const [genStatus, setGenStatus] = useState("");
   const [suggestionMeta, setSuggestionMeta] = useState<{ title: string; budgetKg: number; usedKg: number } | null>(null);
 
+  // Cart-Box auf Desktop bündig zur "Farbe & Menge"-Box ausrichten
+  const stepsAboveRef = useRef<HTMLDivElement>(null);
+  const [cartOffset, setCartOffset] = useState(0);
+
   // Derived
   const selectedSupplier = suppliers.find((s) => s.id === supplierId);
   const hasRegions = (selectedSupplier?.regions?.length ?? 0) > 0;
@@ -110,6 +114,31 @@ export default function WizardForm({ suppliers, catalogs, locale }: Props) {
 
   const totalQty = items.reduce((s, i) => s + i.quantity, 0);
   const unit = selectedLength?.unit ?? "g";
+
+  // Cart-Offset: misst die Höhe der Steps 1+2 dynamisch und schiebt
+  // die Cart-Box runter, sodass sie bündig mit "Farbe & Menge" startet.
+  // Nur auf Desktop (lg-Breakpoint, ab 1024px) — auf Mobile bleibt 0.
+  useEffect(() => {
+    const el = stepsAboveRef.current;
+    if (!el) return;
+    const compute = () => {
+      const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
+      if (selectedLength && isDesktop) {
+        // 16 = space-y-4 zwischen den Boxen im linken Stack
+        setCartOffset(el.offsetHeight + 16);
+      } else {
+        setCartOffset(0);
+      }
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    window.addEventListener("resize", compute);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", compute);
+    };
+  }, [selectedLength, supplierId, currentMethod, hasRegions]);
 
   // Handlers
   const resetSelections = () => {
@@ -624,6 +653,8 @@ export default function WizardForm({ suppliers, catalogs, locale }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Builder */}
         <div className="lg:col-span-2 space-y-4">
+          {/* Steps 1+2 zusammen — Höhe wird gemessen für Cart-Offset */}
+          <div ref={stepsAboveRef} className="space-y-4">
           {/* Step 1: Supplier & Date */}
           <div className="bg-white rounded-2xl border border-neutral-200 p-5 shadow-sm">
             <div className="flex items-center gap-2 mb-4">
@@ -704,6 +735,7 @@ export default function WizardForm({ suppliers, catalogs, locale }: Props) {
               </div>
             </div>
           )}
+          </div>
 
           {/* Step 3: Colors & Quantity */}
           {selectedLength && (
@@ -796,8 +828,11 @@ export default function WizardForm({ suppliers, catalogs, locale }: Props) {
           )}
         </div>
 
-        {/* Right: Cart + Checker + Export */}
-        <div className="space-y-4">
+        {/* Right: Cart + Checker + Export — schiebt sich auf Desktop bündig zur "Farbe & Menge"-Box runter */}
+        <div
+          className="space-y-4 transition-[margin-top] duration-300 ease-out"
+          style={{ marginTop: cartOffset }}
+        >
           {/* Cart */}
           <div className="bg-white rounded-2xl border border-neutral-200 p-5 shadow-sm">
             <div className="flex items-center justify-between mb-4">
