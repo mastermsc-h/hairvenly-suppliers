@@ -29,6 +29,14 @@ export interface AuditReport {
   invalidFormat: BarcodeIssue[];
   invalidChecksum: BarcodeIssue[];
   suspicious: BarcodeIssue[];
+  /**
+   * true wenn der Großteil der Barcodes die GS1-Prüfziffer NICHT besteht.
+   * Dann sind das vermutlich intern vergebene Codes (kein registrierter EAN),
+   * und der Prüfziffer-Check ist nicht aussagekräftig — UI sollte ihn als
+   * "nicht anwendbar" markieren statt als Problem.
+   */
+  checksumNotApplicable: boolean;
+  checksumPassRate: number; // 0..1
 }
 
 const SUSPICIOUS_PATTERNS = [
@@ -128,6 +136,15 @@ export function auditBarcodes(variants: AuditVariant[]): AuditReport {
   }
   duplicates.sort((a, b) => b.variants.length - a.variants.length);
 
+  // Anzahl der Barcodes, die format-konform UND prüfziffer-korrekt sind.
+  // Wenn nahezu nichts die GS1-Checksum besteht, sind es offensichtlich
+  // interne Codes — dann ist der Check nicht anwendbar.
+  const formatOkCount = withBarcode - invalidFormat.length;
+  const checksumPassCount = formatOkCount - invalidChecksum.length;
+  const checksumPassRate = formatOkCount > 0 ? checksumPassCount / formatOkCount : 0;
+  // Schwelle: Wenn >80% fehlschlagen → interne Codes, nicht aussagekräftig
+  const checksumNotApplicable = formatOkCount > 10 && checksumPassRate < 0.2;
+
   return {
     totalVariants: variants.length,
     totalWithBarcode: withBarcode,
@@ -136,5 +153,7 @@ export function auditBarcodes(variants: AuditVariant[]): AuditReport {
     invalidFormat,
     invalidChecksum,
     suspicious,
+    checksumNotApplicable,
+    checksumPassRate,
   };
 }

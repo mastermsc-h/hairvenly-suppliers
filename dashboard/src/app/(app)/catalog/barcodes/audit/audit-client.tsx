@@ -12,11 +12,13 @@ export default function AuditClient({ report, shopDomain }: { report: AuditRepor
   const [tab, setTab] = useState<Tab>(initialTab(report));
   const [search, setSearch] = useState("");
 
+  // Wenn die Prüfziffer-Validierung nicht anwendbar ist (interne Codes),
+  // zähle die Checksum-Mismatches NICHT als Problem.
   const totalIssues =
     report.duplicates.length +
     report.missing.length +
     report.invalidFormat.length +
-    report.invalidChecksum.length +
+    (report.checksumNotApplicable ? 0 : report.invalidChecksum.length) +
     report.suspicious.length;
 
   return (
@@ -66,10 +68,12 @@ export default function AuditClient({ report, shopDomain }: { report: AuditRepor
         />
         <StatCard
           active={tab === "checksum"}
-          color="purple"
+          color={report.checksumNotApplicable ? "neutral" : "purple"}
           icon={<ShieldAlert size={16} />}
-          label="Prüfziffer-Fehler"
+          label={report.checksumNotApplicable ? "Prüfziffer (n.a.)" : "Prüfziffer-Fehler"}
           count={report.invalidChecksum.length}
+          subtext={report.checksumNotApplicable ? "interne Codes" : undefined}
+          dimmed={report.checksumNotApplicable}
           onClick={() => setTab("checksum")}
         />
         <StatCard
@@ -94,6 +98,25 @@ export default function AuditClient({ report, shopDomain }: { report: AuditRepor
         />
       </div>
 
+      {/* Info-Banner für Prüfziffer-Tab wenn nicht anwendbar */}
+      {tab === "checksum" && report.checksumNotApplicable && (
+        <div className="mb-3 p-3 rounded-xl bg-blue-50 border border-blue-200 flex items-start gap-2">
+          <AlertCircle size={16} className="text-blue-600 mt-0.5 shrink-0" />
+          <div className="text-xs text-blue-900">
+            <div className="font-semibold mb-0.5">
+              Prüfziffer-Check ist hier nicht aussagekräftig — du nutzt vermutlich interne Codes.
+            </div>
+            <div className="text-blue-800">
+              Nur {Math.round(report.checksumPassRate * 100)}% der Barcodes bestehen die GS1-Mod-10-Prüfziffer.
+              Das ist normal für selbst vergebene 13-stellige Codes (kein offiziell registrierter EAN bei GS1).
+              Für deine internen Etiketten und Pack-Scans funktioniert das einwandfrei — der Check würde nur bei
+              gekauften, registrierten EANs (Amazon/dm/Apotheke) Tippfehler aufdecken. Diese Kategorie wird
+              daher nicht als „Problem" gezählt.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Tab Content */}
       <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
         {tab === "duplicates" && <DuplicatesView groups={report.duplicates} search={search} shopDomain={shopDomain} />}
@@ -114,18 +137,20 @@ function initialTab(report: AuditReport): Tab {
   if (report.duplicates.length > 0) return "duplicates";
   if (report.missing.length > 0) return "missing";
   if (report.invalidFormat.length > 0) return "format";
-  if (report.invalidChecksum.length > 0) return "checksum";
   if (report.suspicious.length > 0) return "suspicious";
+  // Checksum nur als Initial-Tab wenn die Validierung anwendbar ist
+  if (report.invalidChecksum.length > 0 && !report.checksumNotApplicable) return "checksum";
   return "duplicates";
 }
 
-function StatCard({ active, color, icon, label, count, subtext, onClick }: {
+function StatCard({ active, color, icon, label, count, subtext, dimmed, onClick }: {
   active: boolean;
-  color: "rose" | "amber" | "orange" | "purple" | "blue";
+  color: "rose" | "amber" | "orange" | "purple" | "blue" | "neutral";
   icon: React.ReactNode;
   label: string;
   count: number;
   subtext?: string;
+  dimmed?: boolean;
   onClick: () => void;
 }) {
   const palette: Record<string, { bg: string; text: string; border: string; chip: string; activeBorder: string }> = {
@@ -134,15 +159,17 @@ function StatCard({ active, color, icon, label, count, subtext, onClick }: {
     orange: { bg: "bg-orange-50", text: "text-orange-700", border: "border-orange-200", chip: "bg-orange-100 text-orange-700", activeBorder: "ring-orange-500" },
     purple: { bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200", chip: "bg-purple-100 text-purple-700", activeBorder: "ring-purple-500" },
     blue: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", chip: "bg-blue-100 text-blue-700", activeBorder: "ring-blue-500" },
+    neutral: { bg: "bg-neutral-50", text: "text-neutral-500", border: "border-neutral-200", chip: "bg-neutral-200 text-neutral-500", activeBorder: "ring-neutral-400" },
   };
   const c = palette[color];
-  const ok = count === 0;
+  const ok = count === 0 && !dimmed;
+  const isDimmed = dimmed === true;
   return (
     <button
       type="button"
       onClick={onClick}
       className={`text-left rounded-xl border p-3 transition ${
-        ok ? "bg-white border-neutral-200 opacity-60" : `${c.bg} ${c.border}`
+        ok ? "bg-white border-neutral-200 opacity-60" : isDimmed ? `${c.bg} ${c.border} opacity-70` : `${c.bg} ${c.border}`
       } ${active ? `ring-2 ring-offset-1 ${c.activeBorder}` : "hover:shadow-sm"}`}
     >
       <div className="flex items-center justify-between mb-1">
