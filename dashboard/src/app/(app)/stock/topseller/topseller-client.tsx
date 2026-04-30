@@ -31,7 +31,7 @@ interface Props {
   lastUpdated?: string | null;
 }
 
-type StockFilter = "all" | "zero_no_order" | "zero" | "low";
+type StockFilter = "zero_no_order" | "zero" | "low";
 type SortBy = "rang" | "verkauftG" | "verkauft30d" | "lagerG" | "unterwegsG";
 type SortDir = "asc" | "desc";
 const ALL_TIERS = ["TOP7", "MID", "REST", "KAUM"] as const;
@@ -46,7 +46,17 @@ const SORT_OPTIONS: { key: SortBy; label: string }[] = [
 
 export default function TopsellerClient({ sections, title, subtitle, lastUpdated }: Props) {
   const [query, setQuery] = useState("");
-  const [stockFilter, setStockFilter] = useState<StockFilter>("all");
+  const [stockFilters, setStockFilters] = useState<Set<StockFilter>>(new Set());
+
+  const toggleStockFilter = (key: StockFilter) => {
+    setStockFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  const noStockFilter = stockFilters.size === 0;
   const [activeTiers, setActiveTiers] = useState<Set<string>>(new Set(ALL_TIERS));
   const [sortBy, setSortBy] = useState<SortBy>("rang");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -123,24 +133,34 @@ export default function TopsellerClient({ sections, title, subtitle, lastUpdated
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="flex flex-wrap gap-1.5">
             <span className="text-[10px] uppercase text-neutral-400 font-medium self-center mr-1">Bestand:</span>
+            <button
+              onClick={() => setStockFilters(new Set())}
+              className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                noStockFilter ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+              }`}
+            >
+              Alle
+            </button>
             {([
-              { key: "all" as StockFilter, label: "Alle" },
               { key: "zero_no_order" as StockFilter, label: "Null + nicht bestellt" },
               { key: "zero" as StockFilter, label: "Nullbestand" },
               { key: "low" as StockFilter, label: "< 300g" },
-            ]).map((f) => (
-              <button
-                key={f.key}
-                onClick={() => setStockFilter(f.key)}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
-                  stockFilter === f.key
-                    ? f.key === "zero_no_order" ? "bg-red-600 text-white" : "bg-neutral-900 text-white"
-                    : f.key === "zero_no_order" ? "bg-red-50 text-red-700 border border-red-200 hover:bg-red-100" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
+            ]).map((f) => {
+              const active = stockFilters.has(f.key);
+              return (
+                <button
+                  key={f.key}
+                  onClick={() => toggleStockFilter(f.key)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                    active
+                      ? f.key === "zero_no_order" ? "bg-red-600 text-white" : "bg-neutral-900 text-white"
+                      : f.key === "zero_no_order" ? "bg-red-50 text-red-700 border border-red-200 hover:bg-red-100" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              );
+            })}
           </div>
           <div className="flex flex-wrap gap-1.5">
             <span className="text-[10px] uppercase text-neutral-400 font-medium self-center mr-1">Tier:</span>
@@ -188,23 +208,23 @@ export default function TopsellerClient({ sections, title, subtitle, lastUpdated
             })}
           </div>
         </div>
-        {(stockFilter !== "all" || !allTiersActive || sortBy !== "rang" || sortDir !== "desc") && (
+        {(!noStockFilter || !allTiersActive || sortBy !== "rang" || sortDir !== "desc") && (
           <div className="text-xs text-neutral-500">
             Filter aktiv
-            <button onClick={() => { setStockFilter("all"); setActiveTiers(new Set(ALL_TIERS)); setSortBy("rang"); setSortDir("desc"); }} className="ml-2 text-indigo-600 hover:text-indigo-800 font-medium">Zurücksetzen</button>
+            <button onClick={() => { setStockFilters(new Set()); setActiveTiers(new Set(ALL_TIERS)); setSortBy("rang"); setSortDir("desc"); }} className="ml-2 text-indigo-600 hover:text-indigo-800 font-medium">Zurücksetzen</button>
           </div>
         )}
       </div>
 
       {/* Topseller Tables */}
       {sections.map((sec) => (
-        <TopsellerSectionView key={sec.quality} section={sec} query={query} stockFilter={stockFilter} activeTiers={activeTiers} sortBy={sortBy} sortDir={sortDir} />
+        <TopsellerSectionView key={sec.quality} section={sec} query={query} stockFilters={stockFilters} activeTiers={activeTiers} sortBy={sortBy} sortDir={sortDir} />
       ))}
     </div>
   );
 }
 
-function TopsellerSectionView({ section, query, stockFilter, activeTiers, sortBy, sortDir }: { section: TopsSellerSection; query: string; stockFilter: StockFilter; activeTiers: Set<string>; sortBy: SortBy; sortDir: SortDir }) {
+function TopsellerSectionView({ section, query, stockFilters, activeTiers, sortBy, sortDir }: { section: TopsSellerSection; query: string; stockFilters: Set<StockFilter>; activeTiers: Set<string>; sortBy: SortBy; sortDir: SortDir }) {
   const colors = QUALITY_COLORS[section.quality] ?? QUALITY_COLORS["Russisch Glatt"];
   const q = query.toLowerCase();
   const orderHeaders = section.orderHeaders;
@@ -229,10 +249,16 @@ function TopsellerSectionView({ section, query, stockFilter, activeTiers, sortBy
             return words.every((w) => combined.includes(w));
           });
         }
-        // Stock filter
-        if (stockFilter === "zero_no_order") filtered = filtered.filter((i) => i.lagerG === 0 && i.unterwegsG === 0);
-        else if (stockFilter === "zero") filtered = filtered.filter((i) => i.lagerG === 0);
-        else if (stockFilter === "low") filtered = filtered.filter((i) => i.lagerG > 0 && i.lagerG < 300);
+        // Stock filter — OR-Verknüpfung: leeres Set = keine Einschränkung,
+        // sonst muss mindestens eine aktive Bedingung erfüllt sein
+        if (stockFilters.size > 0) {
+          filtered = filtered.filter((i) => {
+            if (stockFilters.has("zero_no_order") && i.lagerG === 0 && i.unterwegsG === 0) return true;
+            if (stockFilters.has("zero") && i.lagerG === 0) return true;
+            if (stockFilters.has("low") && i.lagerG > 0 && i.lagerG < 300) return true;
+            return false;
+          });
+        }
         // Tier filter
         if (!allTiersActive) filtered = filtered.filter((i) => activeTiers.has(i.tier));
 
@@ -248,7 +274,7 @@ function TopsellerSectionView({ section, query, stockFilter, activeTiers, sortBy
           });
         }
 
-        if (filtered.length === 0 && (q || stockFilter !== "all" || !allTiersActive)) return null;
+        if (filtered.length === 0 && (q || stockFilters.size > 0 || !allTiersActive)) return null;
 
         const progLabel = `${section.forecastDays}T Verbr.`;
 
