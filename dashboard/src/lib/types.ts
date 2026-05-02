@@ -127,6 +127,7 @@ export const FEATURE_KEYS = [
   "returns",
   "customs_ch",
   "shipping",
+  "chatbot",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
@@ -398,6 +399,25 @@ export interface ReturnEvent {
 
 export interface ReturnWithItems extends Return {
   items: ReturnItem[];
+}
+
+/** Chatbot knowledge base entry */
+export interface ChatbotEntry {
+  id: string;
+  topic: string;
+  cluster: string;
+  question: string;
+  answer: string;
+  biz_score: number;
+  conversion: boolean;
+  methods: string[];
+  colors: string[];
+  lengths: string[];
+  grams: string[];
+  source: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 /** Hydrated price list with all nested data */
