@@ -1,9 +1,12 @@
 import { Suspense } from "react";
 import { getChatbotEntries, getChatbotStats } from "@/lib/actions/chatbot";
 import { requireProfile } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/server";
 import KnowledgeTable from "./knowledge-table";
 import KnowledgeFilters from "./knowledge-filters";
+import PriceTable from "./price-table";
 import { Bot, MessageSquare, Zap } from "lucide-react";
+import type { PriceRow } from "@/lib/chatbot/pricing";
 
 interface PageProps {
   searchParams: Promise<{ topic?: string; q?: string; active?: string }>;
@@ -13,14 +16,22 @@ export default async function ChatbotPage({ searchParams }: PageProps) {
   await requireProfile();
   const params = await searchParams;
 
-  const [entries, stats] = await Promise.all([
+  const supabase = await createClient();
+  const [entries, stats, pricesResult] = await Promise.all([
     getChatbotEntries({
       topic:      params.topic || undefined,
       search:     params.q || undefined,
       activeOnly: params.active === "1",
     }),
     getChatbotStats(),
+    supabase
+      .from("chatbot_prices")
+      .select("method, length_cm, gram_label, gram_per_pack, price_eur")
+      .eq("active", true)
+      .order("method")
+      .order("length_cm"),
   ]);
+  const prices = (pricesResult.data ?? []) as PriceRow[];
 
   const totalActive   = stats.reduce((s, t) => s + t.active, 0);
   const totalEntries  = stats.reduce((s, t) => s + t.count, 0);
@@ -94,6 +105,9 @@ export default async function ChatbotPage({ searchParams }: PageProps) {
           ))}
         </div>
       </div>
+
+      {/* Price table */}
+      <PriceTable prices={prices} />
 
       {/* Filter bar + table */}
       <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
