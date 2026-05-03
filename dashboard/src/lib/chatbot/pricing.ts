@@ -122,8 +122,10 @@ export function calcPacks(
     const row = pool.find((p) => p.method === "clip_in" && p.gram_label === `${size}g`);
     if (!row) return null;
     const msg =
-      `Das Clip-in ${size}g Set (60cm, Amanda – Russisch Glatt) kostet **€${row.price_eur.toFixed(2)}**. ` +
-      `Kein Schneiden, kein Kleben — einfach einklipsen 😊`;
+      `Das Clip-in ${size}g Set (60cm, Russisch Glatt) kostet **€${row.price_eur.toFixed(2)}** — ` +
+      `kein Kleben, kein Salon, einfach einklipsen und sofort mehr Volumen & Länge. ` +
+      `Unsere Sets sind salongeprüft und du bekommst bei uns persönlichen Service von Anfang an. 🌟 ` +
+      `Soll ich dir bei der passenden Farbe helfen?`;
     return {
       method, method_label: label, length_cm: 60,
       needed_grams, pack_grams: size, packs: 1, total_grams: size,
@@ -136,7 +138,9 @@ export function calcPacks(
     if (!row) return null;
     const msg =
       `Unser Ponytail (65cm, 130g) kostet **€${row.price_eur.toFixed(2)}** — ` +
-      `als fertiger Zopf zum Anklipsen ✨`;
+      `einfach anklipsen und du hast sofort einen vollen, langen Zopf. ` +
+      `Salongeprüfte Qualität, und wir begleiten dich persönlich bei der Farbwahl. ✨ ` +
+      `Soll ich dir die passende Farbe empfehlen?`;
     return {
       method, method_label: label, length_cm: row.length_cm ?? 65,
       needed_grams, pack_grams: PONYTAIL_SIZE, packs: 1, total_grams: PONYTAIL_SIZE,
@@ -168,9 +172,11 @@ export function calcPacks(
   const msg =
     `Für ca. **${needed_grams}g ${label} (${actualLength}cm${lineSuffix})** ` +
     `brauchst du **${packs} Packung${packs > 1 ? "en" : ""}** à ${packG}g — ` +
-    `macht insgesamt ${total_grams}g und kostet **€${total_price.toFixed(2)}** ` +
+    `insgesamt ${total_grams}g für **€${total_price.toFixed(2)}** ` +
     `(${packs} × €${row.price_eur.toFixed(2)}). ` +
-    `Soll ich dir auch bei der passenden Farbe helfen? 😊`;
+    `Unsere Extensions sind salongeprüft und du bekommst bei uns persönlichen Rundum-Service — ` +
+    `von der Farbberatung bis zur richtigen Anlegetechnik. 🌟 ` +
+    `Soll ich dir direkt bei der passenden Farbe helfen?`;
 
   return {
     method, method_label: label, length_cm: actualLength,
