@@ -40,7 +40,7 @@ export const METHOD_LABELS: Record<Method, string> = {
 export const GRAMS_PER_PACK: Partial<Record<Method, number>> = {
   tape: 25,
   mini_tape: 50,
-  bondings: 50,
+  bondings: 25,
   tressen: 50,
   genius_weft: 50,
   invisible_tape: 50,
