@@ -50,12 +50,28 @@ export const GRAMS_PER_PACK: Partial<Record<Method, number>> = {
 export const CLIP_IN_SIZES = [100, 150, 225] as const;
 export const PONYTAIL_SIZE = 130;
 
+/**
+ * Produktlinien:
+ * - amanda = Russisch Glatt, nur 60cm verfügbar
+ * - ebru   = Usbekisch Wellig, 45/55/65/85cm
+ *
+ * Bondings: Amanda nur 60cm | Ebru nur 65cm + 85cm
+ * Mini Tape + Classic Tressen: nur Amanda (60cm)
+ * Invisible Tape: beide Linien (60cm + 65cm)
+ */
+export const SUPPLIER_LABELS: Record<string, string> = {
+  amanda: "Russisch Glatt (60cm)",
+  ebru:   "Usbekisch Wellig",
+};
+
 export interface PriceRow {
   method: Method;
   length_cm: number | null;
   gram_label: string | null;
   gram_per_pack: number;
   price_eur: number;
+  /** 'amanda' = Russisch Glatt 60cm | 'ebru' = Usbekisch Wellig 45–85cm */
+  supplier_line?: "amanda" | "ebru";
 }
 
 export interface PackCalcResult {
