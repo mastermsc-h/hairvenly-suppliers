@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   const supabase = await createClient();
   const { data: prices, error } = await supabase
     .from("chatbot_prices")
-    .select("method, length_cm, gram_label, gram_per_pack, price_eur")
+    .select("method, length_cm, gram_label, gram_per_pack, price_eur, supplier_line")
     .eq("active", true);
 
   if (error) {

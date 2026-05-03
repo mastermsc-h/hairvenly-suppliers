@@ -26,7 +26,7 @@ export default async function ChatbotPage({ searchParams }: PageProps) {
     getChatbotStats(),
     supabase
       .from("chatbot_prices")
-      .select("method, length_cm, gram_label, gram_per_pack, price_eur")
+      .select("method, length_cm, gram_label, gram_per_pack, price_eur, supplier_line")
       .eq("active", true)
       .order("method")
       .order("length_cm"),

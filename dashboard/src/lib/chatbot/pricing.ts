@@ -91,30 +91,39 @@ export interface PackCalcResult {
 /**
  * Berechnet Packungsanzahl und Gesamtpreis.
  *
- * @param prices  - Preiszeilen aus chatbot_prices Tabelle
- * @param method  - Methode
- * @param length_cm - Haarlänge in cm
- * @param needed_grams - Benötigte Gramm (vom Chatbot geschätzt)
+ * @param prices        - Preiszeilen aus chatbot_prices (bereits nach Linie gefiltert oder alle)
+ * @param method        - Methode
+ * @param length_cm     - Gewünschte Haarlänge in cm
+ * @param needed_grams  - Benötigte Gramm (vom Chatbot geschätzt)
+ * @param supplier_line - Optional: 'amanda' (RU Glatt) | 'ebru' (Wellig) — wenn angegeben, wird nur diese Linie genutzt
  */
 export function calcPacks(
   prices: PriceRow[],
   method: Method,
   length_cm: number,
-  needed_grams: number
+  needed_grams: number,
+  supplier_line?: "amanda" | "ebru"
 ): PackCalcResult | null {
   const label = METHOD_LABELS[method];
 
+  // Filtere nach Linie wenn angegeben
+  const pool = supplier_line
+    ? prices.filter((p) => p.supplier_line === supplier_line)
+    : prices;
+
+  const lineLabel = supplier_line
+    ? supplier_line === "amanda"
+      ? "Russisch Glatt"
+      : "Usbekisch Wellig"
+    : "";
+
   if (method === "clip_in") {
-    // Clip-in: wähle die kleinste Packung die ≥ needed_grams ist
     const size = CLIP_IN_SIZES.find((s) => s >= needed_grams) ?? 225;
-    const row = prices.find(
-      (p) => p.method === "clip_in" && p.gram_label === `${size}g`
-    );
+    const row = pool.find((p) => p.method === "clip_in" && p.gram_label === `${size}g`);
     if (!row) return null;
     const msg =
-      `Für Clip-in Extensions empfehle ich das **${size}g Set (60cm)** — ` +
-      `das kostet **€${row.price_eur.toFixed(2)}**. ` +
-      `Du bekommst es direkt hier: [zum Shop](https://hairvenly.de)`;
+      `Das Clip-in ${size}g Set (60cm, Amanda – Russisch Glatt) kostet **€${row.price_eur.toFixed(2)}**. ` +
+      `Kein Schneiden, kein Kleben — einfach einklipsen 😊`;
     return {
       method, method_label: label, length_cm: 60,
       needed_grams, pack_grams: size, packs: 1, total_grams: size,
@@ -123,10 +132,11 @@ export function calcPacks(
   }
 
   if (method === "ponytail") {
-    const row = prices.find((p) => p.method === "ponytail");
+    const row = pool.find((p) => p.method === "ponytail");
     if (!row) return null;
     const msg =
-      `Unser Ponytail kommt mit **130g (65cm)** und kostet **€${row.price_eur.toFixed(2)}**.`;
+      `Unser Ponytail (65cm, 130g) kostet **€${row.price_eur.toFixed(2)}** — ` +
+      `als fertiger Zopf zum Anklipsen ✨`;
     return {
       method, method_label: label, length_cm: row.length_cm ?? 65,
       needed_grams, pack_grams: PONYTAIL_SIZE, packs: 1, total_grams: PONYTAIL_SIZE,
@@ -137,30 +147,33 @@ export function calcPacks(
   const packG = GRAMS_PER_PACK[method];
   if (!packG) return null;
 
-  // Finde den nächsten verfügbaren Preis (gleiche Länge oder nächsthöhere)
-  const candidates = prices
+  // Kandidaten: gleiche Methode, gleiche Linie, aufsteigend nach Länge
+  const candidates = pool
     .filter((p) => p.method === method && p.length_cm !== null)
     .sort((a, b) => (a.length_cm ?? 0) - (b.length_cm ?? 0));
 
   if (candidates.length === 0) return null;
 
-  // Nimm den Preis für die angefragte Länge oder nächsthöhere
+  // Nimm exakte Länge oder nächste verfügbare
   const row =
     candidates.find((p) => (p.length_cm ?? 0) >= length_cm) ??
     candidates[candidates.length - 1];
 
-  // Packungen aufrunden
-  const packs = Math.ceil(needed_grams / packG);
-  const total_grams = packs * packG;
-  const total_price = packs * row.price_eur;
+  const actualLength = row.length_cm ?? length_cm;
+  const packs        = Math.ceil(needed_grams / packG);
+  const total_grams  = packs * packG;
+  const total_price  = packs * row.price_eur;
 
+  const lineSuffix = lineLabel ? ` · ${lineLabel}` : "";
   const msg =
-    `Für **${needed_grams}g ${label} (${length_cm}cm)** brauchst du ` +
-    `**${packs} Packung${packs > 1 ? "en" : ""} à ${packG}g = ${total_grams}g**. ` +
-    `Das kostet **€${total_price.toFixed(2)}** (${packs} × €${row.price_eur.toFixed(2)}).`;
+    `Für ca. **${needed_grams}g ${label} (${actualLength}cm${lineSuffix})** ` +
+    `brauchst du **${packs} Packung${packs > 1 ? "en" : ""}** à ${packG}g — ` +
+    `macht insgesamt ${total_grams}g und kostet **€${total_price.toFixed(2)}** ` +
+    `(${packs} × €${row.price_eur.toFixed(2)}). ` +
+    `Soll ich dir auch bei der passenden Farbe helfen? 😊`;
 
   return {
-    method, method_label: label, length_cm: row.length_cm ?? length_cm,
+    method, method_label: label, length_cm: actualLength,
     needed_grams, pack_grams: packG, packs, total_grams,
     price_per_pack: row.price_eur, total_price,
     message: msg,
