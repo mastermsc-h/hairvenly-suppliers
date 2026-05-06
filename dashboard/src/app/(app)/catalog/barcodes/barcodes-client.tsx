@@ -89,63 +89,25 @@ export default function BarcodesClient({
           main { padding: 0 !important; overflow: visible !important; }
           @page { size: 50mm 25mm; margin: 0; }
           .label-sheet { display: block; }
-          /* Strikte fixe größe + position:relative damit der inhalt absolut
-             positioniert werden kann und der browser keinen layout-overflow
-             berechnet, der zu seitenbruchen führt */
+          /* Jedes label = 1 SVG mit fixen 50mm x 25mm. Kein flow-overflow,
+             daher kann der browser nicht ueber seitengrenzen aufsplitten. */
           .label {
             width: 50mm !important;
             height: 25mm !important;
-            min-height: 25mm !important;
-            max-height: 25mm !important;
-            position: relative !important;
-            overflow: hidden !important;
+            display: block !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
             page-break-after: always !important;
             break-after: page !important;
-            box-sizing: border-box !important;
-            display: block !important;
           }
           .label:last-child {
             page-break-after: auto !important;
             break-after: auto !important;
           }
-          /* Inhalt absolut positioniert — keine flow-höhe → kein page-break */
-          .label-content {
-            position: absolute !important;
-            top: 0.5mm; left: 0.5mm; right: 0.5mm; bottom: 0.5mm;
-            display: flex !important;
-            flex-direction: column !important;
-            align-items: center !important;
-            justify-content: center !important;
-            overflow: hidden !important;
-          }
-          .label-title {
-            font-size: 5pt;
-            line-height: 1.0;
-            text-align: center;
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-            color: #000;
-            max-height: 5mm;
-            overflow: hidden;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            margin: 0 0 0.3mm 0;
-            width: 100%;
-          }
-          .label-barcode {
-            width: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            flex: 0 0 16mm;
-          }
-          .label-barcode svg {
+          .label svg {
             display: block;
-            width: 100%;
-            height: 16mm;
-            max-height: 16mm;
+            width: 50mm;
+            height: 25mm;
           }
         }
       `}</style>
@@ -338,36 +300,91 @@ export default function BarcodesClient({
 }
 
 function Label({ variant }: { variant: Variant }) {
-  const ref = useRef<SVGSVGElement>(null);
+  // Wir rendern den Barcode in einen offscreen-canvas, holen das DataURL
+  // und embedden es als <image> in EIN großes SVG mit festem viewBox.
+  // Dadurch ist jedes Label genau EIN element mit fixen 50mm x 25mm —
+  // Browser können das nicht ueber seitengrenzen aufsplitten.
+  const [barcodeDataUrl, setBarcodeDataUrl] = useState<string>("");
 
   useEffect(() => {
-    if (!ref.current) return;
     try {
-      JsBarcode(ref.current, variant.barcode, {
+      const canvas = document.createElement("canvas");
+      JsBarcode(canvas, variant.barcode, {
         format: "CODE128",
         displayValue: true,
-        fontSize: 8,
-        height: 28,
+        fontSize: 14,
+        height: 50,
         margin: 0,
-        textMargin: 0,
+        textMargin: 2,
+        background: "#ffffff",
+        lineColor: "#000000",
       });
+      setBarcodeDataUrl(canvas.toDataURL("image/png"));
     } catch {
-      // ignore (z.B. ungültiger Code)
+      // ignore
     }
   }, [variant.barcode]);
 
   const fullTitle = variant.variantTitle
     ? `${variant.productTitle} · ${variant.variantTitle}`
     : variant.productTitle;
+  // Titel auf zwei Zeilen splitten falls zu lang (manuell per zeichen-budget)
+  const titleLines = splitTitle(fullTitle, 38);
 
+  // SVG-Koordinatensystem: 50mm × 25mm. 1 mm = 1 Einheit.
   return (
     <div className="label">
-      <div className="label-content">
-        <div className="label-title">{fullTitle}</div>
-        <div className="label-barcode">
-          <svg ref={ref} />
-        </div>
-      </div>
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 50 25"
+        width="50mm"
+        height="25mm"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        {titleLines.map((line, i) => (
+          <text
+            key={i}
+            x={25}
+            y={2 + i * 1.8}
+            textAnchor="middle"
+            fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
+            fontSize={1.5}
+            fill="#000"
+          >
+            {line}
+          </text>
+        ))}
+        {barcodeDataUrl && (
+          <image
+            href={barcodeDataUrl}
+            x={2}
+            y={titleLines.length === 2 ? 6.5 : 4.5}
+            width={46}
+            height={titleLines.length === 2 ? 18 : 20}
+            preserveAspectRatio="xMidYMid meet"
+          />
+        )}
+      </svg>
     </div>
   );
+}
+
+// Splittet titel auf max 2 zeilen, die zweite zeile bekommt einen "…"-fallback
+function splitTitle(title: string, maxCharsPerLine: number): string[] {
+  if (title.length <= maxCharsPerLine) return [title];
+  // Versuche an einem space zu splitten
+  const words = title.split(" ");
+  let line1 = "";
+  let line2 = "";
+  for (const w of words) {
+    if (!line1 || (line1.length + 1 + w.length) <= maxCharsPerLine) {
+      line1 = line1 ? `${line1} ${w}` : w;
+    } else {
+      line2 = line2 ? `${line2} ${w}` : w;
+    }
+  }
+  if (line2.length > maxCharsPerLine) {
+    line2 = line2.slice(0, maxCharsPerLine - 1) + "…";
+  }
+  return line2 ? [line1, line2] : [line1];
 }
