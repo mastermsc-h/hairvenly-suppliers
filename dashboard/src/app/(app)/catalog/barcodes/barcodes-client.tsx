@@ -92,8 +92,13 @@ export default function BarcodesClient({
           .label {
             width: 50mm;
             height: 25mm;
-            padding: 1mm;
+            padding: 0.5mm;
             box-sizing: border-box;
+            /* WICHTIG: kein page-break innerhalb eines labels — sonst druckt
+               der browser ein label auf zwei seiten wenn der inhalt knapp
+               zu hoch ist */
+            page-break-inside: avoid;
+            break-inside: avoid;
             page-break-after: always;
             break-after: page;
             display: flex;
@@ -104,20 +109,31 @@ export default function BarcodesClient({
           }
           .label:last-child { page-break-after: auto; break-after: auto; }
           .label-title {
-            font-size: 6pt;
-            line-height: 1.1;
+            font-size: 5pt;
+            line-height: 1.0;
             text-align: center;
             font-family: -apple-system, BlinkMacSystemFont, sans-serif;
             color: #000;
-            max-height: 7mm;
+            max-height: 5mm;
             overflow: hidden;
             display: -webkit-box;
             -webkit-line-clamp: 2;
             -webkit-box-orient: vertical;
-            margin-bottom: 0.5mm;
+            margin-bottom: 0.3mm;
           }
-          .label-barcode { width: 100%; max-height: 14mm; }
-          .label-barcode svg { width: 100%; height: 100%; max-height: 14mm; }
+          .label-barcode {
+            width: 100%;
+            max-height: 18mm;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+          }
+          .label-barcode svg {
+            display: block;
+            width: 100%;
+            height: 18mm;
+            max-height: 18mm;
+          }
         }
       `}</style>
 
@@ -317,10 +333,10 @@ function Label({ variant }: { variant: Variant }) {
       JsBarcode(ref.current, variant.barcode, {
         format: "CODE128",
         displayValue: true,
-        fontSize: 10,
-        height: 36,
+        fontSize: 8,
+        height: 28,
         margin: 0,
-        textMargin: 1,
+        textMargin: 0,
       });
     } catch {
       // ignore (z.B. ungültiger Code)
