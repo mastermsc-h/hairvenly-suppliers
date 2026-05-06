@@ -89,25 +89,37 @@ export default function BarcodesClient({
           main { padding: 0 !important; overflow: visible !important; }
           @page { size: 50mm 25mm; margin: 0; }
           .label-sheet { display: block; }
+          /* Strikte fixe größe + position:relative damit der inhalt absolut
+             positioniert werden kann und der browser keinen layout-overflow
+             berechnet, der zu seitenbruchen führt */
           .label {
-            width: 50mm;
-            height: 25mm;
-            padding: 0.5mm;
-            box-sizing: border-box;
-            /* WICHTIG: kein page-break innerhalb eines labels — sonst druckt
-               der browser ein label auf zwei seiten wenn der inhalt knapp
-               zu hoch ist */
-            page-break-inside: avoid;
-            break-inside: avoid;
-            page-break-after: always;
-            break-after: page;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
+            width: 50mm !important;
+            height: 25mm !important;
+            min-height: 25mm !important;
+            max-height: 25mm !important;
+            position: relative !important;
+            overflow: hidden !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            page-break-after: always !important;
+            break-after: page !important;
+            box-sizing: border-box !important;
+            display: block !important;
           }
-          .label:last-child { page-break-after: auto; break-after: auto; }
+          .label:last-child {
+            page-break-after: auto !important;
+            break-after: auto !important;
+          }
+          /* Inhalt absolut positioniert — keine flow-höhe → kein page-break */
+          .label-content {
+            position: absolute !important;
+            top: 0.5mm; left: 0.5mm; right: 0.5mm; bottom: 0.5mm;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: center !important;
+            overflow: hidden !important;
+          }
           .label-title {
             font-size: 5pt;
             line-height: 1.0;
@@ -119,20 +131,21 @@ export default function BarcodesClient({
             display: -webkit-box;
             -webkit-line-clamp: 2;
             -webkit-box-orient: vertical;
-            margin-bottom: 0.3mm;
+            margin: 0 0 0.3mm 0;
+            width: 100%;
           }
           .label-barcode {
             width: 100%;
-            max-height: 18mm;
             display: flex;
             justify-content: center;
             align-items: center;
+            flex: 0 0 16mm;
           }
           .label-barcode svg {
             display: block;
             width: 100%;
-            height: 18mm;
-            max-height: 18mm;
+            height: 16mm;
+            max-height: 16mm;
           }
         }
       `}</style>
@@ -349,9 +362,11 @@ function Label({ variant }: { variant: Variant }) {
 
   return (
     <div className="label">
-      <div className="label-title">{fullTitle}</div>
-      <div className="label-barcode">
-        <svg ref={ref} />
+      <div className="label-content">
+        <div className="label-title">{fullTitle}</div>
+        <div className="label-barcode">
+          <svg ref={ref} />
+        </div>
       </div>
     </div>
   );
