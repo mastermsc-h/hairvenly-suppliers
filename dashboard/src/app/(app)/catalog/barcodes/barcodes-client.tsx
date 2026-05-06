@@ -72,8 +72,10 @@ export default function BarcodesClient({
 
   function handlePrint() {
     if (printList.length === 0) return;
-    // Kurz warten, damit alle Barcode-SVGs gerendert sind
-    setTimeout(() => window.print(), 100);
+    // Warten bis alle Canvas-Labels als PNG fertig komponiert sind.
+    // Pro Label braucht's ~10-30ms — bei vielen labels also relevant.
+    const ms = Math.max(300, printList.length * 25);
+    setTimeout(() => window.print(), ms);
   }
 
   return (
@@ -104,10 +106,11 @@ export default function BarcodesClient({
             page-break-after: auto !important;
             break-after: auto !important;
           }
-          .label svg {
+          .label-img {
             display: block;
             width: 50mm;
             height: 25mm;
+            object-fit: contain;
           }
         }
       `}</style>
@@ -299,72 +302,88 @@ export default function BarcodesClient({
   );
 }
 
+// Pixel-dimensionen des Label-Canvas (Aspect-ratio 50:25 = 2:1).
+// 600×300 = ~12 px/mm bei 50mm — gibt scharfe drucke bei 203/300 dpi.
+const LABEL_W = 600;
+const LABEL_H = 300;
+
 function Label({ variant }: { variant: Variant }) {
-  // Wir rendern den Barcode in einen offscreen-canvas, holen das DataURL
-  // und embedden es als <image> in EIN großes SVG mit festem viewBox.
-  // Dadurch ist jedes Label genau EIN element mit fixen 50mm x 25mm —
-  // Browser können das nicht ueber seitengrenzen aufsplitten.
-  const [barcodeDataUrl, setBarcodeDataUrl] = useState<string>("");
+  // Komplette Label-Komposition in EIN canvas → PNG → <img>.
+  // Im print rendert ein <img> mit fixen mm-massen sicher als atomare einheit,
+  // browser können es nicht über seiten zerlegen.
+  const [labelDataUrl, setLabelDataUrl] = useState<string>("");
 
   useEffect(() => {
     try {
-      const canvas = document.createElement("canvas");
-      JsBarcode(canvas, variant.barcode, {
+      // 1) Barcode-Canvas separat erzeugen (JsBarcode beansprucht canvas exklusiv)
+      const barcodeCanvas = document.createElement("canvas");
+      JsBarcode(barcodeCanvas, variant.barcode, {
         format: "CODE128",
         displayValue: true,
-        fontSize: 14,
-        height: 50,
+        fontSize: 30,
+        height: 130,
         margin: 0,
-        textMargin: 2,
+        textMargin: 4,
         background: "#ffffff",
         lineColor: "#000000",
       });
-      setBarcodeDataUrl(canvas.toDataURL("image/png"));
+
+      // 2) Label-Canvas mit Titel + komponiertem Barcode
+      const canvas = document.createElement("canvas");
+      canvas.width = LABEL_W;
+      canvas.height = LABEL_H;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, LABEL_W, LABEL_H);
+
+      // Titel (max 2 Zeilen)
+      const fullTitle = variant.variantTitle
+        ? `${variant.productTitle} · ${variant.variantTitle}`
+        : variant.productTitle;
+      const titleLines = splitTitle(fullTitle, 38);
+      ctx.fillStyle = "#000000";
+      ctx.font = "bold 22px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      const titleY = 12;
+      const lineHeight = 26;
+      titleLines.forEach((line, i) => {
+        ctx.fillText(line, LABEL_W / 2, titleY + i * lineHeight, LABEL_W - 20);
+      });
+
+      // Barcode unterhalb des Titels einbetten — proportionsgerecht
+      const titleBlockH = titleY + titleLines.length * lineHeight + 6;
+      const barcodeArea = {
+        x: 20,
+        y: titleBlockH,
+        w: LABEL_W - 40,
+        h: LABEL_H - titleBlockH - 8,
+      };
+      // Original aspect-ratio des barcode-canvas behalten
+      const bcRatio = barcodeCanvas.width / barcodeCanvas.height;
+      let drawW = barcodeArea.w;
+      let drawH = drawW / bcRatio;
+      if (drawH > barcodeArea.h) {
+        drawH = barcodeArea.h;
+        drawW = drawH * bcRatio;
+      }
+      const drawX = barcodeArea.x + (barcodeArea.w - drawW) / 2;
+      const drawY = barcodeArea.y + (barcodeArea.h - drawH) / 2;
+      ctx.drawImage(barcodeCanvas, drawX, drawY, drawW, drawH);
+
+      setLabelDataUrl(canvas.toDataURL("image/png"));
     } catch {
       // ignore
     }
-  }, [variant.barcode]);
+  }, [variant.barcode, variant.productTitle, variant.variantTitle]);
 
-  const fullTitle = variant.variantTitle
-    ? `${variant.productTitle} · ${variant.variantTitle}`
-    : variant.productTitle;
-  // Titel auf zwei Zeilen splitten falls zu lang (manuell per zeichen-budget)
-  const titleLines = splitTitle(fullTitle, 38);
-
-  // SVG-Koordinatensystem: 50mm × 25mm. 1 mm = 1 Einheit.
   return (
     <div className="label">
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 50 25"
-        width="50mm"
-        height="25mm"
-        preserveAspectRatio="xMidYMid meet"
-      >
-        {titleLines.map((line, i) => (
-          <text
-            key={i}
-            x={25}
-            y={2 + i * 1.8}
-            textAnchor="middle"
-            fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
-            fontSize={1.5}
-            fill="#000"
-          >
-            {line}
-          </text>
-        ))}
-        {barcodeDataUrl && (
-          <image
-            href={barcodeDataUrl}
-            x={2}
-            y={titleLines.length === 2 ? 6.5 : 4.5}
-            width={46}
-            height={titleLines.length === 2 ? 18 : 20}
-            preserveAspectRatio="xMidYMid meet"
-          />
-        )}
-      </svg>
+      {labelDataUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={labelDataUrl} alt="" className="label-img" />
+      )}
     </div>
   );
 }
