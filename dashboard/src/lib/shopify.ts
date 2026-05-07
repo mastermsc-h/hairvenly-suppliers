@@ -1131,6 +1131,7 @@ export interface PackOrder {
   shippingAddress: {
     name: string | null;
     address1: string | null;
+    address2: string | null;
     zip: string | null;
     city: string | null;
     country: string | null;
@@ -1155,6 +1156,7 @@ interface PackOrderNode {
     firstName: string | null;
     lastName: string | null;
     address1: string | null;
+    address2: string | null;
     zip: string | null;
     city: string | null;
     country: string | null;
@@ -1200,7 +1202,7 @@ const PACK_ORDER_FIELDS_SLIM = `
   displayFulfillmentStatus
   email
   tags
-  shippingAddress { name firstName lastName address1 zip city country }
+  shippingAddress { name firstName lastName address1 address2 zip city country }
   lineItems(first: 50) {
     edges { node {
       title
@@ -1226,7 +1228,7 @@ const PACK_ORDER_FIELDS = `
   displayFinancialStatus
   displayFulfillmentStatus
   email
-  shippingAddress { name firstName lastName address1 zip city country }
+  shippingAddress { name firstName lastName address1 address2 zip city country }
   lineItems(first: 50) {
     edges { node {
       title
@@ -1293,6 +1295,7 @@ function mapPackOrder(node: PackOrderNode): PackOrder {
       ? {
           name: node.shippingAddress.name,
           address1: node.shippingAddress.address1,
+          address2: node.shippingAddress.address2,
           zip: node.shippingAddress.zip,
           city: node.shippingAddress.city,
           country: node.shippingAddress.country,
@@ -1732,6 +1735,57 @@ export async function lookupProductByBarcode(
     }
   }
   return matches.length > 0 ? matches : null;
+}
+
+/**
+ * Heuristik: hat die strasse mind. ein digit? Wenn nein → wahrscheinlich
+ * fehlt die hausnummer und DHL akzeptiert die adresse nicht.
+ */
+export function addressLooksIncomplete(address1: string | null | undefined): boolean {
+  if (!address1) return true;
+  const trimmed = address1.trim();
+  if (trimmed.length < 3) return true;
+  return !/\d/.test(trimmed);
+}
+
+/**
+ * Aktualisiert die Lieferadresse einer Order via orderUpdate-Mutation.
+ * Funktioniert für noch nicht ausgeführte Bestellungen.
+ */
+export interface ShippingAddressUpdate {
+  address1?: string;
+  address2?: string;
+  city?: string;
+  zip?: string;
+  country?: string;
+}
+
+export async function updateOrderShippingAddress(
+  orderGid: string,
+  update: ShippingAddressUpdate,
+): Promise<{ success: boolean; error?: string }> {
+  const query = `
+    mutation orderUpdate($input: OrderInput!) {
+      orderUpdate(input: $input) {
+        order { id }
+        userErrors { field message }
+      }
+    }
+  `;
+  // Nur gesetzte Felder mitsenden (sonst überschreibt Shopify mit null)
+  const shippingAddress: Record<string, string> = {};
+  if (update.address1 !== undefined) shippingAddress.address1 = update.address1;
+  if (update.address2 !== undefined) shippingAddress.address2 = update.address2;
+  if (update.city !== undefined) shippingAddress.city = update.city;
+  if (update.zip !== undefined) shippingAddress.zip = update.zip;
+  if (update.country !== undefined) shippingAddress.country = update.country;
+
+  const res = await shopifyGraphQL<{
+    orderUpdate: { userErrors: { field: string[] | null; message: string }[] };
+  }>(query, { input: { id: orderGid, shippingAddress } });
+  const errors = res.data?.orderUpdate.userErrors ?? [];
+  if (errors.length > 0) return { success: false, error: errors.map((e) => e.message).join("; ") };
+  return { success: true };
 }
 
 /**

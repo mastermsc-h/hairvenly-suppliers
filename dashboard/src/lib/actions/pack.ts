@@ -9,8 +9,10 @@ import {
   setOrderMetafield,
   lookupProductByBarcode,
   addOrderTags,
+  updateOrderShippingAddress,
   type PackOrderLineItem,
   type ProductLookupResult,
+  type ShippingAddressUpdate,
 } from "@/lib/shopify";
 import { revalidatePath } from "next/cache";
 
@@ -786,6 +788,34 @@ export async function cancelPackSession(
 
   revalidatePath("/pack");
   revalidatePath(`/pack/${sessionId}`);
+  return { success: true };
+}
+
+/**
+ * Aktualisiert die Lieferadresse einer Bestellung in Shopify.
+ * Wird genutzt wenn z.B. die Hausnummer fehlt und DHL kein Label erstellt.
+ */
+export async function updateShippingAddress(
+  sessionId: string,
+  update: ShippingAddressUpdate,
+): Promise<{ success: boolean; error?: string }> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) return { success: false, error: "Forbidden" };
+  const supabase = await createClient();
+
+  const { data: session } = await supabase
+    .from("pack_sessions")
+    .select("shopify_order_id, order_name")
+    .eq("id", sessionId)
+    .single();
+  if (!session?.shopify_order_id) return { success: false, error: "Order-ID nicht gefunden" };
+
+  const orderGid = `gid://shopify/Order/${session.shopify_order_id}`;
+  const res = await updateOrderShippingAddress(orderGid, update);
+  if (!res.success) return res;
+
+  revalidatePath("/pack");
+  if (session.order_name) revalidatePath(`/pack/${session.order_name.replace(/^#/, "")}`);
   return { success: true };
 }
 
