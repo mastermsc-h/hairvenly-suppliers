@@ -17,6 +17,7 @@ import {
   updateShippingAddress,
   type PhotoSkipReason,
 } from "@/lib/actions/pack";
+import CelebrationOverlay from "../celebration-overlay";
 
 function addressLooksIncomplete(address1: string | null | undefined): boolean {
   if (!address1) return true;
@@ -164,6 +165,7 @@ export default function PackMode({
   sessionId,
   initialStatus,
   orderName,
+  userName,
   expectedItems,
   initialCounts,
   initialPhotos,
@@ -177,6 +179,7 @@ export default function PackMode({
   sessionId: string;
   initialStatus: string;
   orderName: string;
+  userName: string | null;
   expectedItems: ExpectedItem[];
   initialCounts: Record<string, number>;
   initialPhotos: Record<string, { id: string; url: string }[]>;
@@ -193,6 +196,7 @@ export default function PackMode({
   const [photosSkipReason, setPhotosSkipReason] = useState<PhotoSkipReason | null>(initialPhotosSkipReason);
   const [skipModalOpen, setSkipModalOpen] = useState(false);
   const [addressModalOpen, setAddressModalOpen] = useState(false);
+  const [showCelebration, setShowCelebration] = useState(false);
   // Lokal überschreibbare Adresse (nach Update via Server-Action)
   const [localAddress, setLocalAddress] = useState(shippingAddress);
   const [flash, setFlash] = useState<FlashState>({ kind: null });
@@ -554,6 +558,7 @@ export default function PackMode({
       const res = await completePackSession(sessionId);
       if (res.success) {
         setStatus("shipped");
+        setShowCelebration(true);
       } else {
         setFulfillError(res.error ?? "Fehler");
       }
@@ -562,6 +567,15 @@ export default function PackMode({
 
   return (
     <>
+      {/* Konfetti-Celebration nach erfolgreichem Versenden */}
+      <CelebrationOverlay
+        active={showCelebration}
+        userName={userName}
+        orderName={orderName}
+        persistAfter={false}
+        onAnimationEnd={() => setShowCelebration(false)}
+      />
+
       {/* Flash Overlay */}
       {flash.kind && flash.kind !== "match" && (
         <div

@@ -103,6 +103,7 @@ export default async function PackOrderPage({
         sessionId={sessionId}
         initialStatus={status}
         orderName={order.name}
+        userName={profile.display_name || profile.username || null}
         expectedItems={expectedItems as ExpectedItem[]}
         initialCounts={initialCounts}
         initialPhotos={photoMap}

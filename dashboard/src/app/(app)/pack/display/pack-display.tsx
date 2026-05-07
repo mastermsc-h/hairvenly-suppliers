@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { t, type Locale } from "@/lib/i18n";
 import Link from "next/link";
 import QRCode from "qrcode";
+import CelebrationOverlay from "../celebration-overlay";
 import { CheckCircle2, ScanLine, Send, Package2, Camera, Pencil, Smartphone } from "lucide-react";
 
 interface ExpectedItem {
@@ -86,7 +87,24 @@ export default function PackDisplay({
   const [bigSuccessTitle, setBigSuccessTitle] = useState<string | null>(null);
   const [highlightKey, setHighlightKey] = useState<string | null>(null);
   const [phoneQrDataUrl, setPhoneQrDataUrl] = useState<string | null>(null);
+  // Konfetti triggern wenn session frisch in 'verified'/'shipped' wechselt
+  const [showCelebration, setShowCelebration] = useState(false);
+  const lastShippedSessionRef = useRef<string | null>(null);
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // Trigger Celebration wenn session-status auf shipped/verified wechselt —
+  // pro session nur einmal (lastShippedSessionRef speichert ID).
+  useEffect(() => {
+    if (!session) {
+      lastShippedSessionRef.current = null;
+      return;
+    }
+    const isDone = session.status === "shipped" || session.status === "verified";
+    if (isDone && lastShippedSessionRef.current !== session.id) {
+      lastShippedSessionRef.current = session.id;
+      setShowCelebration(true);
+    }
+  }, [session]);
 
   // Auto-Scroll + Hervorhebung beim Highlight
   useEffect(() => {
@@ -361,6 +379,15 @@ export default function PackDisplay({
   // Aktive Session
   return (
     <div className="min-h-screen relative">
+      {/* Konfetti-Celebration nach Versand-Abschluss; bleibt als kleines
+          Badge oben rechts sichtbar bis zur nächsten Session. */}
+      <CelebrationOverlay
+        active={showCelebration}
+        userName={session.packedBy}
+        orderName={session.orderName}
+        persistAfter={true}
+      />
+
       {flash === "mismatch" && (
         <div className="fixed inset-0 z-50 bg-red-700/95 flex items-center justify-center pointer-events-none">
           <div className="text-center">
