@@ -502,13 +502,9 @@ export default function PackMode({
     });
   }
 
-  // Lokaler State: hat der Mitarbeiter den Versandlabel-Tab schon geöffnet?
-  // Klick darauf = Ende des Prozesses → UI wechselt auf "abgeschlossen".
-  const [labelClicked, setLabelClicked] = useState(false);
-
   function handleFulfill() {
     setFulfillError(null);
-    // Shopify-Order-Tab vor dem Server-Call öffnen, damit der Browser den
+    // Shopify-DHL-Tab vor dem Server-Call öffnen, damit der Browser den
     // window.open noch als direkten user-click wertet (kein popup-block).
     // Named target damit alle nachfolgenden Klicks denselben Tab fokussieren.
     if (shopifyLabelUrl) window.open(shopifyLabelUrl, "shopify-order", "noopener");
@@ -1143,64 +1139,42 @@ export default function PackMode({
             </div>
           )}
 
-          {status === "shipped" && !labelClicked && (
-            <div className="bg-blue-50 border-2 border-blue-300 rounded-2xl p-6 text-center">
-              <Send className="mx-auto text-blue-700 mb-3" size={40} />
-              <div className="text-xl font-bold text-blue-900">
-                {t(locale, "shipping.fulfill_success")}
-              </div>
-              <div className="text-sm text-blue-700 mt-1">{orderName}</div>
-              <div className="text-xs text-blue-700/80 mt-3">
-                Letzter Schritt: Rechnung + Versandetikett drucken.
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-5 max-w-xl mx-auto">
-                {shopifyOrderUrl ? (
-                  <a
-                    href={shopifyOrderUrl}
-                    target="shopify-order"
-                    rel="noopener"
-                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-white border-2 border-blue-300 text-blue-900 text-sm font-semibold hover:bg-blue-100 transition"
-                  >
-                    🧾 Rechnung drucken
-                  </a>
-                ) : (
-                  <div />
-                )}
-                {shopifyLabelUrl ? (
-                  <a
-                    href={shopifyLabelUrl}
-                    target="shopify-order"
-                    rel="noopener"
-                    onClick={() => setLabelClicked(true)}
-                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-emerald-600 border-2 border-emerald-700 text-white text-sm font-semibold hover:bg-emerald-700 transition"
-                  >
-                    📦 Versandetikett drucken &amp; abschließen
-                  </a>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setLabelClicked(true)}
-                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-emerald-600 border-2 border-emerald-700 text-white text-sm font-semibold hover:bg-emerald-700 transition"
-                  >
-                    Bestellung abschließen
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {status === "shipped" && labelClicked && (
+          {status === "shipped" && (
             <div className="bg-emerald-50 border-2 border-emerald-400 rounded-2xl p-6 text-center">
               <CheckCircle2 className="mx-auto text-emerald-700 mb-3" size={48} />
               <div className="text-2xl font-bold text-emerald-900">
                 Vorgang abgeschlossen
               </div>
               <div className="text-sm text-emerald-700 mt-1">
-                {orderName} — versendet, Rechnung &amp; Versandetikett gedruckt
+                {orderName} — versendet, Versandetikett geöffnet
               </div>
 
-              <div className="flex flex-col md:flex-row items-stretch justify-center gap-3 mt-6">
+              {/* Re-Open / Rechnung — als prominente Buttons */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-5 max-w-xl mx-auto">
+                {shopifyOrderUrl && (
+                  <a
+                    href={shopifyOrderUrl}
+                    target="shopify-order"
+                    rel="noopener"
+                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-white border-2 border-emerald-300 text-emerald-900 text-sm font-semibold hover:bg-emerald-100 transition"
+                  >
+                    🧾 Rechnung drucken
+                  </a>
+                )}
+                {shopifyLabelUrl && (
+                  <a
+                    href={shopifyLabelUrl}
+                    target="shopify-order"
+                    rel="noopener"
+                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-white border-2 border-emerald-300 text-emerald-900 text-sm font-semibold hover:bg-emerald-100 transition"
+                  >
+                    📦 Versandetikett erneut öffnen
+                  </a>
+                )}
+              </div>
+
+              {/* Nächste Bestellung */}
+              <div className="flex flex-col md:flex-row items-stretch justify-center gap-3 mt-6 pt-5 border-t border-emerald-200">
                 <OrderQrScanner buttonLabel="Nächste Bestellung scannen" />
                 <Link
                   href="/pack"
@@ -1210,14 +1184,6 @@ export default function PackMode({
                   Zur Versand-Liste
                 </Link>
               </div>
-
-              {shopifyOrderUrl && (
-                <div className="flex flex-wrap items-center justify-center gap-3 mt-4 text-xs text-emerald-800/80">
-                  <a href={shopifyOrderUrl} target="_blank" rel="noopener" className="hover:underline">
-                    Bestellung in Shopify öffnen
-                  </a>
-                </div>
-              )}
             </div>
           )}
         </div>
