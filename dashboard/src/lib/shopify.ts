@@ -1139,6 +1139,7 @@ export interface PackOrder {
   totalQuantity: number;
   fulfillmentOrders: { id: string; status: string }[]; // für Auto-Fulfill
   hasPackQr: boolean;             // ob custom.pack_qr_svg metafield bereits gesetzt ist
+  tags: string[];                 // Shopify-Tags (z.B. 'Ware nicht vorhanden', 'Warte auf Rückmeldung')
 }
 
 interface PackOrderNode {
@@ -1148,6 +1149,7 @@ interface PackOrderNode {
   displayFinancialStatus: string;
   displayFulfillmentStatus: string;
   email: string | null;
+  tags?: string[];
   shippingAddress: {
     name: string | null;
     firstName: string | null;
@@ -1197,6 +1199,7 @@ const PACK_ORDER_FIELDS_SLIM = `
   displayFinancialStatus
   displayFulfillmentStatus
   email
+  tags
   shippingAddress { name firstName lastName address1 zip city country }
   lineItems(first: 50) {
     edges { node {
@@ -1299,6 +1302,7 @@ function mapPackOrder(node: PackOrderNode): PackOrder {
     totalQuantity: lineItems.reduce((s, li) => s + li.quantity, 0),
     fulfillmentOrders: node.fulfillmentOrders?.edges.map((e) => ({ id: e.node.id, status: e.node.status })) ?? [],
     hasPackQr: !!(node.packQrMetafield && node.packQrMetafield.value && node.packQrMetafield.value.length > 0),
+    tags: node.tags ?? [],
   };
 }
 
@@ -1728,6 +1732,30 @@ export async function lookupProductByBarcode(
     }
   }
   return matches.length > 0 ? matches : null;
+}
+
+/**
+ * Fügt einer Order einen oder mehrere Tags hinzu (z.B. "Ware nicht vorhanden").
+ * Idempotent — bestehende Tags bleiben.
+ */
+export async function addOrderTags(
+  orderGid: string,
+  tags: string[],
+): Promise<{ success: boolean; error?: string }> {
+  const query = `
+    mutation addTags($id: ID!, $tags: [String!]!) {
+      tagsAdd(id: $id, tags: $tags) {
+        node { id }
+        userErrors { field message }
+      }
+    }
+  `;
+  const res = await shopifyGraphQL<{
+    tagsAdd: { userErrors: { field: string[] | null; message: string }[] };
+  }>(query, { id: orderGid, tags });
+  const errors = res.data?.tagsAdd.userErrors ?? [];
+  if (errors.length > 0) return { success: false, error: errors.map((e) => e.message).join("; ") };
+  return { success: true };
 }
 
 /** Fetch one order by name (e.g. "#22264" or "22264") for Pack-Modus. */

@@ -102,23 +102,39 @@ export default function PackList({
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((o, idx) => (
+                {filtered.map((o, idx) => {
+                  const stockMissing = o.tags?.includes("Ware nicht vorhanden");
+                  return (
                   <tr
                     key={o.id}
                     className={`border-t border-neutral-100 transition hover:bg-amber-50 ${
-                      idx % 2 === 1 ? "bg-neutral-50/60" : "bg-white"
+                      stockMissing
+                        ? "bg-red-50 hover:bg-red-100"
+                        : idx % 2 === 1
+                        ? "bg-neutral-50/60"
+                        : "bg-white"
                     }`}
                   >
                     <td className="px-4 py-3 font-medium">
-                      <a
-                        href={`https://admin.shopify.com/store/${SHOPIFY_STORE_HANDLE}/orders/${o.numericId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-neutral-900 hover:text-blue-700 hover:underline transition"
-                        title="In Shopify öffnen"
-                      >
-                        {o.name}
-                      </a>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <a
+                          href={`https://admin.shopify.com/store/${SHOPIFY_STORE_HANDLE}/orders/${o.numericId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-neutral-900 hover:text-blue-700 hover:underline transition"
+                          title="In Shopify öffnen"
+                        >
+                          {o.name}
+                        </a>
+                        {stockMissing && (
+                          <span
+                            className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-red-600 text-white"
+                            title="Ware ist im Lager nicht vorhanden — sobald da, neu packen"
+                          >
+                            ⚠ Ware fehlt
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-neutral-700">
                       <div>
@@ -170,7 +186,8 @@ export default function PackList({
                       </Link>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

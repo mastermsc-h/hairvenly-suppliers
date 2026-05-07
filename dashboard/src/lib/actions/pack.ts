@@ -8,6 +8,7 @@ import {
   fulfillOrderInShopify,
   setOrderMetafield,
   lookupProductByBarcode,
+  addOrderTags,
   type PackOrderLineItem,
   type ProductLookupResult,
 } from "@/lib/shopify";
@@ -785,6 +786,69 @@ export async function cancelPackSession(
 
   revalidatePath("/pack");
   revalidatePath(`/pack/${sessionId}`);
+  return { success: true };
+}
+
+/**
+ * Pack-Vorgang abbrechen weil Ware physisch nicht vorhanden ist.
+ * Setzt zusätzlich den Shopify-Tag "Ware nicht vorhanden" auf der Order,
+ * damit sie speziell markiert in der Versand-Liste erscheint und später
+ * neu gepackt werden kann sobald die ware da ist.
+ */
+export async function abortPackSessionStockMissing(
+  sessionId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) {
+    return { success: false, error: "Forbidden" };
+  }
+  const supabase = await createClient();
+
+  // 1. Order-GID via Session laden (für Shopify-Tag-Mutation)
+  const { data: session, error: sErr } = await supabase
+    .from("pack_sessions")
+    .select("id, order_name, shopify_order_id")
+    .eq("id", sessionId)
+    .single();
+  if (sErr || !session) return { success: false, error: "Session nicht gefunden" };
+
+  // 2. Shopify-Tag setzen
+  if (session.shopify_order_id) {
+    const orderGid = `gid://shopify/Order/${session.shopify_order_id}`;
+    const tagRes = await addOrderTags(orderGid, ["Ware nicht vorhanden"]);
+    if (!tagRes.success) {
+      return { success: false, error: `Shopify-Tag konnte nicht gesetzt werden: ${tagRes.error}` };
+    }
+  }
+
+  // 3. Pack-Session resetten (genauso wie cancelPackSession)
+  await supabase
+    .from("pack_scans")
+    .update({ status: "reset" })
+    .eq("session_id", sessionId)
+    .eq("status", "match");
+
+  const { data: photos } = await supabase
+    .from("pack_photos")
+    .select("storage_path")
+    .eq("session_id", sessionId);
+  if (photos && photos.length > 0) {
+    const paths = photos.map((p) => p.storage_path);
+    await supabase.storage.from("pack-photos").remove(paths);
+    await supabase.from("pack_photos").delete().eq("session_id", sessionId);
+  }
+
+  await supabase
+    .from("pack_sessions")
+    .update({
+      status: "open",
+      started_at: null,
+      finished_at: null,
+    })
+    .eq("id", sessionId);
+
+  revalidatePath("/pack");
+  revalidatePath(`/pack/${session.order_name}`);
   return { success: true };
 }
 

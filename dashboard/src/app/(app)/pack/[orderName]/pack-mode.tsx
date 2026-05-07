@@ -11,6 +11,7 @@ import {
   resetItemConfirms,
   fetchSessionScans,
   cancelPackSession,
+  abortPackSessionStockMissing,
   skipPackPhotos,
   unskipPackPhotos,
   type PhotoSkipReason,
@@ -442,6 +443,36 @@ export default function PackMode({
     });
   }, [sessionId, refreshHistory]);
 
+  const handleAbortStockMissing = useCallback(() => {
+    if (typeof window !== "undefined") {
+      const ok = window.confirm(
+        "Bestellung als 'Ware nicht vorhanden' markieren?\n\n" +
+          "• Pack-Vorgang wird abgebrochen (Scans + Fotos gelöscht)\n" +
+          "• Tag 'Ware nicht vorhanden' wird in Shopify gesetzt\n" +
+          "• Die Bestellung bleibt rot markiert in der Versand-Liste\n" +
+          "• Sobald die Ware da ist, kann sie erneut gepackt werden",
+      );
+      if (!ok) return;
+    }
+    startTransition(async () => {
+      const res = await abortPackSessionStockMissing(sessionId);
+      if (res.success) {
+        setCounts({});
+        setPhotos({});
+        setBigSuccess(null);
+        setStatus("open");
+        setManualForms({});
+        setFulfillError(null);
+        setFlash({ kind: null });
+        await refreshHistory();
+        // Zurück zur Versand-Liste — Bestellung erscheint dort jetzt rot markiert
+        if (typeof window !== "undefined") window.location.href = "/pack";
+      } else {
+        alert(`Fehler: ${res.error ?? "unbekannt"}`);
+      }
+    });
+  }, [sessionId, refreshHistory]);
+
   const handleResetItem = useCallback(
     (idx: number) => {
       if (typeof window !== "undefined" && !window.confirm("Diese Position auf 0 zurücksetzen? (Audit-Log bleibt.)")) {
@@ -756,14 +787,25 @@ export default function PackMode({
           )}
 
           {phase !== "shipped" && (
-            <button
-              onClick={handleCancelSession}
-              disabled={isPending}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-red-200 text-red-700 text-xs font-medium hover:bg-red-50 hover:border-red-300 transition disabled:opacity-50"
-            >
-              <X size={14} />
-              Pack-Vorgang abbrechen
-            </button>
+            <div className="space-y-2">
+              <button
+                onClick={handleAbortStockMissing}
+                disabled={isPending}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-700 transition disabled:opacity-50"
+                title="Bestellung markieren — Ware ist im Lager nicht vorhanden"
+              >
+                <AlertTriangle size={14} />
+                Ware nicht vorhanden
+              </button>
+              <button
+                onClick={handleCancelSession}
+                disabled={isPending}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-red-200 text-red-700 text-xs font-medium hover:bg-red-50 hover:border-red-300 transition disabled:opacity-50"
+              >
+                <X size={14} />
+                Pack-Vorgang abbrechen
+              </button>
+            </div>
           )}
         </div>
 
