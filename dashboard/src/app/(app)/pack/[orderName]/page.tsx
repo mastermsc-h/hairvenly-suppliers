@@ -33,16 +33,15 @@ export default async function PackOrderPage({
   if (!order) notFound();
 
   // Shopify-Admin-URLs für Post-Fulfill-Hand-off (Rechnung/Lexware + Versandetikett)
-  const shopHandle = (process.env.SHOPIFY_SHOP_DOMAIN ?? "").replace(/\.myshopify\.com$/, "");
+  const shopDomain = process.env.SHOPIFY_SHOP_DOMAIN ?? "";
+  const shopHandle = shopDomain.replace(/\.myshopify\.com$/, "");
   const shopifyOrderUrl = shopHandle
     ? `https://admin.shopify.com/store/${shopHandle}/orders/${order.numericId}`
     : null;
-  // Shopify hat die direkte /labels/new-route deaktiviert — wir landen
-  // stattdessen auf der Order-Detail-Seite, wo der 'Versandetikett erstellen'-
-  // Button im Shopify-Admin sichtbar ist und der Mitarbeiter dort den
-  // Wizard öffnet.
-  const shopifyLabelUrl = shopHandle
-    ? `https://admin.shopify.com/store/${shopHandle}/orders/${order.numericId}`
+  // Direkt-URL zum DHL-Versandetikett-Wizard (Shopify-DHL-App).
+  // Pattern: /store/<handle>/apps/dhl-shipping/<shop-domain>/createlabel/<order-id>?id=<order-id>
+  const shopifyLabelUrl = shopHandle && shopDomain
+    ? `https://admin.shopify.com/store/${shopHandle}/apps/dhl-shipping/${shopDomain}/createlabel/${order.numericId}?id=${order.numericId}`
     : null;
 
   // Session anlegen oder laden
