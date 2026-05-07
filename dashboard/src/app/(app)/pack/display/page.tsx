@@ -25,8 +25,6 @@ export default async function PackDisplayPage() {
   const initialCounts: Record<string, number> = {};
   const initialPhotoCounts: Record<string, number> = {
     products_invoice: 0,
-    products_in_box: 0,
-    package_on_scale: 0,
   };
   if (session) {
     const { data: scans } = await supabase

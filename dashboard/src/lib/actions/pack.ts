@@ -507,7 +507,7 @@ export async function completePackSession(sessionId: string): Promise<{
       .eq("session_id", sessionId);
 
     const photoTypes = new Set((photos ?? []).map((p) => p.photo_type));
-    const requiredPhotos = ["products_invoice", "products_in_box", "package_on_scale"];
+    const requiredPhotos = ["products_invoice"];
     const missingPhotos = requiredPhotos.filter((t) => !photoTypes.has(t));
     if (missingPhotos.length > 0) {
       return {
@@ -862,7 +862,7 @@ export async function savePackSessionNotes(
  */
 export async function uploadPackPhoto(
   sessionId: string,
-  photoType: "products_invoice" | "products_in_box" | "package_on_scale",
+  photoType: "products_invoice",
   formData: FormData,
 ): Promise<{ success: boolean; error?: string; storagePath?: string }> {
   const profile = await requireProfile();

@@ -63,11 +63,9 @@ function detectAttributes(title: string): {
   return { method, length, origin, color };
 }
 
-const PHOTO_TYPES = ["products_invoice", "products_in_box", "package_on_scale"] as const;
+const PHOTO_TYPES = ["products_invoice"] as const;
 const PHOTO_LABELS: Record<string, string> = {
-  products_invoice: "1. Produkte + Rechnung",
-  products_in_box: "2. Im Versandkarton",
-  package_on_scale: "3. Auf der Waage",
+  products_invoice: "Beweisfoto Produkte + Rechnung",
 };
 
 export default function PackDisplay({
@@ -173,8 +171,6 @@ export default function PackDisplay({
       });
       const pc: Record<string, number> = {
         products_invoice: 0,
-        products_in_box: 0,
-        package_on_scale: 0,
       };
       for (const p of photos ?? []) pc[p.photo_type] = (pc[p.photo_type] ?? 0) + 1;
       setPhotoCounts((prev) => {

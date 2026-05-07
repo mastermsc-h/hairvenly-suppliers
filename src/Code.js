@@ -3,7 +3,7 @@
 // ==========================================
 // CODE_VERSION: 2026-04-22_23-00_DoSA-days-of-stock-allocator
 // ==========================================
-const CODE_VERSION = "2026-04-23_16-15_matchColor-konservativer-Retry-schneller-Abbruch";
+const CODE_VERSION = "2026-05-04_10-00_Inventory-Dedup-Lock-CleanupHelper";
 
 // IDs der externen Bestellungs-Sheets
 const CHINA_SHEET_ID    = "1zqh50KeQsworvG5OivfxvECM7HUoArwUEGBTUGVB4ZM";
@@ -525,16 +525,39 @@ function effectiveDailyRate_(product) {
 }
 
 /**
- * Berechnet Ziel-Grammzahl basierend auf Tier.
- * HINWEIS: Premium-Flag entscheidet nur über Ranking-Breite (TOP7=Rang 1-10 statt 1-7),
- * NICHT mehr über Ziel-Höhe. Ziel ist eine grobe Orientierung;
- * das echte verkaufsbasierte Ziel wird im Bestellvorschlag berechnet.
+ * Berechnet Ziel-Grammzahl dynamisch basierend auf Verkaufsverlauf + Tier-Mindestschwelle.
+ *
+ * Formel: Ziel = max(Tier-Floor, 60T-Verbrauch × Sicherheitsfaktor)
+ *
+ * - 60T-Verbrauch = effectiveDailyRate × 60 (ausverkauf-korrigierte Tagesrate)
+ * - Sicherheitsfaktor pro Tier:
+ *     TOP7 × 2.0 → ~120 Tage Reichweite (4 Monate, Stockout-Schutz)
+ *     MID  × 1.5 → ~90 Tage Reichweite (3 Monate)
+ *     REST × 1.0 → ~60 Tage Reichweite (2 Monate)
+ *     KAUM     → 0g (kein dynamisches Ziel)
+ * - Tier-Floor (Untergrenze) verhindert dass frisch eingeführte Topseller mit niedrigem
+ *   30d-Verkauf auf 0g/Mini-Werte fallen:
+ *     TOP7 mind. 1000g | MID mind. 500g | REST mind. 300g
+ * - Ergebnis auf 100g gerundet (Lesbarkeit).
+ *
+ * Ersetzt fixe pauschale Werte (1000/500/300) — passt sich Verkaufsrate an.
  */
 function zielForProduct_(product) {
-  if (product.tier === "TOP7") return 1000;
-  if (product.tier === "MID")  return 500;
-  if (product.tier === "REST") return 300;
-  return 0;
+  if (!product.tier || product.tier === "KAUM") return 0;
+
+  const tierFloor = product.tier === "TOP7" ? 1000 :
+                    product.tier === "MID"  ? 500  :
+                    product.tier === "REST" ? 300  : 0;
+  const safetyFactor = product.tier === "TOP7" ? 2.0 :
+                       product.tier === "MID"  ? 1.5 :
+                       product.tier === "REST" ? 1.0 : 0;
+
+  const rate = effectiveDailyRate_(product);
+  const verbrauch60T = rate * 60;
+  const dynamic = verbrauch60T * safetyFactor;
+
+  const ziel = Math.max(tierFloor, dynamic);
+  return Math.round(ziel / 100) * 100;
 }
 
 /**
@@ -1060,6 +1083,10 @@ function buildFullAmandaCandidates_(existingCandidates, allOrders) {
       unterwegs: unterwegs,
       verfügbar: lager + unterwegs,
       tagesrate: tagesrate,
+      // Roh-Verkaufsdaten für Phase E (Vorratskauf historische max-Rate)
+      g30d: g30,
+      g60d_alt: g60alt,
+      g90d: g90,
       tier: tier,
       einheit: einheit,
       rang: 999,
@@ -1106,8 +1133,15 @@ function buildFullAmandaCandidates_(existingCandidates, allOrders) {
 function allocateIdealStock_(candidates, cfg) {
   const einheitOf = (c) => Math.max(1, cfg.einheitFn(c));
   const ceilEinh  = (c, val) => Math.ceil(val / einheitOf(c)) * einheitOf(c);
-  // Lieferanten-Mindestbestellmenge (Amanda 300g, China 500g), auf Einheit aufgerundet
   const minOrder = cfg.minBestellung || cfg.regalMindest || 300;
+
+  // Debug-Counter
+  let countSkipGenug = 0;
+  let countSkipKAUMVorrat = 0;
+  let countOK = 0;
+  const skipExamples = [];   // erste 10 geskipte aktive TOP7/MID
+  const okExamples = [];      // erste 10 zugeteilte
+  let sumSkipGenugVorrat = 0;
 
   for (const c of candidates) {
     c.zugeteilt = 0;
@@ -1118,34 +1152,72 @@ function allocateIdealStock_(candidates, cfg) {
     const rate = c.tagesrate || 0;
 
     let idealBestand = 0;
+    let maxTage = 0;
     if (rate > 0) {
-      // Aktiv: tier-spezifische maxTage
-      const maxTage = tier === "TOP7" ? cfg.tierReichweiten.top :
-                      tier === "MID"  ? cfg.tierReichweiten.mid :
-                                        cfg.tierReichweiten.rest;
+      maxTage = tier === "TOP7" ? cfg.tierReichweiten.top :
+                tier === "MID"  ? cfg.tierReichweiten.mid :
+                                  cfg.tierReichweiten.rest;
       idealBestand = maxTage * rate;
     } else {
-      // KAUM/inaktiv: Regal-Präsenz
       idealBestand = cfg.regalMindest;
     }
 
-    // UNTERGRENZE: Lieferanten-Mindestbestellung — kein Produkt soll unter 300g (Amanda)
-    // bestellt werden, auch wenn rechnerisch weniger nötig wäre. Das entspricht der
-    // echten Lieferanten-Realität (Amanda akzeptiert keine <300g-Bestellungen).
     if (idealBestand < minOrder) idealBestand = minOrder;
 
     const fehlt = idealBestand - vorhanden;
-    if (fehlt <= 0) continue;  // schon genug → nichts bestellen
+    if (fehlt <= 0) {
+      // Skip: schon genug
+      if (rate > 0 && (tier === "TOP7" || tier === "MID")) {
+        countSkipGenug++;
+        sumSkipGenugVorrat += vorhanden;
+        if (skipExamples.length < 10) {
+          skipExamples.push({
+            name: (c.product || c.farbe || "?").substring(0, 35),
+            tier, rate: rate.toFixed(1),
+            maxTage, ideal: idealBestand.toFixed(0),
+            lager, unterwegs, vorhanden, ueberschuss: -fehlt
+          });
+        }
+      } else if (rate === 0) {
+        countSkipKAUMVorrat++;
+      }
+      continue;
+    }
     let bestellung = ceilEinh(c, fehlt);
-    // Cleanup-Pass: Bestellung muss auch selbst ≥ minOrder sein
-    // (z.B. vorhanden=200, ideal=300 → fehlt=100 → aber 100 < 300 → auf 300 aufrunden)
     if (bestellung < ceilEinh(c, minOrder)) bestellung = ceilEinh(c, minOrder);
     c.zugeteilt = bestellung;
-    c.bedarf42d = ceilEinh(c, idealBestand);  // für Anzeige
+    c.bedarf42d = ceilEinh(c, idealBestand);
+
+    countOK++;
+    if (okExamples.length < 10 && rate > 0 && tier === "TOP7") {
+      okExamples.push({
+        name: (c.product || c.farbe || "?").substring(0, 35),
+        tier, rate: rate.toFixed(1), maxTage,
+        ideal: idealBestand.toFixed(0),
+        lager, unterwegs, fehlt: fehlt.toFixed(0), bestellung
+      });
+    }
   }
 
   const total = candidates.reduce((s, c) => s + (c.zugeteilt || 0), 0);
-  Logger.log("💎 Idealbestand " + cfg.label + " (Mindest " + minOrder + "g durchgesetzt): " + (total/1000).toFixed(1) + "kg für " + candidates.filter(c => c.zugeteilt > 0).length + " Produkte");
+  Logger.log("━━━━━ Idealbestand " + cfg.label + " (Diagnose) ━━━━━");
+  Logger.log("Pool: " + candidates.length + " | Bestellt: " + countOK + " | Skip-genug: " + countSkipGenug + " | Skip-KAUM-genug: " + countSkipKAUMVorrat);
+  Logger.log("Summe geskipter (genug Vorrat) Lager+Unterwegs: " + (sumSkipGenugVorrat/1000).toFixed(1) + "kg → das ist BEREITS bestellt/da");
+  if (skipExamples.length > 0) {
+    Logger.log("⛔ TOP7/MID skipped (genug):");
+    for (const ex of skipExamples) {
+      Logger.log("  " + ex.tier + " | " + ex.name.padEnd(36) + " rate=" + ex.rate + "/d → ideal " + ex.maxTage + "d×rate=" + ex.ideal +
+                 "g | L=" + ex.lager + " U=" + ex.unterwegs + " (=" + ex.vorhanden + ") → Überschuss " + ex.ueberschuss + "g");
+    }
+  }
+  if (okExamples.length > 0) {
+    Logger.log("✅ TOP7 bestellt (Beispiele):");
+    for (const ex of okExamples) {
+      Logger.log("  " + ex.name.padEnd(36) + " rate=" + ex.rate + "/d ideal=" + ex.ideal + " L=" + ex.lager + " U=" + ex.unterwegs + " → bestelle " + ex.bestellung + "g");
+    }
+  }
+  Logger.log("Gesamt-Empfehlung: " + (total/1000).toFixed(1) + "kg für " + candidates.filter(c => c.zugeteilt > 0).length + " Produkte");
+  Logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   return total;
 }
 
@@ -1341,6 +1413,157 @@ function allocateByDaysOfStock_(candidates, budgetG, cfg) {
     }
   }
 
+  // ── PHASE D: TOP7-Breite-Phase — Sicherheits-Reserve nach Phase C ──
+  //   Wenn nach Phase C noch Budget übrig ist, alle aktiven TOP7-Produkte (und dann MID)
+  //   die NICHT zugeteilt sind auf Mindestbestellung (300g/500g) bringen.
+  //   Begründung: User-Bestellmuster Regel 2 — Topseller in jeder Methode brauchen
+  //   Sicherheits-Reserve, auch wenn Gesamt-Reichweite technisch OK ist.
+  //   Sortierung: Tier (TOP7 → MID), dann Dringlichkeit (kürzeste Reichweite zuerst).
+  if (pool >= cfg.minBestellung) {
+    let phD_count = 0, phD_sum = 0;
+    const candidatesD = candidates.filter(c =>
+      (c.zugeteilt || 0) === 0 &&
+      (c.tagesrate || 0) > 0 &&
+      (c.tier === "TOP7" || c.tier === "MID")
+    );
+    candidatesD.sort((a, b) => {
+      // Erst TOP7, dann MID
+      const ta = a.tier === "TOP7" ? 0 : 1;
+      const tb = b.tier === "TOP7" ? 0 : 1;
+      if (ta !== tb) return ta - tb;
+      // Dann nach Gesamt-Reichweite aufsteigend (knappste zuerst)
+      const ra = ((a.lager || 0) + (a.unterwegs || 0)) / Math.max(0.01, a.tagesrate);
+      const rb = ((b.lager || 0) + (b.unterwegs || 0)) / Math.max(0.01, b.tagesrate);
+      return ra - rb;
+    });
+    for (const c of candidatesD) {
+      const minMenge = ceilEinh(c, cfg.minBestellung);
+      if (pool < minMenge) break;
+      c.zugeteilt = minMenge;
+      pool -= minMenge;
+      phD_sum += minMenge;
+      phD_count++;
+    }
+    if (phD_count > 0) {
+      Logger.log("🌐 DoSA " + cfg.label + " Phase D (TOP7/MID-Breite-Reserve): " + phD_count + " Produkte je " + cfg.minBestellung + "g+ = " + (phD_sum/1000).toFixed(1) + "kg | Rest: " + (pool/1000).toFixed(1) + "kg");
+    }
+  }
+
+  // ── PHASE E: VORRATSKAUF-MODUS — Pool verbrauchen, rein rate-basiert ──
+  //   Cap pro Tier in Tagen × HISTORISCH MAXIMALE Rate (max aus 30d/60d_alt/90d).
+  //   Damit fallen Topseller mit niedrigem 30d-Trend (aber hohem 90d-Verkauf) nicht
+  //   durchs Raster — Beispiel: NATURAL TOP7 mit 30d=600g/30d aber 90d=3050g/90d.
+  //   Keine pauschalen Mindestmengen — die Verkaufsdaten bestimmen alles.
+  const isVorratskauf = PropertiesService.getScriptProperties().getProperty("VORRATSKAUF_MODUS") === "true";
+  if (isVorratskauf && pool >= cfg.minBestellung) {
+    const VORRATSKAUF_CAP_TAGE = { TOP7: 240, MID: 168, REST: 84 };  // 240d=8 Monate / 168d=5.5 Monate / 84d=3 Monate
+    Logger.log("🛒 VORRATSKAUF-MODUS aktiv — verteile " + (pool/1000).toFixed(1) + "kg | Tage-Caps: TOP7=240d, MID=168d, REST=84d (× hist. max-Rate)");
+    // ── DIAGNOSE: Pro Kandidat zeigen was Phase E rechnet ──
+    Logger.log("━━━━━ Phase E Rate-Diagnose (TOP7/MID) ━━━━━");
+    for (const c of candidates) {
+      if (c.tier !== "TOP7" && c.tier !== "MID") continue;
+      const r_aktiv = c.tagesrate || 0;
+      const r_g30 = (c.g30d || 0) / 30;
+      const r_g60a = (c.g60d_alt || 0) / 60;
+      const r_g90 = (c.g90d || 0) / 90;
+      const r_max = Math.max(r_aktiv, r_g30, r_g60a, r_g90);
+      const cap = c.tier === "TOP7" ? 240 * r_max : c.tier === "MID" ? 168 * r_max : 0;
+      const vorhanden = (c.lager||0) + (c.unterwegs||0) + (c.zugeteilt||0);
+      const fehlt = cap - vorhanden;
+      // Variante/Länge/Methode mit anzeigen damit gleichlautende Produkte unterscheidbar sind
+      const variante = c.länge || c.method || c.typ || "";
+      const name = (c.product || c.farbe || "?").substring(0, 28);
+      Logger.log("  " + c.tier + " | [" + String(variante).padEnd(7) + "] " + name.padEnd(29) +
+                 " rates: aktiv=" + r_aktiv.toFixed(1) + " g30=" + r_g30.toFixed(1) + " g60a=" + r_g60a.toFixed(1) + " g90=" + r_g90.toFixed(1) +
+                 " → max=" + r_max.toFixed(1) + " | cap=" + Math.round(cap) +
+                 " | vorh=" + vorhanden + " | fehlt=" + Math.max(0, Math.round(fehlt)));
+    }
+    Logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    let phE_added = 0, phE_count = 0;
+    const tierR = (t) => t === "TOP7" ? 0 : t === "MID" ? 1 : 2;
+
+    // Helper: Historisch maximale Tagesrate (max aus aktueller, 30d, 60d_alt, 90d)
+    // Felder optional am Kandidaten — wenn fehlend, fallback auf c.tagesrate
+    const histRate = (c) => Math.max(
+      c.tagesrate || 0,
+      (c.g30d || 0) / 30,
+      (c.g60d_alt || 0) / 60,
+      (c.g90d || 0) / 90
+    );
+
+    // Effektiver Cap = Tage-Cap × histRate (rein rate-basiert)
+    const effCap = (c) => {
+      const tageCap = VORRATSKAUF_CAP_TAGE[c.tier] || 0;
+      if (tageCap === 0) return 0; // KAUM raus
+      return tageCap * histRate(c);
+    };
+
+    // Snapshot vor Phase E für End-Diagnose
+    const preE = new Map();
+    for (const c of candidates) preE.set(c, c.zugeteilt || 0);
+
+    for (let iter = 0; iter < 5000; iter++) {
+      if (pool < cfg.minBestellung) break;
+      const stockable = candidates.filter(c => {
+        if (!VORRATSKAUF_CAP_TAGE[c.tier]) return false;
+        const cap = effCap(c);
+        if (cap <= 0) return false;
+        const vorhanden = (c.lager||0) + (c.unterwegs||0) + c.zugeteilt;
+        return vorhanden < cap;
+      });
+      if (stockable.length === 0) break;
+
+      // Sortiere: Tier zuerst, dann Auslastung des effCaps (knappste zuerst)
+      stockable.sort((a, b) => {
+        const ta = tierR(a.tier), tb = tierR(b.tier);
+        if (ta !== tb) return ta - tb;
+        const va = (a.lager||0) + (a.unterwegs||0) + a.zugeteilt;
+        const vb = (b.lager||0) + (b.unterwegs||0) + b.zugeteilt;
+        const ca = effCap(a) || 1;
+        const cb = effCap(b) || 1;
+        return (va / ca) - (vb / cb);
+      });
+
+      const c = stockable[0];
+      const step = einheitOf(c);
+      if (pool < step) break;
+      c.zugeteilt += step;
+      pool -= step;
+      phE_added += step;
+      phE_count++;
+    }
+    if (pool >= cfg.minBestellung) {
+      Logger.log("⚠️ Phase E: Pool nach Tier-Caps noch " + (pool/1000).toFixed(1) + "kg übrig — alle Topseller auf max-Cap. Budget zu groß für aktuelles Sortiment.");
+    }
+    Logger.log("🛒 Phase E (Vorratskauf, hist. max-Rate): +" + (phE_added/1000).toFixed(1) + "kg in " + phE_count + " Steps verteilt | Rest: " + (pool/1000).toFixed(1) + "kg");
+
+    // ── END-DIAGNOSE: Was hat jedes TOP7/MID-Produkt nach Phase E? ──
+    // Sortiert nach "fehlt-zur-Cap" absteigend — die mit größter Lücke zuerst zeigen
+    const phaseE_summary = [];
+    for (const c of candidates) {
+      if (c.tier !== "TOP7" && c.tier !== "MID") continue;
+      const cap = effCap(c);
+      if (cap <= 0) continue;
+      const vorE = preE.get(c) || 0;
+      const ePump = (c.zugeteilt || 0) - vorE;
+      const vorhandenEnd = (c.lager||0) + (c.unterwegs||0) + (c.zugeteilt||0);
+      const fehlt = Math.max(0, cap - vorhandenEnd);
+      const reachEnd = histRate(c) > 0 ? Math.round(vorhandenEnd / histRate(c)) : 0;
+      phaseE_summary.push({
+        tier: c.tier, variante: c.länge || c.method || c.typ || "",
+        name: (c.product || c.farbe || "?").substring(0, 28),
+        cap: Math.round(cap), pumpE: ePump, vorhandenEnd, reachEnd, fehlt: Math.round(fehlt)
+      });
+    }
+    phaseE_summary.sort((a, b) => b.fehlt - a.fehlt);
+    Logger.log("━━━━━ Phase E END-Diagnose (sortiert: größte Cap-Lücke zuerst) ━━━━━");
+    for (const s of phaseE_summary.slice(0, 30)) {
+      Logger.log("  " + s.tier + " | [" + String(s.variante).padEnd(7) + "] " + s.name.padEnd(29) +
+                 " | E-Pump=" + s.pumpE + "g | EndVorrat=" + s.vorhandenEnd + "g (=" + s.reachEnd + "d) | Cap=" + s.cap + "g | Fehlt=" + s.fehlt + "g");
+    }
+    Logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  }
+
   // ── CLEANUP: Lieferanten-Mindestbestellmenge durchsetzen ──
   //   Amanda: 300g pro Produkt (Vielfaches der Einheit, z.B. Clip-ins 225g → 450g)
   //   China: 500g pro Produkt
@@ -1379,6 +1602,37 @@ function allocateByDaysOfStock_(candidates, budgetG, cfg) {
     }
     if (cleanupUp > 0 || cleanupDown > 0) {
       Logger.log("🧹 DoSA " + cfg.label + " Cleanup (Mindestmenge " + cfg.minBestellung + "g): ↑" + cleanupUp + " Produkte aufgestockt (+" + (cleanupUpSum/1000).toFixed(1) + "kg), ↓" + cleanupDown + " Produkte entfernt (-" + (cleanupDownSum/1000).toFixed(1) + "kg) | Rest: " + (pool/1000).toFixed(1) + "kg");
+    }
+  }
+
+  // ── LIEFERANTEN-SCHRITT-RUNDUNG (kaufmännisch) ──
+  //   Manche Lieferanten akzeptieren nur bestimmte Schrittgrößen:
+  //     China: 500g-Schritte (500/1000/1500/...) → 600g/700g geht NICHT
+  //     Amanda: 100g-Schritte (entspricht Einheit, kein Extra-Cleanup nötig)
+  //   Regel User: kaufmännisch runden (≥0.5 auf, <0.5 ab):
+  //     500-749g → 500g | 750-1249g → 1000g | 1250-1749g → 1500g | ...
+  //   Mindestmenge bleibt gewahrt (jede Bestellung ≥ minBestellung).
+  if (cfg.lieferantStep && cfg.lieferantStep > 1) {
+    const step = cfg.lieferantStep;
+    const minMenge = cfg.minBestellung || step;
+    let roundedDown = 0, roundedUp = 0, deltaSum = 0;
+    for (const c of candidates) {
+      if ((c.zugeteilt || 0) <= 0) continue;
+      const before = c.zugeteilt;
+      // Kaufmännische Rundung auf step
+      let after = Math.round(before / step) * step;
+      // Sicherheit: nie unter Mindestmenge
+      if (after < minMenge) after = minMenge;
+      if (after !== before) {
+        c.zugeteilt = after;
+        const delta = after - before;
+        deltaSum += delta;
+        if (delta < 0) roundedDown++; else roundedUp++;
+      }
+    }
+    pool -= deltaSum; // Pool anpassen (kann negativ werden = Budget marginal überschritten)
+    if (roundedDown > 0 || roundedUp > 0) {
+      Logger.log("📐 DoSA " + cfg.label + " Liefer-Schritt-Rundung (" + step + "g, kaufmännisch): ↑" + roundedUp + " aufgerundet, ↓" + roundedDown + " abgerundet, Δ=" + (deltaSum > 0 ? "+" : "") + (deltaSum/1000).toFixed(1) + "kg | Pool jetzt: " + (pool/1000).toFixed(1) + "kg");
     }
   }
 
@@ -1532,6 +1786,15 @@ function clearAutoBudgetFlag() {
 }
 
 function fetchShopifyInventoryData() {
+  // ── Lock: verhindert dass zwei Instanzen gleichzeitig schreiben ──
+  // (Tages-Trigger 09:00/18:00 + ggf. liegengebliebener .after()-Resume → Race Condition → Duplikate)
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2000)) {
+    Logger.log("⏭️  fetchShopifyInventoryData: Anderer Lauf aktiv → übersprungen");
+    return;
+  }
+  try {
+
   const shopName = "339520-3";
   const accessToken = "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";
 
@@ -1612,6 +1875,27 @@ function fetchShopifyInventoryData() {
     if (!collection) continue;
 
     let products = fetchAllCollectionProducts(shopName, accessToken, collection);
+    // ── Dedup: Shopify Smart-Collections können dasselbe Produkt mehrfach liefern ──
+    // (Beobachtet: EBONY Clip-Ins erschienen zweimal im Russisch-GLATT-Sheet)
+    // Pro Collection: jede product.id und jeden product.title nur 1× behalten
+    if (Array.isArray(products) && products.length > 0) {
+      const seenIds = new Set();
+      const seenTitles = new Set();
+      const uniqueProducts = [];
+      for (const p of products) {
+        const id = p && p.id ? String(p.id) : "";
+        const title = (p && p.title) ? String(p.title).trim().toUpperCase() : "";
+        if (id && seenIds.has(id)) continue;
+        if (title && seenTitles.has(title)) continue;
+        if (id) seenIds.add(id);
+        if (title) seenTitles.add(title);
+        uniqueProducts.push(p);
+      }
+      if (uniqueProducts.length !== products.length) {
+        Logger.log("⚠️ Dedup '" + collectionName + "': " + products.length + " → " + uniqueProducts.length + " (Shopify-Duplikate entfernt)");
+      }
+      products = uniqueProducts;
+    }
     let collectionWeightTotal = 0;
 
     if (sheetKey === "ThirdSheet") {
@@ -1729,6 +2013,52 @@ function fetchShopifyInventoryData() {
     deleteExistingTriggers("autoChain_verkaufsanalyse");
     ScriptApp.newTrigger("autoChain_verkaufsanalyse").timeBased().after(3000).create();
   }
+  } finally {
+    try { lock.releaseLock(); } catch(_) {}
+  }
+}
+
+/**
+ * Räumt bereits vorhandene Duplikate aus den Inventar-Sheets.
+ * Behält die ERSTE Zeile pro (Collection + Produkt + UnitWeight)-Kombination,
+ * löscht alle weiteren. Manuell aus dem Editor laufen lassen wenn Duplikate
+ * im Sheet entstanden sind (z.B. durch alten Trigger-Crash).
+ */
+function dedupInventorySheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetNames = ["Russisch - GLATT", "Usbekisch - WELLIG", "Tools & Haarpflege"];
+  for (const name of sheetNames) {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) continue;
+    const data = sheet.getDataRange().getValues();
+    const seen = new Set();
+    let currentColl = "";
+    const rowsToDelete = []; // 1-basierte Zeilennummern
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const col0 = String(row[0] || "").trim();
+      const col1 = String(row[1] || "").trim();
+      const col2 = parseFloat(row[2]) || 0;
+      // Header / Total / leer-Zeilen behalten
+      if (!col1) continue;
+      if (col0 === "Collection Name") continue;
+      if (col0.startsWith("Total") || col0.startsWith("GRAND") || col0.startsWith("Zuletzt aktualisiert")) continue;
+      if (col0 !== "") currentColl = col0;
+      const key = currentColl + "|" + col1.toUpperCase() + "|" + col2;
+      if (seen.has(key)) {
+        rowsToDelete.push(i + 1); // setValues ist 0-basiert, Sheet 1-basiert
+      } else {
+        seen.add(key);
+      }
+    }
+    // Von hinten löschen damit Indizes stabil bleiben
+    rowsToDelete.sort((a, b) => b - a);
+    for (const rowNum of rowsToDelete) {
+      sheet.deleteRow(rowNum);
+    }
+    Logger.log("🧹 " + name + ": " + rowsToDelete.length + " Duplikat-Zeilen entfernt");
+  }
+  Logger.log("✅ dedupInventorySheets fertig.");
 }
 
 function scheduleNextExecution() {
@@ -1782,8 +2112,8 @@ function setupMultipleDailyTriggers() {
  * setupAutoDailyRefresh — einmalig aus dem Apps-Script-Editor ausführen!
  *
  * Installiert PERMANENTE tägliche Trigger (bleiben aktiv, bis man sie löscht):
- *   • 09:30 Uhr → fetchShopifyInventoryData (→ createDashboard → refreshVerkaufsanalyse → refreshTopseller → Bestellvorschläge China+Amanda)
- *   • 15:00 Uhr → fetchShopifyInventoryData (→ selbe Kette)
+ *   • 09:00 Uhr → fetchShopifyInventoryData (→ createDashboard → refreshVerkaufsanalyse → refreshTopseller → Bestellvorschläge China+Amanda)
+ *   • 18:00 Uhr → fetchShopifyInventoryData (→ selbe Kette)
  *
  * Löscht vorher alle alten Trigger für fetchShopifyInventoryData, damit keine Duplikate entstehen.
  */
@@ -1791,7 +2121,7 @@ function setupAutoDailyRefresh() {
   // Alle alten Shopify-Fetch-Trigger löschen (inkl. veralteter .after()-Einmal-Trigger)
   deleteExistingTriggers("fetchShopifyInventoryData");
 
-  const stunden = [9, 15]; // 09:30 und 15:00 Uhr (atHour = früheste Stunde, GAS feuert 09:00-10:00)
+  const stunden = [9, 18]; // 09:00 und 18:00 Uhr (atHour = früheste Stunde, GAS feuert in dem Stunden-Slot)
   stunden.forEach(function(h) {
     ScriptApp.newTrigger("fetchShopifyInventoryData")
       .timeBased()
@@ -1876,6 +2206,8 @@ function autoChain_dashboard() {
   deleteExistingTriggers("autoChain_dashboard");
   Logger.log("🔗 Auto-Chain 3/5: Dashboard startet...");
   PropertiesService.getScriptProperties().setProperty("AUTO_BUDGET", "true");
+  // Cache invalidieren am Beginn einer Chain-Runde damit Order-Änderungen wirken
+  invalidateAllOrdersCache_();
   // Nächsten Schritt SOFORT planen (Dashboard kann lange dauern → +8min Puffer)
   ScriptApp.newTrigger("autoChain_china").timeBased().after(8 * 60 * 1000).create();
   Logger.log("🔗 → Schritt 4 (China) vorab für +8min geplant");
@@ -2056,10 +2388,11 @@ function fetchWithRetry(url, accessToken) {
 function debugOrderTabs() {
   let output = [];
 
-  // CHINA
+  // CHINA — Konvention: Tab-Name beginnt mit "China " gefolgt vom Datum (z.B. "China 30.04.2026")
   let chinaSs = SpreadsheetApp.openById(CHINA_SHEET_ID);
   for (let sheet of chinaSs.getSheets()) {
     let sName = sheet.getName().trim();
+    if (!sName.match(/^China\b/i)) continue;
     let date = extractDateFromTabName(sName);
     if (!date) continue;
     let data = sheet.getRange(1, 1, Math.min(5, sheet.getLastRow()), Math.min(4, sheet.getLastColumn())).getValues();
@@ -2204,13 +2537,18 @@ function getOrderStatusFromTab(sheet) {
     // Auch ohne erkannten Header: prüfe ob B2 einen bekannten Status enthält
     let statusVal = b2;
     if (hasStatusRow || statusVal.includes("angekommen") || statusVal.includes("eingetroffen") ||
-        statusVal.includes("geliefert") || statusVal.includes("entwurf") ||
+        statusVal.includes("geliefert") || statusVal.includes("eingepflegt") ||
+        statusVal.includes("entwurf") ||
         statusVal.includes("storniert") || statusVal.includes("storno") ||
         statusVal.includes("unterwegs") || statusVal.includes("bestellt") || statusVal.includes("verzollung")) {
 
       if (statusVal.includes("entwurf"))    return "entwurf";
       if (statusVal.includes("storniert") || statusVal.includes("storno")) return "storniert";
-      if (statusVal.includes("angekommen") || statusVal.includes("abgekommen") || statusVal.includes("eingetroffen") || statusVal.includes("geliefert")) return "angekommen";
+      // "ins lager eingepflegt" / "angekommen" / "eingetroffen" / "geliefert" / "abgekommen"
+      // → Sendung ist DA, zählt nicht mehr als Unterwegs
+      if (statusVal.includes("eingepflegt") || statusVal.includes("angekommen") ||
+          statusVal.includes("abgekommen") || statusVal.includes("eingetroffen") ||
+          statusVal.includes("geliefert")) return "angekommen";
 
       // "unterwegs", "bestellt", "verzollung", leer = aktiv
       return "aktiv";
@@ -2232,14 +2570,30 @@ function getOrderStatusFromTab(sheet) {
  */
 function getAllOrders() {
   Logger.log(">>> getAllOrders() START");
+
+  // ── CACHE-CHECK: In Auto-Chain wurde getAllOrders gerade von createDashboard aufgerufen ──
+  // CacheService TTL = 6h; chain-Schritte sind innerhalb Minuten. Spart ~20-60s pro Aufruf.
+  try {
+    const cache = CacheService.getScriptCache();
+    const cached = cache.get("ALL_ORDERS_V1");
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      Logger.log(">>> getAllOrders() CACHE HIT (" + parsed.length + " orders)");
+      return parsed;
+    }
+  } catch (cacheErr) {
+    Logger.log("⚠️ Cache-Lookup fehlgeschlagen: " + cacheErr.message);
+  }
+
   let orders = [];
 
   try {
-    // --- CHINA ---
+    // --- CHINA --- Konvention seit 30.04.2026: Tab-Name beginnt mit "China " (z.B. "China 30.04.2026")
     let chinaSs = SpreadsheetApp.openById(CHINA_SHEET_ID);
     let chinaSheets = chinaSs.getSheets();
     for (let sheet of chinaSheets) {
       let sName = sheet.getName().trim();
+      if (!sName.match(/^China\b/i)) continue;
       let date = extractDateFromTabName(sName);
       if (!date) continue;
 
@@ -2296,7 +2650,34 @@ function getAllOrders() {
   orders.sort((a, b) => parseDateDE(a.date) - parseDateDE(b.date));
 
   Logger.log("Aktive Bestellungen gesamt: " + orders.length);
+
+  // ── CACHE STORE: 5-min-TTL — reicht für ganze Auto-Chain, kurzgenug bei Korrekturen ──
+  try {
+    const cache = CacheService.getScriptCache();
+    const serialized = JSON.stringify(orders);
+    // CacheService Limit: 100KB pro Eintrag. Bei zu großen Orders nicht cachen.
+    if (serialized.length < 95000) {
+      cache.put("ALL_ORDERS_V1", serialized, 1500); // 1500s = 25min — deckt komplette Auto-Chain (Dashboard → China → Amanda)
+      Logger.log(">>> getAllOrders() CACHE STORED (" + serialized.length + " bytes)");
+    } else {
+      Logger.log("⚠️ Orders zu groß für Cache (" + serialized.length + " bytes)");
+    }
+  } catch (cacheErr) {
+    Logger.log("⚠️ Cache-Store fehlgeschlagen: " + cacheErr.message);
+  }
+
   return orders;
+}
+
+/**
+ * Cache invalidieren (z.B. nach manueller Bestellungs-Änderung).
+ * Wird von onEditChinaSheet/onEditAmandaSheet aufgerufen wenn vorhanden.
+ */
+function invalidateAllOrdersCache_() {
+  try {
+    CacheService.getScriptCache().remove("ALL_ORDERS_V1");
+    Logger.log(">>> ALL_ORDERS_V1 cache invalidiert");
+  } catch (e) { /* silent */ }
 }
 
 /**
@@ -2389,7 +2770,7 @@ function parseChinaOrderSheet(sheet) {
         items.push({
           type:   currentType,
           length: currentLength,
-          color:  col0,
+          color:  normalizeOrderColor_(col0),
           weight: weight
         });
       }
@@ -2415,7 +2796,7 @@ function parseChinaOrderSheet(sheet) {
         items.push({
           type:   currentType,
           length: currentLength,
-          color:  col2,
+          color:  normalizeOrderColor_(col2),
           weight: weight
         });
       }
@@ -2423,6 +2804,27 @@ function parseChinaOrderSheet(sheet) {
   }
   Logger.log('[China Parse] Sheet: ' + sheet.getName() + ' -> items: ' + items.length);
   return items;
+}
+
+/**
+ * Normalisiert den Farbcode-Wert aus einer Bestellzelle:
+ * - Bei "#NORVEGIAN KÜHLES BLOND US WELLIGE TAPE..." → "#NORVEGIAN KÜHLES BLOND"
+ *   (User hat versehentlich ganzen Produktnamen in Farbcode-Spalte geschrieben)
+ * - Bei "#2E" oder "#Pearl White" → unverändert (keine Stopwords drin)
+ * - Bei Werten ohne "#" → unverändert (z.B. Clip-In-Format "Ebony")
+ * Verhindert Mismatch im Bestellvorschlag-Lookup, wo synthetische Produktnamen
+ * nur die kurzen Farbcodes enthalten und der Präfix-Match scheitert.
+ */
+function normalizeOrderColor_(raw) {
+  if (!raw) return raw;
+  const s = String(raw).trim();
+  if (s.indexOf("#") < 0) return s; // Kein Hash → kein Color-Code, unverändert lassen
+  try {
+    const cleaned = extractFullColor_(s);
+    return cleaned || s;
+  } catch (e) {
+    return s;
+  }
 }
 
 /**
@@ -2483,7 +2885,7 @@ function parseAmandaOrderSheet(sheet) {
 
         let weight = parseFloat(col4.replace(/[^0-9.]/g, "")) || 0;
         if (col3 !== "" && weight > 0) {
-          items.push({ method: currentMethod, length: currentLength, color: col3, weight: weight });
+          items.push({ method: currentMethod, length: currentLength, color: normalizeOrderColor_(col3), weight: weight });
         }
       }
     } else {
@@ -2501,7 +2903,7 @@ function parseAmandaOrderSheet(sheet) {
 
         let weight = parseFloat(col3.replace(/[^0-9.]/g, "")) || 0;
         if (col2 !== "" && weight > 0) {
-          items.push({ method: currentMethod, length: currentLength, color: col2, weight: weight });
+          items.push({ method: currentMethod, length: currentLength, color: normalizeOrderColor_(col2), weight: weight });
         }
       }
     }
@@ -2527,7 +2929,7 @@ function parseAmandaOrderSheet(sheet) {
 
         let weight = parseFloat(col3.replace(/[^0-9.]/g, "")) || 0;
         if (col2 !== "" && weight > 0) {
-          items.push({ method: currentMethod, length: currentLength, color: col2, weight: weight });
+          items.push({ method: currentMethod, length: currentLength, color: normalizeOrderColor_(col2), weight: weight });
         }
       }
       Logger.log("[Amanda Parse] Sheet: " + sheet.getName() + " | format=V2(4col) | items=" + items.length);
@@ -2545,7 +2947,7 @@ function parseAmandaOrderSheet(sheet) {
 
         let weight = parseFloat(col4.replace(/[^0-9.]/g, "")) || 0;
         if (col3 !== "" && weight > 0) {
-          items.push({ method: currentMethod, length: currentLength, color: col3, weight: weight });
+          items.push({ method: currentMethod, length: currentLength, color: normalizeOrderColor_(col3), weight: weight });
         }
       }
       Logger.log("[Amanda Parse] Sheet: " + sheet.getName() + " | format=V1(5col) | items=" + items.length);
@@ -2796,10 +3198,12 @@ function getUnterwegsKPIs() {
     }
 
     // Schritt 2: Mengen aus Detailsheets lesen (Subtotal-Zeile)
-    // China-Sheets
+    // China-Sheets — Konvention: Tab-Name beginnt mit "China " (z.B. "China 30.04.2026")
     let chinaSs = SpreadsheetApp.openById(CHINA_SHEET_ID);
     for (let sheet of chinaSs.getSheets()) {
-      let date = extractDateFromTabName(sheet.getName().trim());
+      let sName = sheet.getName().trim();
+      if (!sName.match(/^China\b/i)) continue;
+      let date = extractDateFromTabName(sName);
       if (!date) continue;
       let key = "China|" + date;
       if (!paymentStatus[key]) continue; // Nicht aktiv oder nicht in Übersicht
@@ -2916,6 +3320,12 @@ function createDashboard() {
   let dash = ss.getSheetByName(dashName);
   if (dash) {
     dash.clear();
+    // Zusätzlich: alle Spalten-Default-NumberFormats auf "General" setzen (verhindert "250000.00%" Bug)
+    try {
+      const maxCols = dash.getMaxColumns();
+      const maxRows = dash.getMaxRows();
+      dash.getRange(1, 1, maxRows, maxCols).setNumberFormat("General");
+    } catch (e) { Logger.log("⚠️ NumberFormat reset failed: " + e.message); }
     let charts = dash.getCharts();
     for (let chart of charts) dash.removeChart(chart);
   } else {
@@ -3223,14 +3633,18 @@ function createDashboard() {
     }
   }
 
-  // Hilfsfunktion: rendert eine Nullbestand-Tabelle für eine Gruppe
+  // Hilfsfunktion: rendert eine Nullbestand-Tabelle (BATCH-Render — schnell)
   function renderNullbestandTabelle_(items, label, accentColor, providerFilter) {
     if (items.length === 0) return;
     let allOrders = providerFilter
       ? allOrdersCache.filter(o => o.provider === providerFilter)
       : allOrdersCache;
-    // Spalten: Kollektion | Produkt | Lager (g) | Unterwegs gesamt | Order1 | Order2 ...
     let totalCols = Math.max(4 + allOrders.length, 6);
+
+    // Pre-compute Gewichts-Matrix
+    const weightMatrix = items.map(n => allOrders.map(ord =>
+      getOrderedWeightForProduct(n.product, n.collection, ord, n.variant)
+    ));
 
     // Titelzeile
     dash.getRange(r, 1, 1, totalCols).merge()
@@ -3239,67 +3653,77 @@ function createDashboard() {
       .setBackground(accentColor).setFontColor("#ffffff").setFontFamily("Arial");
     dash.setRowHeight(r, 28); r++;
 
-    // Header
-    dash.getRange(r, 1).setValue("Kollektion").setFontWeight("bold").setFontSize(9).setBackground("#2d2d2d").setFontColor("#ffffff");
-    dash.getRange(r, 2).setValue("Produkt").setFontWeight("bold").setFontSize(9).setBackground("#2d2d2d").setFontColor("#ffffff");
-    dash.getRange(r, 3).setValue("Lager (g)").setFontWeight("bold").setFontSize(9).setBackground("#2d2d2d").setFontColor("#ffffff").setHorizontalAlignment("center");
-    dash.getRange(r, 4).setValue("Unterwegs gesamt").setFontWeight("bold").setFontSize(9).setBackground("#e65c00").setFontColor("#ffffff").setHorizontalAlignment("center");
+    // Header (BATCH)
+    const headerVals = ["Kollektion", "Produkt", "Lager (g)", "Unterwegs gesamt"];
+    const headerBgs = ["#2d2d2d", "#2d2d2d", "#2d2d2d", "#e65c00"];
     for (let i = 0; i < allOrders.length; i++) {
-      let hBg = allOrders[i].provider === "China" ? "#1a73e8" : "#0f9d58";
-      let ankunft = calcAnkunft_(allOrders[i]);
-      dash.getRange(r, 5 + i).setValue(allOrders[i].name + (ankunft ? "\n" + ankunft : ""))
-        .setFontWeight("bold").setFontSize(8).setBackground(hBg).setFontColor("#ffffff")
-        .setHorizontalAlignment("center").setWrap(true);
+      const ankunft = calcAnkunft_(allOrders[i]);
+      headerVals.push(allOrders[i].name + (ankunft ? "\n" + ankunft : ""));
+      headerBgs.push(allOrders[i].provider === "China" ? "#1a73e8" : "#0f9d58");
     }
+    while (headerVals.length < totalCols) { headerVals.push(""); headerBgs.push("#2d2d2d"); }
+    dash.getRange(r, 1, 1, totalCols).setValues([headerVals]).setBackgrounds([headerBgs])
+      .setFontWeight("bold").setFontColor("#ffffff").setFontSize(9)
+      .setHorizontalAlignment("center").setWrap(true);
     dash.setRowHeight(r, 46); r++;
 
-    // Datenzeilen
-    let evenRow = false;
-    for (let n of items) {
+    // Datenzeilen (BATCH)
+    const dataStart = r;
+    const valuesM = [], bgsM = [], fcsM = [], fwsM = [];
+    for (let row_i = 0; row_i < items.length; row_i++) {
+      const n = items[row_i];
       let totalUnterwegs = 0;
-      for (let i = 0; i < allOrders.length; i++) totalUnterwegs += getOrderedWeightForProduct(n.product, n.collection, allOrders[i], n.variant);
-      let noOrder = totalUnterwegs <= 0;
-      let baseBg = noOrder ? "#fffde7" : (evenRow ? "#fff5f5" : "#ffffff");
-      let fw = noOrder ? "bold" : "normal";
-      dash.getRange(r, 1).setValue(n.collection).setFontSize(9).setBackground(baseBg).setFontColor("#444444").setFontWeight(fw);
-      let displayProduct = n.product + (n.variant ? "  [" + n.variant + "g]" : "");
-      dash.getRange(r, 2).setValue(displayProduct).setFontSize(9).setBackground(baseBg).setFontColor("#222222").setFontWeight(fw);
-      // Lager (g) = 0 (Definition Nullbestand), grau hinterlegt
-      dash.getRange(r, 3).setValue(0).setFontSize(9).setBackground("#eeeeee").setFontColor("#999999").setHorizontalAlignment("center").setFontWeight("bold");
-      if (totalUnterwegs > 0) {
-        dash.getRange(r, 4).setValue(totalUnterwegs).setFontSize(10).setFontWeight("bold").setBackground("#e65c00").setFontColor("#ffffff").setHorizontalAlignment("center");
-      } else {
-        dash.getRange(r, 4).setValue("–").setFontSize(9).setBackground(baseBg).setFontColor("#bbbbbb").setFontWeight(fw).setHorizontalAlignment("center");
-      }
+      for (let i = 0; i < allOrders.length; i++) totalUnterwegs += weightMatrix[row_i][i];
+      const noOrder = totalUnterwegs <= 0;
+      const baseBg = noOrder ? "#fffde7" : (row_i % 2 === 0 ? "#ffffff" : "#fff5f5");
+      const fw = noOrder ? "bold" : "normal";
+      const displayProduct = n.product + (n.variant ? "  [" + n.variant + "g]" : "");
+
+      const valueRow = [n.collection, displayProduct, 0, totalUnterwegs > 0 ? totalUnterwegs : "–"];
+      const bgRow    = [baseBg, baseBg, "#eeeeee", totalUnterwegs > 0 ? "#e65c00" : "#f0f0f0"];
+      const fcRow    = ["#444444", "#222222", "#999999", totalUnterwegs > 0 ? "#ffffff" : "#bbbbbb"];
+      const fwRow    = [fw, fw, "bold", totalUnterwegs > 0 ? "bold" : "normal"];
+
       for (let i = 0; i < allOrders.length; i++) {
-        let w = getOrderedWeightForProduct(n.product, n.collection, allOrders[i], n.variant);
-        let cell = dash.getRange(r, 5 + i);
+        const w = weightMatrix[row_i][i];
         if (w > 0) {
-          cell.setValue(w).setFontSize(9).setFontWeight("bold").setBackground(allOrders[i].provider === "China" ? "#d2e3fc" : "#ceead6").setFontColor("#1a1a1a").setHorizontalAlignment("center");
+          valueRow.push(w);
+          bgRow.push(allOrders[i].provider === "China" ? "#d2e3fc" : "#ceead6");
+          fcRow.push("#1a1a1a");
+          fwRow.push("bold");
         } else {
-          cell.setValue("–").setFontSize(9).setBackground(baseBg).setFontColor("#dddddd").setHorizontalAlignment("center");
+          valueRow.push("–");
+          bgRow.push(baseBg);
+          fcRow.push("#dddddd");
+          fwRow.push("normal");
         }
       }
-      dash.setRowHeight(r, 18); evenRow = !evenRow; r++;
+      while (valueRow.length < totalCols) { valueRow.push(""); bgRow.push(baseBg); fcRow.push("#888888"); fwRow.push("normal"); }
+      valuesM.push(valueRow); bgsM.push(bgRow); fcsM.push(fcRow); fwsM.push(fwRow);
     }
-
-    // Summenzeile
+    dash.getRange(dataStart, 1, items.length, totalCols).setValues(valuesM)
+      .setBackgrounds(bgsM).setFontColors(fcsM).setFontWeights(fwsM)
+      .setFontSize(9).setHorizontalAlignment("center")
+      .setNumberFormat("0"); // Fix: verhindert geerbtes %-Format auf Unterwegs-Zellen
+    dash.getRange(dataStart, 1, items.length, 2).setHorizontalAlignment("left").setNumberFormat("@");
+    r += items.length;
+    // Summenzeile (BATCH)
     r++;
-    dash.getRange(r, 1, 1, 3 + allOrders.length + 1).setBackground("#2d2d2d").setFontColor("#ffffff").setFontWeight("bold");
-    dash.getRange(r, 1).setValue("GESAMT").setFontSize(9).setFontWeight("bold").setBackground("#2d2d2d").setFontColor("#ffffff");
-    dash.getRange(r, 2).setValue("").setBackground("#2d2d2d");
-    dash.getRange(r, 3).setValue("0").setBackground("#2d2d2d").setHorizontalAlignment("center");
-    let totalUnterwegsAll = 0;
-    for (let n of items) for (let i = 0; i < allOrders.length; i++) totalUnterwegsAll += getOrderedWeightForProduct(n.product, n.collection, allOrders[i], n.variant);
-    dash.getRange(r, 4).setValue(totalUnterwegsAll).setFontSize(10).setFontWeight("bold").setBackground("#e65c00").setFontColor("#ffffff").setHorizontalAlignment("center");
+    const totalUnterwegsAll = items.reduce((s, _, idx) =>
+      s + allOrders.reduce((s2, _o, j) => s2 + weightMatrix[idx][j], 0), 0);
+    const colTotalsN = allOrders.map((_, i) => weightMatrix.reduce((s, row) => s + row[i], 0));
+    const sumValuesN = ["GESAMT", "", 0, totalUnterwegsAll];
+    const sumBgsN    = ["#2d2d2d", "#2d2d2d", "#2d2d2d", "#e65c00"];
     for (let i = 0; i < allOrders.length; i++) {
-      let colTotal = 0;
-      for (let n of items) colTotal += getOrderedWeightForProduct(n.product, n.collection, allOrders[i], n.variant);
-      dash.getRange(r, 5 + i).setValue(colTotal > 0 ? colTotal : "–").setFontSize(9).setFontWeight("bold")
-        .setBackground(allOrders[i].provider === "China" ? "#1a56b0" : "#0d7a3e").setFontColor("#ffffff").setHorizontalAlignment("center");
+      sumValuesN.push(colTotalsN[i] > 0 ? colTotalsN[i] : "–");
+      sumBgsN.push(allOrders[i].provider === "China" ? "#1a56b0" : "#0d7a3e");
     }
-    dash.setRowHeight(r, 22); r++;
-    r++;
+    while (sumValuesN.length < totalCols) { sumValuesN.push(""); sumBgsN.push("#2d2d2d"); }
+    dash.getRange(r, 1, 1, totalCols).setValues([sumValuesN]).setBackgrounds([sumBgsN])
+      .setFontColor("#ffffff").setFontWeight("bold").setFontSize(9).setHorizontalAlignment("center")
+      .setNumberFormat("0");
+    dash.setRowHeight(r, 22);
+    r += 2;
   }
 
   renderNullbestandTabelle_(uniqueNullWellig, "USBEKISCH WELLIG", "#c62828", "China");
@@ -3310,11 +3734,15 @@ function createDashboard() {
   // ─────────────────────────────────────────
   function renderKritischTabelle_(items, label, accentColor, providerFilter) {
     if (items.length === 0) return;
-    // Nur Bestellspalten des relevanten Lieferanten anzeigen
     let allOrders = providerFilter
       ? allOrdersCache.filter(o => o.provider === providerFilter)
       : allOrdersCache;
     let totalCols = Math.max(4 + allOrders.length, 6);
+
+    // Pre-compute Gewichts-Matrix
+    const weightMatrix = items.map(k => allOrders.map(ord =>
+      getOrderedWeightForProduct(k.product, k.collection, ord, k.variant)
+    ));
 
     // Titelzeile
     dash.getRange(r, 1, 1, totalCols).merge()
@@ -3323,48 +3751,59 @@ function createDashboard() {
       .setBackground(accentColor).setFontColor("#ffffff").setFontFamily("Arial");
     dash.setRowHeight(r, 28); r++;
 
-    // Header
-    dash.getRange(r, 1).setValue("Kollektion").setFontWeight("bold").setFontSize(9).setBackground("#2d2d2d").setFontColor("#ffffff");
-    dash.getRange(r, 2).setValue("Produkt").setFontWeight("bold").setFontSize(9).setBackground("#2d2d2d").setFontColor("#ffffff");
-    dash.getRange(r, 3).setValue("Lager (g)").setFontWeight("bold").setFontSize(9).setBackground("#2d2d2d").setFontColor("#ffffff").setHorizontalAlignment("center");
-    dash.getRange(r, 4).setValue("Unterwegs gesamt").setFontWeight("bold").setFontSize(9).setBackground("#e65c00").setFontColor("#ffffff").setHorizontalAlignment("center");
+    // Header (BATCH)
+    const headerVals = ["Kollektion", "Produkt", "Lager (g)", "Unterwegs gesamt"];
+    const headerBgs = ["#2d2d2d", "#2d2d2d", "#2d2d2d", "#e65c00"];
     for (let i = 0; i < allOrders.length; i++) {
-      let hBg = allOrders[i].provider === "China" ? "#1a73e8" : "#0f9d58";
-      let ankunft = calcAnkunft_(allOrders[i]);
-      dash.getRange(r, 5 + i).setValue(allOrders[i].name + (ankunft ? "\n" + ankunft : ""))
-        .setFontWeight("bold").setFontSize(8).setBackground(hBg).setFontColor("#ffffff")
-        .setHorizontalAlignment("center").setWrap(true);
+      const ankunft = calcAnkunft_(allOrders[i]);
+      headerVals.push(allOrders[i].name + (ankunft ? "\n" + ankunft : ""));
+      headerBgs.push(allOrders[i].provider === "China" ? "#1a73e8" : "#0f9d58");
     }
+    while (headerVals.length < totalCols) { headerVals.push(""); headerBgs.push("#2d2d2d"); }
+    dash.getRange(r, 1, 1, totalCols).setValues([headerVals]).setBackgrounds([headerBgs])
+      .setFontWeight("bold").setFontColor("#ffffff").setFontSize(9)
+      .setHorizontalAlignment("center").setWrap(true);
     dash.setRowHeight(r, 36); r++;
 
-    // Datenzeilen
-    let evenRow = false;
-    for (let k of items) {
-      let isCritical = k.stufe === "kritisch";
-      let baseBg = isCritical ? (evenRow ? "#fff0e0" : "#fff8f0") : (evenRow ? "#fffde7" : "#ffffff");
-      dash.getRange(r, 1).setValue(k.collection).setFontSize(9).setBackground(baseBg).setFontColor("#444444");
-      let displayProduct = k.product + (k.variant ? "  [" + k.variant + "g]" : "");
-      dash.getRange(r, 2).setValue(displayProduct).setFontSize(9).setBackground(baseBg).setFontColor("#222222");
-      let lagerBg = isCritical ? "#e37400" : "#f9ab00";
-      dash.getRange(r, 3).setValue(k.bestandG).setFontSize(10).setFontWeight("bold").setBackground(lagerBg).setFontColor("#ffffff").setHorizontalAlignment("center");
-      let totalUnterwegs = 0;
-      for (let i = 0; i < allOrders.length; i++) totalUnterwegs += getOrderedWeightForProduct(k.product, k.collection, allOrders[i], k.variant);
-      if (totalUnterwegs > 0) {
-        dash.getRange(r, 4).setValue(totalUnterwegs).setFontSize(10).setFontWeight("bold").setBackground("#e65c00").setFontColor("#ffffff").setHorizontalAlignment("center");
-      } else {
-        dash.getRange(r, 4).setValue("–").setFontSize(9).setBackground("#f0f0f0").setFontColor("#bbbbbb").setHorizontalAlignment("center");
-      }
+    // Datenzeilen (BATCH)
+    const dataStart = r;
+    const valuesM = [], bgsM = [], fcsM = [], fwsM = [];
+    for (let row_i = 0; row_i < items.length; row_i++) {
+      const k = items[row_i];
+      const isCritical = k.stufe === "kritisch";
+      const baseBg = isCritical ? (row_i % 2 === 0 ? "#fff8f0" : "#fff0e0") : (row_i % 2 === 0 ? "#ffffff" : "#fffde7");
+      const displayProduct = k.product + (k.variant ? "  [" + k.variant + "g]" : "");
+      const lagerBg = isCritical ? "#e37400" : "#f9ab00";
+      const totalUnterwegs = weightMatrix[row_i].reduce((s, w) => s + w, 0);
+
+      const valueRow = [k.collection, displayProduct, k.bestandG, totalUnterwegs > 0 ? totalUnterwegs : "–"];
+      const bgRow    = [baseBg, baseBg, lagerBg, totalUnterwegs > 0 ? "#e65c00" : "#f0f0f0"];
+      const fcRow    = ["#444444", "#222222", "#ffffff", totalUnterwegs > 0 ? "#ffffff" : "#bbbbbb"];
+      const fwRow    = ["normal", "normal", "bold", totalUnterwegs > 0 ? "bold" : "normal"];
+
       for (let i = 0; i < allOrders.length; i++) {
-        let w = getOrderedWeightForProduct(k.product, k.collection, allOrders[i], k.variant);
-        let cell = dash.getRange(r, 5 + i);
+        const w = weightMatrix[row_i][i];
         if (w > 0) {
-          cell.setValue(w).setFontSize(9).setFontWeight("bold").setBackground(allOrders[i].provider === "China" ? "#d2e3fc" : "#ceead6").setFontColor("#1a1a1a").setHorizontalAlignment("center");
+          valueRow.push(w);
+          bgRow.push(allOrders[i].provider === "China" ? "#d2e3fc" : "#ceead6");
+          fcRow.push("#1a1a1a");
+          fwRow.push("bold");
         } else {
-          cell.setValue("–").setFontSize(9).setBackground(baseBg).setFontColor("#dddddd").setHorizontalAlignment("center");
+          valueRow.push("–");
+          bgRow.push(baseBg);
+          fcRow.push("#dddddd");
+          fwRow.push("normal");
         }
       }
-      dash.setRowHeight(r, 18); evenRow = !evenRow; r++;
+      while (valueRow.length < totalCols) { valueRow.push(""); bgRow.push(baseBg); fcRow.push("#888888"); fwRow.push("normal"); }
+      valuesM.push(valueRow); bgsM.push(bgRow); fcsM.push(fcRow); fwsM.push(fwRow);
     }
+    dash.getRange(dataStart, 1, items.length, totalCols).setValues(valuesM)
+      .setBackgrounds(bgsM).setFontColors(fcsM).setFontWeights(fwsM)
+      .setFontSize(9).setHorizontalAlignment("center")
+      .setNumberFormat("0"); // Fix: verhindert geerbtes %-Format
+    dash.getRange(dataStart, 1, items.length, 2).setHorizontalAlignment("left").setNumberFormat("@");
+    r += items.length;
     r += 2;
   }
 
@@ -3388,11 +3827,12 @@ function createDashboard() {
   // ───────────────────────────────────────
   // ÜBERSICHT BESTELLTER WARE (UNTERWEGS) – aufgeteilt in Usbekisch Wellig und Russisch Glatt
   // ───────────────────────────────────────
-  {
+  try {
     // Alle Produkte mit Unterwegs-Bestand einlesen und nach Lieferant trennen
     let unterwegsWellig = [];
     let unterwegsGlatt  = [];
     let allOrders = allOrdersCache;
+    Logger.log("📦 Dashboard Unterwegs-Render START | allOrders=" + (allOrders||[]).length);
 
     // China-Bestellungen (Usbekisch Wellig)
     let chinaOrders  = allOrders.filter(o => o.provider === "China");
@@ -3455,115 +3895,168 @@ function createDashboard() {
     unterwegsWellig.sort((a, b) => b.unterwegsG - a.unterwegsG);
     unterwegsGlatt.sort((a, b) => b.unterwegsG - a.unterwegsG);
 
-    // ─── Hilfsfunktion: Abschnitt rendern ─────────────────────────────────────
+    // ─── Hilfsfunktion: Abschnitt rendern (BATCH — alle Werte einmal schreiben) ─
     function renderUnterwegsAbschnitt(items, orders, title, titleBg, headerBg) {
       if (items.length === 0) return;
       let numOrderCols = orders.length;
       let totalCols = Math.max(4 + numOrderCols, 6);
 
-      // Titelzeile
+      // ── Pre-Compute: Pro (item, order) Gewicht VORAB berechnen ──
+      // Spart später Tausende getOrderedWeightForProduct-Aufrufe in der inneren Schleife.
+      const weightMatrix = items.map(u => orders.map(ord =>
+        getOrderedWeightForProduct(u.product, u.collection, ord, u.variant || null)
+      ));
+
+      // ── Spaltensummen für Summenzeile ──
+      const colTotals = orders.map((_, i) =>
+        weightMatrix.reduce((s, row) => s + row[i], 0)
+      );
+
+      // ─── 1) TITELZEILE ─────
       dash.getRange(r, 1, 1, totalCols).merge()
         .setValue(title + "  ·  " + items.length + " Produkte unterwegs")
         .setFontSize(12).setFontWeight("bold").setHorizontalAlignment("left")
         .setBackground(titleBg).setFontColor("#ffffff")
         .setFontFamily("Arial");
       dash.setRowHeight(r, 28);
+      const titleRow = r;
       r++;
 
-      // Header
-      dash.getRange(r, 1).setValue("Kollektion")
-        .setFontWeight("bold").setFontSize(9).setBackground(headerBg).setFontColor("#ffffff");
-      dash.getRange(r, 2).setValue("Produkt")
-        .setFontWeight("bold").setFontSize(9).setBackground(headerBg).setFontColor("#ffffff");
-      dash.getRange(r, 3).setValue("Lager (g)")
-        .setFontWeight("bold").setFontSize(9).setBackground(headerBg).setFontColor("#ffffff")
-        .setHorizontalAlignment("center");
-      dash.getRange(r, 4).setValue("Unterwegs gesamt")
-        .setFontWeight("bold").setFontSize(9).setBackground(headerBg).setFontColor("#ffffff")
-        .setHorizontalAlignment("center");
+      // ─── 2) HEADERZEILE — Werte als Array, dann einmal schreiben ─────
+      const headerRow = r;
+      const headerVals = ["Kollektion", "Produkt", "Lager (g)", "Unterwegs gesamt"];
+      const headerBgs = [headerBg, headerBg, headerBg, headerBg];
       for (let i = 0; i < orders.length; i++) {
-        let ord = orders[i];
-        let hBg = ord.provider === "China" ? "#1a73e8" : "#0f9d58";
-        let ankunft = calcAnkunft_(ord);
-        dash.getRange(r, 5 + i).setValue(ord.name + (ankunft ? "\n" + ankunft : ""))
-          .setFontWeight("bold").setFontSize(8).setBackground(hBg).setFontColor("#ffffff")
-          .setHorizontalAlignment("center").setWrap(true);
+        const ord = orders[i];
+        const ankunft = calcAnkunft_(ord);
+        headerVals.push(ord.name + (ankunft ? "\n" + ankunft : ""));
+        headerBgs.push(ord.provider === "China" ? "#1a73e8" : "#0f9d58");
       }
+      // Falls weniger als totalCols, mit "" padden
+      while (headerVals.length < totalCols) { headerVals.push(""); headerBgs.push(headerBg); }
+      dash.getRange(r, 1, 1, totalCols).setValues([headerVals])
+        .setBackgrounds([headerBgs])
+        .setFontWeight("bold").setFontColor("#ffffff").setFontSize(9)
+        .setHorizontalAlignment("center").setWrap(true);
       dash.setRowHeight(r, 36);
       r++;
 
-      // Datenzeilen
-      let evenRow = false;
+      // ─── 3) DATENZEILEN — alle Werte/Backgrounds in Arrays sammeln, dann batch ─
+      const dataStart = r;
+      const valuesM = [];      // 2D Werte-Array
+      const bgsM = [];         // 2D Background-Array
+      const fontColorsM = [];  // 2D FontColor-Array
+      const fontWeightsM = []; // 2D FontWeight-Array
       let totalUnterwegsGesamt = 0;
-      for (let u of items) {
-        let baseBg = evenRow ? "#eceff1" : "#ffffff";
-        dash.getRange(r, 1).setValue(u.collection)
-          .setFontSize(9).setBackground(baseBg).setFontColor("#444444");
-        let displayProdU = u.product + (u.variant ? "  [" + u.variant + "g]" : "");
-        dash.getRange(r, 2).setValue(displayProdU)
-          .setFontSize(9).setBackground(baseBg).setFontColor("#222222");
-        let lagerBg = u.lagerG === 0 ? "#db4437" : (u.lagerG < 300 ? "#e37400" : (u.lagerG < 600 ? "#f9ab00" : baseBg));
-        let lagerFg = (u.lagerG === 0 || u.lagerG < 600) ? "#ffffff" : "#222222";
-        dash.getRange(r, 3).setValue(u.lagerG)
-          .setFontSize(9).setFontWeight(u.lagerG < 300 ? "bold" : "normal")
-          .setBackground(lagerBg).setFontColor(lagerFg)
-          .setHorizontalAlignment("center");
-        dash.getRange(r, 4).setValue(u.unterwegsG)
-          .setFontSize(10).setFontWeight("bold")
-          .setBackground("#455a64").setFontColor("#ffffff")
-          .setHorizontalAlignment("center");
+      let evenRow = false;
+
+      for (let row_i = 0; row_i < items.length; row_i++) {
+        const u = items[row_i];
+        const baseBg = evenRow ? "#eceff1" : "#ffffff";
+        const displayProdU = u.product + (u.variant ? "  [" + u.variant + "g]" : "");
+        const lagerBg = u.lagerG === 0 ? "#db4437" : (u.lagerG < 300 ? "#e37400" : (u.lagerG < 600 ? "#f9ab00" : baseBg));
+        const lagerFg = (u.lagerG === 0 || u.lagerG < 600) ? "#ffffff" : "#222222";
+        const lagerWeight = u.lagerG < 300 ? "bold" : "normal";
         totalUnterwegsGesamt += u.unterwegsG;
+
+        const valueRow = [u.collection, displayProdU, u.lagerG, u.unterwegsG];
+        const bgRow    = [baseBg, baseBg, lagerBg, "#455a64"];
+        const fcRow    = ["#444444", "#222222", lagerFg, "#ffffff"];
+        const fwRow    = ["normal", "normal", lagerWeight, "bold"];
+
+        // Order-Spalten
         for (let i = 0; i < orders.length; i++) {
-          let w = getOrderedWeightForProduct(u.product, u.collection, orders[i], u.variant || null);
-          let cell = dash.getRange(r, 5 + i);
+          const w = weightMatrix[row_i][i];
           if (w > 0) {
-            let cellBg = orders[i].provider === "China" ? "#d2e3fc" : "#ceead6";
-            cell.setValue(w).setFontSize(9).setFontWeight("bold")
-              .setBackground(cellBg).setFontColor("#1a1a1a").setHorizontalAlignment("center");
+            valueRow.push(w);
+            bgRow.push(orders[i].provider === "China" ? "#d2e3fc" : "#ceead6");
+            fcRow.push("#1a1a1a");
+            fwRow.push("bold");
           } else {
-            cell.setValue("–").setFontSize(9).setBackground(baseBg).setFontColor("#dddddd")
-              .setHorizontalAlignment("center");
+            valueRow.push("–");
+            bgRow.push(baseBg);
+            fcRow.push("#dddddd");
+            fwRow.push("normal");
           }
         }
-        dash.setRowHeight(r, 18);
+        // Padding falls totalCols > 4 + orders.length
+        while (valueRow.length < totalCols) { valueRow.push(""); bgRow.push(baseBg); fcRow.push("#888888"); fwRow.push("normal"); }
+
+        valuesM.push(valueRow);
+        bgsM.push(bgRow);
+        fontColorsM.push(fcRow);
+        fontWeightsM.push(fwRow);
         evenRow = !evenRow;
-        r++;
       }
 
-      // Summenzeile
+      // BATCH-Write der Datenzeilen — viel schneller als pro Zelle
+      const dataRange = dash.getRange(dataStart, 1, items.length, totalCols);
+      dataRange.setValues(valuesM)
+        .setBackgrounds(bgsM)
+        .setFontColors(fontColorsM)
+        .setFontWeights(fontWeightsM)
+        .setFontSize(9)
+        .setHorizontalAlignment("center")
+        .setNumberFormat("0"); // Verhindert geerbte %-Formate, zeigt ganze Zahlen
+      // Spalten 1+2 linksbündig + Text-Format
+      dash.getRange(dataStart, 1, items.length, 2).setHorizontalAlignment("left").setNumberFormat("@");
+      r += items.length;
+
+      // ─── 4) SUMMENZEILE ─────
       dash.getRange(r, 1, 1, 3).merge()
         .setValue("GESAMT UNTERWEGS")
         .setFontSize(9).setFontWeight("bold").setBackground("#2d2d2d").setFontColor("#ffffff");
       dash.getRange(r, 4).setValue(totalUnterwegsGesamt)
         .setFontSize(10).setFontWeight("bold")
-        .setBackground("#455a64").setFontColor("#ffffff").setHorizontalAlignment("center");
+        .setBackground("#455a64").setFontColor("#ffffff").setHorizontalAlignment("center")
+        .setNumberFormat("0");
+      // Spaltensummen
+      const sumVals = [];
+      const sumBgs = [];
       for (let i = 0; i < orders.length; i++) {
-        let colTotal = 0;
-        for (let u of items) colTotal += getOrderedWeightForProduct(u.product, u.collection, orders[i], u.variant || null);
-        let sumBg = orders[i].provider === "China" ? "#1a56b0" : "#0d7a3e";
-        dash.getRange(r, 5 + i).setValue(colTotal > 0 ? colTotal : "–")
-          .setFontSize(9).setFontWeight("bold")
-          .setBackground(sumBg).setFontColor("#ffffff").setHorizontalAlignment("center");
+        sumVals.push(colTotals[i] > 0 ? colTotals[i] : "–");
+        sumBgs.push(orders[i].provider === "China" ? "#1a56b0" : "#0d7a3e");
+      }
+      if (sumVals.length > 0) {
+        dash.getRange(r, 5, 1, sumVals.length).setValues([sumVals])
+          .setBackgrounds([sumBgs])
+          .setFontSize(9).setFontWeight("bold").setFontColor("#ffffff")
+          .setHorizontalAlignment("center")
+          .setNumberFormat("0");
       }
       dash.setRowHeight(r, 22);
       r += 2;
     }
 
+    Logger.log("📦 Dashboard Unterwegs-Render: chinaOrders=" + chinaOrders.length + ", amandaOrders=" + amandaOrders.length + ", unterwegsWellig=" + unterwegsWellig.length + ", unterwegsGlatt=" + unterwegsGlatt.length);
+
     // ─── Abschnitt 1: Usbekisch Wellig (China) ────────────────────────────────
-    renderUnterwegsAbschnitt(
-      unterwegsWellig, chinaOrders,
-      "📦  UNTERWEGS – USBEKISCH WELLIG (China)",
-      "#1a56b0",  // Titelzeile dunkelblau
-      "#2d4a7a"   // Header-Zeile
-    );
+    try {
+      renderUnterwegsAbschnitt(
+        unterwegsWellig, chinaOrders,
+        "📦  UNTERWEGS – USBEKISCH WELLIG (China)",
+        "#1a56b0",  // Titelzeile dunkelblau
+        "#2d4a7a"   // Header-Zeile
+      );
+    } catch(eW) {
+      Logger.log("❌ Dashboard Unterwegs Wellig Render-Fehler: " + eW.message + "\n" + (eW.stack || ""));
+    }
 
     // ─── Abschnitt 2: Russisch Glatt (Amanda) ────────────────────────────────
-    renderUnterwegsAbschnitt(
-      unterwegsGlatt, amandaOrders,
-      "📦  UNTERWEGS – RUSSISCH GLATT (Amanda)",
-      "#0d7a3e",  // Titelzeile dunkelgrün
-      "#1a5c30"   // Header-Zeile
-    );
+    try {
+      renderUnterwegsAbschnitt(
+        unterwegsGlatt, amandaOrders,
+        "📦  UNTERWEGS – RUSSISCH GLATT (Amanda)",
+        "#0d7a3e",  // Titelzeile dunkelgrün
+        "#1a5c30"   // Header-Zeile
+      );
+    } catch(eA) {
+      Logger.log("❌ Dashboard Unterwegs Glatt Render-Fehler: " + eA.message + "\n" + (eA.stack || ""));
+    }
+    Logger.log("✅ Dashboard Unterwegs-Render FERTIG");
+  } catch(eUnterwegs) {
+    Logger.log("❌ Dashboard Unterwegs-Block KOMPLETT-FEHLER: " + eUnterwegs.message + "\n" + (eUnterwegs.stack || ""));
+    // Trotz Fehler weitermachen — Spaltenbreiten + Chart sollen noch gerendert werden
   }
 
   // ───────────────────────────────────────
@@ -3847,36 +4340,41 @@ function writeBestellungSheet(sheet, title, columns, rows, headerBg, topColor, m
   const TIER_COL_MID   = "#1565c0"; // Dunkelblau
   const TIER_COL_REST  = "#558b2f"; // Olivgrün
 
-  for (let i = 2; i < allRows.length - 1; i++) {
-    let row = allRows[i];
-    let ziel   = row[row.length - 2];
-    let bedarf = row[row.length - 1];
-    // Tier aus Ziel ableiten
-    let isTop7 = (ziel >= 1000);
-    let isMid  = (ziel >= 500 && ziel < 1000);
-    let bg;
-    if (isTop7)      bg = (i % 2 === 0) ? TIER_ROW_TOP7  : TIER_ROW_TOP7B;
-    else if (isMid)  bg = (i % 2 === 0) ? TIER_ROW_MID   : TIER_ROW_MIDB;
-    else             bg = (i % 2 === 0) ? TIER_ROW_REST  : TIER_ROW_RESTB;
-    sheet.getRange(i + 1, 1, 1, colCount).setBackground(bg).setFontSize(10);
-    // TOP7: Schrift fett
-    if (isTop7) sheet.getRange(i + 1, 1, 1, colCount).setFontWeight("bold");
-
-    // Bestellspalte (letzte Spalte) hervorheben
-    if (typeof bedarf === "number" && bedarf > 0) {
-      let bedarfBg = isTop7 ? TIER_COL_TOP7 : (isMid ? TIER_COL_MID : TIER_COL_REST);
-      sheet.getRange(i + 1, colCount)
-        .setBackground(bedarfBg).setFontColor("#ffffff").setFontWeight("bold")
-        .setHorizontalAlignment("center");
+  // BATCH-Render: alle Backgrounds/FontColors/FontWeights in 2D-Array sammeln
+  const dataRowCnt = allRows.length - 3;
+  if (dataRowCnt > 0) {
+    const lagerCol = (colCount === 8) ? 5 : 4;
+    const bgs2D = [], fcs2D = [], fws2D = [];
+    for (let i = 2; i < allRows.length - 1; i++) {
+      const row = allRows[i];
+      const ziel   = row[row.length - 2];
+      const bedarf = row[row.length - 1];
+      const isTop7 = (ziel >= 1000);
+      const isMid  = (ziel >= 500 && ziel < 1000);
+      let bg;
+      if (isTop7)      bg = (i % 2 === 0) ? TIER_ROW_TOP7  : TIER_ROW_TOP7B;
+      else if (isMid)  bg = (i % 2 === 0) ? TIER_ROW_MID   : TIER_ROW_MIDB;
+      else             bg = (i % 2 === 0) ? TIER_ROW_REST  : TIER_ROW_RESTB;
+      const fw = isTop7 ? "bold" : "normal";
+      const hasBest = (typeof bedarf === "number" && bedarf > 0);
+      const lager = row[lagerCol - 1];
+      const isLagerZero = (typeof lager === "number" && lager === 0);
+      const bedarfBg = isTop7 ? TIER_COL_TOP7 : (isMid ? TIER_COL_MID : TIER_COL_REST);
+      const bgRow = [], fcRow = [], fwRow = [];
+      for (let c = 0; c < colCount; c++) {
+        if (c === lagerCol - 1 && isLagerZero) {
+          bgRow.push("#db4437"); fcRow.push("#ffffff"); fwRow.push("bold");
+        } else if (c === colCount - 1 && hasBest) {
+          bgRow.push(bedarfBg); fcRow.push("#ffffff"); fwRow.push("bold");
+        } else {
+          bgRow.push(bg); fcRow.push("#000000"); fwRow.push(fw);
+        }
+      }
+      bgs2D.push(bgRow); fcs2D.push(fcRow); fws2D.push(fwRow);
     }
-    // Lager-Spalte: rot wenn 0
-    let lagerCol = (colCount === 8) ? 5 : 4;
-    let lager = row[lagerCol - 1];
-    if (typeof lager === "number" && lager === 0) {
-      sheet.getRange(i + 1, lagerCol)
-        .setBackground("#db4437").setFontColor("#ffffff").setFontWeight("bold")
-        .setHorizontalAlignment("center");
-    }
+    sheet.getRange(3, 1, dataRowCnt, colCount)
+      .setBackgrounds(bgs2D).setFontColors(fcs2D).setFontWeights(fws2D)
+      .setFontSize(10);
   }
 
   // Subtotal-Zeile
@@ -3966,6 +4464,39 @@ function createBestellungChina() {
     { keyword: "GENIUS TRESSEN",     typ: "Genius Weft", länge: "65CM", collKeyword: "GENIUS",  collName: "Usbekische Genius Tressen (Wellig)" },
   ];
 
+  // ─── PER-PRODUCT VELOCITY LOOKUP (für Phase E Vorratskauf hist. max-Rate) ───
+  // Key: "handle|#FARBE" → { g30d, g60d_alt, g90d }
+  const vaVelocityLookupC = {};
+  const COLLNAME_TO_HANDLE_C = {
+    "Tapes Wellig 45cm":                   "tapes-45cm",
+    "Tapes Wellig 55cm":                   "tapes-55cm",
+    "Tapes Wellig 65cm":                   "tapes-65cm",
+    "Tapes Wellig 85cm":                   "tapes-85cm",
+    "Bondings wellig 65cm":                "bondings-65cm",
+    "Bondings wellig 85cm":                "bondings-85cm",
+    "Usbekische Classic Tressen (Wellig)": "tressen-usbekisch-classic",
+    "Usbekische Genius Tressen (Wellig)":  "tressen-usbekisch-genius"
+  };
+  try {
+    const vaDataC = loadChunked_(PropertiesService.getScriptProperties(), "VA_PRODUCT_DATA");
+    if (vaDataC) {
+      for (const vaKey in vaDataC) {
+        const vp = vaDataC[vaKey];
+        if (!vp.handle) continue;
+        const farbe = extractFullColor_(vp.name || "");
+        if (!farbe) continue;
+        const lookupKey = vp.handle + "|" + farbe;
+        if (!vaVelocityLookupC[lookupKey] || (vp.g30d || 0) > vaVelocityLookupC[lookupKey].g30d) {
+          vaVelocityLookupC[lookupKey] = {
+            g30d: vp.g30d || 0,
+            g60d_alt: vp.g60d_alt || 0,
+            g90d: vp.g90d || 0
+          };
+        }
+      }
+    }
+  } catch(e) { Logger.log("⚠️ China VA-Velocity-Lookup fehlgeschlagen: " + e.message); }
+
   // Hilfsfunktion: Farbcode aus Produktname extrahieren (erstes Token mit #)
   function extractColorFromProduct(productUpper) {
     let m = productUpper.match(/(#[A-Z0-9][A-Z0-9 ]*?)(?=\s+[A-Z]{2,}|$)/);
@@ -3976,11 +4507,11 @@ function createBestellungChina() {
   }
 
   // Tier für Produkt bestimmen (dynamisch oder Fallback)
-  function getTierChina(colorOneWord, typ) {
+  // länge wichtig: Tapes 45cm vs. 55cm vs. 65cm haben getrennte Tiers
+  function getTierChina(colorOneWord, typ, länge) {
     if (hasTopsellerdaten) {
-      return getTopsellertierTS_("Usbekisch Wellig", typ, colorOneWord);
+      return getTopsellertierTS_("Usbekisch Wellig", typ, colorOneWord, null, länge);
     }
-    // Fallback: alle als REST (1000g Ziel)
     return "REST";
   }
 
@@ -4025,7 +4556,7 @@ function createBestellungChina() {
     if (!colorRaw) continue;
     // Farbcode: vollständiger Farbname bis Stopword (z.B. "#LATTE BROWN", "#2E")
     let colorOneWord = extractFullColor_(produktUpper) || colorRaw.split(" ")[0];
-    let tier = getTierChina(colorOneWord, mapping.typ);
+    let tier = getTierChina(colorOneWord, mapping.typ, mapping.länge.toLowerCase());
     // < 150g Lager = unverkäuflich (Kunden kaufen min. ~150g) → wie ausverkauft behandeln
     if (tier === "KAUM" && lager >= 150) continue; // Genug Lager + keine Verkäufe → wirklich langsam
     // KAUM + lager < 150g → Nachbestellen auf verkaufbare Menge
@@ -4036,8 +4567,8 @@ function createBestellungChina() {
       ? 300  // Ausverkauft – Mindestbestellung
       : getVerkaufsZielGrams_("Usbekisch Wellig", mapping.collName, tier, tierCounts, 10, colorOneWord, lager); // China: 8 Wochen Lieferzeit + 2 Wochen Puffer = 10
     if (ziel === 0) continue; // Nicht bestellen
-    // Echter Rang aus Topseller-Daten
-    let rang = getRangTS_("Usbekisch Wellig", mapping.typ, colorOneWord);
+    // Echter Rang aus Topseller-Daten (länge-aware für Tapes/Bondings China)
+    let rang = getRangTS_("Usbekisch Wellig", mapping.typ, colorOneWord, null, mapping.länge.toLowerCase());
     // Rang-Mindestziele: NUR noch als Fallback wenn keine Produktdaten vorhanden (kein VA_PRODUCT_DATA).
     // Bei vorhandenen Produktdaten regelt getVerkaufsZielGrams_ (inkl. Ausverkauf-Erkennung) das Ziel.
     const hasProdData = !!(PropertiesService.getScriptProperties().getProperty("VA_PRODUCT_DATA_COUNT") ||
@@ -4047,11 +4578,16 @@ function createBestellungChina() {
       else if (rang <= 20)  ziel = Math.max(ziel, RANG_MINZIEL_TOP20);
     } // Für Sortierung
     let nächsteBestellungChina = 0; // Vorausblick: Fehlmenge für nächste Bestellung
-    let unterwegs = getUnterwegsForProduct(allOrders, "China", colorRaw.split(" ")[0], mapping.collName, mapping.länge.toLowerCase(), null);
-    // Auch mit 2-Wort-Farbcode versuchen falls unterwegs = 0
-    if (unterwegs === 0 && colorRaw.split(" ").length > 1) {
+    // Unterwegs-Lookup: zuerst mit vollem Farbnamen (extractFullColor_) probieren —
+    // damit dreiteilige Farbcodes wie "#SOFT BLOND BALAYAGE" gefunden werden.
+    // Dann Fallback auf 2-Wort und 1-Wort für robusteres Matching bei Tippfehlern.
+    let unterwegs = getUnterwegsForProduct(allOrders, "China", colorOneWord, mapping.collName, mapping.länge.toLowerCase(), null);
+    if (unterwegs === 0 && colorRaw.split(" ").length >= 2) {
       let twoWord = colorRaw.split(" ")[0] + " " + colorRaw.split(" ")[1];
       unterwegs = getUnterwegsForProduct(allOrders, "China", twoWord, mapping.collName, mapping.länge.toLowerCase(), null);
+    }
+    if (unterwegs === 0) {
+      unterwegs = getUnterwegsForProduct(allOrders, "China", colorRaw.split(" ")[0], mapping.collName, mapping.länge.toLowerCase(), null);
     }
     let verfügbar = lager + unterwegs;
     let bedarf = Math.max(0, ziel - verfügbar);
@@ -4091,8 +4627,15 @@ function createBestellungChina() {
             const tagesVerkauf2 = g30dProdukt2 / 30;
             tagesrateC = tagesVerkauf2; // Option B: für Budget-Runden merken
             const heute2 = new Date();
-            // Unterwegs-Details pro Bestellung laden
-            const unterwegsDetails2 = getUnterwegsDetailForProduct(allOrders, "China", colorRaw.split(" ")[0], mapping.collName, mapping.länge.toLowerCase(), null);
+            // Unterwegs-Details pro Bestellung laden — vollen Farbnamen zuerst (für 3-teilige Farben)
+            let unterwegsDetails2 = getUnterwegsDetailForProduct(allOrders, "China", colorOneWord, mapping.collName, mapping.länge.toLowerCase(), null);
+            if ((!unterwegsDetails2 || unterwegsDetails2.length === 0) && colorRaw.split(" ").length >= 2) {
+              const twoW = colorRaw.split(" ")[0] + " " + colorRaw.split(" ")[1];
+              unterwegsDetails2 = getUnterwegsDetailForProduct(allOrders, "China", twoW, mapping.collName, mapping.länge.toLowerCase(), null);
+            }
+            if (!unterwegsDetails2 || unterwegsDetails2.length === 0) {
+              unterwegsDetails2 = getUnterwegsDetailForProduct(allOrders, "China", colorRaw.split(" ")[0], mapping.collName, mapping.länge.toLowerCase(), null);
+            }
             // Bestellungen nach Datum sortieren (älteste zuerst = kommt zuerst an)
             unterwegsDetails2.sort((a, b) => parseDateDE(a.date) - parseDateDE(b.date));
             // Für jede Bestellung: Lager bei Ankunft berechnen
@@ -4206,7 +4749,17 @@ function createBestellungChina() {
     }
     // ──────────────────────────────────────────────────────────────────────────────────────
 
-    if (bedarf <= 0) continue;
+    // Vorratskauf-Modus: TOP7/MID-Aktive auch ohne klassischen Bedarf in DoSA-Pool aufnehmen,
+    // damit Phase E sie aufstocken kann (Beispiel: NATURAL 65cm hat genug aktuell, aber war
+    // in 30d ausverkauft → 90d-Verkauf hoch → Phase E will Vorrat aufbauen).
+    const isVorratsmodeC_ = PropertiesService.getScriptProperties().getProperty("VORRATSKAUF_MODUS") === "true";
+    if (bedarf <= 0) {
+      if (isVorratsmodeC_ && (tier === "TOP7" || tier === "MID")) {
+        bedarf = 500; // Minimum-Bedarf damit Kandidat in den Pool kommt
+      } else {
+        continue;
+      }
+    }
     // Mindestbestellmenge 500g (Lieferant akzeptiert keine kleineren Bestellungen)
     if (bedarf < 500) bedarf = 500;
 
@@ -4218,8 +4771,15 @@ function createBestellungChina() {
     // Standard Tapes Russisch: Key = "Standard Tapes|" (keine Länge im Produktnamen)
     const isPremiumKeys = ["tapes|55cm", "tapes|65cm", "bondings|65cm", "genius weft|65cm", "standard tapes|"];
     const isPremium = isPremiumKeys.includes((mapping.typ + "|" + mapping.länge).toLowerCase());
+    // Roh-Verkaufsdaten für Phase E (Vorratskauf hist. max-Rate)
+    const handleC_ = COLLNAME_TO_HANDLE_C[mapping.collName];
+    const vaEntryC_ = (handleC_ && colorOneWord) ? vaVelocityLookupC[handleC_ + "|" + colorOneWord.toUpperCase()] : null;
+    const g30d_C = vaEntryC_ ? (vaEntryC_.g30d || 0) : 0;
+    const g60d_alt_C = vaEntryC_ ? (vaEntryC_.g60d_alt || 0) : 0;
+    const g90d_C = vaEntryC_ ? (vaEntryC_.g90d || 0) : 0;
     rowsByGroup[groupKey].push({ rang, tier, isPremium, lager, unterwegs, ziel, bedarf, nächste: nächsteBestellungChina, product: invRow.product,
-      tagesrate: tagesrateC, stock_at_84: stock_at_84C, hat_lücke: hat_lückeC, lücken_dauer: lücken_dauerC });
+      tagesrate: tagesrateC, stock_at_84: stock_at_84C, hat_lücke: hat_lückeC, lücken_dauer: lücken_dauerC,
+      g30d: g30d_C, g60d_alt: g60d_alt_C, g90d: g90d_C });
   }
 
   // Zeilen zusammenbauen (nach Rang sortiert innerhalb jeder Gruppe)
@@ -4307,6 +4867,8 @@ function createBestellungChina() {
         ziel: r.ziel, bedarf: r.bedarf, nächste: r.nächste || 0,
         product: r.product, typ: g.typ, länge: g.länge,
         tagesrate: r.tagesrate || 0, stock_at_84: r.stock_at_84,
+        // Roh-Verkaufsdaten für Phase E (hist. max-Rate)
+        g30d: r.g30d || 0, g60d_alt: r.g60d_alt || 0, g90d: r.g90d || 0,
         hat_lücke: r.hat_lücke || false, lücken_dauer: r.lücken_dauer || 0,
         notfall, grundbedarf: gbd,
         zugeteilt: 0
@@ -4830,14 +5392,15 @@ function createBestellungChina() {
   // ╚══════════════════════════════════════════════════════════════════════════════╝
   allocateByDaysOfStock_(allCandidates, budgetG, {
     label: "China",
-    zielReichweite: 42,          // Phase A2: voller Sollbestand bei Ankunft (42d)
-    sockelReichweite: 21,        // Phase A1: Sockel-Runde (Breite vor Tiefe)
-    minSockel: 200,              // Sockel-Mindestmenge (auf Einheit aufgerundet)
+    zielReichweite: 42,
+    sockelReichweite: 21,
+    minSockel: 200,
     tierReichweiten: { top: 84, mid: 70, rest: 56 },
-    regalMindest:    500,        // China-Mindestmenge
+    regalMindest:    500,
     minBestellung:   500,
-    minBestellungRest: null,     // bei China keine Sonderregel für REST
-    einheitFn:       (c) => 100, // China: alle auf 100g-Schritte
+    minBestellungRest: null,
+    einheitFn:       (c) => 100,    // intern 100g-Schritte für Genauigkeit
+    lieferantStep:   500,            // China-Lieferant: nur 500g-Schritte → kaufmännische Rundung am Ende
     stockBeiAnkunftFn: (c) => (c.stock_at_84 != null ? c.stock_at_84 : ((c.lager || 0) + (c.unterwegs || 0)))
   });
   restBudget = budgetG - allCandidates.reduce((s, c) => s + c.zugeteilt, 0);
@@ -4878,7 +5441,10 @@ function createBestellungChina() {
   // ─── BUDGET-LISTE oben schreiben ───
   let colCount = 7;
   let headerRow = ["Typ", "Länge", "Farbcode", "Lager (g)", "Unterwegs (g)", "Bedarf 42d (g)", "Bestellung (g)"];
-  let budgetTitle = "CHINA (Usbekisch Wellig) – BUDGET-BESTELLUNG " + dateStr + "  |  Budget: " + (budgetG/1000).toFixed(1) + " kg  |  Verbraucht: " + ((budgetG - restBudget)/1000).toFixed(1) + " kg  |  Zyklus: alle 14 Tage (Ziel-Reichweite 42d = 14 Zyklus + 28 Lieferzeit)";
+  const _vorratC = PropertiesService.getScriptProperties().getProperty("VORRATSKAUF_MODUS") === "true";
+  let budgetTitle = "CHINA (Usbekisch Wellig) – BUDGET-BESTELLUNG " + dateStr +
+    (_vorratC ? "  ⚠️ VORRATSKAUF-MODUS AKTIV ⚠️" : "") +
+    "  |  Budget: " + (budgetG/1000).toFixed(1) + " kg  |  Verbraucht: " + ((budgetG - restBudget)/1000).toFixed(1) + " kg  |  Zyklus: alle 14 Tage (Ziel-Reichweite 42d = 14 Zyklus + 28 Lieferzeit)";
   let budgetTotalBedarf = budgetItems.reduce((s, r) => s + (typeof r[6] === "number" ? r[6] : 0), 0);
   let budgetSubtotal = Array(colCount).fill("");
   budgetSubtotal[0] = "Subtotal";
@@ -4917,31 +5483,44 @@ function createBestellungChina() {
       .setHorizontalAlignment("center");
   }
 
-  // Datenzeilen Budget-Liste
+  // Datenzeilen Budget-Liste (BATCH-Render)
   // budgetCandidatesSorted_ bereits korrekt sortiert (mit NOTFALL zuerst)
-  for (let i = dataRowOffset; i < budgetAllRows.length - 1; i++) {
-    let r = budgetAllRows[i];
-    let itemIdx = i - dataRowOffset;
-    let cand = budgetCandidatesSorted_[itemIdx];
-    let isTop7 = cand && cand.isTop;
-    let isMid  = cand && cand.isMid;
-    let isNotfall = cand && cand.notfall;
-    let bg;
-    if (isNotfall)  bg = (i % 2 === 0) ? "#ffcdd2" : "#ef9a9a"; // Rot für NOTFALL
-    else if (isTop7) bg = (i % 2 === 0) ? B_TOP7  : B_TOP7B;
-    else if (isMid)  bg = (i % 2 === 0) ? B_MID   : B_MIDB;
-    else             bg = (i % 2 === 0) ? B_REST  : B_RESTB;
-    sheet.getRange(i + 1, 1, 1, colCount).setBackground(bg).setFontSize(10);
-    if (isTop7 || isNotfall) sheet.getRange(i + 1, 1, 1, colCount).setFontWeight("bold");
-    let bedarf = r[6];
-    if (typeof bedarf === "number" && bedarf > 0) {
-      let bedarfBg = isTop7 ? BC_TOP7 : (isMid ? BC_MID : BC_REST);
-      sheet.getRange(i + 1, 7).setBackground(bedarfBg)
-        .setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
+  const dataRowCntC = budgetAllRows.length - 1 - dataRowOffset;
+  if (dataRowCntC > 0) {
+    const bgs2D = [], fcs2D = [], fws2D = [];
+    for (let i = dataRowOffset; i < budgetAllRows.length - 1; i++) {
+      const r = budgetAllRows[i];
+      const itemIdx = i - dataRowOffset;
+      const cand = budgetCandidatesSorted_[itemIdx];
+      const isTop7 = cand && cand.isTop;
+      const isMid  = cand && cand.isMid;
+      const isNotfall = cand && cand.notfall;
+      let bg;
+      if (isNotfall)   bg = (i % 2 === 0) ? "#ffcdd2" : "#ef9a9a";
+      else if (isTop7) bg = (i % 2 === 0) ? B_TOP7  : B_TOP7B;
+      else if (isMid)  bg = (i % 2 === 0) ? B_MID   : B_MIDB;
+      else             bg = (i % 2 === 0) ? B_REST  : B_RESTB;
+      const fw = (isTop7 || isNotfall) ? "bold" : "normal";
+      const bedarf = r[6];
+      const hasBest = (typeof bedarf === "number" && bedarf > 0);
+      const lager = r[3];
+      const isLagerZero = (typeof lager === "number" && lager === 0);
+      const bedarfBg = isTop7 ? BC_TOP7 : (isMid ? BC_MID : BC_REST);
+      const bgRow = [], fcRow = [], fwRow = [];
+      for (let c = 0; c < colCount; c++) {
+        if (c === 3 && isLagerZero) {            // Lager-Spalte (Index 3 = Spalte 4)
+          bgRow.push("#db4437"); fcRow.push("#ffffff"); fwRow.push("bold");
+        } else if (c === 6 && hasBest) {          // Bedarf-Spalte (Index 6 = Spalte 7)
+          bgRow.push(bedarfBg); fcRow.push("#ffffff"); fwRow.push("bold");
+        } else {
+          bgRow.push(bg); fcRow.push("#000000"); fwRow.push(fw);
+        }
+      }
+      bgs2D.push(bgRow); fcs2D.push(fcRow); fws2D.push(fwRow);
     }
-    let lager = r[3];
-    if (typeof lager === "number" && lager === 0)
-      sheet.getRange(i + 1, 4).setBackground("#db4437").setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
+    sheet.getRange(dataRowOffset + 1, 1, dataRowCntC, colCount)
+      .setBackgrounds(bgs2D).setFontColors(fcs2D).setFontWeights(fws2D)
+      .setFontSize(10);
   }
   // Subtotal Budget
   sheet.getRange(budgetAllRows.length, 1, 1, colCount)
@@ -5426,11 +6005,16 @@ function createBestellungAmanda() {
     // 1. bedarf > 0 (normaler Fall: ziel > verfügbar), ODER
     // 2. stock_at_42 ≤ 0 (wird vor Ankunft ausverkauft, auch wenn viel unterwegs)
     //    → grundbedarf (21 Tage) als Bedarf setzen, damit bei nächster Bestellung Nachschub kommt
+    // 3. Vorratskauf-Modus aktiv UND Tier=TOP7/MID → in Pool für Phase E (Vorrats-Aufstockung)
+    const isVorratsmodeA_ = PropertiesService.getScriptProperties().getProperty("VORRATSKAUF_MODUS") === "true";
     if (bedarf <= 0) {
       if (stockAt42A2 != null && stockAt42A2 <= 0 && tagesVerkaufA2 > 0) {
         // stock_at_arrival sagt: Produkt wird leer sein → grundbedarf als Minimum
         bedarf = Math.max(100, Math.ceil(tagesVerkaufA2 * 21 / 100) * 100);
         Logger.log("🔄 Bedarf erzwungen für " + invRow.product + ": stock_at_42=" + stockAt42A2 + " → grundbedarf=" + bedarf + "g");
+      } else if (isVorratsmodeA_ && (tier === "TOP7" || tier === "MID")) {
+        // Vorratskauf: TOP7/MID auch ohne klassischen Bedarf in Pool
+        bedarf = 300;
       } else {
         continue;
       }
@@ -6520,14 +7104,17 @@ function createBestellungAmanda() {
 
   allocateByDaysOfStock_(allCandidatesA, budgetGA, {
     label: "Amanda",
-    zielReichweite: 42,          // Phase A2: voller Sollbestand bei Ankunft (42d)
-    sockelReichweite: 21,        // Phase A1: Sockel-Runde (Breite vor Tiefe)
-    minSockel: 300,              // Sockel-Mindestmenge = Amanda-Mindestbestellung (300g, wird auf Einheit aufgerundet: Clip-ins 225g → 450g)
+    zielReichweite: 42,
+    sockelReichweite: 21,
+    minSockel: 300,
     tierReichweiten: { top: 84, mid: 70, rest: 56 },
-    regalMindest:    300,        // Amanda: Regal-Mindestmenge für KAUM
-    minBestellung:   300,        // Russisch: 300g Mindestbestellung für ALLE Tiers (nicht 500g wie China)
+    regalMindest:    300,
+    minBestellung:   300,
     minBestellungRest: 300,
-    einheitFn:       (c) => c.einheit || 100,  // Clip-ins: 100/150/225, Mini: 50, Standard: 100
+    einheitFn:       (c) => c.einheit || 100,
+    // Amanda: Einheit IST der Lieferschritt (100g Tapes/Bondings/Wefts, 50g Mini, 150/225g Clip-ins).
+    // Lieferantenschritt 100g entspricht der Einheit → keine zusätzliche Rundung nötig.
+    lieferantStep:   null,
     stockBeiAnkunftFn: (c) => (c.stock_at_arrival != null ? c.stock_at_arrival : ((c.lager || 0) + (c.unterwegs || 0)))
   });
   restBudgetA = budgetGA - allCandidatesA.reduce((s, c) => s + c.zugeteilt, 0);
@@ -6556,7 +7143,10 @@ function createBestellungAmanda() {
   // ─── BUDGET-LISTE oben schreiben ───
   let colCountA = 8;
   let headerRowA = ["Quality", "Method", "Länge/Variante", "Farbcode", "Lager (g)", "Unterwegs (g)", "Bedarf 42d (g)", "Bestellung (g)"];
-  let budgetTitleA = "AMANDA (Russisch Glatt) – BUDGET-BESTELLUNG " + dateStr + "  |  Budget: " + (budgetGA/1000).toFixed(1) + " kg  |  Verbraucht: " + ((budgetGA - restBudgetA)/1000).toFixed(1) + " kg  |  Zyklus: alle 14 Tage (Ziel-Reichweite 42d = 14 Zyklus + 28 Lieferzeit)";
+  const _vorratA = PropertiesService.getScriptProperties().getProperty("VORRATSKAUF_MODUS") === "true";
+  let budgetTitleA = "AMANDA (Russisch Glatt) – BUDGET-BESTELLUNG " + dateStr +
+    (_vorratA ? "  ⚠️ VORRATSKAUF-MODUS AKTIV ⚠️" : "") +
+    "  |  Budget: " + (budgetGA/1000).toFixed(1) + " kg  |  Verbraucht: " + ((budgetGA - restBudgetA)/1000).toFixed(1) + " kg  |  Zyklus: alle 14 Tage (Ziel-Reichweite 42d = 14 Zyklus + 28 Lieferzeit)";
   let budgetTotalA = budgetItemsA.reduce((s, r) => s + (r[7] || 0), 0);
   let budgetSubtotalA = Array(colCountA).fill("");
   budgetSubtotalA[0] = "Subtotal";
@@ -6596,27 +7186,41 @@ function createBestellungAmanda() {
   const A_REST  = "#f1f8e9"; const A_RESTB = "#dcedc8";
   const AC_TOP7 = "#f9a825"; const AC_MID  = "#1565c0"; const AC_REST = "#558b2f";
 
-  for (let i = 2; i < budgetAllRowsA.length - 1; i++) {
-    let r = budgetAllRowsA[i];
-    let itemIdx = i - 2;
-    let cand = budgetItemsAFull[itemIdx];
-    let isTop7 = cand && cand.isTop;
-    let isMid  = cand && cand.isMid;
-    let bg;
-    if (isTop7)     bg = (i % 2 === 0) ? A_TOP7  : A_TOP7B;
-    else if (isMid) bg = (i % 2 === 0) ? A_MID   : A_MIDB;
-    else            bg = (i % 2 === 0) ? A_REST  : A_RESTB;
-    sheet.getRange(i + 1, 1, 1, colCountA).setBackground(bg).setFontSize(10);
-    if (isTop7) sheet.getRange(i + 1, 1, 1, colCountA).setFontWeight("bold");
-    let bestellung = r[7];
-    if (typeof bestellung === "number" && bestellung > 0) {
-      let bedarfBgA = isTop7 ? AC_TOP7 : (isMid ? AC_MID : AC_REST);
-      sheet.getRange(i + 1, 8).setBackground(bedarfBgA)
-        .setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
+  // BATCH-Render: 2D-Arrays für Backgrounds, FontColors, FontWeights aufbauen
+  const dataRowCount = budgetAllRowsA.length - 3; // Titelzeile, Headerzeile, Subtotal abziehen
+  if (dataRowCount > 0) {
+    const bgs2D = [], fcs2D = [], fws2D = [];
+    for (let i = 2; i < budgetAllRowsA.length - 1; i++) {
+      const r = budgetAllRowsA[i];
+      const itemIdx = i - 2;
+      const cand = budgetItemsAFull[itemIdx];
+      const isTop7 = cand && cand.isTop;
+      const isMid  = cand && cand.isMid;
+      let bg;
+      if (isTop7)     bg = (i % 2 === 0) ? A_TOP7  : A_TOP7B;
+      else if (isMid) bg = (i % 2 === 0) ? A_MID   : A_MIDB;
+      else            bg = (i % 2 === 0) ? A_REST  : A_RESTB;
+      const fw = isTop7 ? "bold" : "normal";
+      const bestellung = r[7];
+      const lager = r[4];
+      const hasBest = (typeof bestellung === "number" && bestellung > 0);
+      const isLagerZero = (typeof lager === "number" && lager === 0);
+      const bedarfBgA = isTop7 ? AC_TOP7 : (isMid ? AC_MID : AC_REST);
+      const bgRow = [], fcRow = [], fwRow = [];
+      for (let c = 0; c < colCountA; c++) {
+        if (c === 4 && isLagerZero) {              // Spalte 5 = Lager
+          bgRow.push("#db4437"); fcRow.push("#ffffff"); fwRow.push("bold");
+        } else if (c === 7 && hasBest) {            // Spalte 8 = Bestellung
+          bgRow.push(bedarfBgA); fcRow.push("#ffffff"); fwRow.push("bold");
+        } else {
+          bgRow.push(bg); fcRow.push("#000000"); fwRow.push(fw);
+        }
+      }
+      bgs2D.push(bgRow); fcs2D.push(fcRow); fws2D.push(fwRow);
     }
-    let lager = r[4];
-    if (typeof lager === "number" && lager === 0)
-      sheet.getRange(i + 1, 5).setBackground("#db4437").setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
+    sheet.getRange(3, 1, dataRowCount, colCountA)
+      .setBackgrounds(bgs2D).setFontColors(fcs2D).setFontWeights(fws2D)
+      .setFontSize(10);
   }
   sheet.getRange(budgetAllRowsA.length, 1, 1, colCountA)
     .setBackground("#2d2d2d").setFontColor("#ffffff").setFontWeight("bold").setFontSize(11)
@@ -6777,13 +7381,15 @@ function writeBestellungSheetAt(sheet, startRow, title, columns, rows, headerBg,
   }
   let colCount = headerRow.length;
 
-  // Tier-Info extrahieren (Index 8 enthält "TOP7"/"MID"/"REST" wenn vorhanden)
-  // Rows haben unterschiedliche Längen (8-12 Felder), die ersten 8 sind die Datenspalten
+  // Tier-Info extrahieren — Tier liegt NACH den Datenspalten:
+  //   China (colCount=7): Index 7
+  //   Amanda (colCount=8): Index 8
   let tiers = [];
   let dataRows = rows.map(r => {
-    let tier = (r.length > 8 && typeof r[8] === "string" && (r[8] === "TOP7" || r[8] === "MID" || r[8] === "REST")) ? r[8] : null;
+    const tierVal = r.length > colCount ? r[colCount] : null;
+    const tier = (typeof tierVal === "string" && (tierVal === "TOP7" || tierVal === "MID" || tierVal === "REST")) ? tierVal : null;
     tiers.push(tier);
-    return r.slice(0, 8);  // nur die 8 Datenspalten behalten
+    return r.slice(0, colCount);  // genau colCount Spalten — passend zur Header-Anzahl
   });
 
   let totalBedarf = dataRows.reduce((s, r) => s + (r[r.length - 1] || 0), 0);
@@ -6819,32 +7425,41 @@ function writeBestellungSheetAt(sheet, startRow, title, columns, rows, headerBg,
   const F_REST  = "#f1f8e9"; const F_RESTB = "#dcedc8";
   const FC_TOP7 = "#f9a825"; const FC_MID  = "#1565c0"; const FC_REST = "#558b2f";
 
-  for (let i = 2; i < allRows.length - 1; i++) {
-    let row = allRows[i];
-    let bedarf = row[row.length - 1];
-    let tier = tiers[i - 2];  // tiers-Array ist 0-basiert, Datenzeilen starten bei i=2
-    let isTop7 = (tier === "TOP7");
-    let isMid  = (tier === "MID");
-    let bg;
-    if (isTop7)     bg = (i % 2 === 0) ? F_TOP7  : F_TOP7B;
-    else if (isMid) bg = (i % 2 === 0) ? F_MID   : F_MIDB;
-    else            bg = (i % 2 === 0) ? F_REST  : F_RESTB;
-    sheet.getRange(startRow + i, 1, 1, colCount).setBackground(bg).setFontSize(10);
-    if (isTop7) sheet.getRange(startRow + i, 1, 1, colCount).setFontWeight("bold");
-
-    if (typeof bedarf === "number" && bedarf > 0) {
-      let bedarfBg = isTop7 ? FC_TOP7 : (isMid ? FC_MID : FC_REST);
-      sheet.getRange(startRow + i, colCount)
-        .setBackground(bedarfBg).setFontColor("#ffffff").setFontWeight("bold")
-        .setHorizontalAlignment("center");
+  // BATCH-Render: alle Backgrounds/FontColors/FontWeights in 2D-Array sammeln
+  const dataRowCnt = allRows.length - 3;
+  if (dataRowCnt > 0) {
+    const lagerCol = (colCount === 8) ? 5 : 4;
+    const bgs2D = [], fcs2D = [], fws2D = [];
+    for (let i = 2; i < allRows.length - 1; i++) {
+      const row = allRows[i];
+      const bedarf = row[row.length - 1];
+      const tier = tiers[i - 2];
+      const isTop7 = (tier === "TOP7");
+      const isMid  = (tier === "MID");
+      let bg;
+      if (isTop7)     bg = (i % 2 === 0) ? F_TOP7  : F_TOP7B;
+      else if (isMid) bg = (i % 2 === 0) ? F_MID   : F_MIDB;
+      else            bg = (i % 2 === 0) ? F_REST  : F_RESTB;
+      const fw = isTop7 ? "bold" : "normal";
+      const hasBest = (typeof bedarf === "number" && bedarf > 0);
+      const lager = row[lagerCol - 1];
+      const isLagerZero = (typeof lager === "number" && lager === 0);
+      const bedarfBg = isTop7 ? FC_TOP7 : (isMid ? FC_MID : FC_REST);
+      const bgRow = [], fcRow = [], fwRow = [];
+      for (let c = 0; c < colCount; c++) {
+        if (c === lagerCol - 1 && isLagerZero) {
+          bgRow.push("#db4437"); fcRow.push("#ffffff"); fwRow.push("bold");
+        } else if (c === colCount - 1 && hasBest) {
+          bgRow.push(bedarfBg); fcRow.push("#ffffff"); fwRow.push("bold");
+        } else {
+          bgRow.push(bg); fcRow.push("#000000"); fwRow.push(fw);
+        }
+      }
+      bgs2D.push(bgRow); fcs2D.push(fcRow); fws2D.push(fwRow);
     }
-    let lagerCol = (colCount === 8) ? 5 : 4;
-    let lager = row[lagerCol - 1];
-    if (typeof lager === "number" && lager === 0) {
-      sheet.getRange(startRow + i, lagerCol)
-        .setBackground("#db4437").setFontColor("#ffffff").setFontWeight("bold")
-        .setHorizontalAlignment("center");
-    }
+    sheet.getRange(startRow + 2, 1, dataRowCnt, colCount)
+      .setBackgrounds(bgs2D).setFontColors(fcs2D).setFontWeights(fws2D)
+      .setFontSize(10);
   }
 
   // Subtotal-Zeile
@@ -7920,7 +8535,31 @@ function writeTopsellertabelleTS_(sheet, startRow, title, ranking, typeOrder, he
     const sectionIsPremium = items.length > 0 && items[0].isPremium;
 
     for (const p of items) {
-      const ziel      = p.tier === "TOP7" ? (sectionIsPremium ? 2000 : 1000) : p.tier === "MID" ? 500 : p.tier === "REST" ? 300 : 0;
+      // Dynamisches Ziel: max(Tier-Floor, 60T-Verbrauch × Sicherheitsfaktor)
+      // Faktoren pro Tier: TOP7×2.0 (~120d), MID×1.5 (~90d), REST×1.0 (~60d)
+      // Premium-TOP7 (Standard Tapes Russisch + Tapes 55/65cm Wellig + Bondings 65cm + Genius Weft 65cm Wellig)
+      // verdoppelt den Tier-Floor auf 2000g (Stockout-Schutz für Bestseller-Categories)
+      let ziel;
+      if (!p.tier || p.tier === "KAUM") {
+        ziel = 0;
+      } else {
+        const tierFloor = p.tier === "TOP7" ? (sectionIsPremium ? 2000 : 1000) :
+                          p.tier === "MID"  ? 500 :
+                          p.tier === "REST" ? 300 : 0;
+        const safetyFactor = p.tier === "TOP7" ? 2.0 :
+                             p.tier === "MID"  ? 1.5 :
+                             p.tier === "REST" ? 1.0 : 0;
+        const g30dForRate    = p.grams_sold_30 || 0;
+        const g60altForRate  = p.g60d_alt || 0;
+        const rateNeu        = g30dForRate / 30;
+        const rateAlt        = g60altForRate / 60;
+        // Ausverkauf-Korrektur: wenn 30d-rate stark unter 60d_alt → 60d_alt verwenden
+        const rateEffektivForZiel = (rateAlt > 0.5 && rateNeu < rateAlt * 0.6) ? rateAlt : rateNeu;
+        const verbrauch60T = rateEffektivForZiel * 60;
+        const dynamic = verbrauch60T * safetyFactor;
+        ziel = Math.max(tierFloor, dynamic);
+        ziel = Math.round(ziel / 100) * 100;
+      }
       const rangKlasse = p.tier === "TOP7" ? (sectionIsPremium ? "Top 1–10" : "Top 1–7") : p.tier === "MID" ? (sectionIsPremium ? "Rang 11–20" : "Rang 8–14") : p.tier === "REST" ? "Rest" : "Kaum verkauft";
       const g30 = p.grams_sold_30 || 0;
 
@@ -8076,9 +8715,11 @@ function saveTopsellerdatenTS_(welligRanking, russischRanking) {
       const pipeIdx = key.indexOf("|");
       const typ = pipeIdx >= 0 ? key.substring(0, pipeIdx) : key;
       const länge = pipeIdx >= 0 ? key.substring(pipeIdx + 1) : "";
-      // Clip-Ins: Schlüssel mit Variante, z.B. "Clip-ins 100g"
-      // Andere Typen: nur typ (ohne Länge) – Länge ist für Amanda immer 60cm
-      const typKey = (typ === "Clip-ins" && länge) ? (typ + " " + länge) : typ;
+      // Schlüssel mit Länge wenn vorhanden — wichtig für Wellig (Tapes 45/55/65/85cm,
+      // Bondings 65/85cm), damit z.B. 2E DUNKELBRAUNE 45cm (MID) nicht durch
+      // 2E DUNKELBRAUNE 55cm (TOP7) überschrieben wird.
+      // Bei Amanda haben alle die gleiche Länge "60cm" → der Suffix ist hier neutral.
+      const typKey = länge ? (typ + " " + länge) : typ;
       if (!data[qualityKey][typKey]) data[qualityKey][typKey] = {};
       for (const p of items) {
         if (p.farbe) {
@@ -8102,7 +8743,7 @@ function saveTopsellerdatenTS_(welligRanking, russischRanking) {
 
 // Gecachte Varianten von getRangTS_ und getTopsellertierTS_ für Performance-kritische Schleifen
 // (kein wiederholter PropertiesService-Aufruf, data wird einmal übergeben)
-function getRangTS_cached_(data, quality, typ, farbe, clipVariant) {
+function getRangTS_cached_(data, quality, typ, farbe, clipVariant, länge) {
   if (!data) return 999;
   try {
     function extractRang(val) { return val && typeof val === "object" ? (val.rang || 999) : 999; }
@@ -8120,25 +8761,34 @@ function getRangTS_cached_(data, quality, typ, farbe, clipVariant) {
       if (hit) return extractRang(hit);
       return 999;
     }
+    // Mit Länge zuerst suchen (z.B. "Tapes 45cm"), dann Fallback auf typ allein
+    if (länge) {
+      const typKeyLen = typ + " " + länge;
+      var hit2 = findByPrefix(data[quality] && data[quality][typKeyLen], farbe);
+      if (hit2) return extractRang(hit2);
+    }
     var hit = findByPrefix(data[quality] && data[quality][typ], farbe);
     if (hit) return extractRang(hit);
     const altTyp = (typ === "Standard Tapes") ? "Tapes" : (typ === "Tapes" ? "Standard Tapes" : null);
     if (altTyp) {
+      if (länge) {
+        const altWithLen = altTyp + " " + länge;
+        var hitAL = findByPrefix(data[quality] && data[quality][altWithLen], farbe);
+        if (hitAL) return extractRang(hitAL);
+      }
       hit = findByPrefix(data[quality] && data[quality][altTyp], farbe);
       if (hit) return extractRang(hit);
     }
     return 999;
   } catch(e) { return 999; }
 }
-function getTopsellertierTS_cached_(data, quality, typ, farbe, clipVariant) {
+function getTopsellertierTS_cached_(data, quality, typ, farbe, clipVariant, länge) {
   if (!data) return "REST";
   try {
     function extractTier(val) { return val && typeof val === "object" ? val.tier : val; }
-    // Prefix-Match Fallback: findet "#BITTER CACAO" auch wenn Key "#BITTER CACAO STANDARD" ist (oder umgekehrt)
     function findByPrefix(bucket, key) {
       if (!bucket) return null;
       if (bucket[key]) return bucket[key];
-      // Suche: gespeicherter Key beginnt mit lookup-Key oder umgekehrt
       for (var k in bucket) {
         if (k.indexOf(key + " ") === 0 || key.indexOf(k + " ") === 0) return bucket[k];
       }
@@ -8152,74 +8802,38 @@ function getTopsellertierTS_cached_(data, quality, typ, farbe, clipVariant) {
       if (hit) return extractTier(hit);
       return "REST";
     }
+    // Mit Länge zuerst (z.B. "Tapes 45cm"), dann Fallback auf typ allein
+    if (länge) {
+      const typKeyLen = typ + " " + länge;
+      var hitL = findByPrefix(data[quality] && data[quality][typKeyLen], farbe);
+      if (hitL) return extractTier(hitL);
+    }
     var hit = findByPrefix(data[quality] && data[quality][typ], farbe);
     if (hit) return extractTier(hit);
     const altTyp = (typ === "Standard Tapes") ? "Tapes" : (typ === "Tapes" ? "Standard Tapes" : null);
     if (altTyp) {
+      if (länge) {
+        const altKey = altTyp + " " + länge;
+        var hitAL = findByPrefix(data[quality] && data[quality][altKey], farbe);
+        if (hitAL) return extractTier(hitAL);
+      }
       hit = findByPrefix(data[quality] && data[quality][altTyp], farbe);
       if (hit) return extractTier(hit);
     }
     return "REST";
   } catch(e) { return "REST"; }
 }
-function getRangTS_(quality, typ, farbe, clipVariant) {
+function getRangTS_(quality, typ, farbe, clipVariant, länge) {
   const raw_ts = PropertiesService.getScriptProperties();
   const rawTsData = loadChunked_(raw_ts, "TOPSELLER_DATA");
-  const raw = rawTsData ? JSON.stringify(rawTsData) : null;
-  if (!raw) return 999;
-  try {
-    const data = JSON.parse(raw);
-    function extractRang(val) { return val && typeof val === "object" ? (val.rang || 999) : 999; }
-    if (typ === "Clip-ins" && clipVariant > 0) {
-      const typKey = "Clip-ins " + clipVariant + "g";
-      if (data[quality] && data[quality][typKey] && data[quality][typKey][farbe]) {
-        return extractRang(data[quality][typKey][farbe]);
-      }
-      return 999;
-    }
-    if (data[quality] && data[quality][typ] && data[quality][typ][farbe]) {
-      return extractRang(data[quality][typ][farbe]);
-    }
-    const altTyp = (typ === "Standard Tapes") ? "Tapes" : (typ === "Tapes" ? "Standard Tapes" : null);
-    if (altTyp && data[quality] && data[quality][altTyp] && data[quality][altTyp][farbe]) {
-      return extractRang(data[quality][altTyp][farbe]);
-    }
-    return 999;
-  } catch(e) { return 999; }
+  if (!rawTsData) return 999;
+  return getRangTS_cached_(rawTsData, quality, typ, farbe, clipVariant, länge);
 }
-function getTopsellertierTS_(quality, typ, farbe, clipVariant) {
+function getTopsellertierTS_(quality, typ, farbe, clipVariant, länge) {
   const raw_ts = PropertiesService.getScriptProperties();
   const rawTsData = loadChunked_(raw_ts, "TOPSELLER_DATA");
-  const raw = rawTsData ? JSON.stringify(rawTsData) : null;
-  if (!raw) return "REST";
-  try {
-    const data = JSON.parse(raw);
-    function extractTier(val) { return val && typeof val === "object" ? val.tier : val; }
-    // Clip-Ins: Lookup mit Variante (z.B. "Clip-ins 100g")
-    if (typ === "Clip-ins" && clipVariant > 0) {
-      const typKey = "Clip-ins " + clipVariant + "g";
-      if (data[quality] && data[quality][typKey] && data[quality][typKey][farbe]) {
-        return extractTier(data[quality][typKey][farbe]);
-      }
-      // Fallback: ohne Variante (alte Daten)
-      if (data[quality] && data[quality]["Clip-ins"] && data[quality]["Clip-ins"][farbe]) {
-        return extractTier(data[quality]["Clip-ins"][farbe]);
-      }
-      return "REST";
-    }
-    // Hilfsfunktion: Wert aus TOPSELLER_DATA lesen (unterstützt altes string und neues {tier,rang})
-    function extractTier(val) { return val && typeof val === "object" ? val.tier : val; }
-    // Direkter Lookup
-    if (data[quality] && data[quality][typ] && data[quality][typ][farbe]) {
-      return extractTier(data[quality][typ][farbe]);
-    }
-    // Fallback: Standard Tapes <-> Tapes (Amanda vs. China Benennung)
-    const altTyp = (typ === "Standard Tapes") ? "Tapes" : (typ === "Tapes" ? "Standard Tapes" : null);
-    if (altTyp && data[quality] && data[quality][altTyp] && data[quality][altTyp][farbe]) {
-      return extractTier(data[quality][altTyp][farbe]);
-    }
-    return "REST";
-  } catch(e) { return "REST"; }
+  if (!rawTsData) return "REST";
+  return getTopsellertierTS_cached_(rawTsData, quality, typ, farbe, clipVariant, länge);
 }
 
 // Prio-Kategorien mit Mindestziel 1000g:
@@ -9365,6 +9979,9 @@ function onOpen() {
     .addItem('4. Bestellung China (Usbekisch) generieren', 'createBestellungChina')
     .addItem('5. Bestellung Amanda (Russisch) generieren', 'createBestellungAmanda')
     .addSeparator()
+    .addItem('🛒 Vorratskauf-Modus AKTIVIEREN (Budget voll ausschöpfen)', 'aktiviereVorratskauf')
+    .addItem('🛒 Vorratskauf-Modus DEAKTIVIEREN', 'deaktiviereVorratskauf')
+    .addSeparator()
     .addItem('Lagerbestand abrufen (Shopify)', 'fetchShopifyInventoryData')
     .addSeparator()
     .addItem('🔍 Debug: VA-Produktdaten analysieren', 'debugVAProductData')
@@ -9373,6 +9990,28 @@ function onOpen() {
     .addItem('🔧 CATALOG Debug-Übersicht (Snapshot-Tab)', 'debugCatalogV2')
     .addItem('⚙️ Budget-Auto-Update aktivieren', 'installBudgetTriggerWithAlert_')
     .addToUi();
+}
+
+/**
+ * Vorratskauf-Modus aktivieren: bei der nächsten Berechnung von
+ * createBestellungChina/Amanda wird das gesamte Budget verbraucht (Phase E).
+ *
+ * Sinn: Wenn man bewusst Lager auffüllen will (z.B. bei großem Budget),
+ * statt dass DoSA bei den 84d/70d/56d-Reichweiten sättigt und Restbudget liegen lässt.
+ */
+function aktiviereVorratskauf() {
+  PropertiesService.getScriptProperties().setProperty("VORRATSKAUF_MODUS", "true");
+  safeAlert_("🛒 VORRATSKAUF-MODUS AKTIVIERT!\n\n" +
+    "Bei der nächsten Bestellung (China oder Amanda) wird das GESAMTE Budget verbraucht.\n\n" +
+    "Phase A-D bleiben aktiv (Topseller-Priorisierung). Wenn Budget übrig: Phase E verteilt iterativ\n" +
+    "auf alle aktiven Produkte — TOP7 zuerst, dann MID, dann REST.\n\n" +
+    "→ Nutze das z.B. wenn du 100kg+ Budget hast und alle Topseller stark auffüllen willst.\n\n" +
+    "Vergiss nicht zu deaktivieren wenn du wieder normal bestellen willst!");
+}
+
+function deaktiviereVorratskauf() {
+  PropertiesService.getScriptProperties().deleteProperty("VORRATSKAUF_MODUS");
+  safeAlert_("🛒 Vorratskauf-Modus deaktiviert.\n\nNächste Bestellung wieder normal (DoSA bis 84d/70d/56d Reichweite).");
 }
 
 // Wrapper der installBudgetTrigger aufruft und Feedback gibt

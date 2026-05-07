@@ -173,7 +173,10 @@ export default async function ArchiveDetailPage({
           {t(locale, "shipping.pack_proof")}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {(["products_invoice", "products_in_box", "package_on_scale"] as const).map((type) => {
+          {/* Nur Foto-Typen anzeigen die tatsächlich existieren —
+             unterstützt sowohl neue (nur products_invoice) als auch alte
+             archivierte sessions mit allen 3 typen. */}
+          {(Object.keys(photoMap) as Array<"products_invoice" | "products_in_box" | "package_on_scale">).map((type) => {
             const labelKey =
               type === "products_invoice"
                 ? "shipping.photo_invoice"

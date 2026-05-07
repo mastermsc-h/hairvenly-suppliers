@@ -34,7 +34,7 @@ interface ExpectedItem {
 
 type FlashState = { kind: "match" | "mismatch" | "overflow" | null; message?: string };
 
-const PHOTO_TYPES = ["products_invoice", "products_in_box", "package_on_scale"] as const;
+const PHOTO_TYPES = ["products_invoice"] as const;
 type PhotoType = (typeof PHOTO_TYPES)[number];
 
 function detectAttributes(title: string): {
@@ -692,11 +692,11 @@ export default function PackMode({
                 Schritt 2 von 3
               </div>
               <div className="text-xl font-black text-amber-900 mt-1">
-                Beweis-Fotos aufnehmen
+                Beweis-Foto aufnehmen
               </div>
               <div className="text-xs text-amber-800 mt-2 leading-relaxed">
                 Alle Artikel sind bestätigt ✓<br />
-                Bitte 3 Fotos machen: Artikel + Rechnung, Artikel im Karton, Karton auf Waage.
+                Bitte ein Foto der Produkte mit der Rechnung machen. Mehrere Aufnahmen sind möglich.
               </div>
             </div>
           )}
@@ -1094,7 +1094,7 @@ export default function PackMode({
                   {t(locale, "shipping.photos_skip_button")}
                 </button>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 {PHOTO_TYPES.map((type, idx) => {
                   const nextIdx = PHOTO_TYPES.findIndex((t) => (photos[t]?.length ?? 0) === 0);
                   const isNext = idx === nextIdx;
@@ -1102,7 +1102,7 @@ export default function PackMode({
                     <PhotoStation
                       key={type}
                       type={type}
-                      label={t(locale, `shipping.photo_${type === "products_invoice" ? "invoice" : type === "products_in_box" ? "in_box" : "on_scale"}`)}
+                      label={t(locale, "shipping.photo_invoice")}
                       photos={photos[type] ?? []}
                       onPhoto={handlePhoto}
                       onDelete={handleDeletePhoto}
