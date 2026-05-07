@@ -551,6 +551,16 @@ export async function completePackSession(sessionId: string): Promise<{
     })
     .eq("id", sessionId);
 
+  // Demo-Session: kein Shopify-Call, direkt auf 'shipped' setzen
+  if (!session.shopify_order_id || session.order_name?.startsWith("#DEMO-")) {
+    await supabase
+      .from("pack_sessions")
+      .update({ status: "shipped", fulfilled_at: new Date().toISOString() })
+      .eq("id", sessionId);
+    revalidatePath("/pack");
+    return { success: true };
+  }
+
   // Auto-Fulfill in Shopify (Variante A)
   // Wir brauchen die fulfillmentOrder-IDs aus dem Live-Order
   const order = await fetchOrderForPack(session.order_name);
@@ -789,6 +799,71 @@ export async function cancelPackSession(
   revalidatePath("/pack");
   revalidatePath(`/pack/${sessionId}`);
   return { success: true };
+}
+
+/**
+ * Erstellt eine Demo-Bestellung zum Testen des Pack-Flows ohne echte
+ * Shopify-Bestellung. Wird mit prefix '#DEMO-' kenntlich gemacht.
+ *
+ * Liefert die order_name zurück (z.B. '#DEMO-1715187234').
+ */
+export async function createDemoSession(): Promise<{
+  success: boolean;
+  orderName?: string;
+  error?: string;
+}> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) return { success: false, error: "Forbidden" };
+
+  const supabase = await createClient();
+  const ts = Math.floor(Date.now() / 1000);
+  const orderName = `#DEMO-${ts}`;
+
+  // Hardcoded demo items mit fake-barcodes — Mitarbeiter kann sie manuell
+  // bestätigen oder den barcode-text via input/USB-scanner eintippen.
+  const expected: ExpectedItem[] = [
+    {
+      variantId: null,
+      barcode: "10000001",
+      title: "Demo: #LATTE BROWN STANDARD RUSSISCHE TAPE EXTENSIONS GLATT",
+      variantTitle: "25 (10 Tapes)",
+      quantity: 1,
+      imageUrl: null,
+      isExtension: true,
+    },
+    {
+      variantId: null,
+      barcode: "10000002",
+      title: "Demo: #EBONY US WELLIGE BONDINGS 65CM",
+      variantTitle: "25 Strähnen",
+      quantity: 2,
+      imageUrl: null,
+      isExtension: true,
+    },
+    {
+      variantId: null,
+      barcode: "10000003",
+      title: "Demo: Tape & Bonding Löser für Extensions",
+      variantTitle: null,
+      quantity: 1,
+      imageUrl: null,
+      isExtension: false,
+    },
+  ];
+
+  const { error } = await supabase.from("pack_sessions").insert({
+    order_name: orderName,
+    shopify_order_id: null, // ← markiert als demo
+    status: "in_progress",
+    started_at: new Date().toISOString(),
+    expected_items: expected,
+    packed_by: profile.id,
+    photos_skipped: false,
+    photos_skip_reason: null,
+  });
+
+  if (error) return { success: false, error: error.message };
+  return { success: true, orderName };
 }
 
 /**

@@ -5,6 +5,7 @@ import { fetchUnfulfilledPaidOrders, type PackOrder } from "@/lib/shopify";
 import { createClient } from "@/lib/supabase/server";
 import PackList from "./pack-list";
 import BackfillButton from "./backfill-button";
+import DemoButton from "./demo-button";
 import OrderQrScanner from "./order-qr-scanner";
 
 export const dynamic = "force-dynamic";
@@ -96,6 +97,7 @@ export default async function PackPage() {
           )}
           <OrderQrScanner />
           <BackfillButton />
+          <DemoButton />
         </div>
       </header>
 
