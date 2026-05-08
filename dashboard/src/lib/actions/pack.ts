@@ -759,15 +759,25 @@ export async function resetPackStats(
  * Pack-Vorgang abbrechen — alle Scans auf "reset", Fotos löschen, Session zurück auf "open".
  * User kann die Bestellung danach erneut von vorn packen.
  * Audit-Log der Scans bleibt mit status='reset' erhalten.
+ *
+ * Optional: kommentar wird an die Shopify-Order-Note angehängt.
  */
 export async function cancelPackSession(
   sessionId: string,
+  comment?: string,
 ): Promise<{ success: boolean; error?: string }> {
   const profile = await requireProfile();
   if (!hasFeature(profile, "shipping")) {
     return { success: false, error: "Forbidden" };
   }
   const supabase = await createClient();
+
+  // 0. Order-Info laden für Shopify-Note
+  const { data: session } = await supabase
+    .from("pack_sessions")
+    .select("shopify_order_id, order_name")
+    .eq("id", sessionId)
+    .single();
 
   // 1. Alle erfolgreichen Scans auf "reset" setzen
   await supabase
@@ -787,7 +797,18 @@ export async function cancelPackSession(
     await supabase.from("pack_photos").delete().eq("session_id", sessionId);
   }
 
-  // 3. Session-Status zurück auf "open"
+  // 3. Shopify-Note appendieren falls echte Order + Kommentar vorhanden
+  if (session?.shopify_order_id && comment && comment.trim()) {
+    const orderGid = `gid://shopify/Order/${session.shopify_order_id}`;
+    const author = profile.display_name || profile.username || null;
+    const fullComment = `Pack-Vorgang abgebrochen: ${comment.trim()}`;
+    const noteRes = await appendOrderNote(orderGid, fullComment, author);
+    if (!noteRes.success) {
+      console.warn("Cancel-Note konnte nicht angefügt werden:", noteRes.error);
+    }
+  }
+
+  // 4. Session-Status zurück auf "open"
   await supabase
     .from("pack_sessions")
     .update({

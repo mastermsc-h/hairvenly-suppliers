@@ -436,27 +436,31 @@ export default function PackMode({
     [sessionId, status, locale, refreshHistory, bigSuccess, expectedItems],
   );
 
-  const handleCancelSession = useCallback(() => {
-    if (typeof window !== "undefined") {
-      const ok = window.confirm(
-        "Pack-Vorgang wirklich abbrechen? Alle Scans + Fotos werden gelöscht. Audit-Log bleibt erhalten. Die Bestellung kann danach erneut bearbeitet werden.",
-      );
-      if (!ok) return;
-    }
-    startTransition(async () => {
-      const res = await cancelPackSession(sessionId);
-      if (res.success) {
-        setCounts({});
-        setPhotos({});
-        setBigSuccess(null);
-        setStatus("open");
-        setManualForms({});
-        setFulfillError(null);
-        setFlash({ kind: null });
-        await refreshHistory();
-      }
-    });
-  }, [sessionId, refreshHistory]);
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+
+  const submitCancelSession = useCallback(
+    (comment: string) => {
+      setCancelModalOpen(false);
+      startTransition(async () => {
+        const res = await cancelPackSession(sessionId, comment);
+        if (res.success) {
+          setCounts({});
+          setPhotos({});
+          setBigSuccess(null);
+          setStatus("open");
+          setManualForms({});
+          setFulfillError(null);
+          setFlash({ kind: null });
+          // Redirect: sonst flippt getOrCreatePackSession den status sofort
+          // wieder auf 'in_progress' beim naechsten reload.
+          if (typeof window !== "undefined") window.location.href = "/pack";
+        } else {
+          alert(`Fehler: ${res.error ?? "unbekannt"}`);
+        }
+      });
+    },
+    [sessionId],
+  );
 
   // Statt confirm() öffnet ein Modal mit Kommentar-Textarea
   const [stockMissingModalOpen, setStockMissingModalOpen] = useState(false);
@@ -841,7 +845,7 @@ export default function PackMode({
                 Ware nicht vorhanden
               </button>
               <button
-                onClick={handleCancelSession}
+                onClick={() => setCancelModalOpen(true)}
                 disabled={isPending}
                 className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-red-200 text-red-700 text-xs font-medium hover:bg-red-50 hover:border-red-300 transition disabled:opacity-50"
               >
@@ -1350,7 +1354,91 @@ export default function PackMode({
           isPending={isPending}
         />
       )}
+
+      {/* Modal: Pack-Vorgang abbrechen mit optionalem Kommentar */}
+      {cancelModalOpen && (
+        <CancelSessionModal
+          orderName={orderName}
+          onClose={() => setCancelModalOpen(false)}
+          onSubmit={submitCancelSession}
+          isPending={isPending}
+        />
+      )}
     </>
+  );
+}
+
+function CancelSessionModal({
+  orderName,
+  onClose,
+  onSubmit,
+  isPending,
+}: {
+  orderName: string;
+  onClose: () => void;
+  onSubmit: (comment: string) => void;
+  isPending: boolean;
+}) {
+  const [comment, setComment] = useState("");
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div>
+            <div className="text-lg font-bold text-neutral-900 flex items-center gap-2">
+              <X size={20} />
+              Pack-Vorgang abbrechen
+            </div>
+            <div className="text-sm text-neutral-600 mt-1">
+              {orderName} — alle Scans und Fotos werden zurückgesetzt.
+            </div>
+          </div>
+          <button onClick={onClose} className="text-neutral-400 hover:text-neutral-700 shrink-0" aria-label="Schließen">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-3 mb-4 text-xs text-neutral-700 space-y-1">
+          <div>• Alle bestätigten Scans + Fotos werden gelöscht</div>
+          <div>• Audit-Log bleibt erhalten (Scans als „reset"-Events)</div>
+          <div>• Bestellung kann danach erneut von vorn gepackt werden</div>
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-neutral-600 uppercase tracking-wide block mb-1">
+            Grund <span className="font-normal text-neutral-400">(optional, wird in Shopify-Order-Notiz gespeichert)</span>
+          </label>
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            rows={3}
+            autoFocus
+            placeholder="z.B. Falsche Bestellung gepackt, Kunde wollte stornieren, Pause"
+            className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900 resize-none"
+          />
+        </div>
+
+        <div className="flex items-center justify-end gap-2 mt-5">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isPending}
+            className="px-4 py-2 rounded-lg text-sm text-neutral-700 hover:bg-neutral-100 disabled:opacity-50"
+          >
+            Abbrechen
+          </button>
+          <button
+            type="button"
+            onClick={() => onSubmit(comment)}
+            disabled={isPending}
+            className="px-4 py-2 rounded-lg bg-neutral-900 text-white text-sm font-semibold hover:bg-neutral-700 transition disabled:opacity-50"
+          >
+            {isPending ? "Wird abgebrochen…" : "Pack-Vorgang abbrechen"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
