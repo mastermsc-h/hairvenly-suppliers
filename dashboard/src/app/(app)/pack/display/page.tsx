@@ -13,11 +13,17 @@ export default async function PackDisplayPage() {
 
   // Neueste aktiv gepackte oder gerade fertig gestellte Session
   // (shipped wird hier nicht angezeigt — dann zurück zum Wartebildschirm)
+  // Stale-Filter: nur sessions die in den letzten 30 Minuten aktiv waren —
+  // sonst zeigt das Display alte vergessene Sessions aus April (etc.) wenn
+  // die aktuelle abgebrochen wird.
+  const STALE_MS = 30 * 60 * 1000;
+  const cutoff = new Date(Date.now() - STALE_MS).toISOString();
   const supabase = await createClient();
   const { data: activeSessions } = await supabase
     .from("pack_sessions")
     .select("id, order_name, status, expected_items, started_at, finished_at, packed_by, photos_skipped, photos_skip_reason, profiles:packed_by(display_name, username)")
     .in("status", ["in_progress", "verified"])
+    .gt("updated_at", cutoff)
     .order("updated_at", { ascending: false })
     .limit(1);
 

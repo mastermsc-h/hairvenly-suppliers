@@ -138,6 +138,7 @@ export default function PackDisplay({
           "id, order_name, status, expected_items, started_at, finished_at, packed_by, photos_skipped, photos_skip_reason, profiles:packed_by(display_name, username)",
         )
         .in("status", ["in_progress", "verified"])
+        .gt("updated_at", new Date(Date.now() - 30 * 60 * 1000).toISOString())
         .order("updated_at", { ascending: false })
         .limit(1);
       if (cancelled) return;
