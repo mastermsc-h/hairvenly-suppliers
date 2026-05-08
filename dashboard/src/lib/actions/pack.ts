@@ -761,6 +761,9 @@ export async function resetPackStats(
  * Audit-Log der Scans bleibt mit status='reset' erhalten.
  *
  * Optional: kommentar wird an die Shopify-Order-Note angehängt.
+ *
+ * REIHENFOLGE: Lokale DB-Updates zuerst (sicher), Shopify-Calls danach
+ * (können fehlschlagen ohne den lokalen Cancel zu blockieren).
  */
 export async function cancelPackSession(
   sessionId: string,
@@ -772,7 +775,7 @@ export async function cancelPackSession(
   }
   const supabase = await createClient();
 
-  // 0. Order-Info laden für Shopify-Note
+  // 0. Order-Info laden für spätere Shopify-Note
   const { data: session } = await supabase
     .from("pack_sessions")
     .select("shopify_order_id, order_name")
@@ -797,18 +800,7 @@ export async function cancelPackSession(
     await supabase.from("pack_photos").delete().eq("session_id", sessionId);
   }
 
-  // 3. Shopify-Note appendieren falls echte Order + Kommentar vorhanden
-  if (session?.shopify_order_id && comment && comment.trim()) {
-    const orderGid = `gid://shopify/Order/${session.shopify_order_id}`;
-    const author = profile.display_name || profile.username || null;
-    const fullComment = `Pack-Vorgang abgebrochen: ${comment.trim()}`;
-    const noteRes = await appendOrderNote(orderGid, fullComment, author);
-    if (!noteRes.success) {
-      console.warn("Cancel-Note konnte nicht angefügt werden:", noteRes.error);
-    }
-  }
-
-  // 4. Session-Status zurück auf "open"
+  // 3. Session-Status zurück auf "open" — VOR Shopify, falls Shopify failt
   await supabase
     .from("pack_sessions")
     .update({
@@ -818,8 +810,24 @@ export async function cancelPackSession(
     })
     .eq("id", sessionId);
 
+  // 4. Shopify-Note appendieren — bestlich nach DB-Update damit ein Shopify-
+  //    Fehler den lokalen Cancel nicht blockiert.
+  if (session?.shopify_order_id && comment && comment.trim()) {
+    try {
+      const orderGid = `gid://shopify/Order/${session.shopify_order_id}`;
+      const author = profile.display_name || profile.username || null;
+      const fullComment = `Pack-Vorgang abgebrochen: ${comment.trim()}`;
+      const noteRes = await appendOrderNote(orderGid, fullComment, author);
+      if (!noteRes.success) {
+        console.warn("Cancel-Note konnte nicht angefügt werden:", noteRes.error);
+      }
+    } catch (e) {
+      console.warn("Cancel-Note throw:", e instanceof Error ? e.message : String(e));
+    }
+  }
+
   revalidatePath("/pack");
-  revalidatePath(`/pack/${sessionId}`);
+  if (session?.order_name) revalidatePath(`/pack/${session.order_name.replace(/^#/, "")}`);
   return { success: true };
 }
 
@@ -940,25 +948,8 @@ export async function abortPackSessionStockMissing(
     .single();
   if (sErr || !session) return { success: false, error: "Session nicht gefunden" };
 
-  // 2. Shopify-Tag setzen + optional Note anhängen
-  if (session.shopify_order_id) {
-    const orderGid = `gid://shopify/Order/${session.shopify_order_id}`;
-    const tagRes = await addOrderTags(orderGid, ["Ware nicht vorhanden"]);
-    if (!tagRes.success) {
-      return { success: false, error: `Shopify-Tag konnte nicht gesetzt werden: ${tagRes.error}` };
-    }
-    if (comment && comment.trim()) {
-      const author = profile.display_name || profile.username || null;
-      const fullComment = `Ware nicht vorhanden: ${comment.trim()}`;
-      const noteRes = await appendOrderNote(orderGid, fullComment, author);
-      if (!noteRes.success) {
-        // Note-fehler ist nicht fatal — tag ist schon gesetzt
-        console.warn("Note konnte nicht angefügt werden:", noteRes.error);
-      }
-    }
-  }
-
-  // 3. Pack-Session resetten (genauso wie cancelPackSession)
+  // 2. Pack-Session lokal resetten — VOR Shopify-Calls damit ein Shopify-Fehler
+  //    den lokalen Cancel nicht blockiert.
   await supabase
     .from("pack_scans")
     .update({ status: "reset" })
@@ -983,6 +974,27 @@ export async function abortPackSessionStockMissing(
       finished_at: null,
     })
     .eq("id", sessionId);
+
+  // 3. Shopify-Tag + optional Note — non-fatal, Fehler werden geloggt
+  if (session.shopify_order_id) {
+    try {
+      const orderGid = `gid://shopify/Order/${session.shopify_order_id}`;
+      const tagRes = await addOrderTags(orderGid, ["Ware nicht vorhanden"]);
+      if (!tagRes.success) {
+        console.warn("Shopify-Tag konnte nicht gesetzt werden:", tagRes.error);
+      }
+      if (comment && comment.trim()) {
+        const author = profile.display_name || profile.username || null;
+        const fullComment = `Ware nicht vorhanden: ${comment.trim()}`;
+        const noteRes = await appendOrderNote(orderGid, fullComment, author);
+        if (!noteRes.success) {
+          console.warn("Note konnte nicht angefügt werden:", noteRes.error);
+        }
+      }
+    } catch (e) {
+      console.warn("Shopify-Calls beim Abort fehlgeschlagen:", e instanceof Error ? e.message : String(e));
+    }
+  }
 
   revalidatePath("/pack");
   revalidatePath(`/pack/${session.order_name}`);
