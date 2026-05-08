@@ -36,6 +36,10 @@ function detectAttributes(title: string, variantTitle: string | null) {
   else if (upper.includes("MINI TAPE") || upper.includes("MINI-TAPE"))
     method = { label: "MINI-TAPES", cls: "method-tapes" };
   else if (upper.includes("TAPE")) method = { label: "TAPES", cls: "method-tapes" };
+  else if (upper.includes("INVISIBLE") && upper.includes("TRESSE")) method = { label: "INVISIBLE TRESSE", cls: "method-invisible" };
+  else if (upper.includes("BUTTERFLY") && upper.includes("WEFT")) method = { label: "INVISIBLE TRESSE", cls: "method-invisible" };
+  else if (upper.includes("GENIUS") && upper.includes("TRESSE")) method = { label: "GENIUS TRESSE", cls: "method-genius" };
+  else if (upper.includes("CLASSIC") && upper.includes("TRESSE")) method = { label: "CLASSIC TRESSE", cls: "method-tressen" };
   else if (upper.includes("TRESSE")) method = { label: "TRESSEN", cls: "method-tressen" };
   else if (upper.includes("CLIP")) method = { label: "CLIP-IN", cls: "method-clipin" };
   else if (upper.includes("PONYTAIL")) method = { label: "PONYTAIL", cls: "method-ponytail" };
@@ -173,11 +177,13 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
         }
-        .method-bondings { background: #c2410c !important; }
-        .method-tapes    { background: #1d4ed8 !important; }
-        .method-tressen  { background: #15803d !important; }
-        .method-clipin   { background: #6d28d9 !important; }
-        .method-ponytail { background: #be185d !important; }
+        .method-bondings  { background: #c2410c !important; }
+        .method-tapes     { background: #1d4ed8 !important; }
+        .method-tressen   { background: #15803d !important; }
+        .method-invisible { background: #7e22ce !important; }
+        .method-genius    { background: #0f766e !important; }
+        .method-clipin    { background: #6d28d9 !important; }
+        .method-ponytail  { background: #be185d !important; }
         .tag-secondary {
           display: inline-block;
           padding: 3px 8px;

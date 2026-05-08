@@ -42,6 +42,10 @@ function detectAttributes(title: string): {
   else if (upper.includes("MINI TAPE") || upper.includes("MINI-TAPE"))
     method = { label: "MINI-TAPES", cls: "bg-blue-600" };
   else if (upper.includes("TAPE")) method = { label: "TAPES", cls: "bg-blue-600" };
+  else if (upper.includes("INVISIBLE") && upper.includes("TRESSE")) method = { label: "INVISIBLE TRESSE", cls: "bg-purple-600" };
+  else if (upper.includes("BUTTERFLY") && upper.includes("WEFT")) method = { label: "INVISIBLE TRESSE", cls: "bg-purple-600" };
+  else if (upper.includes("GENIUS") && upper.includes("TRESSE")) method = { label: "GENIUS TRESSE", cls: "bg-teal-600" };
+  else if (upper.includes("CLASSIC") && upper.includes("TRESSE")) method = { label: "CLASSIC TRESSE", cls: "bg-green-600" };
   else if (upper.includes("TRESSE")) method = { label: "TRESSEN", cls: "bg-green-600" };
   else if (upper.includes("CLIP")) method = { label: "CLIP-IN", cls: "bg-violet-500" };
   else if (upper.includes("PONYTAIL")) method = { label: "PONYTAIL", cls: "bg-pink-600" };

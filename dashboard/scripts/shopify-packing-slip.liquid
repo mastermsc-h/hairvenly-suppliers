@@ -41,8 +41,10 @@
   }
   .method-bondings { background: #c2410c; }
   .method-tapes    { background: #1d4ed8; }
-  .method-tressen  { background: #15803d; }
-  .method-clipin   { background: #7c3aed; }
+  .method-tressen   { background: #15803d; }
+  .method-invisible { background: #7e22ce; }
+  .method-genius    { background: #0f766e; }
+  .method-clipin    { background: #7c3aed; }
   .method-ponytail { background: #be185d; }
 
   .tag-length {
@@ -169,6 +171,18 @@
       {% elsif upper_title contains "TAPE" %}
         {% assign method_label = "TAPES" %}
         {% assign method_class = "method-tapes" %}
+      {% elsif upper_title contains "INVISIBLE" and upper_title contains "TRESSE" %}
+        {% assign method_label = "INVISIBLE TRESSE" %}
+        {% assign method_class = "method-invisible" %}
+      {% elsif upper_title contains "BUTTERFLY" and upper_title contains "WEFT" %}
+        {% assign method_label = "INVISIBLE TRESSE" %}
+        {% assign method_class = "method-invisible" %}
+      {% elsif upper_title contains "GENIUS" and upper_title contains "TRESSE" %}
+        {% assign method_label = "GENIUS TRESSE" %}
+        {% assign method_class = "method-genius" %}
+      {% elsif upper_title contains "CLASSIC" and upper_title contains "TRESSE" %}
+        {% assign method_label = "CLASSIC TRESSE" %}
+        {% assign method_class = "method-tressen" %}
       {% elsif upper_title contains "TRESSE" %}
         {% assign method_label = "TRESSEN" %}
         {% assign method_class = "method-tressen" %}

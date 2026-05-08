@@ -125,6 +125,7 @@ export default async function ArchiveDetailPage({
                   year: "numeric",
                   hour: "2-digit",
                   minute: "2-digit",
+                  timeZone: "Europe/Berlin",
                 })
               : "—"}
           </div>
@@ -139,6 +140,7 @@ export default async function ArchiveDetailPage({
                   year: "numeric",
                   hour: "2-digit",
                   minute: "2-digit",
+                  timeZone: "Europe/Berlin",
                 })
               : "—"}
           </div>
@@ -153,6 +155,7 @@ export default async function ArchiveDetailPage({
                   year: "numeric",
                   hour: "2-digit",
                   minute: "2-digit",
+                  timeZone: "Europe/Berlin",
                 })
               : "—"}
           </div>
@@ -205,6 +208,7 @@ export default async function ArchiveDetailPage({
                         month: "2-digit",
                         hour: "2-digit",
                         minute: "2-digit",
+                        timeZone: "Europe/Berlin",
                       })}
                       {photo.takenBy && ` · ${photo.takenBy}`}
                     </div>
@@ -265,6 +269,7 @@ export default async function ArchiveDetailPage({
                     hour: "2-digit",
                     minute: "2-digit",
                     second: "2-digit",
+                    timeZone: "Europe/Berlin",
                   })}
                 </span>
                 <span className="text-neutral-700 w-24 shrink-0 truncate">{s.scanned_barcode}</span>
