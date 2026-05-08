@@ -21,7 +21,7 @@ export default async function PackDisplayPage() {
   const supabase = await createClient();
   const { data: activeSessions } = await supabase
     .from("pack_sessions")
-    .select("id, order_name, status, expected_items, started_at, finished_at, packed_by, photos_skipped, photos_skip_reason, profiles:packed_by(display_name, username)")
+    .select("id, order_name, status, expected_items, started_at, finished_at, packed_by, photos_skipped, photos_skip_reason, shopify_order_id, profiles:packed_by(display_name, username)")
     .in("status", ["in_progress", "verified"])
     .gt("updated_at", cutoff)
     .order("updated_at", { ascending: false })
@@ -55,6 +55,10 @@ export default async function PackDisplayPage() {
     : null;
   const packedBy = profileRel?.display_name || profileRel?.username || null;
 
+  // Shopify-Shop-Handle für Versandschein-Button auf Display
+  const shopDomain = process.env.SHOPIFY_SHOP_DOMAIN ?? "";
+  const shopHandle = shopDomain.replace(/\.myshopify\.com$/, "");
+
   return (
     <div className="min-h-screen bg-neutral-950 text-white">
       <PackDisplay
@@ -70,11 +74,14 @@ export default async function PackDisplayPage() {
                 finishedAt: session.finished_at,
                 photosSkipped: session.photos_skipped ?? false,
                 photosSkipReason: (session.photos_skip_reason as string | null) ?? null,
+                shopifyOrderId: session.shopify_order_id ? String(session.shopify_order_id) : null,
               }
             : null
         }
         initialCounts={initialCounts}
         initialPhotoCounts={initialPhotoCounts}
+        shopHandle={shopHandle || null}
+        shopDomain={shopDomain || null}
         locale={locale}
       />
     </div>

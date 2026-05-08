@@ -6,6 +6,7 @@ import { t, type Locale } from "@/lib/i18n";
 import Link from "next/link";
 import QRCode from "qrcode";
 import CelebrationOverlay from "../celebration-overlay";
+import { completePackSession } from "@/lib/actions/pack";
 import { CheckCircle2, ScanLine, Send, Package2, Camera, Pencil, Smartphone } from "lucide-react";
 
 interface ExpectedItem {
@@ -28,6 +29,7 @@ interface DisplaySession {
   finishedAt: string | null;
   photosSkipped: boolean;
   photosSkipReason: string | null;
+  shopifyOrderId: string | null;
 }
 
 function detectAttributes(title: string): {
@@ -77,11 +79,15 @@ export default function PackDisplay({
   initialSession,
   initialCounts,
   initialPhotoCounts,
+  shopHandle,
+  shopDomain,
   locale,
 }: {
   initialSession: DisplaySession | null;
   initialCounts: Record<string, number>;
   initialPhotoCounts: Record<string, number>;
+  shopHandle: string | null;
+  shopDomain: string | null;
   locale: Locale;
 }) {
   const [session, setSession] = useState<DisplaySession | null>(initialSession);
@@ -94,6 +100,27 @@ export default function PackDisplay({
   // Konfetti triggern wenn session frisch in 'verified'/'shipped' wechselt
   const [showCelebration, setShowCelebration] = useState(false);
   const lastShippedSessionRef = useRef<string | null>(null);
+  const [versendenPending, setVersendenPending] = useState(false);
+
+  function shopifyLabelUrl(shopifyOrderId: string | null): string | null {
+    if (!shopHandle || !shopDomain || !shopifyOrderId) return null;
+    return `https://admin.shopify.com/store/${shopHandle}/apps/dhl-shipping/${shopDomain}/createlabel/${shopifyOrderId}?id=${shopifyOrderId}`;
+  }
+
+  async function handleVersendenFromDisplay() {
+    if (!session) return;
+    // DHL-tab zuerst öffnen (user-click → kein popup-block)
+    const url = shopifyLabelUrl(session.shopifyOrderId);
+    if (url) window.open(url, "shopify-order", "noopener");
+    setVersendenPending(true);
+    try {
+      const res = await completePackSession(session.id);
+      if (!res.success) alert(`Fehler: ${res.error ?? "unbekannt"}`);
+      // Polling synct innerhalb 3s, dann triggert die Celebration via lastShippedSessionRef
+    } finally {
+      setVersendenPending(false);
+    }
+  }
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Trigger Celebration wenn session-status auf shipped/verified wechselt —
@@ -139,7 +166,7 @@ export default function PackDisplay({
       const { data: rows } = await supabase
         .from("pack_sessions")
         .select(
-          "id, order_name, status, expected_items, started_at, finished_at, packed_by, photos_skipped, photos_skip_reason, profiles:packed_by(display_name, username)",
+          "id, order_name, status, expected_items, started_at, finished_at, packed_by, photos_skipped, photos_skip_reason, shopify_order_id, profiles:packed_by(display_name, username)",
         )
         .in("status", ["in_progress", "verified"])
         .gt("updated_at", new Date(Date.now() - 30 * 60 * 1000).toISOString())
@@ -164,6 +191,7 @@ export default function PackDisplay({
         finishedAt: row.finished_at,
         photosSkipped: row.photos_skipped ?? false,
         photosSkipReason: (row.photos_skip_reason as string | null) ?? null,
+        shopifyOrderId: row.shopify_order_id ? String(row.shopify_order_id) : null,
       };
       setSession((prev) =>
         prev &&
@@ -256,7 +284,7 @@ export default function PackDisplay({
           const { data: rows } = await supabase
             .from("pack_sessions")
             .select(
-              "id, order_name, status, expected_items, started_at, finished_at, packed_by, photos_skipped, photos_skip_reason, profiles:packed_by(display_name, username)",
+              "id, order_name, status, expected_items, started_at, finished_at, packed_by, photos_skipped, photos_skip_reason, shopify_order_id, profiles:packed_by(display_name, username)",
             )
             .in("status", ["in_progress", "verified"])
             .order("updated_at", { ascending: false })
@@ -279,6 +307,7 @@ export default function PackDisplay({
             finishedAt: newSession.finished_at,
             photosSkipped: newSession.photos_skipped ?? false,
             photosSkipReason: (newSession.photos_skip_reason as string | null) ?? null,
+                shopifyOrderId: newSession.shopify_order_id ? String(newSession.shopify_order_id) : null,
           });
           // Counts neu laden
           const { data: scans } = await supabase
@@ -309,7 +338,7 @@ export default function PackDisplay({
             const { data: rows } = await supabase
               .from("pack_sessions")
               .select(
-                "id, order_name, status, expected_items, started_at, finished_at, packed_by, photos_skipped, photos_skip_reason, profiles:packed_by(display_name, username)",
+                "id, order_name, status, expected_items, started_at, finished_at, packed_by, photos_skipped, photos_skip_reason, shopify_order_id, profiles:packed_by(display_name, username)",
               )
               .in("status", ["in_progress", "verified"])
               .order("updated_at", { ascending: false })
@@ -327,6 +356,7 @@ export default function PackDisplay({
                 finishedAt: newSession.finished_at,
                 photosSkipped: newSession.photos_skipped ?? false,
                 photosSkipReason: (newSession.photos_skip_reason as string | null) ?? null,
+                shopifyOrderId: newSession.shopify_order_id ? String(newSession.shopify_order_id) : null,
               });
               const { data: scans } = await supabase
                 .from("pack_scans")
@@ -553,6 +583,17 @@ export default function PackDisplay({
                   <>
                     <CheckCircle2 className="mx-auto mb-3 text-white" size={64} />
                     <div className="text-4xl font-black text-white">{t(locale, "shipping.ready")}</div>
+                    {session.status !== "shipped" && (
+                      <button
+                        type="button"
+                        onClick={handleVersendenFromDisplay}
+                        disabled={versendenPending}
+                        className="mt-6 inline-flex items-center justify-center gap-3 px-8 py-4 rounded-2xl bg-white text-emerald-700 text-xl md:text-2xl font-black shadow-lg hover:bg-emerald-50 transition disabled:opacity-50"
+                      >
+                        <Send size={28} />
+                        {versendenPending ? "Wird versendet…" : "Versandschein drucken"}
+                      </button>
+                    )}
                   </>
                 ) : (
                   <div className="grid md:grid-cols-2 gap-6 items-center text-left">

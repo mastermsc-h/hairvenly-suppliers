@@ -378,11 +378,27 @@ export default function PackMode({
   useEffect(() => {
     if (lastPhaseRef.current === phase) return;
     lastPhaseRef.current = phase;
-    if (phase === "photos") {
-      setTimeout(() => photoSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
-    } else if (phase === "ready" || phase === "shipped") {
-      setTimeout(() => readySectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
-    }
+    // Mehrfach-retry damit's auch auf Mobile-Safari beim initial-mount klappt
+    // (iOS ignoriert scrollIntoView oft direkt nach Page-Load).
+    const targetRef = phase === "photos" ? photoSectionRef
+      : (phase === "ready" || phase === "shipped") ? readySectionRef
+      : null;
+    if (!targetRef) return;
+    let attempts = 0;
+    const tryScroll = () => {
+      attempts++;
+      const el = targetRef.current;
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+        // Auch native window.scrollTo als fallback (iOS Safari quirk)
+        const rect = el.getBoundingClientRect();
+        window.scrollBy({ top: rect.top - 16, behavior: "smooth" });
+      }
+      if (attempts < 4) {
+        setTimeout(tryScroll, 300);
+      }
+    };
+    setTimeout(tryScroll, 250);
   }, [phase]);
 
   const submitBarcode = useCallback(
