@@ -9,6 +9,7 @@ import {
   setOrderMetafield,
   lookupProductByBarcode,
   addOrderTags,
+  appendOrderNote,
   updateOrderShippingAddress,
   type PackOrderLineItem,
   type ProductLookupResult,
@@ -902,6 +903,7 @@ export async function updateShippingAddress(
  */
 export async function abortPackSessionStockMissing(
   sessionId: string,
+  comment?: string,
 ): Promise<{ success: boolean; error?: string }> {
   const profile = await requireProfile();
   if (!hasFeature(profile, "shipping")) {
@@ -917,12 +919,21 @@ export async function abortPackSessionStockMissing(
     .single();
   if (sErr || !session) return { success: false, error: "Session nicht gefunden" };
 
-  // 2. Shopify-Tag setzen
+  // 2. Shopify-Tag setzen + optional Note anhängen
   if (session.shopify_order_id) {
     const orderGid = `gid://shopify/Order/${session.shopify_order_id}`;
     const tagRes = await addOrderTags(orderGid, ["Ware nicht vorhanden"]);
     if (!tagRes.success) {
       return { success: false, error: `Shopify-Tag konnte nicht gesetzt werden: ${tagRes.error}` };
+    }
+    if (comment && comment.trim()) {
+      const author = profile.display_name || profile.username || null;
+      const fullComment = `Ware nicht vorhanden: ${comment.trim()}`;
+      const noteRes = await appendOrderNote(orderGid, fullComment, author);
+      if (!noteRes.success) {
+        // Note-fehler ist nicht fatal — tag ist schon gesetzt
+        console.warn("Note konnte nicht angefügt werden:", noteRes.error);
+      }
     }
   }
 

@@ -1789,6 +1789,49 @@ export async function updateOrderShippingAddress(
 }
 
 /**
+ * Hängt einen Kommentar an die Order-Note an. Bestehende Notes bleiben erhalten.
+ * Format: '[Hairvenly Pack-System, <timestamp> von <user>] <comment>'
+ */
+export async function appendOrderNote(
+  orderGid: string,
+  comment: string,
+  userName?: string | null,
+): Promise<{ success: boolean; error?: string }> {
+  // 1) Existing note holen
+  const fetchQ = `query order($id: ID!) { order(id: $id) { id note } }`;
+  const fetchRes = await shopifyGraphQL<{
+    order: { id: string; note: string | null } | null;
+  }>(fetchQ, { id: orderGid });
+  const currentNote = fetchRes.data?.order?.note ?? "";
+  const ts = new Date().toLocaleString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const author = userName ? ` von ${userName}` : "";
+  const newEntry = `[Hairvenly Pack-System, ${ts}${author}]\n${comment.trim()}`;
+  const combined = currentNote ? `${currentNote}\n\n${newEntry}` : newEntry;
+
+  // 2) Speichern via orderUpdate
+  const updateQ = `
+    mutation orderUpdate($input: OrderInput!) {
+      orderUpdate(input: $input) {
+        order { id }
+        userErrors { field message }
+      }
+    }
+  `;
+  const res = await shopifyGraphQL<{
+    orderUpdate: { userErrors: { field: string[] | null; message: string }[] };
+  }>(updateQ, { input: { id: orderGid, note: combined } });
+  const errors = res.data?.orderUpdate.userErrors ?? [];
+  if (errors.length > 0) return { success: false, error: errors.map((e) => e.message).join("; ") };
+  return { success: true };
+}
+
+/**
  * Fügt einer Order einen oder mehrere Tags hinzu (z.B. "Ware nicht vorhanden").
  * Idempotent — bestehende Tags bleiben.
  */

@@ -458,35 +458,31 @@ export default function PackMode({
     });
   }, [sessionId, refreshHistory]);
 
-  const handleAbortStockMissing = useCallback(() => {
-    if (typeof window !== "undefined") {
-      const ok = window.confirm(
-        "Bestellung als 'Ware nicht vorhanden' markieren?\n\n" +
-          "• Pack-Vorgang wird abgebrochen (Scans + Fotos gelöscht)\n" +
-          "• Tag 'Ware nicht vorhanden' wird in Shopify gesetzt\n" +
-          "• Die Bestellung bleibt rot markiert in der Versand-Liste\n" +
-          "• Sobald die Ware da ist, kann sie erneut gepackt werden",
-      );
-      if (!ok) return;
-    }
-    startTransition(async () => {
-      const res = await abortPackSessionStockMissing(sessionId);
-      if (res.success) {
-        setCounts({});
-        setPhotos({});
-        setBigSuccess(null);
-        setStatus("open");
-        setManualForms({});
-        setFulfillError(null);
-        setFlash({ kind: null });
-        await refreshHistory();
-        // Zurück zur Versand-Liste — Bestellung erscheint dort jetzt rot markiert
-        if (typeof window !== "undefined") window.location.href = "/pack";
-      } else {
-        alert(`Fehler: ${res.error ?? "unbekannt"}`);
-      }
-    });
-  }, [sessionId, refreshHistory]);
+  // Statt confirm() öffnet ein Modal mit Kommentar-Textarea
+  const [stockMissingModalOpen, setStockMissingModalOpen] = useState(false);
+
+  const submitAbortStockMissing = useCallback(
+    (comment: string) => {
+      setStockMissingModalOpen(false);
+      startTransition(async () => {
+        const res = await abortPackSessionStockMissing(sessionId, comment);
+        if (res.success) {
+          setCounts({});
+          setPhotos({});
+          setBigSuccess(null);
+          setStatus("open");
+          setManualForms({});
+          setFulfillError(null);
+          setFlash({ kind: null });
+          await refreshHistory();
+          if (typeof window !== "undefined") window.location.href = "/pack";
+        } else {
+          alert(`Fehler: ${res.error ?? "unbekannt"}`);
+        }
+      });
+    },
+    [sessionId, refreshHistory],
+  );
 
   const handleResetItem = useCallback(
     (idx: number) => {
@@ -836,7 +832,7 @@ export default function PackMode({
           {phase !== "shipped" && (
             <div className="space-y-2">
               <button
-                onClick={handleAbortStockMissing}
+                onClick={() => setStockMissingModalOpen(true)}
                 disabled={isPending}
                 className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-700 transition disabled:opacity-50"
                 title="Bestellung markieren — Ware ist im Lager nicht vorhanden"
@@ -1344,7 +1340,93 @@ export default function PackMode({
           }}
         />
       )}
+
+      {/* Modal: 'Ware nicht vorhanden'-Abbruch mit optionalem Kommentar */}
+      {stockMissingModalOpen && (
+        <StockMissingModal
+          orderName={orderName}
+          onClose={() => setStockMissingModalOpen(false)}
+          onSubmit={submitAbortStockMissing}
+          isPending={isPending}
+        />
+      )}
     </>
+  );
+}
+
+function StockMissingModal({
+  orderName,
+  onClose,
+  onSubmit,
+  isPending,
+}: {
+  orderName: string;
+  onClose: () => void;
+  onSubmit: (comment: string) => void;
+  isPending: boolean;
+}) {
+  const [comment, setComment] = useState("");
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div>
+            <div className="text-lg font-bold text-red-700 flex items-center gap-2">
+              <AlertTriangle size={20} />
+              Ware nicht vorhanden
+            </div>
+            <div className="text-sm text-neutral-600 mt-1">
+              {orderName} wird abgebrochen und in Shopify markiert.
+            </div>
+          </div>
+          <button onClick={onClose} className="text-neutral-400 hover:text-neutral-700 shrink-0" aria-label="Schließen">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-3 mb-4 text-xs text-neutral-700 space-y-1">
+          <div>• Pack-Vorgang wird abgebrochen (Scans + Fotos gelöscht)</div>
+          <div>• Tag <strong>„Ware nicht vorhanden"</strong> wird in Shopify gesetzt</div>
+          <div>• Bestellung bleibt rot markiert in der Versand-Liste</div>
+          <div>• Sobald die Ware da ist, kann sie erneut gepackt werden</div>
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-neutral-600 uppercase tracking-wide block mb-1">
+            Kommentar <span className="font-normal text-neutral-400">(optional, wird in Shopify-Order-Notiz gespeichert)</span>
+          </label>
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            rows={4}
+            autoFocus
+            placeholder="z.B. Caramel Fudge nur 1 Stück da, 2 fehlen — Nachbestellung beim Lieferanten am 15.5."
+            className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"
+          />
+        </div>
+
+        <div className="flex items-center justify-end gap-2 mt-5">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isPending}
+            className="px-4 py-2 rounded-lg text-sm text-neutral-700 hover:bg-neutral-100 disabled:opacity-50"
+          >
+            Abbrechen
+          </button>
+          <button
+            type="button"
+            onClick={() => onSubmit(comment)}
+            disabled={isPending}
+            className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition disabled:opacity-50 inline-flex items-center gap-2"
+          >
+            <AlertTriangle size={14} />
+            {isPending ? "Markiere…" : "Bestellung markieren"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
