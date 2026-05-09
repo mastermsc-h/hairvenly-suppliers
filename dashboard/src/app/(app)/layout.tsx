@@ -3,7 +3,7 @@ import { requireProfile, hasFeature } from "@/lib/auth";
 import { signOut } from "@/lib/actions/auth";
 import { t, type Locale } from "@/lib/i18n";
 import type { FeatureKey } from "@/lib/types";
-import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings, Truck, Globe2, Bot } from "lucide-react";
+import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings, Truck, Globe2, Bot, Scissors } from "lucide-react";
 import SidebarGroup from "./sidebar-group";
 import LanguageSwitcher from "./language-switcher";
 import { MobileSidebarWrapper } from "./mobile-sidebar";
@@ -126,6 +126,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                   { href: "/pack/display", label: t(locale, "nav.shipping.display") },
                 ]}
               />
+            )}
+
+            {has("salon") && (
+              <>
+                <div className="border-t border-neutral-200 my-2" />
+                <SidebarGroup
+                  label={t(locale, "nav.salon")}
+                  icon={<Scissors size={16} />}
+                  href="/salon-admin"
+                  items={[
+                    { href: "/salon-admin", label: t(locale, "nav.salon.overview"), exact: true },
+                    { href: "/salon-admin/mitarbeiter", label: t(locale, "nav.salon.employees") },
+                  ]}
+                />
+              </>
             )}
 
             {/* 5) Chatbot Wissensdatenbank */}

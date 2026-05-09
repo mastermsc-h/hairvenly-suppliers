@@ -672,6 +672,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     "shipping.archive_notes_saved": "Gespeichert",
     "shipping.archive_view_details": "Details",
     "shipping.archive_scan_log": "Scan-Verlauf",
+    "nav.salon": "Salon-Verbrauch",
+    "nav.salon.overview": "Übersicht",
+    "nav.salon.employees": "Mitarbeiter",
   },
 
   en: {
@@ -1344,6 +1347,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     "shipping.archive_notes_saved": "Saved",
     "shipping.archive_view_details": "Details",
     "shipping.archive_scan_log": "Scan log",
+    "nav.salon": "Salon usage",
+    "nav.salon.overview": "Overview",
+    "nav.salon.employees": "Employees",
   },
 
   tr: {
@@ -2041,6 +2047,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     "chatbot.saved": "Gespeichert",
     "chatbot.new_entry": "Neuer Eintrag",
     "chatbot.conversion": "Conversion",
+    "nav.salon": "Salon kullanımı",
+    "nav.salon.overview": "Genel bakış",
+    "nav.salon.employees": "Çalışanlar",
   },
 };
 
