@@ -1955,3 +1955,113 @@ export async function ensureMetafieldDefinitions() {
     }
   }
 }
+
+// ── Inventory-Anpassung (fuer Salon-Verbrauch) ─────────────────
+
+let cachedPrimaryLocationId: string | null = null;
+
+/**
+ * Liefert die primaere Shopify-Location-GID (gecached pro Prozess).
+ * Nimmt die erste Location aus locations(first: 1) — Hairvenly hat nur eine.
+ */
+export async function getPrimaryShopifyLocationId(): Promise<string> {
+  if (cachedPrimaryLocationId) return cachedPrimaryLocationId;
+  const envOverride = process.env.SHOPIFY_LOCATION_ID;
+  if (envOverride) {
+    cachedPrimaryLocationId = envOverride.startsWith("gid://")
+      ? envOverride
+      : `gid://shopify/Location/${envOverride}`;
+    return cachedPrimaryLocationId;
+  }
+  const res = await shopifyGraphQL<{ locations: { edges: { node: { id: string } }[] } }>(
+    `query { locations(first: 1) { edges { node { id } } } }`,
+  );
+  const id = res.data?.locations.edges[0]?.node.id;
+  if (!id) throw new Error("Keine Shopify-Location gefunden");
+  cachedPrimaryLocationId = id;
+  return id;
+}
+
+/**
+ * Findet die inventoryItemId zu einem Barcode (erste passende Variante).
+ */
+export async function findInventoryItemIdByBarcode(barcode: string): Promise<string | null> {
+  const clean = barcode.trim();
+  if (!clean) return null;
+  const query = `
+    query byBarcode($q: String!) {
+      products(first: 5, query: $q) {
+        edges { node { variants(first: 50) { edges { node { barcode inventoryItem { id } } } } } }
+      }
+    }
+  `;
+  const res = await shopifyGraphQL<{
+    products: {
+      edges: { node: { variants: { edges: { node: { barcode: string | null; inventoryItem: { id: string } | null } }[] } } }[];
+    };
+  }>(query, { q: `barcode:${clean}` });
+  for (const p of res.data?.products.edges ?? []) {
+    for (const ve of p.node.variants.edges) {
+      if (ve.node.barcode?.trim() === clean && ve.node.inventoryItem?.id) {
+        return ve.node.inventoryItem.id;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Passt den Shopify-Lagerbestand fuer einen Barcode um delta an.
+ * Positiv = Bestand erhoehen, negativ = senken.
+ * Reason "other" + name "available" — die Standard-Inventory-Quantitaet.
+ */
+export async function adjustShopifyInventoryByBarcode(
+  barcode: string,
+  delta: number,
+  reason: string = "other",
+): Promise<{ ok: boolean; error?: string }> {
+  if (delta === 0) return { ok: true };
+  try {
+    const [invItemId, locationId] = await Promise.all([
+      findInventoryItemIdByBarcode(barcode),
+      getPrimaryShopifyLocationId(),
+    ]);
+    if (!invItemId) return { ok: false, error: `Kein InventoryItem fuer Barcode ${barcode}` };
+
+    const mutation = `
+      mutation adjust($input: InventoryAdjustQuantitiesInput!) {
+        inventoryAdjustQuantities(input: $input) {
+          inventoryAdjustmentGroup { createdAt reason }
+          userErrors { field message }
+        }
+      }
+    `;
+    const res = await shopifyGraphQL<{
+      inventoryAdjustQuantities: {
+        inventoryAdjustmentGroup: { createdAt: string; reason: string } | null;
+        userErrors: { field: string[]; message: string }[];
+      };
+    }>(mutation, {
+      input: {
+        reason,
+        name: "available",
+        changes: [
+          {
+            delta,
+            inventoryItemId: invItemId,
+            locationId,
+          },
+        ],
+      },
+    });
+    const errs = res.data?.inventoryAdjustQuantities?.userErrors ?? [];
+    if (errs.length > 0) {
+      return { ok: false, error: errs.map((e) => e.message).join("; ") };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth";
-import { lookupProductByBarcode } from "@/lib/shopify";
+import { lookupProductByBarcode, adjustShopifyInventoryByBarcode } from "@/lib/shopify";
 import {
   detectCategory,
   detectPackGrams,
@@ -104,6 +104,16 @@ export async function recordEntnahme(input: {
     .single();
   if (error || !row) return { ok: false, error: error?.message ?? "Insert fehlgeschlagen" };
 
+  // Shopify-Bestand -1 (best-effort: Fail blockt nicht die Entnahme,
+  // wir loggen aber in einer note + status koennte spaeter retried werden)
+  const adj = await adjustShopifyInventoryByBarcode(p.barcode, -1, "other");
+  if (!adj.ok) {
+    await svc
+      .from("salon_entnahmen")
+      .update({ note: `Shopify-Adjust fehlgeschlagen: ${adj.error}` })
+      .eq("id", row.id);
+  }
+
   revalidatePath("/salon-admin");
   return { ok: true, id: row.id, employeeName: emp.name };
 }
@@ -146,7 +156,7 @@ export async function recordRueckgabeFull(
 
   const { data: ent, error: getErr } = await svc
     .from("salon_entnahmen")
-    .select("id, pack_grams, status")
+    .select("id, pack_grams, status, barcode")
     .eq("id", entnahmeId)
     .single();
   if (getErr || !ent) return { ok: false, error: getErr?.message ?? "Entnahme nicht gefunden" };
@@ -163,6 +173,15 @@ export async function recordRueckgabeFull(
     })
     .eq("id", entnahmeId);
   if (error) return { ok: false, error: error.message };
+
+  // Shopify-Bestand +1 nur bei vollstaendiger Rueckgabe
+  const adj = await adjustShopifyInventoryByBarcode(ent.barcode, +1, "restock");
+  if (!adj.ok) {
+    await svc
+      .from("salon_entnahmen")
+      .update({ note: `Shopify-Adjust (+1) fehlgeschlagen: ${adj.error}` })
+      .eq("id", entnahmeId);
+  }
 
   revalidatePath("/salon-admin");
   return { ok: true };
