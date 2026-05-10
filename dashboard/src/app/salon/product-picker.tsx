@@ -12,13 +12,14 @@ interface PickableProduct extends SalonProductInfo {
   hasBarcode: boolean;
 }
 
-const CAT_ORDER = ["tape", "mini_tape", "bonding", "tresse", "clip"] as const;
+const CAT_ORDER = ["tape", "mini_tape", "bonding", "tresse", "clip", "other"] as const;
 const CAT_TILES: Record<string, { label: string; emoji: string }> = {
   tape: { label: "Tape", emoji: "🎀" },
   mini_tape: { label: "Mini-Tape", emoji: "📎" },
   bonding: { label: "Bonding", emoji: "🪡" },
   tresse: { label: "Tresse", emoji: "🧵" },
   clip: { label: "Clip-In", emoji: "💇" },
+  other: { label: "Sonstiges", emoji: "📦" },
 };
 
 interface Props {

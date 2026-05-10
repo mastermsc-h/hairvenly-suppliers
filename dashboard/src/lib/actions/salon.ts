@@ -176,8 +176,8 @@ export async function listSalonPickableProducts(): Promise<{
         imageUrl: v.imageUrl,
         collectionTitles: v.collectionTitles,
       });
-      // Nur Salon-relevante Kategorien
-      if (info.category === "other") continue;
+      // ALLE Varianten zeigen — auch unkategorisierte unter "Sonstiges".
+      // Damit gibt es keine 'unsichtbaren' Shopify-Produkte fuer den Friseur.
       out.push({ ...info, hasBarcode: !!v.barcode });
     }
     // Sortierung: Kategorie -> Laenge -> Farbe -> Titel
