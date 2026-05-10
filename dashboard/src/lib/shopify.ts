@@ -2011,23 +2011,16 @@ export async function findInventoryItemIdByBarcode(barcode: string): Promise<str
 }
 
 /**
- * Passt den Shopify-Lagerbestand fuer einen Barcode um delta an.
- * Positiv = Bestand erhoehen, negativ = senken.
- * Reason "other" + name "available" — die Standard-Inventory-Quantitaet.
+ * Passt den Shopify-Lagerbestand direkt ueber inventoryItemId an.
  */
-export async function adjustShopifyInventoryByBarcode(
-  barcode: string,
+export async function adjustShopifyInventoryByItemId(
+  inventoryItemId: string,
   delta: number,
   reason: string = "other",
 ): Promise<{ ok: boolean; error?: string }> {
   if (delta === 0) return { ok: true };
   try {
-    const [invItemId, locationId] = await Promise.all([
-      findInventoryItemIdByBarcode(barcode),
-      getPrimaryShopifyLocationId(),
-    ]);
-    if (!invItemId) return { ok: false, error: `Kein InventoryItem fuer Barcode ${barcode}` };
-
+    const locationId = await getPrimaryShopifyLocationId();
     const mutation = `
       mutation adjust($input: InventoryAdjustQuantitiesInput!) {
         inventoryAdjustQuantities(input: $input) {
@@ -2045,23 +2038,133 @@ export async function adjustShopifyInventoryByBarcode(
       input: {
         reason,
         name: "available",
-        changes: [
-          {
-            delta,
-            inventoryItemId: invItemId,
-            locationId,
-          },
-        ],
+        changes: [{ delta, inventoryItemId, locationId }],
       },
     });
     const errs = res.data?.inventoryAdjustQuantities?.userErrors ?? [];
-    if (errs.length > 0) {
-      return { ok: false, error: errs.map((e) => e.message).join("; ") };
-    }
+    if (errs.length > 0) return { ok: false, error: errs.map((e) => e.message).join("; ") };
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+/**
+ * Passt den Shopify-Lagerbestand fuer einen Barcode um delta an.
+ */
+export async function adjustShopifyInventoryByBarcode(
+  barcode: string,
+  delta: number,
+  reason: string = "other",
+): Promise<{ ok: boolean; error?: string }> {
+  if (delta === 0) return { ok: true };
+  const invItemId = await findInventoryItemIdByBarcode(barcode);
+  if (!invItemId) return { ok: false, error: `Kein InventoryItem fuer Barcode ${barcode}` };
+  return adjustShopifyInventoryByItemId(invItemId, delta, reason);
+}
+
+// ── Picker: alle Varianten (mit oder ohne Barcode) ─────────────
+
+export interface SalonPickableVariant {
+  variantId: string;
+  inventoryItemId: string | null;
+  productTitle: string;
+  variantTitle: string | null;
+  barcode: string | null;
+  imageUrl: string | null;
+  collectionHandles: string[];
+  collectionTitles: string[];
+  productHandle: string;
+}
+
+let cachedSalonVariants: { ts: number; data: SalonPickableVariant[] } | null = null;
+const SALON_VARIANTS_TTL_MS = 10 * 60 * 1000; // 10 min
+
+/**
+ * Holt alle Produkt-Varianten fuer den Salon-Picker — mit oder ohne Barcode.
+ * Gecached fuer 10 min.
+ */
+export async function fetchAllSalonVariants(force = false): Promise<SalonPickableVariant[]> {
+  if (!force && cachedSalonVariants && Date.now() - cachedSalonVariants.ts < SALON_VARIANTS_TTL_MS) {
+    return cachedSalonVariants.data;
+  }
+  const out: SalonPickableVariant[] = [];
+  let cursor: string | null = null;
+
+  while (true) {
+    const query = `
+      query salonPicker($cursor: String) {
+        products(first: 100, after: $cursor) {
+          edges {
+            node {
+              handle
+              title
+              featuredImage { url }
+              collections(first: 10) { edges { node { handle title } } }
+              variants(first: 50) {
+                edges { node { id title barcode image { url } inventoryItem { id } } }
+              }
+            }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    `;
+    interface SalonPickerResp {
+      products: {
+        edges: {
+          node: {
+            handle: string;
+            title: string;
+            featuredImage: { url: string } | null;
+            collections: { edges: { node: { handle: string; title: string } }[] };
+            variants: {
+              edges: {
+                node: {
+                  id: string;
+                  title: string | null;
+                  barcode: string | null;
+                  image: { url: string } | null;
+                  inventoryItem: { id: string } | null;
+                };
+              }[];
+            };
+          };
+        }[];
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+      };
+    }
+    const res: GraphQLResponse<SalonPickerResp> = await shopifyGraphQL<SalonPickerResp>(
+      query,
+      { cursor },
+    );
+
+    const products = res.data?.products.edges.map((e) => e.node) ?? [];
+    for (const p of products) {
+      const handles = p.collections.edges.map((c) => c.node.handle);
+      const titles = p.collections.edges.map((c) => c.node.title);
+      for (const ve of p.variants.edges) {
+        const v = ve.node;
+        out.push({
+          variantId: v.id,
+          inventoryItemId: v.inventoryItem?.id ?? null,
+          productTitle: p.title,
+          variantTitle: v.title && v.title !== "Default Title" ? v.title : null,
+          barcode: v.barcode?.trim() ? v.barcode.trim() : null,
+          imageUrl: v.image?.url ?? p.featuredImage?.url ?? null,
+          collectionHandles: handles,
+          collectionTitles: titles,
+          productHandle: p.handle,
+        });
+      }
+    }
+    const pageInfo = res.data?.products.pageInfo;
+    if (!pageInfo?.hasNextPage) break;
+    cursor = pageInfo.endCursor;
+  }
+
+  cachedSalonVariants = { ts: Date.now(), data: out };
+  return out;
 }
 
 

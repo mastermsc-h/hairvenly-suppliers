@@ -3,7 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth";
-import { lookupProductByBarcode, adjustShopifyInventoryByBarcode } from "@/lib/shopify";
+import {
+  lookupProductByBarcode,
+  adjustShopifyInventoryByBarcode,
+  adjustShopifyInventoryByItemId,
+  fetchAllSalonVariants,
+  type SalonPickableVariant,
+} from "@/lib/shopify";
 import {
   detectCategory,
   detectPackGrams,
@@ -13,7 +19,11 @@ import {
 import { parseLength, parseColor } from "@/lib/salon/parse";
 
 export interface SalonProductInfo {
+  /** leer wenn Pack keinen Barcode hat (Picker-Flow) */
   barcode: string;
+  /** Shopify GID — fuer Lookup ohne Barcode */
+  variantId: string | null;
+  inventoryItemId: string | null;
   productTitle: string;
   variantTitle: string | null;
   imageUrl: string | null;
@@ -26,6 +36,50 @@ export interface SalonProductInfo {
   color: string | null;
 }
 
+/** Erzeugt SalonProductInfo aus einer Shopify-Variante (vom Picker oder Barcode-Lookup). */
+function variantToInfo(opts: {
+  barcode: string;
+  variantId: string | null;
+  inventoryItemId: string | null;
+  productTitle: string;
+  variantTitle: string | null;
+  imageUrl: string | null;
+  collectionTitles: string[];
+}): SalonProductInfo {
+  const cat = detectCategory({
+    productTitle: opts.productTitle,
+    variantTitle: opts.variantTitle,
+    collectionTitles: opts.collectionTitles,
+  });
+  const packGrams = detectPackGrams({
+    productTitle: opts.productTitle,
+    variantTitle: opts.variantTitle,
+  });
+  const lengthCm = parseLength({
+    productTitle: opts.productTitle,
+    variantTitle: opts.variantTitle,
+  });
+  const color = parseColor({
+    productTitle: opts.productTitle,
+    variantTitle: opts.variantTitle,
+  });
+  return {
+    barcode: opts.barcode,
+    variantId: opts.variantId,
+    inventoryItemId: opts.inventoryItemId,
+    productTitle: opts.productTitle,
+    variantTitle: opts.variantTitle,
+    imageUrl: opts.imageUrl,
+    category: cat.category,
+    categoryLabel: cat.label,
+    divisible: cat.divisible,
+    gramsPerPiece: cat.gramsPerPiece,
+    packGrams,
+    lengthCm,
+    color,
+  };
+}
+
 /**
  * Barcode -> Produktinfo (mit Kategorie-Erkennung).
  * Wird sowohl im Entnehmen- als auch im Rueckgeben-Flow benutzt.
@@ -36,47 +90,118 @@ export async function lookupSalonProduct(
   const clean = barcode.trim();
   if (!clean) return { ok: false, error: "Kein Barcode" };
   try {
+    // 1) Direkter Barcode-Lookup (gibt Variant- aber keine InventoryItem-Info zurueck)
     const matches = await lookupProductByBarcode(clean);
     if (!matches || matches.length === 0) {
       return { ok: false, error: "Barcode nicht in Shopify gefunden" };
     }
     const m = matches[0];
-    const cat = detectCategory({
-      productTitle: m.productTitle,
-      variantTitle: m.variantTitle,
-      collectionTitles: m.collectionTitles,
-    });
-    const packGrams = detectPackGrams({
-      productTitle: m.productTitle,
-      variantTitle: m.variantTitle,
-    });
-    const lengthCm = parseLength({ productTitle: m.productTitle, variantTitle: m.variantTitle });
-    const color = parseColor({ productTitle: m.productTitle, variantTitle: m.variantTitle });
+    // 2) Inventory-Item ueber den Picker-Cache nachziehen, damit auch der
+    // Adjust spaeter in einem Call laeuft (kein zweiter Roundtrip)
+    let inventoryItemId: string | null = null;
+    try {
+      const all = await fetchAllSalonVariants();
+      const v = all.find((x) => x.variantId === m.variantId);
+      inventoryItemId = v?.inventoryItemId ?? null;
+    } catch {
+      // ignorieren — Adjust faellt eh auf Barcode-Lookup zurueck
+    }
     return {
       ok: true,
-      product: {
+      product: variantToInfo({
         barcode: clean,
+        variantId: m.variantId,
+        inventoryItemId,
         productTitle: m.productTitle,
         variantTitle: m.variantTitle,
         imageUrl: m.imageUrl,
-        category: cat.category,
-        categoryLabel: cat.label,
-        divisible: cat.divisible,
-        gramsPerPiece: cat.gramsPerPiece,
-        packGrams,
-        lengthCm,
-        color,
-      },
+        collectionTitles: m.collectionTitles,
+      }),
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Lookup-Fehler" };
   }
 }
 
+/** Lookup per Variant-ID (Picker-Flow ohne Barcode). */
+export async function lookupSalonProductByVariantId(
+  variantId: string,
+): Promise<{ ok: true; product: SalonProductInfo } | { ok: false; error: string }> {
+  try {
+    const all = await fetchAllSalonVariants();
+    const v = all.find((x) => x.variantId === variantId);
+    if (!v) return { ok: false, error: "Variante nicht gefunden" };
+    return {
+      ok: true,
+      product: variantToInfo({
+        barcode: v.barcode ?? "",
+        variantId: v.variantId,
+        inventoryItemId: v.inventoryItemId,
+        productTitle: v.productTitle,
+        variantTitle: v.variantTitle,
+        imageUrl: v.imageUrl,
+        collectionTitles: v.collectionTitles,
+      }),
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Lookup-Fehler" };
+  }
+}
+
+// ── Picker-Liste ────────────────────────────────────────────────
+
+export interface SalonPickableProduct extends SalonProductInfo {
+  // alle Felder von SalonProductInfo + nichts extra
+  hasBarcode: boolean;
+}
+
+/**
+ * Liefert alle Salon-pickbaren Produkte (Tape/Mini-Tape/Bonding/Tresse/Clip-In)
+ * — gefiltert auf relevante Kategorien, mit Barcode optional.
+ */
+export async function listSalonPickableProducts(): Promise<{
+  ok: true;
+  products: SalonPickableProduct[];
+} | { ok: false; error: string }> {
+  try {
+    const all: SalonPickableVariant[] = await fetchAllSalonVariants();
+    const out: SalonPickableProduct[] = [];
+    for (const v of all) {
+      const info = variantToInfo({
+        barcode: v.barcode ?? "",
+        variantId: v.variantId,
+        inventoryItemId: v.inventoryItemId,
+        productTitle: v.productTitle,
+        variantTitle: v.variantTitle,
+        imageUrl: v.imageUrl,
+        collectionTitles: v.collectionTitles,
+      });
+      // Nur Salon-relevante Kategorien
+      if (info.category === "other") continue;
+      out.push({ ...info, hasBarcode: !!v.barcode });
+    }
+    // Sortierung: Kategorie -> Laenge -> Farbe -> Titel
+    const catOrder: Record<string, number> = { tape: 0, mini_tape: 1, bonding: 2, tresse: 3, clip: 4, other: 5 };
+    out.sort((a, b) => {
+      const c = (catOrder[a.category] ?? 9) - (catOrder[b.category] ?? 9);
+      if (c !== 0) return c;
+      const la = a.lengthCm ?? 999;
+      const lb = b.lengthCm ?? 999;
+      if (la !== lb) return la - lb;
+      return (a.color ?? "").localeCompare(b.color ?? "");
+    });
+    return { ok: true, products: out };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Fehler" };
+  }
+}
+
 // ── Entnehmen ──────────────────────────────────────────────────
 
 export async function recordEntnahme(input: {
-  barcode: string;
+  /** entweder barcode ODER variantId muss gesetzt sein */
+  barcode?: string | null;
+  variantId?: string | null;
   pin: string;
 }): Promise<{ ok: true; id: string; employeeName: string } | { ok: false; error: string }> {
   const svc = createServiceClient();
@@ -91,8 +216,15 @@ export async function recordEntnahme(input: {
   if (empErr) return { ok: false, error: empErr.message };
   if (!emp) return { ok: false, error: "PIN nicht erkannt" };
 
-  // Produkt-Info via Barcode
-  const lookup = await lookupSalonProduct(input.barcode);
+  // Produkt-Info via Barcode oder VariantId
+  let lookup;
+  if (input.barcode && input.barcode.trim()) {
+    lookup = await lookupSalonProduct(input.barcode);
+  } else if (input.variantId) {
+    lookup = await lookupSalonProductByVariantId(input.variantId);
+  } else {
+    return { ok: false, error: "Barcode oder Produkt-Auswahl fehlt" };
+  }
   if (!lookup.ok) return { ok: false, error: lookup.error };
   const p = lookup.product;
 
@@ -100,7 +232,9 @@ export async function recordEntnahme(input: {
     .from("salon_entnahmen")
     .insert({
       employee_id: emp.id,
-      barcode: p.barcode,
+      barcode: p.barcode || null,
+      variant_id: p.variantId,
+      inventory_item_id: p.inventoryItemId,
       product_title: p.productTitle,
       variant_title: p.variantTitle,
       pack_grams: p.packGrams,
@@ -113,9 +247,15 @@ export async function recordEntnahme(input: {
     .single();
   if (error || !row) return { ok: false, error: error?.message ?? "Insert fehlgeschlagen" };
 
-  // Shopify-Bestand -1 (best-effort: Fail blockt nicht die Entnahme,
-  // wir loggen aber in einer note + status koennte spaeter retried werden)
-  const adj = await adjustShopifyInventoryByBarcode(p.barcode, -1, "other");
+  // Shopify-Bestand -1 (per InventoryItemId wenn vorhanden, sonst Barcode-Fallback)
+  let adj;
+  if (p.inventoryItemId) {
+    adj = await adjustShopifyInventoryByItemId(p.inventoryItemId, -1, "other");
+  } else if (p.barcode) {
+    adj = await adjustShopifyInventoryByBarcode(p.barcode, -1, "other");
+  } else {
+    adj = { ok: false, error: "Weder InventoryItem noch Barcode bekannt" } as const;
+  }
   if (!adj.ok) {
     await svc
       .from("salon_entnahmen")
@@ -158,6 +298,31 @@ export async function findOpenEntnahmenByBarcode(
   };
 }
 
+export async function findOpenEntnahmenByVariantId(
+  variantId: string,
+): Promise<
+  | { ok: true; entries: { id: string; employeeName: string; takenAt: string }[] }
+  | { ok: false; error: string }
+> {
+  const svc = createServiceClient();
+  const { data, error } = await svc
+    .from("salon_entnahmen")
+    .select("id, taken_at, salon_employees(name)")
+    .eq("variant_id", variantId)
+    .eq("status", "open")
+    .order("taken_at", { ascending: true });
+  if (error) return { ok: false, error: error.message };
+  return {
+    ok: true,
+    entries: (data ?? []).map((r) => ({
+      id: r.id as string,
+      employeeName:
+        (r.salon_employees as unknown as { name: string } | null)?.name ?? "?",
+      takenAt: r.taken_at as string,
+    })),
+  };
+}
+
 export async function recordRueckgabeFull(
   entnahmeId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -165,7 +330,7 @@ export async function recordRueckgabeFull(
 
   const { data: ent, error: getErr } = await svc
     .from("salon_entnahmen")
-    .select("id, pack_grams, status, barcode")
+    .select("id, pack_grams, status, barcode, inventory_item_id")
     .eq("id", entnahmeId)
     .single();
   if (getErr || !ent) return { ok: false, error: getErr?.message ?? "Entnahme nicht gefunden" };
@@ -184,7 +349,14 @@ export async function recordRueckgabeFull(
   if (error) return { ok: false, error: error.message };
 
   // Shopify-Bestand +1 nur bei vollstaendiger Rueckgabe
-  const adj = await adjustShopifyInventoryByBarcode(ent.barcode, +1, "restock");
+  let adj;
+  if (ent.inventory_item_id) {
+    adj = await adjustShopifyInventoryByItemId(ent.inventory_item_id, +1, "restock");
+  } else if (ent.barcode) {
+    adj = await adjustShopifyInventoryByBarcode(ent.barcode, +1, "restock");
+  } else {
+    adj = { ok: false, error: "Weder InventoryItem noch Barcode gespeichert" } as const;
+  }
   if (!adj.ok) {
     await svc
       .from("salon_entnahmen")

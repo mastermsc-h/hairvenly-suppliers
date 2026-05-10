@@ -2,15 +2,22 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { ArrowLeft, Check, X, RotateCcw, Minus, Plus } from "lucide-react";
+import { ArrowLeft, Check, X, RotateCcw, Minus, Plus, ListChecks } from "lucide-react";
 import {
   lookupSalonProduct,
   findOpenEntnahmenByBarcode,
+  findOpenEntnahmenByVariantId,
+  listSalonPickableProducts,
   recordRueckgabeFull,
   recordRueckgabePartial,
   type SalonProductInfo,
 } from "@/lib/actions/salon";
 import ScanInput from "../scan-input";
+import ProductPicker from "../product-picker";
+
+interface PickableProduct extends SalonProductInfo {
+  hasBarcode: boolean;
+}
 
 type Step =
   | "scan"
@@ -35,6 +42,9 @@ export default function InClient() {
   const [pieces, setPieces] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerProducts, setPickerProducts] = useState<PickableProduct[]>([]);
 
   function reset() {
     setStep("scan");
@@ -43,6 +53,37 @@ export default function InClient() {
     setSelectedEntry(null);
     setPieces(0);
     setError(null);
+  }
+
+  async function processProduct(p: SalonProductInfo) {
+    let matches;
+    if (p.barcode) {
+      matches = await findOpenEntnahmenByBarcode(p.barcode);
+    } else if (p.variantId) {
+      matches = await findOpenEntnahmenByVariantId(p.variantId);
+    } else {
+      setError("Weder Barcode noch Variante");
+      setStep("error");
+      return;
+    }
+    if (!matches.ok) {
+      setError(matches.error);
+      setStep("error");
+      return;
+    }
+    if (matches.entries.length === 0) {
+      setError("Keine offene Entnahme fuer diesen Pack");
+      setStep("error");
+      return;
+    }
+    setProduct(p);
+    setOpenEntries(matches.entries);
+    if (matches.entries.length === 1) {
+      setSelectedEntry(matches.entries[0]);
+      setStep("fullOrPartial");
+    } else {
+      setStep("matchPick");
+    }
   }
 
   function onScan(barcode: string) {
@@ -54,25 +95,32 @@ export default function InClient() {
         setStep("error");
         return;
       }
-      const matches = await findOpenEntnahmenByBarcode(barcode);
-      if (!matches.ok) {
-        setError(matches.error);
-        setStep("error");
-        return;
-      }
-      if (matches.entries.length === 0) {
-        setError("Keine offene Entnahme fuer diesen Pack");
-        setStep("error");
-        return;
-      }
-      setProduct(lookup.product);
-      setOpenEntries(matches.entries);
-      if (matches.entries.length === 1) {
-        setSelectedEntry(matches.entries[0]);
-        setStep("fullOrPartial");
-      } else {
-        setStep("matchPick");
-      }
+      await processProduct(lookup.product);
+    });
+  }
+
+  async function openPicker() {
+    setError(null);
+    if (pickerProducts.length > 0) {
+      setPickerOpen(true);
+      return;
+    }
+    setPickerLoading(true);
+    const res = await listSalonPickableProducts();
+    setPickerLoading(false);
+    if (!res.ok) {
+      setError(res.error);
+      setStep("error");
+      return;
+    }
+    setPickerProducts(res.products);
+    setPickerOpen(true);
+  }
+
+  function onPickerPick(p: PickableProduct) {
+    setPickerOpen(false);
+    start(async () => {
+      await processProduct(p);
     });
   }
 
@@ -125,7 +173,25 @@ export default function InClient() {
             <div className="text-neutral-400 mt-2">Auch wenn vollstaendig zurueck — bitte scannen</div>
           </div>
           <ScanInput onScan={onScan} busy={pending} />
+          <div className="text-center">
+            <button
+              onClick={openPicker}
+              disabled={pickerLoading}
+              className="inline-flex items-center gap-2 text-base text-neutral-300 hover:text-white border border-neutral-700 hover:border-neutral-500 rounded-xl px-5 py-3 disabled:opacity-50"
+            >
+              <ListChecks size={18} />
+              {pickerLoading ? "Lade..." : "Kein Barcode? Manuell auswählen"}
+            </button>
+          </div>
         </div>
+      )}
+
+      {pickerOpen && (
+        <ProductPicker
+          products={pickerProducts}
+          onPick={onPickerPick}
+          onClose={() => setPickerOpen(false)}
+        />
       )}
 
       {step === "matchPick" && product && (

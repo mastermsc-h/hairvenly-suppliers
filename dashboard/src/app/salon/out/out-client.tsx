@@ -2,11 +2,21 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { ArrowLeft, Check, X, RotateCcw } from "lucide-react";
-import { lookupSalonProduct, recordEntnahme, type SalonProductInfo } from "@/lib/actions/salon";
+import { ArrowLeft, Check, X, RotateCcw, ListChecks } from "lucide-react";
+import {
+  lookupSalonProduct,
+  listSalonPickableProducts,
+  recordEntnahme,
+  type SalonProductInfo,
+} from "@/lib/actions/salon";
 import ScanInput from "../scan-input";
+import ProductPicker from "../product-picker";
 
 type Step = "scan" | "preview" | "employee" | "pin" | "done" | "error";
+
+interface PickableProduct extends SalonProductInfo {
+  hasBarcode: boolean;
+}
 
 interface Employee {
   id: string;
@@ -32,6 +42,9 @@ export default function OutClient({ employees }: { employees: Employee[] }) {
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerProducts, setPickerProducts] = useState<PickableProduct[]>([]);
 
   function reset() {
     setStep("scan");
@@ -55,13 +68,41 @@ export default function OutClient({ employees }: { employees: Employee[] }) {
     });
   }
 
+  async function openPicker() {
+    setError(null);
+    if (pickerProducts.length > 0) {
+      setPickerOpen(true);
+      return;
+    }
+    setPickerLoading(true);
+    const res = await listSalonPickableProducts();
+    setPickerLoading(false);
+    if (!res.ok) {
+      setError(res.error);
+      setStep("error");
+      return;
+    }
+    setPickerProducts(res.products);
+    setPickerOpen(true);
+  }
+
+  function onPickerPick(p: PickableProduct) {
+    setPickerOpen(false);
+    setProduct(p);
+    setStep("preview");
+  }
+
   function onPinDigit(d: string) {
     if (pin.length >= 6) return;
     const next = pin + d;
     setPin(next);
     if (next.length >= 4 && employee && product) {
       start(async () => {
-        const res = await recordEntnahme({ barcode: product.barcode, pin: next });
+        const res = await recordEntnahme({
+          barcode: product.barcode || null,
+          variantId: product.variantId,
+          pin: next,
+        });
         if (!res.ok) {
           setError(res.error);
           setStep("error");
@@ -87,7 +128,25 @@ export default function OutClient({ employees }: { employees: Employee[] }) {
             <div className="text-neutral-400 mt-2">Barcode ans Lesegeraet halten oder Kamera nutzen</div>
           </div>
           <ScanInput onScan={onScan} busy={pending} />
+          <div className="text-center">
+            <button
+              onClick={openPicker}
+              disabled={pickerLoading}
+              className="inline-flex items-center gap-2 text-base text-neutral-300 hover:text-white border border-neutral-700 hover:border-neutral-500 rounded-xl px-5 py-3 disabled:opacity-50"
+            >
+              <ListChecks size={18} />
+              {pickerLoading ? "Lade..." : "Kein Barcode? Manuell auswählen"}
+            </button>
+          </div>
         </div>
+      )}
+
+      {pickerOpen && (
+        <ProductPicker
+          products={pickerProducts}
+          onPick={onPickerPick}
+          onClose={() => setPickerOpen(false)}
+        />
       )}
 
       {step === "preview" && product && (
