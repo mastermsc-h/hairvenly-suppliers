@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Calendar } from "lucide-react";
 import {
   ResponsiveContainer,
   BarChart,
@@ -15,7 +17,18 @@ import {
   Legend,
 } from "recharts";
 
-type Range = "today" | "7d" | "30d" | "month" | "all";
+type Quick = "today" | "7d" | "30d" | "month" | "all";
+
+interface FilterState {
+  label: string;
+  quick: Quick | null;
+  month: string | null;
+  from: string | null;
+  to: string | null;
+  availableMonths: string[];
+  defaultFrom: string;
+  defaultTo: string;
+}
 
 interface Row {
   id: string;
@@ -42,46 +55,129 @@ const CAT_LABELS: Record<string, string> = {
   other: "Sonstiges",
 };
 
-const RANGE_LABELS: Record<Range, string> = {
+const QUICK_LABELS: Record<Quick, string> = {
   today: "Heute",
-  "7d": "Letzte 7 Tage",
-  "30d": "Letzte 30 Tage",
-  month: "Dieser Monat",
-  all: "Alles",
+  "7d": "7 Tage",
+  "30d": "30 Tage",
+  month: "Akt. Monat",
+  all: "Alle",
 };
 
+function formatMonth(ym: string): string {
+  // YYYY-MM -> "April 2026"
+  const [y, m] = ym.split("-").map((s) => parseInt(s, 10));
+  const d = new Date(y, m - 1, 1);
+  return d.toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+}
+
 export default function StatistikClient({
-  range,
+  filter,
   rows,
   employees,
 }: {
-  range: Range;
+  filter: FilterState;
   rows: Row[];
   employees: { id: string; name: string }[];
 }) {
   const stats = useMemo(() => computeStats(rows, employees), [rows, employees]);
+  const router = useRouter();
+  const [showCustom, setShowCustom] = useState(!!(filter.from || filter.to));
+  const [customFrom, setCustomFrom] = useState(filter.from ?? filter.defaultFrom);
+  const [customTo, setCustomTo] = useState(filter.to ?? filter.defaultTo);
+
+  function applyCustom() {
+    const params = new URLSearchParams();
+    if (customFrom) params.set("from", customFrom);
+    if (customTo) params.set("to", customTo);
+    router.push(`/salon-admin/statistik?${params.toString()}`);
+  }
 
   return (
     <div className="p-4 md:p-6 space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Salon-Statistik</h1>
-          <p className="text-sm text-neutral-500">{RANGE_LABELS[range]} · {rows.length} Entnahmen</p>
-        </div>
-        <div className="flex gap-1 bg-neutral-100 rounded-lg p-1">
-          {(Object.keys(RANGE_LABELS) as Range[]).map((r) => (
-            <Link
-              key={r}
-              href={`/salon-admin/statistik?range=${r}`}
-              prefetch={false}
-              className={`px-3 py-1.5 text-sm rounded-md ${
-                r === range ? "bg-white shadow-sm font-medium" : "text-neutral-600 hover:text-neutral-900"
-              }`}
+      <div>
+        <h1 className="text-2xl font-semibold">Salon-Statistik</h1>
+        <p className="text-sm text-neutral-500">{filter.label} · {rows.length} Entnahmen</p>
+      </div>
+
+      {/* Filter-Bar */}
+      <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex gap-1 bg-neutral-100 rounded-lg p-1">
+            {(Object.keys(QUICK_LABELS) as Quick[]).map((q) => (
+              <Link
+                key={q}
+                href={`/salon-admin/statistik?range=${q}`}
+                prefetch={false}
+                className={`px-3 py-1.5 text-sm rounded-md ${
+                  filter.quick === q ? "bg-white shadow-sm font-medium" : "text-neutral-600 hover:text-neutral-900"
+                }`}
+              >
+                {QUICK_LABELS[q]}
+              </Link>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-neutral-500 uppercase tracking-wide">Monat</label>
+            <select
+              value={filter.month ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (!v) router.push("/salon-admin/statistik");
+                else router.push(`/salon-admin/statistik?month=${v}`);
+              }}
+              className="rounded-lg border border-neutral-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-neutral-900 outline-none"
             >
-              {RANGE_LABELS[r]}
-            </Link>
-          ))}
+              <option value="">— wählen —</option>
+              {filter.availableMonths.map((m) => (
+                <option key={m} value={m}>
+                  {formatMonth(m)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            onClick={() => setShowCustom((v) => !v)}
+            className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border ${
+              showCustom || filter.from || filter.to
+                ? "border-neutral-900 bg-neutral-900 text-white"
+                : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+            }`}
+          >
+            <Calendar size={14} />
+            Eigener Zeitraum
+          </button>
         </div>
+
+        {showCustom && (
+          <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-neutral-100">
+            <div>
+              <label className="text-xs text-neutral-500 uppercase tracking-wide block">Von</label>
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="mt-1 rounded-lg border border-neutral-300 px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-neutral-500 uppercase tracking-wide block">Bis</label>
+              <input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="mt-1 rounded-lg border border-neutral-300 px-2 py-1.5 text-sm"
+              />
+            </div>
+            <button
+              onClick={applyCustom}
+              className="bg-neutral-900 text-white rounded-lg px-4 py-1.5 text-sm font-medium"
+            >
+              Anwenden
+            </button>
+          </div>
+        )}
       </div>
 
       {/* KPIs */}
