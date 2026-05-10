@@ -674,6 +674,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "shipping.archive_scan_log": "Scan-Verlauf",
     "nav.salon": "Salon-Verbrauch",
     "nav.salon.overview": "Übersicht",
+    "nav.salon.stats": "Statistik",
     "nav.salon.employees": "Mitarbeiter",
   },
 
@@ -1349,6 +1350,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "shipping.archive_scan_log": "Scan log",
     "nav.salon": "Salon usage",
     "nav.salon.overview": "Overview",
+    "nav.salon.stats": "Statistics",
     "nav.salon.employees": "Employees",
   },
 
@@ -2049,6 +2051,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "chatbot.conversion": "Conversion",
     "nav.salon": "Salon kullanımı",
     "nav.salon.overview": "Genel bakış",
+    "nav.salon.stats": "İstatistik",
     "nav.salon.employees": "Çalışanlar",
   },
 };

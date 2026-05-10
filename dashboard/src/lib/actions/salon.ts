@@ -10,6 +10,7 @@ import {
   piecesToGrams,
   type SalonCategory,
 } from "@/lib/salon/category";
+import { parseLength, parseColor } from "@/lib/salon/parse";
 
 export interface SalonProductInfo {
   barcode: string;
@@ -21,6 +22,8 @@ export interface SalonProductInfo {
   divisible: boolean;
   gramsPerPiece: number | null;
   packGrams: number;
+  lengthCm: number | null;
+  color: string | null;
 }
 
 /**
@@ -47,6 +50,8 @@ export async function lookupSalonProduct(
       productTitle: m.productTitle,
       variantTitle: m.variantTitle,
     });
+    const lengthCm = parseLength({ productTitle: m.productTitle, variantTitle: m.variantTitle });
+    const color = parseColor({ productTitle: m.productTitle, variantTitle: m.variantTitle });
     return {
       ok: true,
       product: {
@@ -59,6 +64,8 @@ export async function lookupSalonProduct(
         divisible: cat.divisible,
         gramsPerPiece: cat.gramsPerPiece,
         packGrams,
+        lengthCm,
+        color,
       },
     };
   } catch (e) {
@@ -98,6 +105,8 @@ export async function recordEntnahme(input: {
       variant_title: p.variantTitle,
       pack_grams: p.packGrams,
       category: p.category,
+      length_cm: p.lengthCm,
+      color: p.color,
       status: "open",
     })
     .select("id")
