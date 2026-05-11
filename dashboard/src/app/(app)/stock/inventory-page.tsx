@@ -252,6 +252,11 @@ function PrintModal({
     items: { title: string; barcode: string; collection: string; quantity: number }[],
   ) => void;
 }) {
+  // Sicherheits-Caps gegen Browser-Tab-Crashes auf langsameren Macs
+  // (jedes Label = synchroner JsBarcode-SVG-Render im Portal)
+  const MAX_QTY_PER_ROW = 500;
+  const MAX_TOTAL_LABELS = 500;
+
   // Initial-Mengen: max(0, Lager - bereits gedruckt) pro Produkt mit Barcode
   const initialQty = useMemo(() => {
     const map: Record<string, number> = {};
@@ -369,7 +374,11 @@ function PrintModal({
   }, [isClipIn, visibleItems, variantFilter]);
 
   function setQty(r: InventoryWithTransit, q: number) {
-    setQuantities({ ...quantities, [`${r.barcode}|${r.unitWeight}`]: Math.max(0, q || 0) });
+    // Hard-Cap pro Zeile: verhindert dass versehentliches Festhalten
+    // des Schrittzähler-Buttons die Menge in Tausende treibt — die
+    // synchrone JsBarcode-SVG-Rendering-Schleife killt sonst den Tab.
+    const safeQ = Math.max(0, Math.min(q || 0, MAX_QTY_PER_ROW));
+    setQuantities({ ...quantities, [`${r.barcode}|${r.unitWeight}`]: safeQ });
   }
 
   function handlePrint() {
@@ -567,11 +576,16 @@ function PrintModal({
           </table>
         </div>
 
-        <div className="flex items-center justify-between gap-3 p-4 border-t border-neutral-200">
+        <div className="flex items-center justify-between gap-3 p-4 border-t border-neutral-200 flex-wrap">
           <div className="text-sm text-neutral-700">
             <strong>{total}</strong> Etikett{total === 1 ? "" : "en"} drucken
             {skipped > 0 && (
               <span className="text-neutral-400 ml-2">· {skipped} Produkt(e) ohne EAN übersprungen</span>
+            )}
+            {total > MAX_TOTAL_LABELS && (
+              <div className="text-xs text-red-600 mt-1 font-medium">
+                ⚠ Über {MAX_TOTAL_LABELS} Etiketten ist instabil — bitte in mehreren Druckvorgängen aufteilen.
+              </div>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -585,7 +599,8 @@ function PrintModal({
             <button
               type="button"
               onClick={handlePrint}
-              disabled={total === 0}
+              disabled={total === 0 || total > MAX_TOTAL_LABELS}
+              title={total > MAX_TOTAL_LABELS ? `Maximal ${MAX_TOTAL_LABELS} Etiketten pro Druckvorgang` : undefined}
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Printer size={14} />
@@ -706,6 +721,7 @@ function ModalRow({
         <input
           type="number"
           min={0}
+          max={500}
           value={q}
           onChange={(e) => onQty(row, parseInt(e.target.value || "0", 10))}
           className={`w-16 text-right rounded border px-2 py-1 text-sm focus:ring-2 focus:outline-none ${
