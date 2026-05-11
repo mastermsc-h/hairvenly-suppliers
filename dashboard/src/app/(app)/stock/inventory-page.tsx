@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Package, AlertTriangle, Scale, Printer, X } from "lucide-react";
 import JsBarcode from "jsbarcode";
@@ -290,7 +290,8 @@ function PrintModal({
     return out;
   }, [printedSummary, resetBarcodes]);
 
-  async function handleResetPrinted(r: InventoryWithTransit) {
+  // STABIL via useCallback — sonst bricht React.memo auf ModalRow
+  const handleResetPrinted = useCallback(async (r: InventoryWithTransit) => {
     if (!r.barcode) return;
     if (!confirm(`'Bisher gedruckt'-Zaehler fuer\n${r.product}\nzuruecksetzen?`)) return;
     const res = await resetPrintedForBarcode(r.barcode);
@@ -299,9 +300,8 @@ function PrintModal({
       return;
     }
     setResetBarcodes((prev) => new Set([...prev, r.barcode!]));
-    // Auch quantities updaten — neuer Vorschlag = volles Lager
     setQuantities((prev) => ({ ...prev, [`${r.barcode}|${r.unitWeight}`]: Math.floor(r.quantity) }));
-  }
+  }, []);
 
   // Reset für ALLE sichtbaren Produkte der Kategorie (respektiert variant-filter).
   // Wird über den Reset-Button in der Toolbar oben aufgerufen.
@@ -338,13 +338,18 @@ function PrintModal({
   }
 
   // Duplikat-Warnung: gleicher Barcode auf mehreren Zeilen?
+  // STABILE Set (nicht Array) — sonst muss jeder Caller new Set(...)
+  // bei jedem render bauen und alle ModalRows re-rendern.
   const duplicateBarcodes = useMemo(() => {
     const counts = new Map<string, number>();
     for (const r of itemsWithBarcode) {
       counts.set(r.barcode!, (counts.get(r.barcode!) ?? 0) + 1);
     }
-    return Array.from(counts.entries()).filter(([, n]) => n > 1).map(([bc]) => bc);
+    const set = new Set<string>();
+    for (const [bc, n] of counts) if (n > 1) set.add(bc);
+    return set;
   }, [itemsWithBarcode]);
+  const duplicateBarcodesArr = useMemo(() => Array.from(duplicateBarcodes), [duplicateBarcodes]);
 
   // Bei Clip-Ins: nach Gewichts-Variante (100g/150g/225g) gruppieren + Filter-Tabs.
   const isClipIn = groupKey.toUpperCase().includes("CLIP");
@@ -373,13 +378,14 @@ function PrintModal({
     return Array.from(groups.entries()).sort((a, b) => a[0] - b[0]);
   }, [isClipIn, visibleItems, variantFilter]);
 
-  function setQty(r: InventoryWithTransit, q: number) {
-    // Hard-Cap pro Zeile: verhindert dass versehentliches Festhalten
-    // des Schrittzähler-Buttons die Menge in Tausende treibt — die
-    // synchrone JsBarcode-SVG-Rendering-Schleife killt sonst den Tab.
+  // STABIL via useCallback — sonst bekommt jeder Render eine neue
+  // setQty-Funktion und alle memoized ModalRows re-rendern trotzdem.
+  // Funktionsupdate-Form (prev => ...) statt `quantities`-closure,
+  // damit rapide Schrittzähler-Clicks nicht überschrieben werden.
+  const setQty = useCallback((r: InventoryWithTransit, q: number) => {
     const safeQ = Math.max(0, Math.min(q || 0, MAX_QTY_PER_ROW));
-    setQuantities({ ...quantities, [`${r.barcode}|${r.unitWeight}`]: safeQ });
-  }
+    setQuantities((prev) => ({ ...prev, [`${r.barcode}|${r.unitWeight}`]: safeQ }));
+  }, [MAX_QTY_PER_ROW]);
 
   function handlePrint() {
     const items: { title: string; barcode: string; collection: string; quantity: number }[] = [];
@@ -430,11 +436,11 @@ function PrintModal({
         </div>
 
         {/* Warnung wenn doppelte EANs in der Gruppe — Daten-Bug in Shopify */}
-        {duplicateBarcodes.length > 0 && (
+        {duplicateBarcodesArr.length > 0 && (
           <div className="mx-5 mt-4 p-3 bg-amber-50 border-2 border-amber-300 rounded-lg text-xs text-amber-900">
             <div className="font-bold uppercase tracking-wide mb-1">
-              ⚠ {duplicateBarcodes.length} doppelt vergebene EAN
-              {duplicateBarcodes.length === 1 ? "" : "s"} erkannt
+              ⚠ {duplicateBarcodesArr.length} doppelt vergebene EAN
+              {duplicateBarcodesArr.length === 1 ? "" : "s"} erkannt
             </div>
             <div>
               Mehrere Produkte teilen denselben EAN-Code. Etiketten lassen sich
@@ -553,24 +559,29 @@ function PrintModal({
                     headerLabel={`${weight}g Variante`}
                     rows={weightRows}
                     quantities={quantities}
-                    printedSummary={effectiveSummary}
-                    duplicateBarcodes={new Set(duplicateBarcodes)}
+                    effectiveSummary={effectiveSummary}
+                    duplicateBarcodes={duplicateBarcodes}
                     onQty={setQty}
                     onResetPrinted={handleResetPrinted}
                   />
                 ))
               ) : (
-                visibleItems.map((r, i) => (
-                  <ModalRow
-                    key={i}
-                    row={r}
-                    quantities={quantities}
-                    printedSummary={effectiveSummary}
-                    duplicateBarcodes={new Set(duplicateBarcodes)}
-                    onQty={setQty}
-                    onResetPrinted={handleResetPrinted}
-                  />
-                ))
+                visibleItems.map((r) => {
+                  const k = `${r.barcode}|${r.unitWeight}`;
+                  const printedInfo = r.barcode ? effectiveSummary[r.barcode] : undefined;
+                  return (
+                    <ModalRow
+                      key={k}
+                      row={r}
+                      q={quantities[k] ?? 0}
+                      printed={printedInfo?.totalPrinted ?? 0}
+                      lastPrintedAt={printedInfo?.lastPrintedAt ?? null}
+                      isDuplicate={!!r.barcode && duplicateBarcodes.has(r.barcode)}
+                      onQty={setQty}
+                      onResetPrinted={handleResetPrinted}
+                    />
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -617,7 +628,7 @@ function ModalGroupRows({
   headerLabel,
   rows,
   quantities,
-  printedSummary,
+  effectiveSummary,
   duplicateBarcodes,
   onQty,
   onResetPrinted,
@@ -625,7 +636,7 @@ function ModalGroupRows({
   headerLabel: string;
   rows: InventoryWithTransit[];
   quantities: Record<string, number>;
-  printedSummary: Record<string, { totalPrinted: number; lastPrintedAt: string | null }>;
+  effectiveSummary: Record<string, { totalPrinted: number; lastPrintedAt: string | null }>;
   duplicateBarcodes: Set<string>;
   onQty: (r: InventoryWithTransit, q: number) => void;
   onResetPrinted: (r: InventoryWithTransit) => void;
@@ -637,45 +648,47 @@ function ModalGroupRows({
           {headerLabel} <span className="ml-1 font-normal text-indigo-400">({rows.length})</span>
         </td>
       </tr>
-      {rows.map((r, i) => (
-        <ModalRow
-          key={i}
-          row={r}
-          quantities={quantities}
-          printedSummary={printedSummary}
-          duplicateBarcodes={duplicateBarcodes}
-          onQty={onQty}
-          onResetPrinted={onResetPrinted}
-        />
-      ))}
+      {rows.map((r) => {
+        const k = `${r.barcode}|${r.unitWeight}`;
+        const printedInfo = r.barcode ? effectiveSummary[r.barcode] : undefined;
+        return (
+          <ModalRow
+            key={k}
+            row={r}
+            q={quantities[k] ?? 0}
+            printed={printedInfo?.totalPrinted ?? 0}
+            lastPrintedAt={printedInfo?.lastPrintedAt ?? null}
+            isDuplicate={!!r.barcode && duplicateBarcodes.has(r.barcode)}
+            onQty={onQty}
+            onResetPrinted={onResetPrinted}
+          />
+        );
+      })}
     </>
   );
 }
 
-function ModalRow({
+const ModalRow = memo(function ModalRow({
   row,
-  quantities,
-  printedSummary,
-  duplicateBarcodes,
+  q,
+  printed,
+  lastPrintedAt,
+  isDuplicate,
   onQty,
   onResetPrinted,
 }: {
   row: InventoryWithTransit;
-  quantities: Record<string, number>;
-  printedSummary: Record<string, { totalPrinted: number; lastPrintedAt: string | null }>;
-  duplicateBarcodes: Set<string>;
+  q: number;
+  printed: number;
+  lastPrintedAt: string | null;
+  isDuplicate: boolean;
   onQty: (r: InventoryWithTransit, q: number) => void;
   onResetPrinted: (r: InventoryWithTransit) => void;
 }) {
-  const k = `${row.barcode}|${row.unitWeight}`;
-  const q = quantities[k] ?? 0;
-  const printedInfo = printedSummary[row.barcode!];
-  const printed = printedInfo?.totalPrinted ?? 0;
-  const lastDate = printedInfo?.lastPrintedAt
-    ? new Date(printedInfo.lastPrintedAt).toLocaleDateString("de-DE")
+  const lastDate = lastPrintedAt
+    ? new Date(lastPrintedAt).toLocaleDateString("de-DE")
     : null;
   const suggested = Math.max(0, Math.floor(row.quantity) - printed);
-  const isDuplicate = !!row.barcode && duplicateBarcodes.has(row.barcode);
   return (
     <tr className={`border-t border-neutral-100 hover:bg-neutral-50 ${isDuplicate ? "bg-amber-50/60" : ""}`}>
       <td className="px-3 py-2">
@@ -733,7 +746,7 @@ function ModalRow({
       </td>
     </tr>
   );
-}
+});
 
 function PrintLabels({ items }: { items: { title: string; barcode: string }[] }) {
   // Mount-Guard fuer SSR
