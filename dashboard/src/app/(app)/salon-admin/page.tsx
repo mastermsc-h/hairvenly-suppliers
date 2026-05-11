@@ -24,10 +24,11 @@ export default async function SalonAdminPage() {
     { data: monthEntries },
     { data: looseStock },
     { count: empCount },
+    { data: shopifyFailures },
   ] = await Promise.all([
     svc
       .from("salon_entnahmen")
-      .select("id, taken_at, product_title, variant_title, pack_grams, salon_employees(name)", {
+      .select("id, taken_at, product_title, variant_title, pack_grams, note, salon_employees(name)", {
         count: "exact",
       })
       .eq("status", "open")
@@ -47,6 +48,12 @@ export default async function SalonAdminPage() {
       .order("total_grams", { ascending: false })
       .limit(20),
     svc.from("salon_employees").select("id", { count: "exact", head: true }).eq("active", true),
+    svc
+      .from("salon_entnahmen")
+      .select("id, taken_at, product_title, variant_title, note, salon_employees(name)")
+      .not("note", "is", null)
+      .order("taken_at", { ascending: false })
+      .limit(20),
   ]);
 
   const todayUsed = (todayEntries ?? []).reduce((sum, e) => sum + (e.used_grams ?? 0), 0);
@@ -88,6 +95,55 @@ export default async function SalonAdminPage() {
         <Kpi label="Offene Entnahmen" value={`${openCount ?? 0}`} icon={<AlertTriangle size={18} />} accent={openCount && openCount > 0 ? "warn" : undefined} />
         <Kpi label="Loose-Stock-Buckets" value={`${(looseStock ?? []).length}`} icon={<Layers size={18} />} />
       </div>
+
+      {/* Shopify-Sync-Probleme */}
+      {(shopifyFailures ?? []).length > 0 && (
+        <div className="bg-rose-50 border border-rose-300 rounded-2xl p-4 md:p-6 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle size={18} className="text-rose-700" />
+            <div className="text-base font-semibold text-rose-900">Shopify-Sync-Probleme</div>
+            <span className="ml-auto text-xs text-rose-700">
+              {shopifyFailures!.length} Eintrag/Einträge
+            </span>
+          </div>
+          <div className="text-xs text-rose-800 mb-3">
+            Diese Entnahmen wurden in der DB gespeichert, aber Shopify konnte den Lagerbestand nicht
+            anpassen. Bitte Fehlertext prüfen und manuell in Shopify korrigieren oder die Ursache fixen.
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-xs uppercase text-rose-700">
+              <tr>
+                <th className="text-left py-2">Mitarbeiter</th>
+                <th className="text-left py-2">Produkt</th>
+                <th className="text-left py-2">Wann</th>
+                <th className="text-left py-2">Fehler</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shopifyFailures!.map((f) => (
+                <tr key={f.id} className="border-t border-rose-200">
+                  <td className="py-2">
+                    {(f.salon_employees as unknown as { name: string } | null)?.name ?? "?"}
+                  </td>
+                  <td className="py-2">
+                    {f.product_title}
+                    {f.variant_title && <span className="text-rose-700"> · {f.variant_title}</span>}
+                  </td>
+                  <td className="py-2 text-rose-700">
+                    {new Date(f.taken_at as string).toLocaleString("de-DE", {
+                      day: "2-digit",
+                      month: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </td>
+                  <td className="py-2 text-rose-900 font-mono text-xs">{f.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Offene Entnahmen */}
       <Card title="Offene Entnahmen (FIFO)" subtitle="Pack ist raus, Reste noch nicht zurueck">

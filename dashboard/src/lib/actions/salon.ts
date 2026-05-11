@@ -16,7 +16,7 @@ import {
   piecesToGrams,
   type SalonCategory,
 } from "@/lib/salon/category";
-import { parseLength, parseColor } from "@/lib/salon/parse";
+import { parseLength, parseColor, parseQuality, type SalonQuality } from "@/lib/salon/parse";
 
 export interface SalonProductInfo {
   /** leer wenn Pack keinen Barcode hat (Picker-Flow) */
@@ -34,6 +34,7 @@ export interface SalonProductInfo {
   packGrams: number;
   lengthCm: number | null;
   color: string | null;
+  quality: SalonQuality;
 }
 
 /** Erzeugt SalonProductInfo aus einer Shopify-Variante (vom Picker oder Barcode-Lookup). */
@@ -63,6 +64,11 @@ function variantToInfo(opts: {
     productTitle: opts.productTitle,
     variantTitle: opts.variantTitle,
   });
+  const quality = parseQuality({
+    productTitle: opts.productTitle,
+    variantTitle: opts.variantTitle,
+    collectionTitles: opts.collectionTitles,
+  });
   return {
     barcode: opts.barcode,
     variantId: opts.variantId,
@@ -77,6 +83,7 @@ function variantToInfo(opts: {
     packGrams,
     lengthCm,
     color,
+    quality,
   };
 }
 
@@ -241,6 +248,7 @@ export async function recordEntnahme(input: {
       category: p.category,
       length_cm: p.lengthCm,
       color: p.color,
+      quality: p.quality,
       status: "open",
     })
     .select("id")

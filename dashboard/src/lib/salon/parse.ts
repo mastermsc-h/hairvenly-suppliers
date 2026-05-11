@@ -2,6 +2,27 @@
 
 const LENGTH_RE = /(\d{2,3})\s*cm\b/i;
 
+export type SalonQuality = "russisch" | "usbekisch" | null;
+
+export function parseQuality(opts: {
+  productTitle: string;
+  variantTitle?: string | null;
+  collectionTitles?: string[];
+  collectionHandles?: string[];
+}): SalonQuality {
+  const haystack = [
+    opts.productTitle,
+    opts.variantTitle ?? "",
+    ...(opts.collectionTitles ?? []),
+    ...(opts.collectionHandles ?? []),
+  ]
+    .join(" ")
+    .toLowerCase();
+  if (/\brussisch|russian\b/.test(haystack)) return "russisch";
+  if (/\busbekisch|uzbek/.test(haystack)) return "usbekisch";
+  return null;
+}
+
 export function parseLength(opts: {
   productTitle: string;
   variantTitle?: string | null;

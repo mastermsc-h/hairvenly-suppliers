@@ -1,10 +1,10 @@
 "use client";
 
-// Schnellpicker: 3-stufiges Auswaehlen — Methode → Laenge → Farbe.
-// Wenn mehrere Pack-Groessen die gleiche Methode/Laenge/Farbe haben,
-// kommt noch ein 4. Schritt mit der Pack-Groesse.
+// Schnellpicker — adaptive Stufen:
+//   Methode → Qualitaet (Russisch/Usbekisch) → Laenge → Farbe → Variante
+// Stufen mit nur 1 Option werden automatisch uebersprungen.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, Search, X } from "lucide-react";
 import type { SalonProductInfo } from "@/lib/actions/salon";
 
@@ -22,6 +22,12 @@ const CAT_TILES: Record<string, { label: string; emoji: string }> = {
   other: { label: "Sonstiges", emoji: "📦" },
 };
 
+const QUALITY_TILES: Record<string, { label: string; emoji: string; sub: string }> = {
+  russisch: { label: "Russisch", emoji: "🪞", sub: "Glatt" },
+  usbekisch: { label: "Usbekisch", emoji: "🌊", sub: "Wellig" },
+  null: { label: "Sonstiges", emoji: "❓", sub: "ohne Qualität" },
+};
+
 interface Props {
   products: PickableProduct[];
   onPick: (p: PickableProduct) => void;
@@ -30,27 +36,45 @@ interface Props {
 
 export default function ProductPicker({ products, onPick, onClose }: Props) {
   const [category, setCategory] = useState<string | null>(null);
+  const [quality, setQuality] = useState<string | null | "_none_">(null);
   const [length, setLength] = useState<number | null | "any">(null);
   const [color, setColor] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
-  // Verfuegbare Optionen je Stufe
+  // ─── Verfügbare Stufen-Optionen ─────────────────────────────
   const inCat = useMemo(
     () => (category ? products.filter((p) => p.category === category) : []),
     [products, category],
   );
+  const qualities = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of inCat) set.add(p.quality ?? "_none_");
+    return [...set];
+  }, [inCat]);
+  const inQuality = useMemo(
+    () =>
+      quality
+        ? inCat.filter((p) => (p.quality ?? "_none_") === quality)
+        : inCat,
+    [inCat, quality],
+  );
   const lengths = useMemo(() => {
     const set = new Set<number | "any">();
-    for (const p of inCat) set.add(p.lengthCm ?? "any");
+    for (const p of inQuality) set.add(p.lengthCm ?? "any");
     return [...set].sort((a, b) => {
       if (a === "any") return 1;
       if (b === "any") return -1;
       return a - b;
     });
-  }, [inCat]);
+  }, [inQuality]);
   const inLen = useMemo(
-    () => inCat.filter((p) => (length === "any" ? p.lengthCm == null : p.lengthCm === length)),
-    [inCat, length],
+    () =>
+      length != null
+        ? inQuality.filter((p) =>
+            length === "any" ? p.lengthCm == null : p.lengthCm === length,
+          )
+        : inQuality,
+    [inQuality, length],
   );
   const colors = useMemo(() => {
     const map = new Map<string, PickableProduct>();
@@ -62,11 +86,32 @@ export default function ProductPicker({ products, onPick, onClose }: Props) {
   }, [inLen]);
   const inColor = useMemo(
     () =>
-      inLen.filter((p) => ((p.color ?? "—").trim() || "—") === color),
+      color ? inLen.filter((p) => ((p.color ?? "—").trim() || "—") === color) : inLen,
     [inLen, color],
   );
 
-  // Volltext-Suche querbeet (alternative zum Cascading)
+  // ─── Adaptive Skip ──────────────────────────────────────────
+  // Wenn beim Aktivieren einer Stufe nur 1 Option existiert: auto-pick.
+  useEffect(() => {
+    if (category && quality == null && qualities.length === 1) {
+      setQuality(qualities[0]);
+    }
+  }, [category, quality, qualities]);
+
+  useEffect(() => {
+    if (category && quality != null && length == null && lengths.length === 1) {
+      setLength(lengths[0]);
+    }
+  }, [category, quality, length, lengths]);
+
+  // Wenn nach Farb-Pick nur 1 Variante uebrig → direkt picken
+  useEffect(() => {
+    if (color && inColor.length === 1) {
+      onPick(inColor[0]);
+    }
+  }, [color, inColor, onPick]);
+
+  // ─── Volltext-Suche ─────────────────────────────────────────
   const searchResults = useMemo(() => {
     if (!search.trim()) return null;
     const q = search.toLowerCase();
@@ -75,36 +120,46 @@ export default function ProductPicker({ products, onPick, onClose }: Props) {
         (p) =>
           p.productTitle.toLowerCase().includes(q) ||
           (p.variantTitle ?? "").toLowerCase().includes(q) ||
-          (p.color ?? "").toLowerCase().includes(q),
+          (p.color ?? "").toLowerCase().includes(q) ||
+          (p.quality ?? "").toLowerCase().includes(q),
       )
-      .slice(0, 60);
+      .slice(0, 80);
   }, [products, search]);
+
+  // ─── Back-Navigation ─────────────────────────────────────────
+  function back() {
+    if (color) setColor(null);
+    else if (length != null) setLength(null);
+    else if (quality != null) setQuality(null);
+    else if (category) setCategory(null);
+    else onClose();
+  }
+
+  const stage =
+    !category ? "cat" : quality == null ? "qual" : length == null ? "len" : !color ? "col" : "var";
 
   return (
     <div className="fixed inset-0 z-50 bg-neutral-950 flex flex-col">
       <header className="px-4 py-3 flex items-center gap-3 border-b border-neutral-900">
         <button
-          onClick={() => {
-            if (color) setColor(null);
-            else if (length) setLength(null);
-            else if (category) setCategory(null);
-            else onClose();
-          }}
+          onClick={back}
           className="p-2 -ml-2 hover:bg-neutral-900 rounded-lg"
         >
           <ChevronLeft size={24} />
         </button>
         <div className="flex-1">
           <div className="text-lg font-semibold">
-            {!category && "Methode wählen"}
-            {category && !length && `${CAT_TILES[category]?.label} — Länge`}
-            {category && length && !color && `${CAT_TILES[category]?.label} ${length === "any" ? "" : length + "cm"} — Farbe`}
-            {color && "Pack-Größe"}
+            {stage === "cat" && "Methode wählen"}
+            {stage === "qual" && "Qualität wählen"}
+            {stage === "len" && "Länge wählen"}
+            {stage === "col" && "Farbe wählen"}
+            {stage === "var" && "Pack wählen"}
           </div>
-          <div className="text-xs text-neutral-500">
+          <div className="text-xs text-neutral-500 truncate">
             {[
               category ? CAT_TILES[category]?.label : null,
-              length ? (length === "any" ? "" : `${length}cm`) : null,
+              quality && quality !== "_none_" ? QUALITY_TILES[quality]?.label : null,
+              length != null ? (length === "any" ? "" : `${length}cm`) : null,
               color || null,
             ]
               .filter(Boolean)
@@ -116,14 +171,13 @@ export default function ProductPicker({ products, onPick, onClose }: Props) {
         </button>
       </header>
 
-      {/* Suche oben — alternativer Pfad */}
       <div className="px-4 py-3 border-b border-neutral-900">
         <div className="relative">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Suche (Titel, Farbe, Länge...)"
+            placeholder="Suche (Titel, Farbe, Qualität...)"
             className="w-full bg-neutral-900 border border-neutral-700 rounded-xl pl-9 pr-3 py-2.5 text-base text-white placeholder-neutral-500 focus:ring-2 focus:ring-rose-500 outline-none"
           />
         </div>
@@ -144,8 +198,8 @@ export default function ProductPicker({ products, onPick, onClose }: Props) {
           </div>
         )}
 
-        {/* Cascading: Stufe 1 - Methode */}
-        {!searchResults && !category && (
+        {/* Stufe 1: Methode */}
+        {!searchResults && stage === "cat" && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-2">
             {CAT_ORDER.filter((c) => products.some((p) => p.category === c)).map((c) => {
               const count = products.filter((p) => p.category === c).length;
@@ -164,8 +218,31 @@ export default function ProductPicker({ products, onPick, onClose }: Props) {
           </div>
         )}
 
-        {/* Stufe 2 - Laenge */}
-        {!searchResults && category && !length && (
+        {/* Stufe 2: Qualitaet */}
+        {!searchResults && stage === "qual" && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+            {qualities.map((q) => {
+              const def = QUALITY_TILES[q];
+              const count = inCat.filter((p) => (p.quality ?? "_none_") === q).length;
+              return (
+                <button
+                  key={q}
+                  onClick={() => setQuality(q)}
+                  className="bg-neutral-900 hover:bg-neutral-800 rounded-2xl py-10 text-2xl font-bold flex flex-col items-center gap-2 active:scale-95 transition"
+                >
+                  <span className="text-4xl">{def.emoji}</span>
+                  <span>{def.label}</span>
+                  <span className="text-xs text-neutral-500 font-normal">
+                    {def.sub} · {count} Varianten
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Stufe 3: Laenge */}
+        {!searchResults && stage === "len" && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
             {lengths.map((l) => (
               <button
@@ -179,9 +256,9 @@ export default function ProductPicker({ products, onPick, onClose }: Props) {
           </div>
         )}
 
-        {/* Stufe 3 - Farbe */}
-        {!searchResults && category && length != null && !color && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-2">
+        {/* Stufe 4: Farbe */}
+        {!searchResults && stage === "col" && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
             {colors.map(([c, sample]) => (
               <button
                 key={c}
@@ -205,8 +282,8 @@ export default function ProductPicker({ products, onPick, onClose }: Props) {
           </div>
         )}
 
-        {/* Stufe 4 - Pack-Groesse (oder direkt picken wenn nur 1) */}
-        {!searchResults && color && (
+        {/* Stufe 5: Variante (nur wenn mehrere Pack-Groessen pro Farbe) */}
+        {!searchResults && stage === "var" && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-2">
             {inColor.map((p, i) => (
               <ProductTile key={i} p={p} onPick={() => onPick(p)} />
@@ -235,6 +312,9 @@ function ProductTile({ p, onPick }: { p: PickableProduct; onPick: () => void }) 
         <div className="text-xs text-neutral-400 mt-0.5">{p.variantTitle ?? "—"}</div>
         <div className="mt-1 flex flex-wrap gap-1 text-[10px]">
           <span className="px-1.5 py-0.5 bg-neutral-800 rounded">{p.categoryLabel}</span>
+          {p.quality && (
+            <span className="px-1.5 py-0.5 bg-neutral-800 rounded capitalize">{p.quality}</span>
+          )}
           {p.lengthCm && <span className="px-1.5 py-0.5 bg-neutral-800 rounded">{p.lengthCm}cm</span>}
           <span className="px-1.5 py-0.5 bg-neutral-800 rounded">{p.packGrams}g</span>
           {!p.hasBarcode && (
