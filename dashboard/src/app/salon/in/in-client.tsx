@@ -80,10 +80,14 @@ export default function InClient() {
     setOpenEntries(matches.entries);
     if (matches.entries.length === 1) {
       setSelectedEntry(matches.entries[0]);
-      setStep("fullOrPartial");
-    } else {
-      setStep("matchPick");
     }
+    // Erst Bestaetigungs-Screen, danach geht's je nach Anzahl der Matches weiter
+    setStep("preview");
+  }
+
+  function onConfirmPreview() {
+    if (openEntries.length === 1) setStep("fullOrPartial");
+    else setStep("matchPick");
   }
 
   function onScan(barcode: string) {
@@ -192,6 +196,35 @@ export default function InClient() {
           onPick={onPickerPick}
           onClose={() => setPickerOpen(false)}
         />
+      )}
+
+      {step === "preview" && product && (
+        <div className="flex-1 flex flex-col p-6 max-w-2xl w-full mx-auto gap-6">
+          <div className="text-center">
+            <div className="text-2xl font-bold">Stimmt der Pack?</div>
+            <div className="text-neutral-400 text-sm mt-1">Bitte kurz prüfen</div>
+          </div>
+          <ProductCard p={product} />
+          {openEntries.length === 1 && (
+            <div className="text-sm text-neutral-400 text-center">
+              Entnommen durch {openEntries[0].employeeName}
+            </div>
+          )}
+          {openEntries.length > 1 && (
+            <div className="text-sm text-amber-400 text-center">
+              {openEntries.length} offene Entnahmen — Mitarbeiter wird im nächsten Schritt gewählt
+            </div>
+          )}
+          <button
+            onClick={onConfirmPreview}
+            className="bg-emerald-600 hover:bg-emerald-500 rounded-2xl py-7 text-2xl font-bold flex items-center justify-center gap-3"
+          >
+            <Check size={32} /> Bestätigen
+          </button>
+          <button onClick={reset} className="text-neutral-400 hover:text-white py-3 border border-neutral-800 rounded-xl">
+            Falscher Pack — nochmal scannen
+          </button>
+        </div>
       )}
 
       {step === "matchPick" && product && (

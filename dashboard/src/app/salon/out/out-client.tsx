@@ -151,15 +151,19 @@ export default function OutClient({ employees }: { employees: Employee[] }) {
 
       {step === "preview" && product && (
         <div className="flex-1 flex flex-col p-6 max-w-2xl w-full mx-auto gap-6">
+          <div className="text-center">
+            <div className="text-2xl font-bold">Stimmt der Pack?</div>
+            <div className="text-neutral-400 text-sm mt-1">Bitte kurz prüfen</div>
+          </div>
           <ProductCard p={product} />
           <button
             onClick={() => setStep("employee")}
-            className="bg-rose-600 hover:bg-rose-500 rounded-2xl py-6 text-2xl font-bold"
+            className="bg-emerald-600 hover:bg-emerald-500 rounded-2xl py-7 text-2xl font-bold flex items-center justify-center gap-3"
           >
-            Weiter — Mitarbeiter waehlen
+            <Check size={32} /> Bestätigen
           </button>
-          <button onClick={reset} className="text-neutral-400 hover:text-white">
-            Anderen Pack scannen
+          <button onClick={reset} className="text-neutral-400 hover:text-white py-3 border border-neutral-800 rounded-xl">
+            Falscher Pack — nochmal scannen
           </button>
         </div>
       )}
