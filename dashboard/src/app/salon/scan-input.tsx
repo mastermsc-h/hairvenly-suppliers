@@ -12,13 +12,15 @@ interface Props {
   onScan: (barcode: string) => void;
   busy?: boolean;
   placeholder?: string;
+  /** Kamera direkt beim Mount starten (default: true). */
+  autoStartCamera?: boolean;
 }
 
 const READER_ID = "salon-scanner-reader";
 
-export default function ScanInput({ onScan, busy, placeholder }: Props) {
+export default function ScanInput({ onScan, busy, placeholder, autoStartCamera = true }: Props) {
   const [val, setVal] = useState("");
-  const [camActive, setCamActive] = useState(false);
+  const [camActive, setCamActive] = useState(autoStartCamera);
   const [camError, setCamError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
