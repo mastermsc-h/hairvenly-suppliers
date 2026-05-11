@@ -254,8 +254,8 @@ function PrintModal({
 }) {
   // Sicherheits-Caps gegen Browser-Tab-Crashes auf langsameren Macs
   // (jedes Label = synchroner JsBarcode-SVG-Render im Portal)
-  const MAX_QTY_PER_ROW = 500;
-  const MAX_TOTAL_LABELS = 500;
+  const MAX_QTY_PER_ROW = 1000;
+  const MAX_TOTAL_LABELS = 1000;
 
   // Initial-Mengen: max(0, Lager - bereits gedruckt) pro Produkt mit Barcode
   const initialQty = useMemo(() => {
@@ -721,7 +721,7 @@ function ModalRow({
         <input
           type="number"
           min={0}
-          max={500}
+          max={1000}
           value={q}
           onChange={(e) => onQty(row, parseInt(e.target.value || "0", 10))}
           className={`w-16 text-right rounded border px-2 py-1 text-sm focus:ring-2 focus:outline-none ${

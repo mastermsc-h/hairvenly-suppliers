@@ -69,7 +69,7 @@ export default function BarcodesClient({
 
   // Schutz: pro Variante auf max 500 cappen — sonst kann ein
   // versehentliches Festhalten des Step-Buttons den Browser killen.
-  const MAX_PER_VARIANT = 500;
+  const MAX_PER_VARIANT = 1000;
 
   function handlePrint() {
     if (totalLabels === 0 || printing) return;
