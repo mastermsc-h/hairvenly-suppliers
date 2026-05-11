@@ -739,11 +739,10 @@ function PrintLabels({ items }: { items: { title: string; barcode: string }[] })
           body > *:not(.stock-label-sheet-portal) { display: none !important; }
           .stock-label-sheet-portal { display: block !important; }
           html, body { background: white !important; margin: 0 !important; padding: 0 !important; }
-          /* Hochformat: 25mm breit × 50mm hoch (Zebra ZD421 Portrait) */
-          @page { size: 25mm 50mm; margin: 0; }
+          @page { size: 50mm 25mm; margin: 0; }
           .stock-label {
-            width: 25mm;
-            height: 50mm;
+            width: 50mm;
+            height: 25mm;
             padding: 1mm;
             box-sizing: border-box;
             page-break-after: always;
@@ -757,32 +756,19 @@ function PrintLabels({ items }: { items: { title: string; barcode: string }[] })
           .stock-label:last-child { page-break-after: auto; break-after: auto; }
           .stock-label-title {
             font-size: 6pt;
-            line-height: 1.15;
+            line-height: 1.1;
             text-align: center;
             font-family: -apple-system, BlinkMacSystemFont, sans-serif;
             color: #000;
-            max-height: 12mm;
+            max-height: 7mm;
             overflow: hidden;
             display: -webkit-box;
-            -webkit-line-clamp: 3;
+            -webkit-line-clamp: 2;
             -webkit-box-orient: vertical;
-            margin-bottom: 1mm;
+            margin-bottom: 0.5mm;
           }
-          /* Barcode um 90° rotiert, damit er die lange Achse (50mm) nutzt
-             und gut scanbar bleibt — CODE128 mit 13 Ziffern braucht Platz. */
-          .stock-label-barcode {
-            width: 23mm;
-            height: 32mm;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-          }
-          .stock-label-barcode svg {
-            width: 32mm;
-            height: 23mm;
-            transform: rotate(90deg);
-            transform-origin: center;
-          }
+          .stock-label-barcode { width: 100%; max-height: 14mm; }
+          .stock-label-barcode svg { width: 100%; height: 100%; max-height: 14mm; }
         }
       `}</style>
       <div className="stock-label-sheet-portal">

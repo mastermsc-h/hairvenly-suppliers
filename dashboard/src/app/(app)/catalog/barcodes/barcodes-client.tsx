@@ -89,12 +89,13 @@ export default function BarcodesClient({
           aside, [data-mobile-sidebar] { display: none !important; }
           html, body { background: white !important; margin: 0 !important; padding: 0 !important; }
           main { padding: 0 !important; overflow: visible !important; }
-          /* Hochformat: 25mm breit × 50mm hoch (Zebra ZD421 Portrait) */
-          @page { size: 25mm 50mm; margin: 0; }
+          @page { size: 50mm 25mm; margin: 0; }
           .label-sheet { display: block; }
+          /* Jedes label = 1 SVG mit fixen 50mm x 25mm. Kein flow-overflow,
+             daher kann der browser nicht ueber seitengrenzen aufsplitten. */
           .label {
-            width: 25mm !important;
-            height: 50mm !important;
+            width: 50mm !important;
+            height: 25mm !important;
             display: block !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
@@ -107,8 +108,8 @@ export default function BarcodesClient({
           }
           .label-img {
             display: block;
-            width: 25mm;
-            height: 50mm;
+            width: 50mm;
+            height: 25mm;
             object-fit: contain;
           }
         }
@@ -303,9 +304,8 @@ export default function BarcodesClient({
 
 // Pixel-dimensionen des Label-Canvas (Aspect-ratio 50:25 = 2:1).
 // 600×300 = ~12 px/mm bei 50mm — gibt scharfe drucke bei 203/300 dpi.
-// Hochformat: 25mm breit × 50mm hoch → 1:2 ratio, hier in px (8 px/mm)
-const LABEL_W = 300;
-const LABEL_H = 600;
+const LABEL_W = 600;
+const LABEL_H = 300;
 
 function Label({ variant }: { variant: Variant }) {
   // Komplette Label-Komposition in EIN canvas → PNG → <img>.
@@ -337,52 +337,40 @@ function Label({ variant }: { variant: Variant }) {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, LABEL_W, LABEL_H);
 
-      // Titel (max 3 Zeilen — Hochformat hat mehr vertikalen Platz)
+      // Titel (max 2 Zeilen)
       const fullTitle = variant.variantTitle
         ? `${variant.productTitle} · ${variant.variantTitle}`
         : variant.productTitle;
-      const titleLines = splitTitle(fullTitle, 22);
+      const titleLines = splitTitle(fullTitle, 38);
       ctx.fillStyle = "#000000";
-      ctx.font = "bold 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+      ctx.font = "bold 22px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       const titleY = 12;
-      const lineHeight = 22;
+      const lineHeight = 26;
       titleLines.forEach((line, i) => {
-        ctx.fillText(line, LABEL_W / 2, titleY + i * lineHeight, LABEL_W - 12);
+        ctx.fillText(line, LABEL_W / 2, titleY + i * lineHeight, LABEL_W - 20);
       });
 
-      // Barcode unterhalb des Titels — um 90° rotiert, damit die Bar-Länge
-      // die lange Label-Achse (50mm) nutzt. Sonst wäre der Barcode bei nur
-      // 25mm Breite zu dicht für zuverlässiges Scannen.
-      const titleBlockH = titleY + titleLines.length * lineHeight + 8;
+      // Barcode unterhalb des Titels einbetten — proportionsgerecht
+      const titleBlockH = titleY + titleLines.length * lineHeight + 6;
       const barcodeArea = {
-        x: 10,
+        x: 20,
         y: titleBlockH,
-        w: LABEL_W - 20,
-        h: LABEL_H - titleBlockH - 10,
+        w: LABEL_W - 40,
+        h: LABEL_H - titleBlockH - 8,
       };
-      // Original aspect-ratio des barcode-canvas behalten (horizontal)
+      // Original aspect-ratio des barcode-canvas behalten
       const bcRatio = barcodeCanvas.width / barcodeCanvas.height;
-      // Drehung: Original-Breite wird zur dargestellten Höhe, original-Höhe zur Breite
-      // Wir wollen, dass die rotierte BREITE in barcodeArea.w passt UND die rotierte HÖHE
-      // (entspricht der originalen Bar-Länge) in barcodeArea.h passt.
-      // Maximal verfügbare rotierte Höhe = barcodeArea.h, maximal rotierte Breite = barcodeArea.w
-      let rotatedH = barcodeArea.h;             // entspricht der originalen Bar-Länge
-      let rotatedW = rotatedH / bcRatio;         // entspricht der originalen Bar-Höhe
-      if (rotatedW > barcodeArea.w) {
-        rotatedW = barcodeArea.w;
-        rotatedH = rotatedW * bcRatio;
+      let drawW = barcodeArea.w;
+      let drawH = drawW / bcRatio;
+      if (drawH > barcodeArea.h) {
+        drawH = barcodeArea.h;
+        drawW = drawH * bcRatio;
       }
-      const cx = barcodeArea.x + barcodeArea.w / 2;
-      const cy = barcodeArea.y + barcodeArea.h / 2;
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(Math.PI / 2);
-      // Nach Rotation: original-Breite wird vertikal gezeichnet (= rotatedH),
-      // original-Höhe wird horizontal (= rotatedW)
-      ctx.drawImage(barcodeCanvas, -rotatedH / 2, -rotatedW / 2, rotatedH, rotatedW);
-      ctx.restore();
+      const drawX = barcodeArea.x + (barcodeArea.w - drawW) / 2;
+      const drawY = barcodeArea.y + (barcodeArea.h - drawH) / 2;
+      ctx.drawImage(barcodeCanvas, drawX, drawY, drawW, drawH);
 
       setLabelDataUrl(canvas.toDataURL("image/png"));
     } catch {
