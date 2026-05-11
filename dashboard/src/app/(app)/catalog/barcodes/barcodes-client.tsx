@@ -60,22 +60,37 @@ export default function BarcodesClient({
     setQuantities(next);
   }
 
-  // Liste der zu druckenden Etiketten (jedes mehrfach laut quantities)
-  const printList = useMemo(() => {
-    const list: Variant[] = [];
-    for (const v of variants) {
-      const q = quantities[variantKey(v)] ?? 0;
-      for (let i = 0; i < q; i++) list.push(v);
-    }
-    return list;
-  }, [variants, quantities]);
+  // Druckliste wird ERST beim Klick auf "Drucken" erzeugt — sonst würde
+  // jede Mengen-Änderung im Input sofort alle Etiketten reaktiv rendern
+  // (auch wenn versteckt via @media screen). Das hat auf langsameren
+  // Macs zu Tab-Crashes geführt, wenn die Menge groß war.
+  const [printList, setPrintList] = useState<Variant[]>([]);
+  const [printing, setPrinting] = useState(false);
+
+  // Schutz: pro Variante auf max 500 cappen — sonst kann ein
+  // versehentliches Festhalten des Step-Buttons den Browser killen.
+  const MAX_PER_VARIANT = 500;
 
   function handlePrint() {
-    if (printList.length === 0) return;
+    if (totalLabels === 0 || printing) return;
+    setPrinting(true);
+    const list: Variant[] = [];
+    for (const v of variants) {
+      const q = Math.min(quantities[variantKey(v)] ?? 0, MAX_PER_VARIANT);
+      for (let i = 0; i < q; i++) list.push(v);
+    }
+    setPrintList(list);
     // Warten bis alle Canvas-Labels als PNG fertig komponiert sind.
     // Pro Label braucht's ~10-30ms — bei vielen labels also relevant.
-    const ms = Math.max(300, printList.length * 25);
-    setTimeout(() => window.print(), ms);
+    const ms = Math.max(300, list.length * 25);
+    setTimeout(() => {
+      window.print();
+      // Nach dem Druck wieder freigeben, damit der speicher nicht haengt
+      setTimeout(() => {
+        setPrintList([]);
+        setPrinting(false);
+      }, 1500);
+    }, ms);
   }
 
   return (
@@ -256,8 +271,9 @@ export default function BarcodesClient({
                           <input
                             type="number"
                             min={0}
+                            max={MAX_PER_VARIANT}
                             value={q}
-                            onChange={(e) => setQty(v, parseInt(e.target.value || "0", 10))}
+                            onChange={(e) => setQty(v, Math.min(parseInt(e.target.value || "0", 10), MAX_PER_VARIANT))}
                             className="w-16 text-right rounded border border-neutral-300 px-2 py-1 text-sm focus:ring-2 focus:ring-neutral-900 focus:outline-none"
                           />
                         </td>
@@ -277,11 +293,11 @@ export default function BarcodesClient({
             <button
               type="button"
               onClick={handlePrint}
-              disabled={totalLabels === 0}
+              disabled={totalLabels === 0 || printing}
               className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Printer size={16} />
-              Drucken auf Zebra
+              {printing ? "Etiketten werden vorbereitet…" : "Drucken auf Zebra"}
             </button>
           </div>
         </div>
