@@ -731,22 +731,65 @@ const ModalRow = memo(function ModalRow({
         )}
       </td>
       <td className="px-3 py-2 text-right">
-        <input
-          type="number"
-          min={0}
-          max={1000}
-          value={q}
-          onChange={(e) => onQty(row, parseInt(e.target.value || "0", 10))}
-          className={`w-16 text-right rounded border px-2 py-1 text-sm focus:ring-2 focus:outline-none ${
-            q !== suggested
-              ? "border-amber-400 focus:ring-amber-500"
-              : "border-neutral-300 focus:ring-neutral-900"
-          }`}
+        <QtyInput
+          q={q}
+          suggested={suggested}
+          onCommit={(val) => onQty(row, val)}
         />
       </td>
     </tr>
   );
 });
+
+/**
+ * Entkoppelt das Tippen vom Parent-State: Input hält seinen eigenen
+ * lokalen Wert und schreibt nur beim onBlur oder Enter (oder beim Step-
+ * Counter-Klick) zurück. Damit löst kein onChange-Event mehr einen
+ * Parent-Re-render aus. Verhindert Safari-Crashes auf alten iMacs,
+ * wo schon EIN Tastendruck die Seite gekillt hat.
+ */
+function QtyInput({ q, suggested, onCommit }: { q: number; suggested: number; onCommit: (v: number) => void }) {
+  const [val, setVal] = useState<string>(String(q));
+  // Sync wenn der parent q ändert (z.B. nach "Alle auf 0" oder Reset)
+  useEffect(() => {
+    setVal(String(q));
+  }, [q]);
+
+  const commit = () => {
+    const n = parseInt(val || "0", 10);
+    if (!Number.isFinite(n) || n === q) {
+      setVal(String(q));
+      return;
+    }
+    onCommit(n);
+  };
+
+  return (
+    <input
+      type="number"
+      min={0}
+      max={1000}
+      value={val}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          (e.currentTarget as HTMLInputElement).blur();
+        }
+        if (e.key === "Escape") {
+          setVal(String(q));
+          (e.currentTarget as HTMLInputElement).blur();
+        }
+      }}
+      className={`w-16 text-right rounded border px-2 py-1 text-sm focus:ring-2 focus:outline-none ${
+        val !== String(suggested)
+          ? "border-amber-400 focus:ring-amber-500"
+          : "border-neutral-300 focus:ring-neutral-900"
+      }`}
+    />
+  );
+}
 
 function PrintLabels({ items }: { items: { title: string; barcode: string }[] }) {
   // Mount-Guard fuer SSR
