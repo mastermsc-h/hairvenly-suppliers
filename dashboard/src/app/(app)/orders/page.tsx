@@ -58,8 +58,12 @@ export default async function OrdersPage() {
     return [];
   }
 
-  // Hide archived (stocked / cancelled) — those live in /orders/archive
-  const active = list.filter((o) => o.status !== "stocked" && o.status !== "cancelled");
+  // Hide archived (stocked / cancelled with no open balance) — those live in /orders/archive
+  // Orders we still owe money on stay visible even if their status moved past delivered.
+  const isArchivable = (o: OrderWithTotals) =>
+    (o.status === "stocked" || o.status === "cancelled") &&
+    Number(o.remaining_balance ?? 0) <= 0.009;
+  const active = list.filter((o) => !isArchivable(o));
 
   // Sort by order_date desc, then created_at desc
   const sorted = [...active].sort((a, b) => {

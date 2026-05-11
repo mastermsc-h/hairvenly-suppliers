@@ -58,12 +58,13 @@ export default async function DashboardPage() {
   }
 
   const totalOpen = list.reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
-  const activeOrders = list.filter(
-    (o) => o.status !== "stocked" && o.status !== "cancelled",
-  ).length;
-  const archivedCount = list.filter(
-    (o) => o.status === "stocked" || o.status === "cancelled",
-  ).length;
+  // An order is "active" if it's not stocked/cancelled, OR if it still has an open balance.
+  // Suppliers we still owe money to should remain visible — only fully paid + stocked/cancelled orders go to archive.
+  const isArchivable = (o: OrderWithTotals) =>
+    (o.status === "stocked" || o.status === "cancelled") &&
+    Number(o.remaining_balance ?? 0) <= 0.009;
+  const activeOrders = list.filter((o) => !isArchivable(o)).length;
+  const archivedCount = list.filter(isArchivable).length;
 
   // Kg pro Lieferant: gesamt bestellt + davon unterwegs
   const kgRows: SupplierKgRow[] = supplierList
@@ -171,7 +172,7 @@ export default async function DashboardPage() {
           items={supplierList.map((s) => {
             const sOrders = list.filter((o) => o.supplier_id === s.id);
             const openOrders = sOrders
-              .filter((o) => o.status !== "stocked" && o.status !== "cancelled")
+              .filter((o) => !isArchivable(o))
               .sort((a, b) => {
                 const da = a.order_date ?? a.created_at;
                 const db = b.order_date ?? b.created_at;

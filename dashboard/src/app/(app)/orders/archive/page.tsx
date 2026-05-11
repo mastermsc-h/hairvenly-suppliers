@@ -44,11 +44,14 @@ export default async function OrdersArchivePage() {
   const showDocs = showAllDocs || showPackingLists;
   const showInvoices = hasFeature(profile, "invoices") || isSupplierRole;
 
-  // Scope to own supplier for supplier role
+  // Scope to own supplier for supplier role.
+  // Archive: stocked/cancelled AND fully paid (no open balance).
+  // If we still owe money on the order, it stays in the active view.
   let ordersQuery = supabase
     .from("orders_with_totals")
     .select("*")
-    .in("status", ["stocked", "cancelled"]);
+    .in("status", ["stocked", "cancelled"])
+    .lte("remaining_balance", 0.009);
   if (isSupplierRole && mySupplierId) {
     ordersQuery = ordersQuery.eq("supplier_id", mySupplierId);
   }
