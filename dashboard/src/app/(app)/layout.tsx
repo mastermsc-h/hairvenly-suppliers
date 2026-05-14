@@ -5,6 +5,7 @@ import { t, type Locale } from "@/lib/i18n";
 import type { FeatureKey } from "@/lib/types";
 import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings, Truck, Globe2, Bot, Scissors } from "lucide-react";
 import SidebarGroup from "./sidebar-group";
+import ChatbotInboxBadge from "./chatbot-inbox-badge";
 import LanguageSwitcher from "./language-switcher";
 import { MobileSidebarWrapper } from "./mobile-sidebar";
 import ChangePassword from "./change-password";
@@ -144,11 +145,23 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               </>
             )}
 
-            {/* 5) Chatbot Wissensdatenbank */}
+            {/* 5) Chatbot — gruppiert */}
             {has("chatbot") && (
               <>
                 <div className="border-t border-neutral-200 my-2" />
-                <NavLink href="/chatbot" icon={<Bot size={16} />} label={t(locale, "nav.chatbot")} />
+                <SidebarGroup
+                  label="Chatbot"
+                  icon={<Bot size={16} />}
+                  href="/chatbot/inbox"
+                  trailing={<ChatbotInboxBadge />}
+                  items={[
+                    { href: "/chatbot/inbox",    label: "Chat-Inbox" },
+                    { href: "/chatbot",          label: "Wissensdatenbank" },
+                    { href: "/chatbot/avatars",  label: "Avatars" },
+                    { href: "/chatbot-test",     label: "Bot testen" },
+                    { href: "/chatbot/training", label: "Bot trainieren" },
+                  ]}
+                />
               </>
             )}
 

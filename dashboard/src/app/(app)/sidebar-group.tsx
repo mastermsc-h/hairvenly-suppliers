@@ -17,9 +17,10 @@ interface SidebarGroupProps {
   icon: React.ReactNode;
   href?: string;
   items: SidebarItem[];
+  trailing?: React.ReactNode;  // z.B. Badge mit Counter
 }
 
-export default function SidebarGroup({ label, icon, href, items }: SidebarGroupProps) {
+export default function SidebarGroup({ label, icon, href, items, trailing }: SidebarGroupProps) {
   const pathname = usePathname();
   const isExactMatch = href && pathname === href;
   const allHrefs = items.flatMap((i) => [i.href, ...(i.children?.map((c) => c.href) ?? [])]);
@@ -39,9 +40,10 @@ export default function SidebarGroup({ label, icon, href, items }: SidebarGroupP
           >
             {icon}
             <span>{label}</span>
+            {trailing}
           </Link>
         ) : (
-          <span className="flex-1 flex items-center gap-2 px-3 py-2 text-neutral-700">{icon}<span>{label}</span></span>
+          <span className="flex-1 flex items-center gap-2 px-3 py-2 text-neutral-700">{icon}<span>{label}</span>{trailing}</span>
         )}
         <button
           onClick={() => setOpen(!open)}
