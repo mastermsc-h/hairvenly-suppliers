@@ -20,7 +20,7 @@ export async function takeoverSession(sessionId: string) {
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
 
-/** Sendet eine Mitarbeiter-Nachricht in eine Session */
+/** Sendet eine Mitarbeiter-Nachricht in eine Session — reaktiviert geschlossene Sessions */
 export async function sendHumanMessage(sessionId: string, content: string) {
   if (!content?.trim()) return;
   const supabase = await createClient();
@@ -28,6 +28,13 @@ export async function sendHumanMessage(sessionId: string, content: string) {
   if (!user) throw new Error("Not authenticated");
 
   const svc = createServiceClient();
+
+  // Wenn Session "closed" war → automatisch wieder auf "awaiting_human" setzen
+  // (Mitarbeiter schreibt wieder rein, Bot bleibt erstmal pausiert)
+  const { data: cur } = await svc
+    .from("chat_sessions").select("status").eq("id", sessionId).single();
+  const wasClosed = cur?.status === "closed";
+
   await svc.from("chat_messages").insert({
     session_id: sessionId,
     role: "human_agent",
@@ -35,7 +42,10 @@ export async function sendHumanMessage(sessionId: string, content: string) {
     agent_id: user.id,
   });
   await svc.from("chat_sessions")
-    .update({ last_message_at: new Date().toISOString() })
+    .update({
+      last_message_at: new Date().toISOString(),
+      ...(wasClosed ? { status: "awaiting_human", assigned_to: user.id } : {}),
+    })
     .eq("id", sessionId);
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }

@@ -172,7 +172,14 @@ export async function POST(req: NextRequest) {
     signatureName,
   );
 
-  // Wenn Session schon awaiting_human → KEINE Bot-Antwort, nur Message speichern
+  // Wenn Session "closed" war → automatisch wieder auf "active" öffnen
+  // (Kunde schreibt wieder rein, behandeln wie eine fortgesetzte Konversation)
+  if (session.status === "closed") {
+    await supabase.from("chat_sessions").update({ status: "active" }).eq("id", session.id);
+    session.status = "active";
+  }
+
+  // Wenn Session awaiting_human → KEINE Bot-Antwort, nur Message speichern
   if (session.status === "awaiting_human") {
     await supabase.from("chat_messages").insert({
       session_id: session.id,

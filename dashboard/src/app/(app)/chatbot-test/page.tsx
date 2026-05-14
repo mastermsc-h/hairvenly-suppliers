@@ -385,13 +385,13 @@ export default function ChatbotTestPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send()}
-            placeholder={status === "closed" ? "Session beendet" : status === "awaiting_human" ? "Schreib weiter — eine Stylistin liest mit…" : "Frag Ava…"}
-            disabled={loading || status === "closed"}
+            placeholder={status === "awaiting_human" ? "Schreib weiter — eine Stylistin liest mit…" : "Frag Ava…"}
+            disabled={loading}
             className="flex-1 rounded-xl border border-neutral-300 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-pink-500 disabled:bg-neutral-50 disabled:text-neutral-400"
           />
           <button
             onClick={send}
-            disabled={loading || !input.trim() || status === "closed"}
+            disabled={loading || !input.trim()}
             className="bg-neutral-900 text-white rounded-xl px-4 py-3 hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <Send size={16} />

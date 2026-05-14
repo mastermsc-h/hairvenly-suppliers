@@ -7,18 +7,8 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 
-const AUTO_CLOSE_HOURS = 24;
-
 export async function GET() {
   const svc = createServiceClient();
-
-  // Auto-Close: alles was >24h still ist auf closed setzen
-  const cutoff = new Date(Date.now() - AUTO_CLOSE_HOURS * 3600 * 1000).toISOString();
-  await svc
-    .from("chat_sessions")
-    .update({ status: "closed" })
-    .in("status", ["active", "awaiting_human"])
-    .lt("last_message_at", cutoff);
 
   // Zähle awaiting_human
   const { count: awaitingHuman } = await svc

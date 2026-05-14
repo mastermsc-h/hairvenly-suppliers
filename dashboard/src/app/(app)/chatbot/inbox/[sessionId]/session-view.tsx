@@ -130,6 +130,14 @@ export default function ChatSessionView({ session, initialMessages }: Props) {
     });
   }
 
+  async function handleReopen() {
+    startTransition(async () => {
+      // resumeBot setzt status='active' + assigned_to=null — perfekt für "reaktivieren"
+      await resumeBot(session.id);
+      router.refresh();
+    });
+  }
+
   async function handleDelete() {
     if (!confirm("Diese Session komplett löschen (mit allen Nachrichten)? Kann nicht rückgängig gemacht werden.")) return;
     startTransition(async () => {
@@ -267,8 +275,15 @@ export default function ChatSessionView({ session, initialMessages }: Props) {
           Bot antwortet automatisch. Klick &ldquo;Übernehmen&rdquo; um selbst zu antworten.
         </div>
       ) : (
-        <div className="border-t border-neutral-100 p-3 text-center text-xs text-neutral-400 italic">
-          Session abgeschlossen
+        <div className="border-t border-neutral-100 p-3 text-center text-xs text-neutral-500 flex items-center justify-center gap-2">
+          <span>Session abgeschlossen — kann jederzeit wieder geöffnet werden</span>
+          <button
+            onClick={handleReopen}
+            disabled={isPending}
+            className="text-xs px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 inline-flex items-center gap-1 disabled:opacity-50"
+          >
+            <RotateCcw size={11} /> Wieder öffnen
+          </button>
         </div>
       )}
     </div>
