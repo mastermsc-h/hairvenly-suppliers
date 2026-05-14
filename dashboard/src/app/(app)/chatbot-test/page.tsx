@@ -57,11 +57,18 @@ export default function ChatbotTestPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, loading]);
 
-  // Polling neuer Nachrichten
+  // Polling neuer Nachrichten — mit Dedup gegen bereits gestreamte Bot-Antworten
   useEffect(() => {
     if (!sessionId) return;
+    // Beim ersten Lauf für diese sessionId: cursor auf jetzt setzen damit Polling
+    // nichts vor dem aktuellen Zeitpunkt zieht (sonst Doppel-Anzeige der grade
+    // per Stream gerenderten Bot-Antwort)
+    if (!lastPolled) {
+      setLastPolled(new Date().toISOString());
+      return;
+    }
     const interval = setInterval(async () => {
-      const url = `/api/chat/messages?sessionId=${sessionId}${lastPolled ? `&since=${encodeURIComponent(lastPolled)}` : ""}`;
+      const url = `/api/chat/messages?sessionId=${sessionId}&since=${encodeURIComponent(lastPolled)}`;
       try {
         const res = await fetch(url);
         if (!res.ok) return;
@@ -71,16 +78,26 @@ export default function ChatbotTestPage() {
           (m: { role: string }) => m.role === "human_agent" || m.role === "assistant",
         );
         if (newOnes.length > 0) {
-          setMessages(prev => [
-            ...prev,
-            ...newOnes.map((m: { id: string; role: string; content: string; agent_name?: string; created_at: string }) => ({
-              id: m.id,
-              role: m.role === "human_agent" ? ("human" as const) : ("assistant" as const),
-              content: m.content,
-              signature: m.agent_name || undefined,
-              ts: m.created_at,
-            })),
-          ]);
+          // Dedup: skip messages die schon (via stream) im state sind
+          setMessages(prev => {
+            const existingIds = new Set(prev.map(p => p.id));
+            const existingContents = new Set(prev.map(p => `${p.role}::${(p.content || "").slice(0, 80)}`));
+            const additions = newOnes
+              .filter((m: { id: string; role: string; content: string }) => {
+                if (existingIds.has(m.id)) return false;
+                const role = m.role === "human_agent" ? "human" : "assistant";
+                const sig = `${role}::${(m.content || "").slice(0, 80)}`;
+                return !existingContents.has(sig);
+              })
+              .map((m: { id: string; role: string; content: string; agent_name?: string; created_at: string }) => ({
+                id: m.id,
+                role: m.role === "human_agent" ? ("human" as const) : ("assistant" as const),
+                content: m.content,
+                signature: m.agent_name || undefined,
+                ts: m.created_at,
+              }));
+            return additions.length > 0 ? [...prev, ...additions] : prev;
+          });
           setLastPolled(newOnes[newOnes.length - 1].created_at);
         }
       } catch {}

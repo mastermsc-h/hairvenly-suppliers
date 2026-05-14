@@ -46,20 +46,31 @@ export default function ChatSessionView({ session, initialMessages }: Props) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
-  // Polling für neue Nachrichten alle 3s
+  // Polling für neue Nachrichten alle 3s — mit Dedup gegen Optimistic-Updates
   useEffect(() => {
+    let lastTs = messages.length > 0 ? messages[messages.length - 1].created_at : new Date().toISOString();
     const interval = setInterval(async () => {
-      const last = messages[messages.length - 1]?.created_at;
-      const res = await fetch(`/api/chat/messages?sessionId=${session.id}${last ? `&since=${encodeURIComponent(last)}` : ""}`);
+      const res = await fetch(`/api/chat/messages?sessionId=${session.id}&since=${encodeURIComponent(lastTs)}`);
       if (!res.ok) return;
       const data = await res.json();
       if (data.messages && data.messages.length > 0) {
-        setMessages(m => [...m, ...data.messages]);
+        setMessages(m => {
+          const existingIds = new Set(m.map(p => p.id));
+          const existingContents = new Set(m.map(p => `${p.role}::${(p.content || "").slice(0, 80)}`));
+          const fresh = (data.messages as Message[]).filter(nm => {
+            if (existingIds.has(nm.id)) return false;
+            const sig = `${nm.role}::${(nm.content || "").slice(0, 80)}`;
+            return !existingContents.has(sig);
+          });
+          return fresh.length > 0 ? [...m, ...fresh] : m;
+        });
+        lastTs = data.messages[data.messages.length - 1].created_at;
         router.refresh();
       }
     }, 3000);
     return () => clearInterval(interval);
-  }, [session.id, messages, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id]);
 
   async function handleTakeover() {
     startTransition(async () => {
