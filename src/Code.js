@@ -3,7 +3,7 @@
 // ==========================================
 // CODE_VERSION: 2026-04-22_23-00_DoSA-days-of-stock-allocator
 // ==========================================
-const CODE_VERSION = "2026-05-04_10-00_Inventory-Dedup-Lock-CleanupHelper";
+const CODE_VERSION = "2026-05-13_12-30_VAProductData-TopsellerData-Cache-Loop-Massive-Speedup";
 
 // IDs der externen Bestellungs-Sheets
 const CHINA_SHEET_ID    = "1zqh50KeQsworvG5OivfxvECM7HUoArwUEGBTUGVB4ZM";
@@ -4397,6 +4397,10 @@ function writeBestellungSheet(sheet, title, columns, rows, headerBg, topColor, m
 
 function createBestellungChina() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  // ── Timing-Profiler: misst Phasendauer für 6-Min-Limit-Diagnose ──
+  const _t0 = Date.now();
+  const _phaseTime = (label) => Logger.log("⏱️ China[" + ((Date.now() - _t0) / 1000).toFixed(1) + "s] " + label);
+  _phaseTime("START");
   // V2 (Catalog-basiert) ist seit 17.04.2026 Standard.
   // Für Rollback auf V1: Script Property "CHINA_USE_V1_LEGACY" = "true"
   const useV1Legacy = PropertiesService.getScriptProperties().getProperty("CHINA_USE_V1_LEGACY") === "true";
@@ -4444,13 +4448,19 @@ function createBestellungChina() {
   } else {
     invRows = readInventoryRowsFromSheet("Usbekisch - WELLIG");
   }
+  _phaseTime("Catalog/Inventar geladen (" + invRows.length + " rows)");
 
   // Aktive Bestellungen laden
   const allOrders = getAllOrders();
+  _phaseTime("getAllOrders fertig (" + allOrders.length + " orders)");
 
   // ─── TOPSELLER-RÄNGE: Dynamisch aus refreshTopseller() oder Fallback ───
   // Prüfen ob Topseller-Daten vorhanden sind
   const hasTopsellerdaten = !!(PropertiesService.getScriptProperties().getProperty("TOPSELLER_DATA_COUNT"));
+  // TOPSELLER_DATA einmal laden — sonst ruft jeder getRangTS_/getTopsellertierTS_ Aufruf
+  // loadChunked_ erneut auf (mehrere Chunks pro Aufruf, ~200ms × 400+ Aufrufe = 80s+ verschwendet)
+  const tsDataC = hasTopsellerdaten ? loadChunked_(PropertiesService.getScriptProperties(), "TOPSELLER_DATA") : null;
+  _phaseTime("TOPSELLER_DATA geladen (China)");
 
   // Kollektion -> Typ + collName Mapping
   const collMapping = [
@@ -4509,8 +4519,8 @@ function createBestellungChina() {
   // Tier für Produkt bestimmen (dynamisch oder Fallback)
   // länge wichtig: Tapes 45cm vs. 55cm vs. 65cm haben getrennte Tiers
   function getTierChina(colorOneWord, typ, länge) {
-    if (hasTopsellerdaten) {
-      return getTopsellertierTS_("Usbekisch Wellig", typ, colorOneWord, null, länge);
+    if (hasTopsellerdaten && tsDataC) {
+      return getTopsellertierTS_cached_(tsDataC, "Usbekisch Wellig", typ, colorOneWord, null, länge);
     }
     return "REST";
   }
@@ -4527,6 +4537,17 @@ function createBestellungChina() {
       m.keyword
     );
   }
+
+  // ─── PROPERTIES-CACHE: einmalig laden statt pro Iteration (HEAVY!) ───
+  // PropertiesService.getProperty kostet ~50-100ms pro Aufruf. Bei ~150 invRows × 3 Aufrufen
+  // pro Iteration sind das 30-45 Sekunden — kann das 6-Min-Trigger-Limit sprengen.
+  const _props = PropertiesService.getScriptProperties();
+  const _rawVD = _props.getProperty("VERKAUFS_DATA");
+  const _vdParsed = _rawVD ? (function() { try { return JSON.parse(_rawVD); } catch(e) { return null; } })() : null;
+  const _hasProdData = !!(_props.getProperty("VA_PRODUCT_DATA_COUNT") || _props.getProperty("VA_PRODUCT_DATA_0"));
+  // VA_PRODUCT_DATA einmal laden — getVerkaufsZielGrams_ ruft das sonst pro Iteration (200×80s+!)
+  const _vaProductDataCacheC = _hasProdData ? loadChunked_(_props, "VA_PRODUCT_DATA") : null;
+  _phaseTime("Properties-Cache fertig (vd=" + (_vdParsed ? "OK" : "leer") + ", prodData=" + _hasProdData + ", vaProd=" + (_vaProductDataCacheC ? "OK" : "leer") + ")");
 
   // ─── BEDARFSBERECHNUNG: über alle Inventar-Zeilen iterieren ───
   // Gruppierung: Typ + Länge als Gruppenkey
@@ -4565,14 +4586,15 @@ function createBestellungChina() {
     let tierCounts = tierCountsCache[mapping.collName] || { TOP7: 1, MID: 1, REST: 1 };
     let ziel = (tier === "KAUM")
       ? 300  // Ausverkauft – Mindestbestellung
-      : getVerkaufsZielGrams_("Usbekisch Wellig", mapping.collName, tier, tierCounts, 10, colorOneWord, lager); // China: 8 Wochen Lieferzeit + 2 Wochen Puffer = 10
+      : getVerkaufsZielGrams_("Usbekisch Wellig", mapping.collName, tier, tierCounts, 10, colorOneWord, lager, _vaProductDataCacheC); // China: 8 Wochen Lieferzeit + 2 Wochen Puffer = 10
     if (ziel === 0) continue; // Nicht bestellen
     // Echter Rang aus Topseller-Daten (länge-aware für Tapes/Bondings China)
-    let rang = getRangTS_("Usbekisch Wellig", mapping.typ, colorOneWord, null, mapping.länge.toLowerCase());
+    let rang = tsDataC
+      ? getRangTS_cached_(tsDataC, "Usbekisch Wellig", mapping.typ, colorOneWord, null, mapping.länge.toLowerCase())
+      : 999;
     // Rang-Mindestziele: NUR noch als Fallback wenn keine Produktdaten vorhanden (kein VA_PRODUCT_DATA).
     // Bei vorhandenen Produktdaten regelt getVerkaufsZielGrams_ (inkl. Ausverkauf-Erkennung) das Ziel.
-    const hasProdData = !!(PropertiesService.getScriptProperties().getProperty("VA_PRODUCT_DATA_COUNT") ||
-                           PropertiesService.getScriptProperties().getProperty("VA_PRODUCT_DATA_0"));
+    const hasProdData = _hasProdData; // aus Properties-Cache (siehe oben)
     if (!hasProdData && mapping.typ === "Tapes" && rang < 999) {
       if (rang <= 10)       ziel = Math.max(ziel, RANG_MINZIEL_TOP10);
       else if (rang <= 20)  ziel = Math.max(ziel, RANG_MINZIEL_TOP20);
@@ -4604,10 +4626,10 @@ function createBestellungChina() {
     // Lager bei Ankunft = Lager heute - Verbrauch bis Ankunft
     // Verfügbar bei Ankunft = Lager bei Ankunft + diese Bestellung + frühere Bestellungen
     {
-      const rawVD2 = PropertiesService.getScriptProperties().getProperty("VERKAUFS_DATA");
-      if (rawVD2) {
+      // VERKAUFS_DATA aus Properties-Cache (einmal geladen, siehe oben — spart 30-60s über alle Iterationen)
+      if (_vdParsed) {
         try {
-          const vd2 = JSON.parse(rawVD2);
+          const vd2 = _vdParsed;
           // collMapping.collName (z.B. "Tapes Wellig 45cm") → VERKAUFS_DATA-Label (z.B. "Tapes 45cm")
           const VD_KEY_MAP_C = {
             "Tapes Wellig 45cm": "Tapes 45cm", "Tapes Wellig 55cm": "Tapes 55cm",
@@ -5390,6 +5412,7 @@ function createBestellungChina() {
   // ║ DAYS-OF-STOCK ALLOCATOR (DoSA) — überschreibt alle vorherigen Zuteilungen    ║
   // ║ Ersetzt Runden 0-10 + Sanity durch eine saubere, einheitliche Logik.         ║
   // ╚══════════════════════════════════════════════════════════════════════════════╝
+  _phaseTime("VOR DoSA (allCandidates: " + allCandidates.length + ")");
   allocateByDaysOfStock_(allCandidates, budgetG, {
     label: "China",
     zielReichweite: 42,
@@ -5403,6 +5426,7 @@ function createBestellungChina() {
     lieferantStep:   500,            // China-Lieferant: nur 500g-Schritte → kaufmännische Rundung am Ende
     stockBeiAnkunftFn: (c) => (c.stock_at_84 != null ? c.stock_at_84 : ((c.lager || 0) + (c.unterwegs || 0)))
   });
+  _phaseTime("DoSA fertig");
   restBudget = budgetG - allCandidates.reduce((s, c) => s + c.zugeteilt, 0);
 
   // Nur Kandidaten mit Zuteilung > 0, nach Typ+Länge gruppiert sortieren
@@ -5458,6 +5482,7 @@ function createBestellungChina() {
     budgetSubtotal
   ];
 
+  _phaseTime("VOR Render Budget-Tabelle");
   sheet.getRange(1, 1, budgetAllRows.length, colCount).setValues(budgetAllRows);
 
   // Formatierung Budget-Titel
@@ -5576,6 +5601,7 @@ function createBestellungChina() {
     5, rowsFullC,
     "#1a73e8", "#1a73e8", "#4a90d9"
   );
+  _phaseTime("Render fertig — Funktion ENDE");
 
   // Spaltenbreiten
   sheet.setColumnWidth(1, 160); sheet.setColumnWidth(2, 90); sheet.setColumnWidth(3, 200);
@@ -5801,6 +5827,16 @@ function createBestellungAmanda() {
   let rowsByGroup = {};
   let groupOrder = [];
 
+  // ─── PROPERTIES-CACHE: einmalig laden statt pro Iteration (HEAVY!) ───
+  // PropertiesService.getProperty kostet ~50-100ms pro Aufruf. Bei ~250 invRows × 3-4 Aufrufen
+  // sind das 50+ Sekunden — kann das 6-Min-Trigger-Limit sprengen.
+  const _propsA = PropertiesService.getScriptProperties();
+  const _rawVDA = _propsA.getProperty("VERKAUFS_DATA");
+  const _vdParsedA = _rawVDA ? (function() { try { return JSON.parse(_rawVDA); } catch(e) { return null; } })() : null;
+  const _hasProdDataA = !!(_propsA.getProperty("VA_PRODUCT_DATA_COUNT") || _propsA.getProperty("VA_PRODUCT_DATA_0"));
+  // VA_PRODUCT_DATA einmal laden — getVerkaufsZielGrams_ ruft das sonst pro Iteration (250×800ms+!)
+  const _vaProductDataCacheA = _hasProdDataA ? loadChunked_(_propsA, "VA_PRODUCT_DATA") : null;
+
   for (let invRow of invRows) {
     let cUpper = invRow.collection.toUpperCase();
 
@@ -5847,7 +5883,7 @@ function createBestellungAmanda() {
       ziel = 300; // Ausverkauft/unverkäuflich – Mindestbestellung
     } else {
       let tierCounts = tierCountsCacheA[mapping.collName] || { TOP7: 1, MID: 1, REST: 1 };
-      ziel = getVerkaufsZielGrams_("Russisch Glatt", mapping.collName, tier, tierCounts, 6, colorOneWord, lager); // Amanda: 6 Wochen
+      ziel = getVerkaufsZielGrams_("Russisch Glatt", mapping.collName, tier, tierCounts, 6, colorOneWord, lager, _vaProductDataCacheA); // Amanda: 6 Wochen
     }
     if (ziel === 0) continue; // Nicht bestellen
     // Echten Rang aus Topseller-Daten laden (statt pauschaler Platzhalter 1/8/15)
@@ -5862,8 +5898,7 @@ function createBestellungAmanda() {
     // Wenn VA_PRODUCT_DATA vorhanden: Ausverkauf-Erkennung in getVerkaufsZielGrams_ liefert das korrekte Ziel.
     if (mapping.method === "Standard Tapes") {
       Logger.log("[Rang-Debug] " + colorOneWord + ": rangReal=" + rangReal + " tier=" + tier + " ziel_vor=" + ziel);
-      const hasProdDataA = !!(PropertiesService.getScriptProperties().getProperty("VA_PRODUCT_DATA_COUNT") ||
-                              PropertiesService.getScriptProperties().getProperty("VA_PRODUCT_DATA_0"));
+      const hasProdDataA = _hasProdDataA; // aus Properties-Cache
       if (!hasProdDataA) {
         if (rangReal < 999) {
           if (rangReal <= 10)      ziel = Math.max(ziel, RANG_MINZIEL_TOP10);
@@ -5888,10 +5923,10 @@ function createBestellungAmanda() {
     // ─── VELOCITY-CHECK: Pro Bestellung mit echtem Ankunftsdatum (Amanda) ────────────────────────
     // Für jede unterwegs-Bestellung: Ankunft = Bestelldatum + 42 Tage (6 Wochen Amanda)
     {
-      const rawVDA2 = PropertiesService.getScriptProperties().getProperty("VERKAUFS_DATA");
-      if (rawVDA2) {
+      // VERKAUFS_DATA aus Properties-Cache (einmal geladen, siehe oben — spart 50+s über alle Iterationen)
+      if (_vdParsedA) {
         try {
-          const vdA2 = JSON.parse(rawVDA2);
+          const vdA2 = _vdParsedA;
           // collMappingAmanda.collName (z.B. "Standard Tapes Russisch") → VERKAUFS_DATA-Label (z.B. "Standard Tapes")
           const VD_KEY_MAP_A = {
             "Standard Tapes Russisch": "Standard Tapes",
@@ -9624,7 +9659,7 @@ function refreshVerkaufsanalyse() {
  * @param {Object} tierCounts Anzahl Produkte pro Tier in dieser Collection: { TOP7, MID, REST }
  * @returns {number} Ziel-Gramm (auf 25g gerundet), 0 wenn KAUM
  */
-function getVerkaufsZielGrams_(quality, collLabel, tier, tierCounts, lieferzeitWochen, colorOneWord, lagerG) {
+function getVerkaufsZielGrams_(quality, collLabel, tier, tierCounts, lieferzeitWochen, colorOneWord, lagerG, vaProductDataCache) {
   if (tier === "KAUM") return 0;
 
   // ─── Prio-Kategorien: festes Mindestziel 1000g (unabhängig von Verkaufsdaten) ───
@@ -9649,7 +9684,10 @@ function getVerkaufsZielGrams_(quality, collLabel, tier, tierCounts, lieferzeitW
   let produktDatenVerfügbar = false;
   if (colorOneWord) {
     try {
-      const vaProductData = loadChunked_(PropertiesService.getScriptProperties(), "VA_PRODUCT_DATA");
+      // Cache-Parameter bevorzugen (Performance: spart loadChunked_ pro Aufruf in Schleifen)
+      const vaProductData = (vaProductDataCache !== undefined && vaProductDataCache !== null)
+        ? vaProductDataCache
+        : loadChunked_(PropertiesService.getScriptProperties(), "VA_PRODUCT_DATA");
       if (vaProductData) {
         // Suche nach Produkt anhand Farbcode + Quality/Handle + Collection
         // WICHTIG: collLabel-Filter verhindert Cross-Collection-Matches

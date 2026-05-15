@@ -158,6 +158,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                     { href: "/chatbot/inbox",    label: "Chat-Inbox" },
                     { href: "/chatbot",          label: "Wissensdatenbank" },
                     { href: "/chatbot/avatars",  label: "Avatars" },
+                    { href: "/chatbot/insights", label: "Insights (Chat-Analyse)" },
                     { href: "/chatbot-test",     label: "Bot testen" },
                     { href: "/chatbot/training", label: "Bot trainieren" },
                   ]}

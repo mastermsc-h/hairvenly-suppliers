@@ -212,10 +212,16 @@ export async function POST(req: NextRequest) {
     attachments: body.attachments ?? [],
   });
 
-  // last_customer_msg_at aktualisieren (für "neue Kundennachricht" Indikator)
+  // last_customer_msg_at aktualisieren + falls Follow-Up gesendet wurde: als 'responded' markieren
+  const updates: Record<string, string> = {
+    last_customer_msg_at: new Date().toISOString(),
+  };
+  if ((session as { follow_up_status?: string }).follow_up_status === "sent") {
+    updates.follow_up_status = "responded";
+  }
   await supabase
     .from("chat_sessions")
-    .update({ last_customer_msg_at: new Date().toISOString() })
+    .update(updates)
     .eq("id", session.id);
 
   // History laden

@@ -36,9 +36,19 @@ export async function GET() {
     .select("id", { count: "exact", head: true })
     .eq("status", "active");
 
+  // Fällige Follow-Ups: Status=active, >3 Tage still, kein Follow-Up gesendet
+  const followUpCutoff = new Date(Date.now() - 3 * 86400 * 1000).toISOString();
+  const { count: dueFollowUps } = await svc
+    .from("chat_sessions")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "active")
+    .is("follow_up_sent_at", null)
+    .lt("last_message_at", followUpCutoff);
+
   return NextResponse.json({
     awaiting_human: awaitingHuman ?? 0,
     active: active ?? 0,
     unread_customer_msgs: unreadCustomerMsgs,
+    due_follow_ups: dueFollowUps ?? 0,
   });
 }

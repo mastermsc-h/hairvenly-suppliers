@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User } from "lucide-react";
+import FollowUpButton from "./follow-up-button";
 
 interface PageProps {
   searchParams: Promise<{ status?: string; mode?: string }>;
@@ -48,6 +49,15 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   }
   const { data: sessions } = await query;
 
+  // Stats für Follow-Up-Indikator
+  const followUpCutoff = new Date(Date.now() - 3 * 86400 * 1000).toISOString();
+  const { count: dueFollowUps } = await svc
+    .from("chat_sessions")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "active")
+    .is("follow_up_sent_at", null)
+    .lt("last_message_at", followUpCutoff);
+
   // Pro Session: erste User-Frage, erste Bot-Antwort, letzte Nachricht, Counts
   const sessionIds = (sessions ?? []).map(s => s.id);
   const stats: Record<string, SessionStats> = {};
@@ -87,10 +97,15 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-2">
-        <MessageSquare size={20} className="text-neutral-700" />
-        <h1 className="text-xl font-semibold text-neutral-900">Chat-Inbox</h1>
-        <span className="text-sm text-neutral-500 ml-2">Live-Gespräche aller Kanäle</span>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <MessageSquare size={20} className="text-neutral-700" />
+          <h1 className="text-xl font-semibold text-neutral-900">Chat-Inbox</h1>
+          <span className="text-sm text-neutral-500 ml-2">Live-Gespräche aller Kanäle</span>
+        </div>
+        {(dueFollowUps ?? 0) > 0 && (
+          <FollowUpButton count={dueFollowUps ?? 0} />
+        )}
       </div>
 
       {/* KPIs */}
