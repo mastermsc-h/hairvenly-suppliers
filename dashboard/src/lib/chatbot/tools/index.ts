@@ -398,12 +398,140 @@ const transferToHuman: ToolDef = {
   },
 };
 
+// ── get_available_colors (echte Farben aus product_colors-Tabelle) ──────────
+const getAvailableColors: ToolDef = {
+  schema: {
+    name: "get_available_colors",
+    description:
+      "Holt die ECHTEN Hairvenly-Farben aus dem Produktkatalog. " +
+      "NUTZE IMMER bevor du konkrete Farbnamen erwähnst — niemals Farben aus dem Kopf erfinden! " +
+      "Filter optional nach Methode (tape/bondings/tressen/etc.) und/oder Haarqualität (russisch/usbekisch). " +
+      "Bei großen Listen: gib dem Kunden eine kuratierte Empfehlung (z.B. 3-5 dunkle Töne), nicht alle 50 Namen.",
+    input_schema: {
+      type: "object",
+      properties: {
+        method: {
+          type: "string",
+          description: "Methode-Name z.B. 'Tapes', 'Bondings', 'Tressen', 'Clip-ins', 'Ponytail' oder leer für alle",
+        },
+        supplier_line: {
+          type: "string",
+          enum: ["russisch", "usbekisch", "any"],
+          description: "russisch (Premium, glatt) oder usbekisch (wellig). 'any' für beide.",
+        },
+        search: {
+          type: "string",
+          description: "Optional: Filter nach Farbton (z.B. 'blond', 'braun', 'schwarz', 'rot')",
+        },
+      },
+    },
+  },
+  async execute(input) {
+    const svc = createServiceClient();
+    const method = (input.method as string | undefined)?.toLowerCase();
+    const supplierLine = (input.supplier_line as string | undefined)?.toLowerCase();
+    const search = (input.search as string | undefined)?.toLowerCase();
+
+    // product_colors → product_lengths → product_methods → suppliers
+    let q = svc.from("product_colors").select(`
+      name_hairvenly,
+      length:product_lengths!product_colors_length_id_fkey(
+        value,
+        unit,
+        method:product_methods!product_lengths_method_id_fkey(
+          name,
+          supplier:suppliers!product_methods_supplier_id_fkey(name)
+        )
+      )
+    `).not("name_hairvenly", "is", null).limit(200);
+
+    const { data, error } = await q;
+    if (error) return { output: `Fehler: ${error.message}` };
+
+    type Row = {
+      name_hairvenly: string;
+      length?: { value?: number; unit?: string; method?: { name?: string; supplier?: { name?: string } | null } | null } | null;
+    };
+    let rows = (data as unknown as Row[]) || [];
+
+    // Method-Filter (lokal — flexibler als SQL-LIKE)
+    if (method && method !== "any") {
+      rows = rows.filter(r => {
+        const m = (r.length?.method?.name || "").toLowerCase();
+        // Map vom Bot-Begriff zu DB-Namen
+        if (method.includes("tape") && (m.includes("tape") || m.includes("minitape"))) return true;
+        if (method.includes("bond") && m.includes("bond")) return true;
+        if (method.includes("tress") && m.includes("weft")) return true;
+        if (method.includes("clip") && m.includes("clip")) return true;
+        if (method.includes("ponytail") && m.includes("ponytail")) return true;
+        if (method.includes("weft") && m.includes("weft")) return true;
+        return m.includes(method);
+      });
+    }
+
+    // Supplier-Filter
+    if (supplierLine === "russisch") {
+      rows = rows.filter(r => (r.length?.method?.supplier?.name || "").toLowerCase().includes("amanda"));
+    } else if (supplierLine === "usbekisch") {
+      rows = rows.filter(r => {
+        const s = (r.length?.method?.supplier?.name || "").toLowerCase();
+        return s.includes("eyfel") || s.includes("ebru");
+      });
+    }
+
+    // Such-Filter
+    if (search) {
+      rows = rows.filter(r => r.name_hairvenly.toLowerCase().includes(search));
+    }
+
+    // Eindeutige Farbnamen (mit Methoden zusammenfassen)
+    const colorMap = new Map<string, { lengths: Set<string>; methods: Set<string> }>();
+    for (const r of rows) {
+      if (!r.name_hairvenly) continue;
+      const entry = colorMap.get(r.name_hairvenly) || { lengths: new Set(), methods: new Set() };
+      if (r.length?.value) entry.lengths.add(`${r.length.value}${r.length.unit || "cm"}`);
+      if (r.length?.method?.name) entry.methods.add(r.length.method.name);
+      colorMap.set(r.name_hairvenly, entry);
+    }
+
+    if (colorMap.size === 0) {
+      return {
+        output: JSON.stringify({
+          status: "no_match",
+          message:
+            "Keine Farben mit diesen Filtern gefunden. Frag den Kunden nach Methode + Haarqualität (russisch/usbekisch), " +
+            "oder rufe das Tool ohne Filter auf um alle verfügbaren Farben zu sehen.",
+          filters: { method, supplier_line: supplierLine, search },
+        }),
+      };
+    }
+
+    const colors = Array.from(colorMap.entries()).map(([name, info]) => ({
+      name,
+      methods: Array.from(info.methods),
+      lengths: Array.from(info.lengths),
+    }));
+
+    return {
+      output: JSON.stringify({
+        status: "ok",
+        message:
+          `${colors.length} ECHTE Farben gefunden — NUR diese darfst du dem Kunden nennen. ` +
+          `Bei dem Kunden-Wunsch eine kuratierte Empfehlung machen (3-5 passende), nicht alle aufzählen.`,
+        filters: { method, supplier_line: supplierLine, search },
+        colors,
+      }),
+    };
+  },
+};
+
 export const TOOLS: Record<string, ToolDef> = {
-  get_price:          getPrice,
-  search_faq:         searchFaq,
-  get_stock_eta:      getStockEta,
-  analyze_hair_photo: analyzeHairPhoto,
-  transfer_to_human:  transferToHuman,
+  get_price:             getPrice,
+  search_faq:            searchFaq,
+  get_stock_eta:         getStockEta,
+  get_available_colors:  getAvailableColors,
+  analyze_hair_photo:    analyzeHairPhoto,
+  transfer_to_human:     transferToHuman,
 };
 
 export const TOOL_SCHEMAS = Object.values(TOOLS).map((t) => t.schema);
