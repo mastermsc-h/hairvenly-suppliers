@@ -28,7 +28,7 @@ interface Props {
   orderIdByName?: Record<string, OrderMeta>;
 }
 
-type QuickFilter = "all" | "no_order" | "has_order" | "kritisch" | "niedrig";
+type QuickFilter = "all" | "no_order" | "has_order" | "kritisch" | "niedrig" | "akut" | "knapp";
 
 const QUICK_FILTERS: Record<AlertMode, { key: QuickFilter; label: string; description: string }[]> = {
   zero: [
@@ -38,8 +38,10 @@ const QUICK_FILTERS: Record<AlertMode, { key: QuickFilter; label: string; descri
   ],
   critical: [
     { key: "all", label: "Alle", description: "" },
-    { key: "kritisch", label: "Kritisch (< 300g)", description: "" },
-    { key: "niedrig", label: "Niedrig (< 600g)", description: "" },
+    { key: "akut", label: "Akut (Reichweite < Lieferzeit)", description: "" },
+    { key: "knapp", label: "Knapp (< 1.5× Lieferzeit)", description: "" },
+    { key: "kritisch", label: "< 300g", description: "" },
+    { key: "niedrig", label: "< 600g", description: "" },
     { key: "no_order", label: "Ohne Bestellung", description: "" },
   ],
   transit: [
@@ -65,6 +67,48 @@ const TIER_LABEL: Record<Tier, string> = {
 };
 
 const TIER_ORDER: Record<Tier | "UNKNOWN", number> = { TOP7: 0, MID: 1, REST: 2, UNKNOWN: 3, KAUM: 4 };
+
+// Lieferzeit pro Qualität (in Tagen). Konservative Defaults — Eyfel TR ist
+// schneller (14 Tage) wird aber selten genutzt, China-Default schützt mehr.
+const LEAD_TIME_DAYS: Record<"wellig" | "glatt", number> = {
+  glatt: 42, // Amanda 6 Wochen
+  wellig: 56, // Eyfel/China 8 Wochen
+};
+
+// Berechnet Reichweite in Tagen aus Velocity. Nutzt den höheren Wert aus
+// 30T- und 90T-Geschwindigkeit — Trending-Up-Produkte werden so eher als
+// kritisch erkannt.
+function calcReichweite(d: AlertProduct): {
+  daily: number | null;
+  range: number | null;
+  rangeWithOrder: number | null;
+  leadTime: number;
+} {
+  const leadTime = LEAD_TIME_DAYS[d.sheetKey];
+  const v30 = (d.verkauft30d ?? 0) / 30;
+  const v90 = (d.verkauft90d ?? 0) / 90;
+  const daily = Math.max(v30, v90);
+  if (daily <= 0) return { daily: null, range: null, rangeWithOrder: null, leadTime };
+  return {
+    daily,
+    range: Math.round(d.lagerG / daily),
+    rangeWithOrder: Math.round((d.lagerG + d.unterwegsG) / daily),
+    leadTime,
+  };
+}
+
+// Kritikalität auf Basis Reichweite + Bestellung.
+// "akut" = Reichweite (auch mit Bestellung) reicht nicht bis nächste Lieferung möglich wäre
+// "knapp" = Reichweite mit Bestellung knapp über Lieferzeit
+// "ok"    = Reichweite reicht
+function rangeStatus(d: AlertProduct): "akut" | "knapp" | "ok" | "unbekannt" {
+  const { rangeWithOrder, range, leadTime, daily } = calcReichweite(d);
+  if (daily === null) return "unbekannt";
+  if (rangeWithOrder === null || range === null) return "unbekannt";
+  if (rangeWithOrder < leadTime) return "akut";
+  if (rangeWithOrder < leadTime * 1.5) return "knapp";
+  return "ok";
+}
 
 export default function AlertsClient({ data, title, subtitle, mode, lastUpdated, orderIdByName }: Props) {
   const [query, setQuery] = useState("");
@@ -128,6 +172,8 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
     if (quickFilter === "has_order" && d.unterwegsG <= 0) return false;
     if (quickFilter === "kritisch" && !((d.stufe === "kritisch") || d.lagerG < 300)) return false;
     if (quickFilter === "niedrig" && !(d.lagerG >= 300 && d.lagerG < 600)) return false;
+    if (quickFilter === "akut" && rangeStatus(d) !== "akut") return false;
+    if (quickFilter === "knapp" && rangeStatus(d) !== "knapp") return false;
     // Tier filter (critical mode)
     if (mode === "critical" && hasAnyTier && !allTiersActive) {
       if (!activeTiers.has(tierKey(d))) return false;
@@ -142,12 +188,20 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
     return true;
   };
 
+  const statusOrder: Record<ReturnType<typeof rangeStatus>, number> = {
+    akut: 0, knapp: 1, ok: 2, unbekannt: 3,
+  };
   const sortFn = (a: AlertProduct, b: AlertProduct) => {
     if (mode !== "critical") return 0;
-    // Sort: TOP7 first, then MID, REST, UNKNOWN, KAUM last.
-    // Within tier: lower stock first (most urgent at top).
+    // Sort: akute Reichweite zuerst, dann Tier (TOP7 vor REST/KAUM),
+    // innerhalb gleicher Bucket: kürzere Reichweite zuerst.
+    const statusDiff = statusOrder[rangeStatus(a)] - statusOrder[rangeStatus(b)];
+    if (statusDiff !== 0) return statusDiff;
     const tierDiff = TIER_ORDER[tierKey(a)] - TIER_ORDER[tierKey(b)];
     if (tierDiff !== 0) return tierDiff;
+    const ra = calcReichweite(a).rangeWithOrder ?? Number.MAX_SAFE_INTEGER;
+    const rb = calcReichweite(b).rangeWithOrder ?? Number.MAX_SAFE_INTEGER;
+    if (ra !== rb) return ra - rb;
     return a.lagerG - b.lagerG;
   };
 
@@ -225,15 +279,31 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
         {filters.length > 1 && (
           <div className="flex flex-wrap gap-2">
             {filters.map((f) => {
-              const count = f.key === "all" ? data.length : f.key === "no_order" ? noOrderCount : f.key === "has_order" ? hasOrderCount : f.key === "kritisch" ? data.filter((d) => d.lagerG < 300).length : data.filter((d) => d.lagerG >= 300 && d.lagerG < 600).length;
+              const count =
+                f.key === "all" ? data.length :
+                f.key === "no_order" ? noOrderCount :
+                f.key === "has_order" ? hasOrderCount :
+                f.key === "kritisch" ? data.filter((d) => d.lagerG < 300).length :
+                f.key === "niedrig" ? data.filter((d) => d.lagerG >= 300 && d.lagerG < 600).length :
+                f.key === "akut" ? data.filter((d) => rangeStatus(d) === "akut").length :
+                f.key === "knapp" ? data.filter((d) => rangeStatus(d) === "knapp").length :
+                0;
+              const isAkut = f.key === "akut";
+              const isKnapp = f.key === "knapp";
               return (
                 <button
                   key={f.key}
                   onClick={() => setQuickFilter(f.key)}
                   className={`px-3 py-2 rounded-lg text-sm font-medium transition inline-flex items-center gap-1.5 ${
                     quickFilter === f.key
-                      ? f.key === "no_order" ? "bg-red-600 text-white" : "bg-neutral-900 text-white"
-                      : f.key === "no_order" ? "bg-red-50 text-red-700 hover:bg-red-100 border border-red-200" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                      ? isAkut ? "bg-red-600 text-white"
+                        : isKnapp ? "bg-orange-500 text-white"
+                        : f.key === "no_order" ? "bg-red-600 text-white"
+                        : "bg-neutral-900 text-white"
+                      : isAkut ? "bg-red-50 text-red-700 hover:bg-red-100 border border-red-200"
+                        : isKnapp ? "bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200"
+                        : f.key === "no_order" ? "bg-red-50 text-red-700 hover:bg-red-100 border border-red-200"
+                        : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
                   }`}
                 >
                   {f.label}
@@ -420,21 +490,28 @@ function AlertSection({
 
       {/* Mobile */}
       <div className="md:hidden divide-y divide-neutral-100">
-        {items.map((item, i) => (
-          <div key={i} className={`px-3 py-2 ${item.tier === "KAUM" ? "opacity-60" : ""}`}>
+        {items.map((item, i) => {
+          const status = mode === "critical" ? rangeStatus(item) : "ok";
+          return (
+          <div key={i} className={`px-3 py-2 ${
+            mode === "critical" && status === "akut" ? "bg-red-50/50" :
+            mode === "critical" && status === "knapp" ? "bg-orange-50/40" :
+            item.tier === "KAUM" ? "opacity-60" : ""
+          }`}>
             <div className="flex justify-between items-start">
               <div className="min-w-0">
                 <div className="text-xs font-medium text-neutral-900 truncate">
                   {item.product}
                   {item.variant && <span className="text-neutral-400 ml-1">[{item.variant}g]</span>}
                 </div>
-                <div className="flex items-center gap-1.5 mt-0.5">
+                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                   <span className="text-[10px] text-neutral-500">{item.collection}</span>
                   {item.tier && (
                     <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-semibold ${TIER_BADGE[item.tier]}`}>
                       {TIER_LABEL[item.tier]}
                     </span>
                   )}
+                  {mode === "critical" && <ReichweiteBadge item={item} compact />}
                   {item.verkauft30d ? (
                     <span className="text-[9px] text-neutral-400">30T: {item.verkauft30d}g</span>
                   ) : null}
@@ -484,7 +561,8 @@ function AlertSection({
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Desktop */}
@@ -495,7 +573,8 @@ function AlertSection({
               <th className="px-2 py-1.5 font-medium">Kollektion</th>
               <th className="px-2 py-1.5 font-medium">Produkt</th>
               {mode === "critical" && <th className="px-2 py-1.5 font-medium">Rang</th>}
-              {mode === "critical" && <th className="px-2 py-1.5 font-medium text-right">30T</th>}
+              {mode === "critical" && <th className="px-2 py-1.5 font-medium text-right" title="Verbrauch letzte 30 Tage">30T</th>}
+              {mode === "critical" && <th className="px-2 py-1.5 font-medium text-right" title="Reichweite in Tagen inkl. Bestellung — verglichen mit Lieferzeit">Reichw.</th>}
               <th className="px-2 py-1.5 font-medium text-right">Lager</th>
               <th className="px-2 py-1.5 font-medium text-right">Unterwegs</th>
               <th className="px-2 py-1.5 font-medium">Bestellungen</th>
@@ -505,10 +584,13 @@ function AlertSection({
             {items.map((item, i) => {
               const tier = item.tier;
               const isKaum = tier === "KAUM";
+              const status = mode === "critical" ? rangeStatus(item) : "ok";
               return (
               <tr
                 key={i}
                 className={`hover:bg-indigo-100 hover:shadow-[inset_3px_0_0_0_rgb(79_70_229)] transition ${
+                  mode === "critical" && status === "akut" ? "bg-red-50/50" :
+                  mode === "critical" && status === "knapp" ? "bg-orange-50/40" :
                   mode === "critical" && tier === "TOP7" && item.lagerG < 600 ? "bg-yellow-50/40" :
                   mode === "critical" && item.stufe === "kritisch" && !isKaum ? "bg-orange-50/30" :
                   mode === "zero" && item.unterwegsG === 0 ? "bg-yellow-50/30" :
@@ -534,6 +616,11 @@ function AlertSection({
                 {mode === "critical" && (
                   <td className="px-2 py-1 text-right text-neutral-500">
                     {item.verkauft30d ? `${item.verkauft30d}g` : <span className="text-neutral-300">–</span>}
+                  </td>
+                )}
+                {mode === "critical" && (
+                  <td className="px-2 py-1 text-right">
+                    <ReichweiteBadge item={item} />
                   </td>
                 )}
                 <td className="px-2 py-1 text-right">
@@ -616,6 +703,32 @@ function LagerBadge({ lagerG, stufe }: { lagerG: number; stufe?: "kritisch" | "n
   }
   const bg = stufe === "kritisch" ? "bg-orange-100 text-orange-700" : stufe === "niedrig" ? "bg-amber-100 text-amber-700" : "bg-neutral-100 text-neutral-700";
   return <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${bg}`}>{lagerG}g</span>;
+}
+
+function ReichweiteBadge({ item, compact = false }: { item: AlertProduct; compact?: boolean }) {
+  const { daily, range, rangeWithOrder, leadTime } = calcReichweite(item);
+  if (daily === null || range === null || rangeWithOrder === null) {
+    return <span className="text-neutral-300 text-[10px]">–</span>;
+  }
+  const status = rangeStatus(item);
+  const color =
+    status === "akut" ? "bg-red-100 text-red-700" :
+    status === "knapp" ? "bg-orange-100 text-orange-700" :
+    "bg-emerald-50 text-emerald-700";
+  // Show range + range incl. order if they differ
+  const orderInfo = item.unterwegsG > 0 ? ` (+${rangeWithOrder - range})` : "";
+  const tooltip =
+    `Reichweite: ${range} Tage` +
+    (item.unterwegsG > 0 ? ` / ${rangeWithOrder} Tage inkl. Bestellung` : "") +
+    ` · Lieferzeit: ${leadTime} Tage · Verbrauch: ${daily.toFixed(1)}g/Tag`;
+  return (
+    <span
+      className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${color}`}
+      title={tooltip}
+    >
+      {compact ? `${range}T${orderInfo}` : `${range}T${orderInfo}`}
+    </span>
+  );
 }
 
 function KpiCard({ label, value, sub, icon, color }: { label: string; value: string; sub?: string; icon: React.ReactNode; color: "indigo" | "rose" | "emerald" }) {
