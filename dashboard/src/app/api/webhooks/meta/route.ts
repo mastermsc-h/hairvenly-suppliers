@@ -203,7 +203,8 @@ async function routeIncoming(opts: {
 
   if (!session) return;
 
-  // Message speichern
+  // Message speichern + Zeitstempel merken (für Debounce-Check)
+  const myMsgTimestamp = new Date().toISOString();
   await svc.from("chat_messages").insert({
     session_id: session.id,
     role: "user",
@@ -213,14 +214,39 @@ async function routeIncoming(opts: {
 
   // Session updaten
   await svc.from("chat_sessions").update({
-    last_message_at: new Date().toISOString(),
-    last_customer_msg_at: new Date().toISOString(),
+    last_message_at: myMsgTimestamp,
+    last_customer_msg_at: myMsgTimestamp,
     customer_name: session.customer_name || opts.customerName || null,
   }).eq("id", session.id);
 
   // Bot-Auto-Antwort wenn aktiviert für diese Session
   if (session.bot_auto_reply && session.status === "active") {
     try {
+      // ── DEBOUNCE ──
+      // Warte 4 Sekunden bevor du antwortest. Falls in der Zwischenzeit eine
+      // neuere Nachricht reinkommt, lass DEREN Webhook antworten (dieser hier skipped).
+      // → Kunde schreibt 3 kurze Nachrichten hintereinander = 1 Bot-Antwort auf
+      //   alle drei zusammen, nicht 3 einzelne Antworten.
+      const DEBOUNCE_MS = 4000;
+      await new Promise(r => setTimeout(r, DEBOUNCE_MS));
+
+      const { data: refreshed } = await svc
+        .from("chat_sessions")
+        .select("last_customer_msg_at, status, bot_auto_reply")
+        .eq("id", session.id)
+        .single();
+
+      // Neuere Kundennachricht eingegangen? → wir antworten NICHT, die andere Webhook tut's
+      if (refreshed?.last_customer_msg_at && refreshed.last_customer_msg_at > myMsgTimestamp) {
+        console.log(`[meta-webhook] debounce: newer message arrived (${refreshed.last_customer_msg_at} > ${myMsgTimestamp}), skipping`);
+        return;
+      }
+      // Status hat sich geändert (z.B. Mitarbeiter hat übernommen)?
+      if (refreshed?.status !== "active" || !refreshed?.bot_auto_reply) {
+        console.log(`[meta-webhook] debounce: session no longer active+auto, skipping`);
+        return;
+      }
+      // Alles klar → Bot antwortet jetzt
       await triggerBotResponse(session.id, opts.channel, opts.externalId);
     } catch (e) {
       console.error("[meta-webhook] bot reply failed:", e);
