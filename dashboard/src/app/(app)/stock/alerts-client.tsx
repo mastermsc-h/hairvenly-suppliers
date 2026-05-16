@@ -47,11 +47,43 @@ const QUICK_FILTERS: Record<AlertMode, { key: QuickFilter; label: string; descri
   ],
 };
 
+type Tier = "TOP7" | "MID" | "REST" | "KAUM";
+const ALL_TIERS: Tier[] = ["TOP7", "MID", "REST", "KAUM"];
+
+const TIER_BADGE: Record<Tier, string> = {
+  TOP7: "bg-yellow-100 text-yellow-800 ring-yellow-200",
+  MID: "bg-blue-100 text-blue-800 ring-blue-200",
+  REST: "bg-neutral-100 text-neutral-600 ring-neutral-200",
+  KAUM: "bg-neutral-100 text-neutral-400 ring-neutral-200",
+};
+
+const TIER_LABEL: Record<Tier, string> = {
+  TOP7: "Topseller",
+  MID: "Mid-Seller",
+  REST: "Rest",
+  KAUM: "Kaum",
+};
+
+const TIER_ORDER: Record<Tier | "UNKNOWN", number> = { TOP7: 0, MID: 1, REST: 2, UNKNOWN: 3, KAUM: 4 };
+
 export default function AlertsClient({ data, title, subtitle, mode, lastUpdated, orderIdByName }: Props) {
   const [query, setQuery] = useState("");
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
+  const [activeTiers, setActiveTiers] = useState<Set<Tier | "UNKNOWN">>(new Set([...ALL_TIERS, "UNKNOWN"]));
   const config = MODE_CONFIG[mode];
   const filters = QUICK_FILTERS[mode];
+
+  const tierKey = (d: AlertProduct): Tier | "UNKNOWN" => (d.tier ?? "UNKNOWN");
+  const toggleTier = (tier: Tier | "UNKNOWN") => {
+    setActiveTiers((prev) => {
+      const next = new Set(prev);
+      if (next.has(tier)) next.delete(tier);
+      else next.add(tier);
+      return next;
+    });
+  };
+  const allTiersActive = activeTiers.size === ALL_TIERS.length + 1;
+  const hasAnyTier = useMemo(() => data.some((d) => d.tier), [data]);
 
   // Collect unique order names for transit mode
   const allOrderNames = useMemo(() => {
@@ -92,10 +124,14 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
       if (!words.every((w) => combined.includes(w))) return false;
     }
     // Quick filter
-    if (quickFilter === "no_order") return d.unterwegsG === 0;
-    if (quickFilter === "has_order") return d.unterwegsG > 0;
-    if (quickFilter === "kritisch") return (d.stufe === "kritisch") || d.lagerG < 300;
-    if (quickFilter === "niedrig") return d.lagerG >= 300 && d.lagerG < 600;
+    if (quickFilter === "no_order" && d.unterwegsG !== 0) return false;
+    if (quickFilter === "has_order" && d.unterwegsG <= 0) return false;
+    if (quickFilter === "kritisch" && !((d.stufe === "kritisch") || d.lagerG < 300)) return false;
+    if (quickFilter === "niedrig" && !(d.lagerG >= 300 && d.lagerG < 600)) return false;
+    // Tier filter (critical mode)
+    if (mode === "critical" && hasAnyTier && !allTiersActive) {
+      if (!activeTiers.has(tierKey(d))) return false;
+    }
     // Order filter (transit mode): show product only if it has at least one selected order.
     // If all are selected → show everything. If none are selected → hide everything.
     if (mode === "transit" && allOrderNames.length > 0 && !allOrdersActive) {
@@ -106,7 +142,16 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
     return true;
   };
 
-  const filtered = data.filter(filterFn);
+  const sortFn = (a: AlertProduct, b: AlertProduct) => {
+    if (mode !== "critical") return 0;
+    // Sort: TOP7 first, then MID, REST, UNKNOWN, KAUM last.
+    // Within tier: lower stock first (most urgent at top).
+    const tierDiff = TIER_ORDER[tierKey(a)] - TIER_ORDER[tierKey(b)];
+    if (tierDiff !== 0) return tierDiff;
+    return a.lagerG - b.lagerG;
+  };
+
+  const filtered = data.filter(filterFn).sort(sortFn);
   const wellig = filtered.filter((d) => d.sheetKey === "wellig");
   const glatt = filtered.filter((d) => d.sheetKey === "glatt");
 
@@ -199,6 +244,50 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
           </div>
         )}
       </div>
+
+      {/* Tier filter (critical mode) */}
+      {mode === "critical" && hasAnyTier && (
+        <div className="flex flex-wrap gap-1.5 items-center">
+          <span className="text-[10px] uppercase text-neutral-400 font-medium mr-1">Verkaufsrang:</span>
+          <button
+            onClick={() => setActiveTiers(new Set([...ALL_TIERS, "UNKNOWN"]))}
+            className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+              allTiersActive ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+            }`}
+          >
+            Alle
+          </button>
+          {ALL_TIERS.map((tier) => {
+            const active = activeTiers.has(tier);
+            const count = data.filter((d) => tierKey(d) === tier).length;
+            return (
+              <button
+                key={tier}
+                onClick={() => toggleTier(tier)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition inline-flex items-center gap-1 ${
+                  active ? TIER_BADGE[tier].replace("ring-", "ring-1 ring-") : "bg-neutral-50 text-neutral-400 hover:bg-neutral-100 border border-dashed border-neutral-300"
+                }`}
+                title={TIER_LABEL[tier]}
+              >
+                {TIER_LABEL[tier]}
+                <span className="opacity-60">({count})</span>
+              </button>
+            );
+          })}
+          {data.some((d) => !d.tier) && (
+            <button
+              onClick={() => toggleTier("UNKNOWN")}
+              className={`px-2.5 py-1 rounded-md text-xs font-medium transition inline-flex items-center gap-1 ${
+                activeTiers.has("UNKNOWN") ? "bg-neutral-200 text-neutral-700" : "bg-neutral-50 text-neutral-400 hover:bg-neutral-100 border border-dashed border-neutral-300"
+              }`}
+              title="Kein Verkaufsrang im Topseller-Tab gefunden"
+            >
+              ohne Rang
+              <span className="opacity-60">({data.filter((d) => !d.tier).length})</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Order selection (transit mode) */}
       {mode === "transit" && allOrderNames.length > 0 && (
@@ -332,14 +421,24 @@ function AlertSection({
       {/* Mobile */}
       <div className="md:hidden divide-y divide-neutral-100">
         {items.map((item, i) => (
-          <div key={i} className="px-3 py-2">
+          <div key={i} className={`px-3 py-2 ${item.tier === "KAUM" ? "opacity-60" : ""}`}>
             <div className="flex justify-between items-start">
               <div className="min-w-0">
                 <div className="text-xs font-medium text-neutral-900 truncate">
                   {item.product}
                   {item.variant && <span className="text-neutral-400 ml-1">[{item.variant}g]</span>}
                 </div>
-                <div className="text-[10px] text-neutral-500 mt-0.5">{item.collection}</div>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="text-[10px] text-neutral-500">{item.collection}</span>
+                  {item.tier && (
+                    <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-semibold ${TIER_BADGE[item.tier]}`}>
+                      {TIER_LABEL[item.tier]}
+                    </span>
+                  )}
+                  {item.verkauft30d ? (
+                    <span className="text-[9px] text-neutral-400">30T: {item.verkauft30d}g</span>
+                  ) : null}
+                </div>
               </div>
               <div className="text-right shrink-0 ml-3">
                 <LagerBadge lagerG={item.lagerG} stufe={item.stufe} />
@@ -395,18 +494,25 @@ function AlertSection({
             <tr>
               <th className="px-2 py-1.5 font-medium">Kollektion</th>
               <th className="px-2 py-1.5 font-medium">Produkt</th>
+              {mode === "critical" && <th className="px-2 py-1.5 font-medium">Rang</th>}
+              {mode === "critical" && <th className="px-2 py-1.5 font-medium text-right">30T</th>}
               <th className="px-2 py-1.5 font-medium text-right">Lager</th>
               <th className="px-2 py-1.5 font-medium text-right">Unterwegs</th>
               <th className="px-2 py-1.5 font-medium">Bestellungen</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-100">
-            {items.map((item, i) => (
+            {items.map((item, i) => {
+              const tier = item.tier;
+              const isKaum = tier === "KAUM";
+              return (
               <tr
                 key={i}
                 className={`hover:bg-indigo-100 hover:shadow-[inset_3px_0_0_0_rgb(79_70_229)] transition ${
-                  mode === "critical" && item.stufe === "kritisch" ? "bg-orange-50/30" :
-                  mode === "zero" && item.unterwegsG === 0 ? "bg-yellow-50/30" : ""
+                  mode === "critical" && tier === "TOP7" && item.lagerG < 600 ? "bg-yellow-50/40" :
+                  mode === "critical" && item.stufe === "kritisch" && !isKaum ? "bg-orange-50/30" :
+                  mode === "zero" && item.unterwegsG === 0 ? "bg-yellow-50/30" :
+                  isKaum ? "opacity-60" : ""
                 }`}
               >
                 <td className="px-2 py-1 text-neutral-500">{item.collection}</td>
@@ -414,6 +520,22 @@ function AlertSection({
                   {item.product}
                   {item.variant && <span className="text-neutral-400 ml-1">[{item.variant}g]</span>}
                 </td>
+                {mode === "critical" && (
+                  <td className="px-2 py-1">
+                    {tier ? (
+                      <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-semibold ${TIER_BADGE[tier]}`}>
+                        {TIER_LABEL[tier]}
+                      </span>
+                    ) : (
+                      <span className="text-neutral-300 text-[10px]">–</span>
+                    )}
+                  </td>
+                )}
+                {mode === "critical" && (
+                  <td className="px-2 py-1 text-right text-neutral-500">
+                    {item.verkauft30d ? `${item.verkauft30d}g` : <span className="text-neutral-300">–</span>}
+                  </td>
+                )}
                 <td className="px-2 py-1 text-right">
                   <LagerBadge lagerG={item.lagerG} stufe={item.stufe} />
                 </td>
@@ -479,7 +601,8 @@ function AlertSection({
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

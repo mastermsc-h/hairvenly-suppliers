@@ -76,6 +76,10 @@ export interface AlertProduct {
   sheetKey: "wellig" | "glatt";
   unterwegsG: number;
   perOrder: { name: string; ankunft: string; menge: number }[];
+  tier?: "TOP7" | "MID" | "REST" | "KAUM";
+  verkauft30d?: number;
+  verkauft90d?: number;
+  ziel?: number;
 }
 
 export interface VerkaufsanalyseRow {
@@ -422,6 +426,67 @@ export async function readDashboardAlerts(): Promise<{
   }
 
   return { nullbestand, kritisch, unterwegs, lagerKpis: { welligKg, glattKg }, lastUpdated };
+}
+
+// ── Enrich Alerts with Topseller Tier ──────────────────────────
+// Matched via sheetKey + normalized color token + Länge (variant).
+// Topseller-`farbe` looks like "#4 Caramel #4 Standard Tape" — we extract
+// the first "#X" token and use it as the color key.
+
+function extractColorToken_(s: string): string {
+  // Match "#" followed by alphanumerics, optional "/" suffix groups, possibly trailing single word like "PEARL"
+  const m = s.match(/#[A-Z0-9]+(?:\/[A-Z0-9]+)*/i);
+  if (m) return m[0].toUpperCase().replace(/\s+/g, "");
+  // Fallback: first 12 chars uppercased, no spaces
+  return s.trim().toUpperCase().replace(/\s+/g, "").slice(0, 16);
+}
+
+function normalizeLaenge_(s: string | null | undefined): string {
+  if (!s) return "";
+  // strip "cm", "g", whitespace; keep digits and slashes
+  return String(s).replace(/[^\d/]/g, "");
+}
+
+export function enrichAlertsWithTier(
+  alerts: AlertProduct[],
+  topseller: TopsSellerSection[],
+): AlertProduct[] {
+  // Build lookup: sheetKey|colorToken|laenge → { tier, verkauft30d, verkauft90d, ziel }
+  type Meta = { tier: AlertProduct["tier"]; verkauft30d: number; verkauft90d: number; ziel: number };
+  const map = new Map<string, Meta>();
+
+  for (const sec of topseller) {
+    const sheetKey: "wellig" | "glatt" = sec.quality === "Usbekisch Wellig" ? "wellig" : "glatt";
+    for (const group of sec.sections) {
+      for (const it of group.items) {
+        const colorTok = extractColorToken_(it.farbe);
+        const lng = normalizeLaenge_(it.laenge);
+        const key = `${sheetKey}|${colorTok}|${lng}`;
+        const tier = (["TOP7", "MID", "REST", "KAUM"] as const).find((t) => t === it.tier);
+        map.set(key, {
+          tier,
+          verkauft30d: it.verkauft30d || 0,
+          verkauft90d: it.verkauftG || 0,
+          ziel: it.ziel || 0,
+        });
+      }
+    }
+  }
+
+  return alerts.map((a) => {
+    const colorTok = extractColorToken_(a.collection || a.product);
+    const lng = normalizeLaenge_(a.variant);
+    const key = `${a.sheetKey}|${colorTok}|${lng}`;
+    const meta = map.get(key);
+    if (!meta) return a;
+    return {
+      ...a,
+      tier: meta.tier,
+      verkauft30d: meta.verkauft30d,
+      verkauft90d: meta.verkauft90d,
+      ziel: meta.ziel,
+    };
+  });
 }
 
 // ── Read Verkaufsanalyse ───────────────────────────────────────
