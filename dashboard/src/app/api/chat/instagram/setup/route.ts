@@ -8,6 +8,9 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 const GRAPH_VERSION = "v21.0";
+// Instagram Login Tokens (IGAA...) nutzen graph.instagram.com
+// Page Access Tokens (EAA...) nutzen graph.facebook.com
+const IG_HOST = "https://graph.instagram.com";
 
 async function requireAdmin() {
   const supabase = await createClient();
@@ -41,24 +44,28 @@ export async function GET() {
     has_whitespace: /\s/.test(token),
   };
 
-  // Test 1: Simple call zu /me (sollte mit jedem gültigen Token funktionieren)
+  // Token-Format erkennen: IGAA → graph.instagram.com / EAA → graph.facebook.com
+  const host = token.startsWith("IGAA") ? IG_HOST : "https://graph.facebook.com";
+
+  // Test 1: /me
   const testMe = await fetch(
-    `https://graph.facebook.com/${GRAPH_VERSION}/me?fields=id,username,name&access_token=${encodeURIComponent(token)}`
+    `${host}/${GRAPH_VERSION}/me?fields=id,username,name&access_token=${encodeURIComponent(token)}`
   ).then(r => r.json()).catch(e => ({ error: e.message }));
 
   // Test 2: Direkt IG-User-Endpoint
   const testIg = await fetch(
-    `https://graph.facebook.com/${GRAPH_VERSION}/${igId}?fields=username,id&access_token=${encodeURIComponent(token)}`
+    `${host}/${GRAPH_VERSION}/${igId}?fields=username,id&access_token=${encodeURIComponent(token)}`
   ).then(r => r.json()).catch(e => ({ error: e.message }));
 
   // Test 3: Subscriptions
   const testSubs = await fetch(
-    `https://graph.facebook.com/${GRAPH_VERSION}/${igId}/subscribed_apps?access_token=${encodeURIComponent(token)}`
+    `${host}/${GRAPH_VERSION}/${igId}/subscribed_apps?access_token=${encodeURIComponent(token)}`
   ).then(r => r.json()).catch(e => ({ error: e.message }));
 
   return NextResponse.json({
     ig_user_id: igId,
     token_info: tokenInfo,
+    api_host: host,
     test_me: testMe,
     test_ig_user: testIg,
     test_subscriptions: testSubs,
@@ -72,7 +79,8 @@ export async function POST() {
   if (!igId || !token) return NextResponse.json({ error: "ENV missing" }, { status: 400 });
 
   // Subscribe — explizit subscribed_fields setzen
-  const url = `https://graph.facebook.com/${GRAPH_VERSION}/${igId}/subscribed_apps`;
+  const host = token.startsWith("IGAA") ? IG_HOST : "https://graph.facebook.com";
+  const url = `${host}/${GRAPH_VERSION}/${igId}/subscribed_apps`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

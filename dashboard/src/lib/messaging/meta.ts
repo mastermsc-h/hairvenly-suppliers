@@ -27,8 +27,10 @@ export async function sendInstagramMessage(
   if (!token || !igUserId) {
     return { success: false, error: "META_PAGE_ACCESS_TOKEN or META_INSTAGRAM_USER_ID not set" };
   }
+  // IGAA-Tokens (Instagram Login) → graph.instagram.com / EAA → graph.facebook.com
+  const host = token.startsWith("IGAA") ? "https://graph.instagram.com" : "https://graph.facebook.com";
   try {
-    const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${igUserId}/messages`, {
+    const res = await fetch(`${host}/${GRAPH_VERSION}/${igUserId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({
