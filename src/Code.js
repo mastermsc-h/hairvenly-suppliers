@@ -3,7 +3,7 @@
 // ==========================================
 // CODE_VERSION: 2026-04-22_23-00_DoSA-days-of-stock-allocator
 // ==========================================
-const CODE_VERSION = "2026-05-13_12-30_VAProductData-TopsellerData-Cache-Loop-Massive-Speedup";
+const CODE_VERSION = "2026-05-13_13-30_Produkt-URL-Spalte-in-Inventar-Sheets";
 
 // IDs der externen Bestellungs-Sheets
 const CHINA_SHEET_ID    = "1zqh50KeQsworvG5OivfxvECM7HUoArwUEGBTUGVB4ZM";
@@ -1922,6 +1922,7 @@ function fetchShopifyInventoryData() {
     for (let product of products) {
       let weight = extractWeightFromTitle(product.title);
       let variants = fetchVariantsAndStockByProductId(shopName, accessToken, product.id);
+      const productUrl = buildProductUrl_(product);
 
       if (variants.length === 0 && collectionName === "Ponytails 130g") {
         let inventory = fetchInventoryLevel(shopName, accessToken, product.id);
@@ -1929,7 +1930,7 @@ function fetchShopifyInventoryData() {
         let rawWeight = extractWeightFromTitle(product.title) || weight;
         let safeWeight = sanitizeWeightForCollection(collectionName, rawWeight);
         let totalWeight = safeWeight * inventory;
-        sheet.appendRow([collectionName, product.title, safeWeight, inventory, totalWeight]);
+        sheet.appendRow([collectionName, product.title, safeWeight, inventory, totalWeight, productUrl]);
         collectionWeightTotal += totalWeight;
         continue;
       }
@@ -1942,7 +1943,7 @@ function fetchShopifyInventoryData() {
         let variantWeight = sanitizeWeightForCollection(collectionName, rawVariantWeight);
         let quantity = Math.max(variant.availableStock, 0);
         let variantTotalWeight = variantWeight * quantity;
-        sheet.appendRow([collectionName, product.title, variantWeight, quantity, variantTotalWeight]);
+        sheet.appendRow([collectionName, product.title, variantWeight, quantity, variantTotalWeight, productUrl]);
         collectionWeightTotal += variantTotalWeight;
       }
     }
@@ -2263,9 +2264,75 @@ function ensureHeaderExists(sheet, sheetKey) {
     if (sheetKey === "ThirdSheet") {
       sheet.appendRow(["Collection Name", "Product Name", "Inventory Quantity"]);
     } else {
-      sheet.appendRow(["Collection Name", "Product Name", "Unit Weight (g)", "Inventory Quantity", "Total Weight (g)"]);
+      sheet.appendRow(["Collection Name", "Product Name", "Unit Weight (g)", "Inventory Quantity", "Total Weight (g)", "Produkt-URL"]);
+    }
+  } else if (sheetKey === "FirstSheet" || sheetKey === "SecondSheet") {
+    // Upgrade: bestehende 5-Spalten-Header → 6-Spalten (Produkt-URL nachträglich)
+    const headerF = String(sheet.getRange(1, 6).getValue() || "").trim();
+    if (!headerF) {
+      sheet.getRange(1, 6).setValue("Produkt-URL");
     }
   }
+}
+
+// Storefront-Basis-URL für Produkt-Links (letzte Spalte in Inventar-Sheets)
+const SHOPIFY_STOREFRONT_BASE = "https://hairvenly.de/products/";
+function buildProductUrl_(product) {
+  if (!product) return "";
+  if (product.handle) return SHOPIFY_STOREFRONT_BASE + product.handle;
+  // Fallback: URL-safe Slug aus Titel ableiten
+  if (product.title) {
+    const slug = String(product.title).toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    return SHOPIFY_STOREFRONT_BASE + slug;
+  }
+  return "";
+}
+
+/**
+ * Backfill: Füllt bei bestehenden Zeilen in Russisch-GLATT und Usbekisch-WELLIG
+ * die fehlende Produkt-URL-Spalte (F) anhand des Produkt-Namens nach.
+ * Einmalig aus dem Apps-Script-Editor laufen lassen.
+ */
+function backfillProductUrls() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const targets = ["Russisch - GLATT", "Usbekisch - WELLIG"];
+  for (const name of targets) {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) continue;
+    // Header sicherstellen
+    const headerF = String(sheet.getRange(1, 6).getValue() || "").trim();
+    if (!headerF) sheet.getRange(1, 6).setValue("Produkt-URL");
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) continue;
+    // Spalte B (Produkt Name) + Spalte F (URL) lesen
+    const range = sheet.getRange(2, 2, lastRow - 1, 5); // B..F
+    const values = range.getValues();
+    const updates = [];
+    let count = 0;
+    for (let i = 0; i < values.length; i++) {
+      const title = String(values[i][0] || "").trim();
+      const existingUrl = String(values[i][4] || "").trim();
+      // Header/Total/leer Zeilen überspringen
+      if (!title || title === "Product Name" || title.startsWith("Total") || title.startsWith("GRAND")) {
+        updates.push([values[i][4]]);
+        continue;
+      }
+      if (existingUrl) {
+        updates.push([existingUrl]);
+        continue;
+      }
+      // URL aus Titel via Slug
+      const url = buildProductUrl_({ title: title });
+      updates.push([url]);
+      count++;
+    }
+    // Spalte F (Index 6) zurückschreiben
+    sheet.getRange(2, 6, updates.length, 1).setValues(updates);
+    Logger.log("🔗 " + name + ": " + count + " URLs nachgetragen.");
+  }
+  Logger.log("✅ backfillProductUrls fertig.");
 }
 
 function fetchAllCollections(shopName, accessToken) {

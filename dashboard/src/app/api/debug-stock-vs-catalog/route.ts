@@ -28,24 +28,37 @@ export async function GET() {
   };
   const catalog = (rawCatalog as unknown as CatalogRow[]) || [];
 
-  // Extrahiere Kurznamen aus Stock-Produkten
-  const extractKurzname = (title: string): string | null => {
-    const m = title.match(/^#?\s*([\w\s\-/]+?)(?:\s+(?:RU|US|RUSSISCH|USBEKISCH|WELLIG|GLATT|KERATIN|INVISIBLE|TAPE|BONDING|TRESSEN|CLIP|PONYTAIL|MINITAPE|MINI)|\s+\d|♡|$)/i);
-    return m ? m[1].trim().toUpperCase() : null;
-  };
+  // Normalisierungs-Helfer: Vergleich case+whitespace-insensitive
+  const norm = (s: string) => s.toUpperCase().replace(/\s+/g, " ").replace(/[♡♥]/g, "").trim();
 
-  // Sammle Kurznamen aus Stock-Sheets
-  const stockKurznames = new Set<string>();
-  for (const row of [...rus.rows, ...usb.rows]) {
-    const k = extractKurzname(row.product);
-    if (k) stockKurznames.add(k);
+  // Catalog: Set aller name_shopify (normalisiert)
+  const catalogShopifyNames = new Map<string, CatalogRow>();
+  for (const c of catalog) {
+    if (c.name_shopify) catalogShopifyNames.set(norm(c.name_shopify), c);
   }
 
-  // Catalog-Kurznamen
-  const catalogKurznames = new Set(catalog.map(c => (c.name_hairvenly || "").toUpperCase().trim()).filter(Boolean));
+  // Stock-Produkte mit Match-Status
+  const allStock = [...rus.rows, ...usb.rows];
+  const matched: { stock_title: string; catalog_kurzname: string | null }[] = [];
+  const unmatched: string[] = [];
+  for (const row of allStock) {
+    const normalized = norm(row.product);
+    const cat = catalogShopifyNames.get(normalized);
+    if (cat) {
+      matched.push({ stock_title: row.product, catalog_kurzname: cat.name_hairvenly });
+    } else {
+      unmatched.push(row.product);
+    }
+  }
 
-  const inStockNotInCatalog = Array.from(stockKurznames).filter(k => !catalogKurznames.has(k));
-  const inCatalogNotInStock = Array.from(catalogKurznames).filter(k => !stockKurznames.has(k));
+  // Catalog-Einträge die im Stock NICHT vorkommen (= womöglich veraltet)
+  const stockNormSet = new Set(allStock.map(r => norm(r.product)));
+  const orphanCatalog: CatalogRow[] = [];
+  for (const c of catalog) {
+    if (c.name_shopify && !stockNormSet.has(norm(c.name_shopify))) {
+      orphanCatalog.push(c);
+    }
+  }
 
   return NextResponse.json({
     stock_sheets: {
@@ -64,10 +77,18 @@ export async function GET() {
       methods: Array.from(new Set(catalog.map(c => c.length?.method?.name).filter(Boolean))),
     },
     matching: {
-      stock_kurznames_count: stockKurznames.size,
-      catalog_kurznames_count: catalogKurznames.size,
-      in_stock_not_in_catalog: inStockNotInCatalog.sort().slice(0, 50),
-      in_catalog_not_in_stock: inCatalogNotInStock.sort().slice(0, 50),
+      stock_total: allStock.length,
+      matched_count: matched.length,
+      unmatched_count: unmatched.length,
+      match_rate_pct: Math.round(100 * matched.length / allStock.length),
+      orphan_catalog_count: orphanCatalog.length,
+      // Liste der Stock-Produkte ohne Catalog-Match
+      stock_missing_in_catalog: unmatched.sort().slice(0, 100),
+      // Catalog-Einträge ohne Stock-Match (eventuell auslaufende Produkte)
+      catalog_orphans_sample: orphanCatalog.slice(0, 30).map(c => ({
+        kurz: c.name_hairvenly,
+        shopify: c.name_shopify,
+      })),
     },
   });
 }
