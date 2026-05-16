@@ -3,7 +3,7 @@
 // ==========================================
 // CODE_VERSION: 2026-04-22_23-00_DoSA-days-of-stock-allocator
 // ==========================================
-const CODE_VERSION = "2026-05-13_13-30_Produkt-URL-Spalte-in-Inventar-Sheets";
+const CODE_VERSION = "2026-05-13_14-00_Deutsche-Header-Inventar-Sheets-Row2";
 
 // IDs der externen Bestellungs-Sheets
 const CHINA_SHEET_ID    = "1zqh50KeQsworvG5OivfxvECM7HUoArwUEGBTUGVB4ZM";
@@ -1848,15 +1848,23 @@ function fetchShopifyInventoryData() {
     if (!totalWeightMap[key]) totalWeightMap[key] = 0;
     if (lastProcessedCollection === 0) {
       sheets[key].clear();
-      // Datum-Zeile oben einfügen (nur für Wellig + Glatt, nicht Tools)
+      // Datum-Zeile oben einfügen (nur für Wellig + Glatt, nicht Tools) + Header in Zeile 2
       if (key === "FirstSheet" || key === "SecondSheet") {
         const dateLabel = "Zuletzt aktualisiert: " + nowStr;
-        sheets[key].appendRow([dateLabel, "", "", "", ""]);
-        sheets[key].getRange(1, 1, 1, 5).merge()
+        const headers = ["Kollektion", "Produkt", "Gewicht/Stück (g)", "Bestand (Stück)", "Gesamtgewicht (g)", "Produkt-URL"];
+        // Row 1: Datum (merged über alle 6 Spalten)
+        sheets[key].appendRow([dateLabel, "", "", "", "", ""]);
+        sheets[key].getRange(1, 1, 1, headers.length).merge()
           .setFontStyle("italic").setFontSize(9).setFontColor("#555555")
           .setBackground("#f5f5f5");
+        // Row 2: Spalten-Header (dark, bold, weiß) + Freeze
+        sheets[key].getRange(2, 1, 1, headers.length).setValues([headers]);
+        formatInventoryHeaderRow_For_(sheets[key], 2, headers.length);
+        sheets[key].setFrozenRows(2);
+      } else {
+        // ThirdSheet (Tools): nur Header in Row 1
+        ensureHeaderExists(sheets[key], key);
       }
-      ensureHeaderExists(sheets[key], key);
     }
   }
 
@@ -2042,7 +2050,7 @@ function dedupInventorySheets() {
       const col2 = parseFloat(row[2]) || 0;
       // Header / Total / leer-Zeilen behalten
       if (!col1) continue;
-      if (col0 === "Collection Name") continue;
+      if ((col0 === "Collection Name" || col0 === "Kollektion" || col0.startsWith("Zuletzt aktualisiert"))) continue;
       if (col0.startsWith("Total") || col0.startsWith("GRAND") || col0.startsWith("Zuletzt aktualisiert")) continue;
       if (col0 !== "") currentColl = col0;
       const key = currentColl + "|" + col1.toUpperCase() + "|" + col2;
@@ -2289,14 +2297,17 @@ function ensureHeaderExists(sheet, sheetKey) {
 
 /** Fett, weiß auf dunkel, eingefroren — konsistentes Aussehen der Header-Zeile */
 function formatInventoryHeaderRow_(sheet, colCount) {
+  formatInventoryHeaderRow_For_(sheet, 1, colCount);
+}
+function formatInventoryHeaderRow_For_(sheet, row, colCount) {
   try {
-    sheet.getRange(1, 1, 1, colCount)
+    sheet.getRange(row, 1, 1, colCount)
       .setFontWeight("bold")
       .setFontColor("#ffffff")
       .setBackground("#2d2d2d")
       .setHorizontalAlignment("center")
       .setFontSize(10);
-    if (sheet.getFrozenRows() < 1) sheet.setFrozenRows(1);
+    if (sheet.getFrozenRows() < row) sheet.setFrozenRows(row);
   } catch (e) { /* silent */ }
 }
 
@@ -2325,36 +2336,30 @@ function backfillProductUrls() {
   for (const name of targets) {
     const sheet = ss.getSheetByName(name);
     if (!sheet) continue;
-    // Header sicherstellen
-    const headerF = String(sheet.getRange(1, 6).getValue() || "").trim();
-    if (!headerF) sheet.getRange(1, 6).setValue("Produkt-URL");
-
     const lastRow = sheet.getLastRow();
-    if (lastRow < 2) continue;
-    // Spalte B (Produkt Name) + Spalte F (URL) lesen
-    const range = sheet.getRange(2, 2, lastRow - 1, 5); // B..F
-    const values = range.getValues();
-    const updates = [];
+    if (lastRow < 1) continue;
+
+    // Komplette ersten 2 Spalten lesen, jede Zeile prüfen
+    const data = sheet.getRange(1, 1, lastRow, 6).getValues();
+    const updates = []; // [{rowNum, url}]
     let count = 0;
-    for (let i = 0; i < values.length; i++) {
-      const title = String(values[i][0] || "").trim();
-      const existingUrl = String(values[i][4] || "").trim();
-      // Header/Total/leer Zeilen überspringen
-      if (!title || title === "Product Name" || title.startsWith("Total") || title.startsWith("GRAND")) {
-        updates.push([values[i][4]]);
-        continue;
-      }
-      if (existingUrl) {
-        updates.push([existingUrl]);
-        continue;
-      }
-      // URL aus Titel via Slug
-      const url = buildProductUrl_({ title: title });
-      updates.push([url]);
-      count++;
+    for (let i = 0; i < data.length; i++) {
+      const rowNum = i + 1;
+      const col0 = String(data[i][0] || "").trim();
+      const col1 = String(data[i][1] || "").trim();
+      const colF = String(data[i][5] || "").trim();
+      // Skip: Datum-Zeile, Header, Total/Grand-Zeilen, leere Zeilen
+      if (!col1) continue;
+      if (col0 === "Collection Name" || col0 === "Kollektion") continue;
+      if (col0.startsWith("Zuletzt aktualisiert")) continue;
+      if (col0.startsWith("Total") || col0.startsWith("GRAND")) continue;
+      if (col1 === "Product Name" || col1 === "Produkt") continue;
+      if (colF) continue; // schon vorhanden
+      const url = buildProductUrl_({ title: col1 });
+      if (url) { updates.push({ rowNum: rowNum, url: url }); count++; }
     }
-    // Spalte F (Index 6) zurückschreiben
-    sheet.getRange(2, 6, updates.length, 1).setValues(updates);
+    // Einzelne setValue-Aufrufe (kein zusammenhängender Block möglich)
+    updates.forEach(u => sheet.getRange(u.rowNum, 6).setValue(u.url));
     Logger.log("🔗 " + name + ": " + count + " URLs nachgetragen.");
   }
   Logger.log("✅ backfillProductUrls fertig.");
@@ -3529,8 +3534,8 @@ function createDashboard() {
             collectionName: colName, totalWeightG: col4, totalWeightKg: col4 / 1000
           });
         }
-        if (def.key !== "tools" && col0 !== "" && col0 !== "Collection Name"
-          && !col0.startsWith("Total") && !col0.startsWith("GRAND")) {
+        if (def.key !== "tools" && col0 !== "" && col0 !== "Collection Name" && col0 !== "Kollektion"
+          && !col0.startsWith("Total") && !col0.startsWith("GRAND") && !col0.startsWith("Zuletzt aktualisiert")) {
           let isClipIn = col0.toUpperCase().includes("CLIP IN") || col0.toUpperCase().includes("CLIP-IN");
           let variant = isClipIn ? (col2 || null) : null;
           // Clip-Ins gehören immer zu Russisch Glatt / Amanda
@@ -3940,7 +3945,7 @@ function createDashboard() {
         let col0 = String(row[0]).trim(); // Kollektion
         let col1 = String(row[1]).trim(); // Produkt
         let col4 = parseFloat(row[4]) || 0; // Gesamtgewicht
-        if (!col0 || col0 === "Collection Name" || col0.startsWith("Total") || col0.startsWith("GRAND")) continue;
+        if (!col0 || (col0 === "Collection Name" || col0 === "Kollektion" || col0.startsWith("Zuletzt aktualisiert")) || col0.startsWith("Total") || col0.startsWith("GRAND")) continue;
         if (!col1) continue;
 
         // Clip-Ins → immer Russisch Glatt / Amanda
@@ -4222,7 +4227,7 @@ function readInventoryRowsFromSheet(sheetName) {
     let col2 = parseFloat(row[2]) || 0; // Gewicht pro Stück (für Clip-In Varianten: 100, 150, 225)
     let col3 = parseFloat(row[3]) || 0; // Stückzahl
     let col4 = parseFloat(row[4]) || 0; // Gesamtgewicht
-    if (col0 === "Collection Name") continue;
+    if ((col0 === "Collection Name" || col0 === "Kollektion" || col0.startsWith("Zuletzt aktualisiert"))) continue;
     if (col0.startsWith("Total") || col0.startsWith("GRAND")) continue;
     if (col0 !== "") currentCollection = col0;
     if (!col1) continue;
@@ -4253,7 +4258,7 @@ function readInventoryFromSheet(sheetName) {
     let col1 = String(row[1]).trim();
     let col2 = parseFloat(row[2]) || 0; // Gewicht pro Stück (für Clip-In Varianten)
     let col4 = parseFloat(row[4]) || 0;
-    if (!col1 || col0 === "Collection Name" || col0.startsWith("Total") || col0.startsWith("GRAND")) continue;
+    if (!col1 || (col0 === "Collection Name" || col0 === "Kollektion" || col0.startsWith("Zuletzt aktualisiert")) || col0.startsWith("Total") || col0.startsWith("GRAND")) continue;
     let isClipInRow = col0.toUpperCase().includes("CLIP IN") || col0.toUpperCase().includes("CLIP-IN");
     if (isClipInRow && col2 > 0) {
       // Clip-Ins: Key mit Variante speichern, z.B. "#PEARL WHITE - INVISIBLE CLIP EXTENSIONS|100"
@@ -8073,7 +8078,7 @@ function refreshTopseller() {
         const c0 = String(lRow[0] || "").trim();
         const c1 = String(lRow[1] || "").trim();
         if (!c0 && !c1) continue;
-        if (c0.startsWith("Total") || c0.startsWith("GRAND") || c0 === "Collection Name") continue;
+        if (c0.startsWith("Total") || c0.startsWith("GRAND") || c0 === "Collection Name" || c0 === "Kollektion" || c0.startsWith("Zuletzt aktualisiert")) continue;
         if (c0.startsWith("Zuletzt")) continue;
         if (c0) currentColl = c0;  // EXAKT, nicht toUpperCase!
         if (!c1) continue;

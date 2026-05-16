@@ -15,6 +15,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { verifyMetaSignature, getInstagramUsername, sendInstagramMessage } from "@/lib/messaging/meta";
 
+// Vercel-Function-Timeout auf 60s setzen (Default = 10s zu kurz für Bot+Tools)
+export const maxDuration = 60;
+
 // GET: Webhook-Verification von Meta beim Setup
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
