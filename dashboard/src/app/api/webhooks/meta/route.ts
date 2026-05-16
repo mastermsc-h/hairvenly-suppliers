@@ -52,8 +52,14 @@ export async function POST(req: NextRequest) {
 
   console.log("[meta-webhook] parsed, object:", payload.object, "entries:", payload.entry?.length);
 
-  // Sofort 200 zurückgeben — Meta verlangt schnelle Antwort
-  processEvents(payload).catch(e => console.error("[meta-webhook] process error:", e));
+  // WICHTIG: in Serverless await statt fire-and-forget — sonst wird Function
+  // beendet bevor die DB-Inserts durchgelaufen sind.
+  // Meta erlaubt bis zu 20s Response-Zeit, also unproblematisch.
+  try {
+    await processEvents(payload);
+  } catch (e) {
+    console.error("[meta-webhook] process error:", e);
+  }
 
   return NextResponse.json({ received: true });
 }
