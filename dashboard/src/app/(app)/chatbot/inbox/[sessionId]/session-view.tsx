@@ -10,6 +10,7 @@ import {
   closeSession,
   deleteSession,
   toggleBotAutoReply,
+  setSessionAvatar,
 } from "@/lib/actions/chat-inbox";
 
 interface Message {
@@ -34,9 +35,10 @@ interface Props {
     assigned_name: string | null;
   };
   initialMessages: Message[];
+  avatarOptions: string[];
 }
 
-export default function ChatSessionView({ session, initialMessages }: Props) {
+export default function ChatSessionView({ session, initialMessages, avatarOptions }: Props) {
   const router = useRouter();
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState("");
@@ -183,9 +185,27 @@ export default function ChatSessionView({ session, initialMessages }: Props) {
             </span>{" "}
             <span className="font-medium">{session.customer_name || "—"}</span>
           </div>
-          <div className="text-sm text-neutral-700">
-            <span className="text-neutral-400">Bot:</span>{" "}
-            <span className="font-medium">Ava von {session.bot_signature_name || "—"}</span>
+          <div className="text-sm text-neutral-700 inline-flex items-center gap-1">
+            <span className="text-neutral-400">Bot:</span>
+            <span className="font-medium">Ava von</span>
+            <select
+              value={session.bot_signature_name || ""}
+              onChange={(e) => {
+                const newAvatar = e.target.value;
+                if (!newAvatar || newAvatar === session.bot_signature_name) return;
+                startTransition(async () => {
+                  await setSessionAvatar(session.id, newAvatar);
+                  router.refresh();
+                });
+              }}
+              disabled={isPending}
+              className="text-xs rounded-md border border-neutral-300 px-2 py-0.5 bg-white font-medium hover:bg-neutral-50 disabled:opacity-50"
+            >
+              {!session.bot_signature_name && <option value="">—</option>}
+              {avatarOptions.map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
           </div>
           {session.assigned_name && (
             <div className="text-sm text-neutral-700">

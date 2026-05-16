@@ -60,6 +60,22 @@ export async function resumeBot(sessionId: string) {
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
 
+/** Setzt den Avatar (Bot-Signatur) für eine Session */
+export async function setSessionAvatar(sessionId: string, avatarName: string) {
+  const svc = createServiceClient();
+  // Validierung: Avatar muss existieren + aktiv sein
+  const { data: avatar } = await svc
+    .from("chatbot_avatars")
+    .select("name")
+    .eq("name", avatarName)
+    .eq("active", true)
+    .maybeSingle();
+  if (!avatar) throw new Error(`Avatar "${avatarName}" nicht aktiv oder nicht gefunden`);
+  await svc.from("chat_sessions").update({ bot_signature_name: avatarName }).eq("id", sessionId);
+  revalidatePath(`/chatbot/inbox/${sessionId}`);
+  revalidatePath("/chatbot/inbox");
+}
+
 /** Toggle Bot-Auto-Reply für eine Session */
 export async function toggleBotAutoReply(sessionId: string, enabled: boolean) {
   const svc = createServiceClient();

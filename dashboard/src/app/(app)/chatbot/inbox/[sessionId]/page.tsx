@@ -35,6 +35,13 @@ export default async function ChatSessionPage({ params }: PageProps) {
     .update({ last_seen_by_agent_at: new Date().toISOString() })
     .eq("id", sessionId);
 
+  // Aktive Avatars für Selector
+  const { data: avatars } = await svc
+    .from("chatbot_avatars")
+    .select("name")
+    .eq("active", true)
+    .order("name");
+
   const { data: messages } = await svc
     .from("chat_messages")
     .select(`
@@ -68,6 +75,7 @@ export default async function ChatSessionPage({ params }: PageProps) {
             return p?.display_name || p?.email || null;
           })(),
         }}
+        avatarOptions={(avatars || []).map(a => a.name)}
         initialMessages={(messages ?? []).map(m => ({
           id: m.id,
           role: m.role,
