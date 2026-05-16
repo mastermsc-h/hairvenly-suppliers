@@ -29,10 +29,11 @@ export async function sendHumanMessage(sessionId: string, content: string) {
 
   const svc = createServiceClient();
 
-  // Wenn Session "closed" war → automatisch wieder auf "awaiting_human" setzen
-  // (Mitarbeiter schreibt wieder rein, Bot bleibt erstmal pausiert)
+  // Lade Session inkl. Channel + External-ID
   const { data: cur } = await svc
-    .from("chat_sessions").select("status").eq("id", sessionId).single();
+    .from("chat_sessions")
+    .select("status, channel, external_id")
+    .eq("id", sessionId).single();
   const wasClosed = cur?.status === "closed";
 
   await svc.from("chat_messages").insert({
@@ -47,6 +48,22 @@ export async function sendHumanMessage(sessionId: string, content: string) {
       ...(wasClosed ? { status: "awaiting_human", assigned_to: user.id } : {}),
     })
     .eq("id", sessionId);
+
+  // An echten Channel zurücksenden (außer 'web' — da pollt der Browser)
+  if (cur?.channel === "instagram" && cur?.external_id) {
+    const { sendInstagramMessage } = await import("@/lib/messaging/meta");
+    const result = await sendInstagramMessage(cur.external_id, content.trim());
+    if (!result.success) {
+      console.error("[chat-inbox] sendInstagramMessage failed:", result.error);
+    }
+  } else if (cur?.channel === "whatsapp" && cur?.external_id) {
+    const { sendWhatsAppMessage } = await import("@/lib/messaging/meta");
+    const result = await sendWhatsAppMessage(cur.external_id, content.trim());
+    if (!result.success) {
+      console.error("[chat-inbox] sendWhatsAppMessage failed:", result.error);
+    }
+  }
+
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
 
