@@ -227,7 +227,7 @@ async function routeIncoming(opts: {
       // neuere Nachricht reinkommt, lass DEREN Webhook antworten (dieser hier skipped).
       // → Kunde schreibt 3 kurze Nachrichten hintereinander = 1 Bot-Antwort auf
       //   alle drei zusammen, nicht 3 einzelne Antworten.
-      const DEBOUNCE_MS = 4000;
+      const DEBOUNCE_MS = 6000;
       await new Promise(r => setTimeout(r, DEBOUNCE_MS));
 
       const { data: refreshed } = await svc
