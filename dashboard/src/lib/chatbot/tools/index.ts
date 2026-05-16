@@ -436,6 +436,7 @@ const getAvailableColors: ToolDef = {
     // Nur bot_active = true einbeziehen
     const { data, error } = await svc.from("product_colors").select(`
       name_hairvenly,
+      name_shopify,
       shopify_url,
       length:product_lengths!product_colors_length_id_fkey(
         value,
@@ -445,16 +446,32 @@ const getAvailableColors: ToolDef = {
           supplier:suppliers!product_methods_supplier_id_fkey(name)
         )
       )
-    `).not("name_hairvenly", "is", null).eq("bot_active", true).limit(300);
+    `).not("name_hairvenly", "is", null).eq("bot_active", true).limit(800);
 
     if (error) return { output: `Fehler: ${error.message}` };
 
     type Row = {
       name_hairvenly: string;
+      name_shopify: string | null;
       shopify_url: string | null;
       length?: { value?: number; unit?: string; method?: { name?: string; supplier?: { name?: string } | null } | null } | null;
     };
     let rows = (data as unknown as Row[]) || [];
+
+    // Synonym-Mapping: bei Such-Begriffen auf Farbcodes erweitern
+    // Damit Bot "schwarz" findet auch wenn Russisch nur "EBONY/TIEFSCHWARZ" nutzt
+    const SYNONYMS: Record<string, string[]> = {
+      schwarz:      ["schwarz", "tiefschwarz", "ebony", "raw", "1a", "natural"],
+      dunkelbraun:  ["dunkelbraun", "schwarzbraun", "smoky brown", "expresso", "espresso", "raw"],
+      braun:        ["braun", "mittelbraun", "hellbraun", "dunkelbraun"],
+      blond:        ["blond", "blonde"],
+      hellblond:    ["hellblond", "platin", "pearl white", "snowy"],
+      dunkelblond:  ["dunkelblond", "honey", "honig", "champagne"],
+      rot:          ["rot", "red", "cherry", "kupfer", "copper"],
+    };
+    const searchTerms = search
+      ? (SYNONYMS[search] ?? [search])
+      : null;
 
     // Method-Filter (lokal — flexibler als SQL-LIKE)
     if (method && method !== "any") {
@@ -481,9 +498,13 @@ const getAvailableColors: ToolDef = {
       });
     }
 
-    // Such-Filter
-    if (search) {
-      rows = rows.filter(r => r.name_hairvenly.toLowerCase().includes(search));
+    // Such-Filter — sucht in Kurzname UND im Shopify-Volltitel
+    // (damit "schwarz" auch #EBONY findet wenn der Titel "TIEFSCHWARZ" enthält)
+    if (searchTerms) {
+      rows = rows.filter(r => {
+        const hay = `${r.name_hairvenly} ${r.name_shopify || ""}`.toLowerCase();
+        return searchTerms.some(t => hay.includes(t));
+      });
     }
 
     // Eindeutige Farbnamen — sammle Methoden, Längen und Shop-URLs
