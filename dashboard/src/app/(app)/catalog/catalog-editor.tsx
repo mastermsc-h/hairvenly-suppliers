@@ -62,11 +62,27 @@ export default function CatalogEditor({ suppliers, catalogs, locale }: Props) {
             </button>
           ))}
         </div>
-        <button onClick={handleSync} disabled={shopifyImporting}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition">
-          {shopifyImporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-          {shopifyImporting ? "Synchronisiert..." : "Katalog synchronisieren"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={async () => {
+              if (!confirm("Shopify-URLs aus den Stock-Sheets in den Catalog übernehmen?")) return;
+              const res = await fetch("/api/catalog/sync-urls", { method: "POST" });
+              const data = await res.json();
+              if (!res.ok) { alert(`Fehler: ${data.error}`); return; }
+              alert(`✓ ${data.updated} URLs übernommen, ${data.skipped_already_set} schon korrekt, ${data.no_url_in_sheet} ohne URL im Sheet.`);
+              window.location.reload();
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition"
+            title="Übernimmt die in den Stock-Sheets eingetragenen URLs in den Catalog"
+          >
+            🔗 URLs aus Stock-Sheet importieren
+          </button>
+          <button onClick={handleSync} disabled={shopifyImporting}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition">
+            {shopifyImporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            {shopifyImporting ? "Synchronisiert..." : "Katalog synchronisieren"}
+          </button>
+        </div>
       </div>
 
       {/* Sync Results */}

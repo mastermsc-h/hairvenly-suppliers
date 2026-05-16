@@ -2260,19 +2260,44 @@ function getOrCreateSheet(ss, sheetName) {
 }
 
 function ensureHeaderExists(sheet, sheetKey) {
+  // Header-Definition (deutsch, mit URL-Spalte)
+  const headersFull = ["Kollektion", "Produkt", "Gewicht/Stück (g)", "Bestand (Stück)", "Gesamtgewicht (g)", "Produkt-URL"];
+  const headersThird = ["Kollektion", "Produkt", "Bestand (Stück)"];
+  const headers = (sheetKey === "ThirdSheet") ? headersThird : headersFull;
+
   if (sheet.getLastRow() === 0) {
-    if (sheetKey === "ThirdSheet") {
-      sheet.appendRow(["Collection Name", "Product Name", "Inventory Quantity"]);
-    } else {
-      sheet.appendRow(["Collection Name", "Product Name", "Unit Weight (g)", "Inventory Quantity", "Total Weight (g)", "Produkt-URL"]);
-    }
-  } else if (sheetKey === "FirstSheet" || sheetKey === "SecondSheet") {
-    // Upgrade: bestehende 5-Spalten-Header → 6-Spalten (Produkt-URL nachträglich)
-    const headerF = String(sheet.getRange(1, 6).getValue() || "").trim();
-    if (!headerF) {
-      sheet.getRange(1, 6).setValue("Produkt-URL");
-    }
+    sheet.appendRow(headers);
+    formatInventoryHeaderRow_(sheet, headers.length);
+    return;
   }
+  // Bestehendes Sheet: prüfen ob Header-Zeile (Zeile 1) komplett ist
+  const cols = headers.length;
+  const existing = sheet.getRange(1, 1, 1, cols).getValues()[0];
+  let needsRewrite = false;
+  for (let i = 0; i < cols; i++) {
+    if (String(existing[i] || "").trim() === "") { needsRewrite = true; break; }
+  }
+  // Auch updaten wenn alte englische Header noch drin stehen
+  if (!needsRewrite && String(existing[0] || "").trim().toLowerCase() === "collection name") {
+    needsRewrite = true;
+  }
+  if (needsRewrite) {
+    sheet.getRange(1, 1, 1, cols).setValues([headers]);
+    formatInventoryHeaderRow_(sheet, cols);
+  }
+}
+
+/** Fett, weiß auf dunkel, eingefroren — konsistentes Aussehen der Header-Zeile */
+function formatInventoryHeaderRow_(sheet, colCount) {
+  try {
+    sheet.getRange(1, 1, 1, colCount)
+      .setFontWeight("bold")
+      .setFontColor("#ffffff")
+      .setBackground("#2d2d2d")
+      .setHorizontalAlignment("center")
+      .setFontSize(10);
+    if (sheet.getFrozenRows() < 1) sheet.setFrozenRows(1);
+  } catch (e) { /* silent */ }
 }
 
 // Storefront-Basis-URL für Produkt-Links (letzte Spalte in Inventar-Sheets)

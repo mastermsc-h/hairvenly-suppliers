@@ -34,6 +34,7 @@ export interface InventoryRow {
   unitWeight: number;
   quantity: number;
   totalWeight: number;
+  url?: string | null;     // Shopify-URL aus Sheet-Spalte
   barcode?: string | null; // EAN aus Shopify, optional ergänzt für Etiketten-Druck
 }
 
@@ -121,7 +122,7 @@ export async function readInventorySheet(
 
   const { data } = await sheets.spreadsheets.values.get({
     spreadsheetId: getStockSheetId(),
-    range: `'${tabName}'!A1:E2000`,
+    range: `'${tabName}'!A1:H2000`,
     valueRenderOption: "UNFORMATTED_VALUE",
   });
 
@@ -147,12 +148,20 @@ export async function readInventorySheet(
     if (col0) currentCollection = col0;
     if (!col1) continue;
 
+    // Erkenne URL in beliebiger Spalte F/G/H (Sheet-Layouts können variieren)
+    let url: string | null = null;
+    for (let i = 5; i <= 7; i++) {
+      const cell = String(row[i] ?? "").trim();
+      if (cell.startsWith("http")) { url = cell; break; }
+    }
+
     rows.push({
       collection: currentCollection,
       product: col1,
       unitWeight: col2,
       quantity: col3,
       totalWeight: col4,
+      url,
     });
   }
 
