@@ -76,20 +76,37 @@ export async function respondAsBot(sessionId: string): Promise<RespondResult> {
     }
   }
 
-  // Conversation laden
-  const { data: msgs } = await svc
+  // Conversation laden — letzte 150 Nachrichten chronologisch
+  // (Claude Sonnet 4.5 hat 200k Token Context, weiterer Ausbau via Summarization später)
+  const { data: msgsDesc } = await svc
     .from("chat_messages")
-    .select("role, content, tool_calls, tool_results")
+    .select("role, content, tool_calls, tool_results, attachments, created_at")
     .eq("session_id", sessionId)
-    .order("created_at", { ascending: true })
-    .limit(50);
+    .order("created_at", { ascending: false })
+    .limit(150);
+  const msgs = (msgsDesc || []).slice().reverse();
 
   if (!msgs || msgs.length === 0) return { success: false, error: "no messages" };
 
   const messages: Anthropic.MessageParam[] = [];
   for (const m of msgs) {
     if (m.role === "user") {
-      messages.push({ role: "user", content: m.content || "" });
+      // Foto-Anhänge als Image-Blocks an Claude weitergeben (Vision)
+      const attachments = (m.attachments as { type: string; url: string }[] | null) || [];
+      const images = attachments.filter(a => a.type === "image" && a.url);
+      if (images.length > 0) {
+        const blocks: Anthropic.ContentBlockParam[] = [];
+        for (const img of images) {
+          blocks.push({
+            type: "image",
+            source: { type: "url", url: img.url },
+          });
+        }
+        if (m.content) blocks.push({ type: "text", text: m.content });
+        messages.push({ role: "user", content: blocks });
+      } else {
+        messages.push({ role: "user", content: m.content || "" });
+      }
     } else if (m.role === "assistant") {
       const blocks: Anthropic.ContentBlockParam[] = [];
       if (m.content) blocks.push({ type: "text", text: m.content });
