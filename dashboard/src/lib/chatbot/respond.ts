@@ -151,7 +151,10 @@ export async function respondAsBot(sessionId: string): Promise<RespondResult> {
     const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
     const toolBlocks = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
 
-    finalText = textBlocks.map(b => b.text).join("\n").trim();
+    // Text NUR überschreiben wenn diese Iteration auch Text produziert hat
+    // (sonst löscht eine letzte tool-only-Iteration den vorigen Text)
+    const iterText = textBlocks.map(b => b.text).join("\n").trim();
+    if (iterText) finalText = iterText;
 
     if (toolBlocks.length === 0 || response.stop_reason === "end_turn") break;
 
@@ -177,7 +180,21 @@ export async function respondAsBot(sessionId: string): Promise<RespondResult> {
     ];
   }
 
-  if (!finalText) return { success: false, error: "empty response" };
+  // Fallback: wenn nach MAX_ITER kein Text vorhanden, einen finalen text-only Call
+  // damit Claude die Tool-Ergebnisse in eine Antwort verpackt
+  if (!finalText) {
+    console.warn("[respond] empty after tool loop — forcing final text-only call");
+    const finalResp = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 1024,
+      system: systemPrompt + "\n\nFasse jetzt die Tool-Ergebnisse zusammen und antworte dem Kunden auf seine letzte Frage. KEINE weiteren Tools aufrufen.",
+      messages: convo,
+    });
+    const finalBlocks = finalResp.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
+    finalText = finalBlocks.map(b => b.text).join("\n").trim();
+  }
+
+  if (!finalText) return { success: false, error: "empty response after fallback" };
 
   // In DB speichern
   await svc.from("chat_messages").insert({
