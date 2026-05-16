@@ -514,6 +514,7 @@ const getAvailableColors: ToolDef = {
       name,
       methods: Array.from(info.methods),
       lengths: Array.from(info.lengths),
+      shopify_url: info.shopify_url,  // null wenn noch nicht gepflegt
     }));
 
     return {
@@ -521,7 +522,9 @@ const getAvailableColors: ToolDef = {
         status: "ok",
         message:
           `${colors.length} ECHTE Farben gefunden — NUR diese darfst du dem Kunden nennen. ` +
-          `Bei dem Kunden-Wunsch eine kuratierte Empfehlung machen (3-5 passende), nicht alle aufzählen.`,
+          "Bei kuratierten Empfehlungen (3-5 passende statt alle): wenn shopify_url da ist, " +
+          "füge sie als Link mit dem Kurznamen ein (z.B. [Pearl White](https://...)). " +
+          "Wenn null: nur den Namen nennen.",
         filters: { method, supplier_line: supplierLine, search },
         colors,
       }),
