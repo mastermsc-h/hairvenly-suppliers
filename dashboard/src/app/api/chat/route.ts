@@ -396,19 +396,7 @@ export async function POST(req: NextRequest) {
           status: updated?.status || "active",
           finalText,
         }));
-
-        // Fire-and-forget: Wächter analysiert diese Session asynchron im Hintergrund
-        // Blockiert die User-Response nicht — Alerts erscheinen ein paar Sekunden später
-        // im Wächter-Dashboard wenn kritisch
-        (async () => {
-          try {
-            const { analyzeSession, persistAlerts } = await import("@/lib/chatbot/guardian");
-            const alerts = await analyzeSession(session.id);
-            if (alerts.length > 0) await persistAlerts(session.id, alerts);
-          } catch (e) {
-            console.error("[guardian realtime] session failed:", session.id, e);
-          }
-        })();
+        // (Wächter läuft per Cron alle 30 Min, nicht in Echtzeit)
       } catch (e) {
         controller.enqueue(sse({
           type: "error",

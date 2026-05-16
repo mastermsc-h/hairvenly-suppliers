@@ -11,10 +11,6 @@
     {
       "path": "/api/chat/guardian/cron",
       "schedule": "*/30 * * * *"
-    },
-    {
-      "path": "/api/chat/follow-ups/cron",
-      "schedule": "0 10 * * *"
     }
   ]
 }

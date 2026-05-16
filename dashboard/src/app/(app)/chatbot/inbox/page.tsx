@@ -2,8 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
-import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User } from "lucide-react";
-import FollowUpButton from "./follow-up-button";
+import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User, Mail } from "lucide-react";
 
 interface PageProps {
   searchParams: Promise<{ status?: string; mode?: string; channel?: string }>;
@@ -108,7 +107,12 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
           <span className="text-sm text-neutral-500 ml-2">Live-Gespräche aller Kanäle</span>
         </div>
         {(dueFollowUps ?? 0) > 0 && (
-          <FollowUpButton count={dueFollowUps ?? 0} />
+          <a
+            href="/chatbot/follow-ups"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs font-medium hover:bg-purple-700"
+          >
+            <Mail size={12} /> {dueFollowUps} Follow-Ups fällig →
+          </a>
         )}
       </div>
 

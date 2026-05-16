@@ -190,6 +190,8 @@ function LengthBlock({ length, locale }: { length: CatalogLength; locale: Locale
                   <th className="text-left pb-2 font-medium">{t(locale, "catalog.name_hairvenly")}</th>
                   <th className="text-left pb-2 font-medium">{t(locale, "catalog.name_supplier")}</th>
                   <th className="text-left pb-2 font-medium">{t(locale, "catalog.name_shopify")}</th>
+                  <th className="text-left pb-2 font-medium w-20">Shop-URL</th>
+                  <th className="text-center pb-2 font-medium w-16">Bot</th>
                   <th className="w-16"></th>
                 </tr>
               </thead>
@@ -218,16 +220,32 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
   const [nameH, setNameH] = useState(color.name_hairvenly);
   const [nameS, setNameS] = useState(color.name_supplier ?? "");
   const [nameSh, setNameSh] = useState(color.name_shopify ?? "");
+  const [shopUrl, setShopUrl] = useState(color.shopify_url ?? "");
+  const [botActive, setBotActive] = useState(color.bot_active ?? true);
 
   const handleSave = () => {
     const fd = new FormData();
     fd.set("name_hairvenly", nameH);
     fd.set("name_supplier", nameS);
     fd.set("name_shopify", nameSh);
+    fd.set("shopify_url", shopUrl);
+    fd.set("bot_active", botActive ? "true" : "false");
     startTransition(async () => {
       await updateColor(color.id, fd);
       setEditing(false);
     });
+  };
+
+  const toggleBot = () => {
+    const newVal = !botActive;
+    setBotActive(newVal);
+    const fd = new FormData();
+    fd.set("name_hairvenly", nameH);
+    fd.set("name_supplier", nameS);
+    fd.set("name_shopify", nameSh);
+    fd.set("shopify_url", shopUrl);
+    fd.set("bot_active", newVal ? "true" : "false");
+    startTransition(async () => { await updateColor(color.id, fd); });
   };
 
   const handleDelete = () => {
@@ -248,7 +266,16 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
             className="w-full rounded border border-neutral-300 px-2 py-1 text-sm" />
         </td>
         <td className="py-1 pr-2 text-xs text-neutral-400 truncate max-w-[200px]" title={nameSh || undefined}>
-          {nameSh || "—"}
+          <input value={nameSh} onChange={(e) => setNameSh(e.target.value)} onKeyDown={onKeyDown}
+            className="w-full rounded border border-neutral-300 px-2 py-1 text-xs" />
+        </td>
+        <td className="py-1 pr-2">
+          <input value={shopUrl} onChange={(e) => setShopUrl(e.target.value)} onKeyDown={onKeyDown}
+            placeholder="https://hairvenly.de/products/..."
+            className="w-full rounded border border-neutral-300 px-2 py-1 text-xs" />
+        </td>
+        <td className="py-1 pr-2 text-center">
+          <input type="checkbox" checked={botActive} onChange={(e) => setBotActive(e.target.checked)} />
         </td>
         <td className="py-1">
           <div className="flex gap-1">
@@ -264,7 +291,24 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
     <tr className="group hover:bg-neutral-50/50">
       <td className="py-1.5 text-neutral-900 font-medium">#{color.name_hairvenly}</td>
       <td className="py-1.5 text-neutral-500">{color.name_supplier || "—"}</td>
-      <td className="py-1.5 text-neutral-500">{color.name_shopify || "—"}</td>
+      <td className="py-1.5 text-neutral-500 truncate max-w-[260px]" title={color.name_shopify || undefined}>{color.name_shopify || "—"}</td>
+      <td className="py-1.5">
+        {color.shopify_url ? (
+          <a href={color.shopify_url} target="_blank" rel="noopener" className="text-blue-600 hover:underline text-xs">
+            🔗 Shop
+          </a>
+        ) : <span className="text-neutral-300 text-xs">—</span>}
+      </td>
+      <td className="py-1.5 text-center">
+        <button
+          onClick={toggleBot}
+          disabled={pending}
+          title={botActive ? "Bot darf diese Farbe nennen" : "Bot überspringt diese Farbe"}
+          className={`w-9 h-5 rounded-full transition relative ${botActive ? "bg-pink-500" : "bg-neutral-300"}`}
+        >
+          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition ${botActive ? "left-4" : "left-0.5"}`} />
+        </button>
+      </td>
       <td className="py-1.5">
         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
           <button onClick={() => setEditing(true)} className="text-neutral-400 hover:text-neutral-700"><Pencil size={12} /></button>

@@ -433,8 +433,10 @@ const getAvailableColors: ToolDef = {
     const search = (input.search as string | undefined)?.toLowerCase();
 
     // product_colors → product_lengths → product_methods → suppliers
-    let q = svc.from("product_colors").select(`
+    // Nur bot_active = true einbeziehen
+    const { data, error } = await svc.from("product_colors").select(`
       name_hairvenly,
+      shopify_url,
       length:product_lengths!product_colors_length_id_fkey(
         value,
         unit,
@@ -443,13 +445,13 @@ const getAvailableColors: ToolDef = {
           supplier:suppliers!product_methods_supplier_id_fkey(name)
         )
       )
-    `).not("name_hairvenly", "is", null).limit(200);
+    `).not("name_hairvenly", "is", null).eq("bot_active", true).limit(300);
 
-    const { data, error } = await q;
     if (error) return { output: `Fehler: ${error.message}` };
 
     type Row = {
       name_hairvenly: string;
+      shopify_url: string | null;
       length?: { value?: number; unit?: string; method?: { name?: string; supplier?: { name?: string } | null } | null } | null;
     };
     let rows = (data as unknown as Row[]) || [];
@@ -484,13 +486,15 @@ const getAvailableColors: ToolDef = {
       rows = rows.filter(r => r.name_hairvenly.toLowerCase().includes(search));
     }
 
-    // Eindeutige Farbnamen (mit Methoden zusammenfassen)
-    const colorMap = new Map<string, { lengths: Set<string>; methods: Set<string> }>();
+    // Eindeutige Farbnamen — sammle Methoden, Längen und Shop-URLs
+    const colorMap = new Map<string, { lengths: Set<string>; methods: Set<string>; shopify_url: string | null }>();
     for (const r of rows) {
       if (!r.name_hairvenly) continue;
-      const entry = colorMap.get(r.name_hairvenly) || { lengths: new Set(), methods: new Set() };
+      const entry = colorMap.get(r.name_hairvenly) || { lengths: new Set(), methods: new Set(), shopify_url: null };
       if (r.length?.value) entry.lengths.add(`${r.length.value}${r.length.unit || "cm"}`);
       if (r.length?.method?.name) entry.methods.add(r.length.method.name);
+      // Erste verfügbare Shopify-URL behalten (nimmt eine als Referenz pro Farbe)
+      if (r.shopify_url && !entry.shopify_url) entry.shopify_url = r.shopify_url;
       colorMap.set(r.name_hairvenly, entry);
     }
 
