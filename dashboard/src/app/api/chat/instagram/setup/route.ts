@@ -29,14 +29,39 @@ export async function GET() {
       META_PAGE_ACCESS_TOKEN: !!token,
     }, { status: 400 });
   }
-  // Prüfe Subscriptions
-  const url = `https://graph.facebook.com/${GRAPH_VERSION}/${igId}/subscribed_apps?access_token=${token}`;
-  const res = await fetch(url);
-  const data = await res.json();
+
+  // Token-Diagnose (gibt nur Prefix + Length zurück, NICHT vollen Token)
+  const tokenInfo = {
+    length: token.length,
+    prefix: token.slice(0, 8),
+    suffix: token.slice(-4),
+    starts_with: token.startsWith("IGAA") ? "IGAA (Instagram Login Token)" :
+                 token.startsWith("EAA") ? "EAA (Page/User Access Token)" :
+                 "OTHER — wahrscheinlich falsches Format",
+    has_whitespace: /\s/.test(token),
+  };
+
+  // Test 1: Simple call zu /me (sollte mit jedem gültigen Token funktionieren)
+  const testMe = await fetch(
+    `https://graph.facebook.com/${GRAPH_VERSION}/me?fields=id,username,name&access_token=${encodeURIComponent(token)}`
+  ).then(r => r.json()).catch(e => ({ error: e.message }));
+
+  // Test 2: Direkt IG-User-Endpoint
+  const testIg = await fetch(
+    `https://graph.facebook.com/${GRAPH_VERSION}/${igId}?fields=username,id&access_token=${encodeURIComponent(token)}`
+  ).then(r => r.json()).catch(e => ({ error: e.message }));
+
+  // Test 3: Subscriptions
+  const testSubs = await fetch(
+    `https://graph.facebook.com/${GRAPH_VERSION}/${igId}/subscribed_apps?access_token=${encodeURIComponent(token)}`
+  ).then(r => r.json()).catch(e => ({ error: e.message }));
+
   return NextResponse.json({
     ig_user_id: igId,
-    has_token: !!token,
-    subscribed_apps: data,
+    token_info: tokenInfo,
+    test_me: testMe,
+    test_ig_user: testIg,
+    test_subscriptions: testSubs,
   });
 }
 
