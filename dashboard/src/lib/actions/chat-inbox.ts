@@ -60,6 +60,14 @@ export async function resumeBot(sessionId: string) {
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
 
+/** Toggle Bot-Auto-Reply für eine Session */
+export async function toggleBotAutoReply(sessionId: string, enabled: boolean) {
+  const svc = createServiceClient();
+  await svc.from("chat_sessions").update({ bot_auto_reply: enabled }).eq("id", sessionId);
+  revalidatePath(`/chatbot/inbox/${sessionId}`);
+  revalidatePath("/chatbot/inbox");
+}
+
 /** Schließt eine Session */
 export async function closeSession(sessionId: string) {
   const svc = createServiceClient();

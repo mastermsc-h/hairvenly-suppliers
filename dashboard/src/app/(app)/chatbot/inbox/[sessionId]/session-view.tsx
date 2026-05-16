@@ -2,13 +2,14 @@
 
 import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2 } from "lucide-react";
+import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power } from "lucide-react";
 import {
   takeoverSession,
   sendHumanMessage,
   resumeBot,
   closeSession,
   deleteSession,
+  toggleBotAutoReply,
 } from "@/lib/actions/chat-inbox";
 
 interface Message {
@@ -28,6 +29,8 @@ interface Props {
     status: string;
     assigned_to: string | null;
     bot_signature_name: string | null;
+    customer_name: string | null;
+    bot_auto_reply: boolean;
     assigned_name: string | null;
   };
   initialMessages: Message[];
@@ -170,9 +173,15 @@ export default function ChatSessionView({ session, initialMessages }: Props) {
     <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden flex flex-col" style={{ height: "calc(100vh - 200px)" }}>
       {/* Header */}
       <div className="px-5 py-4 border-b border-neutral-100 flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <div className={`text-xs px-2 py-1 rounded-full font-medium ${statusBadge.color}`}>
             {statusBadge.label}
+          </div>
+          <div className="text-sm text-neutral-700">
+            <span className="text-neutral-400">
+              {session.channel === "instagram" ? "📷" : session.channel === "whatsapp" ? "💬" : "🌐"} Kunde:
+            </span>{" "}
+            <span className="font-medium">{session.customer_name || "—"}</span>
           </div>
           <div className="text-sm text-neutral-700">
             <span className="text-neutral-400">Bot:</span>{" "}
@@ -186,7 +195,25 @@ export default function ChatSessionView({ session, initialMessages }: Props) {
             </div>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          {/* Bot-Auto-Reply Toggle */}
+          {session.status === "active" && (
+            <button
+              onClick={() => startTransition(async () => {
+                await toggleBotAutoReply(session.id, !session.bot_auto_reply);
+                router.refresh();
+              })}
+              disabled={isPending}
+              title={session.bot_auto_reply ? "Bot antwortet automatisch — Klick zum Deaktivieren" : "Bot antwortet NICHT automatisch — Klick zum Aktivieren"}
+              className={`text-xs px-2.5 py-1.5 rounded-lg inline-flex items-center gap-1 ${
+                session.bot_auto_reply
+                  ? "bg-green-100 text-green-800 hover:bg-green-200"
+                  : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+              }`}
+            >
+              <Power size={11} /> Bot-Auto: {session.bot_auto_reply ? "AN" : "AUS"}
+            </button>
+          )}
           {!isTakenOver && session.status !== "closed" && (
             <button
               onClick={handleTakeover}

@@ -6,7 +6,7 @@ import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User } from "lucide
 import FollowUpButton from "./follow-up-button";
 
 interface PageProps {
-  searchParams: Promise<{ status?: string; mode?: string }>;
+  searchParams: Promise<{ status?: string; mode?: string; channel?: string }>;
 }
 
 interface PreviewMsg { role: string; content: string; created_at: string; }
@@ -30,8 +30,9 @@ const CHANNEL_LABELS: Record<string, string> = {
 export default async function ChatInboxPage({ searchParams }: PageProps) {
   await requireProfile();
   const params = await searchParams;
-  const filter = params.status || "all";
-  const mode   = params.mode   || "all"; // 'all' | 'pure_bot' | 'with_human'
+  const filter        = params.status  || "all";
+  const mode          = params.mode    || "all"; // 'all' | 'pure_bot' | 'with_human'
+  const channelFilter = params.channel || "all"; // 'all' | 'web' | 'instagram' | 'whatsapp'
 
   const svc = createServiceClient();
   let query = svc
@@ -46,6 +47,9 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
 
   if (filter !== "all") {
     query = query.eq("status", filter);
+  }
+  if (channelFilter !== "all") {
+    query = query.eq("channel", channelFilter);
   }
   const { data: sessions } = await query;
 
@@ -115,6 +119,30 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         <KPI label="Abgeschlossen"    count={cntClosed ?? 0}  color="text-neutral-500"/>
       </div>
 
+      {/* Filter — Kanal */}
+      <div className="space-y-2">
+        <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">Kanal</div>
+        <div className="flex gap-2 flex-wrap">
+          {["all", "instagram", "whatsapp", "web"].map(c => (
+            <Link
+              key={c}
+              href={`/chatbot/inbox?${new URLSearchParams({
+                ...(filter !== "all" ? { status: filter } : {}),
+                ...(mode !== "all" ? { mode } : {}),
+                ...(c !== "all" ? { channel: c } : {}),
+              }).toString()}`}
+              className={`text-xs px-3 py-1.5 rounded-full border ${
+                channelFilter === c
+                  ? "bg-neutral-900 text-white border-neutral-900"
+                  : "bg-white text-neutral-600 border-neutral-300 hover:bg-neutral-50"
+              }`}
+            >
+              {c === "all" ? "Alle" : CHANNEL_LABELS[c] || c}
+            </Link>
+          ))}
+        </div>
+      </div>
+
       {/* Filter — Status */}
       <div className="space-y-2">
         <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">Status</div>
@@ -122,7 +150,11 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
           {["all", "awaiting_human", "active", "closed"].map(s => (
             <Link
               key={s}
-              href={`/chatbot/inbox?${new URLSearchParams({ ...(s !== "all" ? { status: s } : {}), ...(mode !== "all" ? { mode } : {}) }).toString()}`}
+              href={`/chatbot/inbox?${new URLSearchParams({
+                ...(s !== "all" ? { status: s } : {}),
+                ...(mode !== "all" ? { mode } : {}),
+                ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
+              }).toString()}`}
               className={`text-xs px-3 py-1.5 rounded-full border ${
                 filter === s
                   ? "bg-neutral-900 text-white border-neutral-900"

@@ -13,7 +13,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { verifyMetaSignature } from "@/lib/messaging/meta";
+import { verifyMetaSignature, getInstagramUsername, sendInstagramMessage } from "@/lib/messaging/meta";
 
 // GET: Webhook-Verification von Meta beim Setup
 export async function GET(req: NextRequest) {
@@ -130,10 +130,18 @@ async function handleInstagramOrMessenger(m: MessagingItem, source: "instagram" 
   const externalId = senderId;
   const channel = source === "instagram" ? "instagram" : "web"; // messenger fällt vorläufig auf web
 
+  // Username vom Sender holen (für Inbox-Anzeige statt nur Zahlen-ID)
+  let customerName: string | undefined;
+  if (source === "instagram") {
+    const username = await getInstagramUsername(senderId);
+    if (username) customerName = `@${username}`;
+  }
+
   await routeIncoming({
     channel,
     externalId,
     text,
+    customerName,
     attachments: (m.message.attachments || []).map(a => ({
       type: a.type, url: a.payload?.url || "",
     })),
@@ -207,7 +215,28 @@ async function routeIncoming(opts: {
     customer_name: session.customer_name || opts.customerName || null,
   }).eq("id", session.id);
 
-  // TODO: Bot-Antwort triggern wenn Session 'active' ist
-  // Aktuell: nur empfangen + in Inbox sichtbar machen
-  // Bot-Auto-Antwort kommt in nächstem Schritt (wenn Setup verifiziert ist)
+  // Bot-Auto-Antwort wenn aktiviert für diese Session
+  if (session.bot_auto_reply && session.status === "active") {
+    try {
+      await triggerBotResponse(session.id, opts.channel, opts.externalId);
+    } catch (e) {
+      console.error("[meta-webhook] bot reply failed:", e);
+    }
+  }
+}
+
+// Bot-Antwort generieren + an passenden Channel senden
+async function triggerBotResponse(sessionId: string, channel: string, externalId: string) {
+  const { respondAsBot } = await import("@/lib/chatbot/respond");
+  const result = await respondAsBot(sessionId);
+  if (!result.success || !result.text) {
+    console.error("[meta-webhook] bot response failed:", result.error);
+    return;
+  }
+  // An echten Channel zurücksenden
+  if (channel === "instagram") {
+    const sendResult = await sendInstagramMessage(externalId, result.text);
+    console.log("[meta-webhook] IG reply sent:", sendResult);
+  }
+  // whatsapp: später analog
 }

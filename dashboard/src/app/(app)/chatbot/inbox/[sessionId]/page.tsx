@@ -20,6 +20,7 @@ export default async function ChatSessionPage({ params }: PageProps) {
     .from("chat_sessions")
     .select(`
       id, channel, customer_name, status, assigned_to, bot_signature_name,
+      bot_auto_reply, external_id,
       last_message_at, created_at,
       assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
     `)
@@ -60,6 +61,8 @@ export default async function ChatSessionPage({ params }: PageProps) {
           status: session.status,
           assigned_to: session.assigned_to,
           bot_signature_name: session.bot_signature_name,
+          customer_name: session.customer_name,
+          bot_auto_reply: session.bot_auto_reply ?? false,
           assigned_name: (() => {
             const p = session.assigned_profile as unknown as { display_name?: string; email?: string } | null;
             return p?.display_name || p?.email || null;

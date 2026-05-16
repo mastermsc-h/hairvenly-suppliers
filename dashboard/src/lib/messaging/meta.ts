@@ -75,6 +75,27 @@ export async function sendWhatsAppMessage(
   }
 }
 
+/** Resolved IGSID (Instagram-Scoped ID aus Webhook) zu Username via Graph API */
+export async function getInstagramUsername(igsid: string): Promise<string | null> {
+  const token = process.env.META_PAGE_ACCESS_TOKEN;
+  if (!token) return null;
+  const host = token.startsWith("IGAA") ? "https://graph.instagram.com" : "https://graph.facebook.com";
+  try {
+    const res = await fetch(
+      `${host}/${GRAPH_VERSION}/${igsid}?fields=username,name&access_token=${encodeURIComponent(token)}`,
+    );
+    const data = await res.json();
+    if (!res.ok) {
+      console.warn("[meta] getInstagramUsername failed:", data.error?.message);
+      return null;
+    }
+    return data.username || data.name || null;
+  } catch (e) {
+    console.warn("[meta] getInstagramUsername error:", (e as Error).message);
+    return null;
+  }
+}
+
 /** Verifiziert Meta-Webhook-Signature (X-Hub-Signature-256 Header) */
 export async function verifyMetaSignature(rawBody: string, signatureHeader: string | null): Promise<boolean> {
   if (!signatureHeader || !signatureHeader.startsWith("sha256=")) return false;
