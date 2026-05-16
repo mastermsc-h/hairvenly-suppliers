@@ -1,7 +1,8 @@
 import { requireAdmin } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
-import { AlertTriangle, TrendingUp, TrendingDown, Users, Target, MessageCircle } from "lucide-react";
+import { AlertTriangle, TrendingUp, Users, Target, MessageCircle } from "lucide-react";
 import Link from "next/link";
+import AutoTrainButton from "./auto-train-button";
 
 export const dynamic = "force-dynamic";
 
@@ -106,13 +107,16 @@ export default async function InsightsPage({ searchParams }: PageProps) {
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold text-neutral-900 flex items-center gap-2">
-          <Target size={20} /> Chat-Insights
-        </h1>
-        <p className="text-sm text-neutral-500 mt-1">
-          Was lernen wir aus echten Kundengesprächen? · {total.toLocaleString()} Chats analysiert
-        </p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-xl font-semibold text-neutral-900 flex items-center gap-2">
+            <Target size={20} /> Chat-Insights
+          </h1>
+          <p className="text-sm text-neutral-500 mt-1">
+            Was lernen wir aus echten Kundengesprächen? · {total.toLocaleString()} Chats analysiert
+          </p>
+        </div>
+        <AutoTrainButton />
       </div>
 
       {/* KPI-Kacheln */}
