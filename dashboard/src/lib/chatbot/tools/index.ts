@@ -403,10 +403,13 @@ const getAvailableColors: ToolDef = {
   schema: {
     name: "get_available_colors",
     description:
-      "Holt die ECHTEN Hairvenly-Farben aus dem Produktkatalog. " +
+      "Holt die ECHTEN Hairvenly-Farben aus dem Produktkatalog INKLUSIVE aktuellem Stock-Status. " +
       "NUTZE IMMER bevor du konkrete Farbnamen erwähnst — niemals Farben aus dem Kopf erfinden! " +
-      "Filter optional nach Methode (tape/bondings/tressen/etc.) und/oder Haarqualität (russisch/usbekisch). " +
-      "Bei großen Listen: gib dem Kunden eine kuratierte Empfehlung (z.B. 3-5 dunkle Töne), nicht alle 50 Namen.",
+      "Jede Farbe hat ein `in_stock: true/false` Feld + ggf. `eta` (z.B. 'Ende Juni'). " +
+      "WICHTIG: Empfehle dem Kunden NUR Farben mit `in_stock=true`. " +
+      "Nicht vorrätige Farben darfst du erwähnen mit ETA-Hinweis (z.B. 'kommt Ende Juni wieder'), " +
+      "aber NIE als sofort verfügbar präsentieren. " +
+      "Filter optional nach Methode (tape/bondings/tressen/etc.) und/oder Haarqualität (russisch/usbekisch).",
     input_schema: {
       type: "object",
       properties: {
@@ -507,15 +510,63 @@ const getAvailableColors: ToolDef = {
       });
     }
 
-    // Eindeutige Farbnamen — sammle Methoden, Längen und Shop-URLs
-    const colorMap = new Map<string, { lengths: Set<string>; methods: Set<string>; shopify_url: string | null }>();
+    // Stock-Daten parallel laden — für jeden Catalog-Eintrag prüfen wir ob aktuell verfügbar
+    // (readDashboardAlerts cached intern; ist nur ein API-Call zum Sheet)
+    const { unterwegs, nullbestand } = await readDashboardAlerts();
+    // Auch reine Inventory-Sheets für "in_stock" Status
+    const sheets: Array<"Russisch - GLATT" | "Usbekisch - WELLIG"> = [];
+    if (supplierLine === "russisch")       sheets.push("Russisch - GLATT");
+    else if (supplierLine === "usbekisch") sheets.push("Usbekisch - WELLIG");
+    else                                   sheets.push("Russisch - GLATT", "Usbekisch - WELLIG");
+    const stockRows = (await Promise.all(sheets.map(s => readInventorySheet(s))))
+      .flatMap(r => r.rows);
+
+    // Normalisierung für Match: name_shopify ↔ stock row.product
+    const normN = (s: string) => s.toUpperCase().replace(/\s+/g, " ").replace(/[♡♥]/g, "").trim();
+    const stockByName = new Map<string, { quantity: number; totalWeight: number }>();
+    for (const sr of stockRows) {
+      stockByName.set(normN(sr.product), { quantity: sr.quantity, totalWeight: sr.totalWeight });
+    }
+    const unterwegsByName = new Map<string, { etaText: string }>();
+    for (const u of unterwegs) {
+      const eta = u.perOrder[0]?.ankunft || "bald";
+      unterwegsByName.set(normN(u.product), { etaText: eta });
+    }
+    const nullbestandSet = new Set(nullbestand.map(p => normN(p.product)));
+
+    // Eindeutige Farbnamen — sammle Methoden, Längen, URLs UND Stock-Status
+    type ColorEntry = {
+      lengths: Set<string>;
+      methods: Set<string>;
+      shopify_url: string | null;
+      in_stock: boolean;          // mindestens 1 Variante aktuell vorrätig
+      eta: string | null;          // erste gefundene Ankunfts-ETA wenn unterwegs
+    };
+    const colorMap = new Map<string, ColorEntry>();
     for (const r of rows) {
       if (!r.name_hairvenly) continue;
-      const entry = colorMap.get(r.name_hairvenly) || { lengths: new Set(), methods: new Set(), shopify_url: null };
+      const entry = colorMap.get(r.name_hairvenly) || {
+        lengths: new Set(), methods: new Set(), shopify_url: null,
+        in_stock: false, eta: null,
+      };
       if (r.length?.value) entry.lengths.add(`${r.length.value}${r.length.unit || "cm"}`);
       if (r.length?.method?.name) entry.methods.add(r.length.method.name);
-      // Erste verfügbare Shopify-URL behalten (nimmt eine als Referenz pro Farbe)
       if (r.shopify_url && !entry.shopify_url) entry.shopify_url = r.shopify_url;
+
+      // Stock-Status: schaue ob dieser Catalog-Eintrag im Sheet vorrätig ist
+      if (r.name_shopify) {
+        const stockInfo = stockByName.get(normN(r.name_shopify));
+        if (stockInfo && stockInfo.totalWeight > 0) {
+          entry.in_stock = true;
+        }
+        // ETA falls unterwegs
+        const uw = unterwegsByName.get(normN(r.name_shopify));
+        if (uw && !entry.eta) entry.eta = uw.etaText;
+        // Nullbestand-Hinweis (komplett aus, kein Nachschub)
+        if (nullbestandSet.has(normN(r.name_shopify)) && !entry.in_stock && !entry.eta) {
+          entry.eta = "aktuell ausverkauft, kein Nachschub";
+        }
+      }
       colorMap.set(r.name_hairvenly, entry);
     }
 
@@ -536,7 +587,16 @@ const getAvailableColors: ToolDef = {
       methods: Array.from(info.methods),
       lengths: Array.from(info.lengths),
       shopify_url: info.shopify_url,  // null wenn noch nicht gepflegt
+      in_stock: info.in_stock,        // true = aktuell vorrätig, false = NICHT vorrätig
+      eta: info.eta,                  // wenn nicht vorrätig: ETA-Hinweis ('Ende Juni', 'ausverkauft', null)
     }));
+
+    // Sortiere: in_stock zuerst, dann mit ETA, dann ohne
+    colors.sort((a, b) => {
+      if (a.in_stock !== b.in_stock) return a.in_stock ? -1 : 1;
+      if (!!a.eta !== !!b.eta) return a.eta ? -1 : 1;
+      return 0;
+    });
 
     return {
       output: JSON.stringify({
