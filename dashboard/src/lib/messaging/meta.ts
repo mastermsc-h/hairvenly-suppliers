@@ -11,6 +11,33 @@
 
 const GRAPH_VERSION = "v21.0";
 
+/**
+ * Konvertiert Markdown zu Plain-Text für Instagram/WhatsApp:
+ *  - **fett** → fett   (Markdown wird auf IG nicht gerendert)
+ *  - [Text](URL) → Text\nURL  (Link sichtbar als eigene Zeile)
+ *  - - Item → • Item
+ */
+export function markdownToInstagramText(text: string): string {
+  let t = text;
+  // Links [text](url) → "text" Newline "url"
+  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => `${label}\n${url}`);
+  // Bold **text** → text
+  t = t.replace(/\*\*(.+?)\*\*/g, "$1");
+  // Italic *text* → text
+  t = t.replace(/(?<!\*)\*([^*\n]+?)\*(?!\*)/g, "$1");
+  // Strike ~~text~~ → text
+  t = t.replace(/~~(.+?)~~/g, "$1");
+  // Inline code `code` → code
+  t = t.replace(/`([^`]+)`/g, "$1");
+  // Headings (# ...) → entfernt
+  t = t.replace(/^#{1,6}\s+/gm, "");
+  // Bullet "- " oder "* " → "• "
+  t = t.replace(/^[\s]*[-*]\s+/gm, "• ");
+  // Mehr als 2 aufeinanderfolgende Leerzeilen → max 2
+  t = t.replace(/\n{3,}/g, "\n\n");
+  return t.trim();
+}
+
 interface SendResult {
   success: boolean;
   message_id?: string;
@@ -27,6 +54,8 @@ export async function sendInstagramMessage(
   if (!token || !igUserId) {
     return { success: false, error: "META_PAGE_ACCESS_TOKEN or META_INSTAGRAM_USER_ID not set" };
   }
+  // Markdown vor dem Senden zu Plain-Text konvertieren — IG rendert kein Markdown
+  const cleaned = markdownToInstagramText(text);
   // IGAA-Tokens (Instagram Login) → graph.instagram.com / EAA → graph.facebook.com
   const host = token.startsWith("IGAA") ? "https://graph.instagram.com" : "https://graph.facebook.com";
   try {
@@ -35,7 +64,7 @@ export async function sendInstagramMessage(
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({
         recipient: { id: recipientIgId },
-        message:   { text },
+        message:   { text: cleaned },
       }),
     });
     const data = await res.json();
@@ -56,6 +85,9 @@ export async function sendWhatsAppMessage(
   if (!token || !phoneNumberId) {
     return { success: false, error: "META_PAGE_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID not set" };
   }
+  // WhatsApp unterstützt *bold* (Asterisk-Syntax), nicht **bold**. Markdown grob konvertieren.
+  // Für Konsistenz nutzen wir hier die Plain-Text-Variante wie bei IG.
+  const cleaned = markdownToInstagramText(text);
   try {
     const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${phoneNumberId}/messages`, {
       method: "POST",
@@ -64,7 +96,7 @@ export async function sendWhatsAppMessage(
         messaging_product: "whatsapp",
         to:                recipientPhone,
         type:              "text",
-        text:              { body: text },
+        text:              { body: cleaned },
       }),
     });
     const data = await res.json();
