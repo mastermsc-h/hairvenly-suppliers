@@ -215,6 +215,13 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 return (
                   <li key={s.id} className="hover:bg-neutral-50 transition-colors">
                     <Link href={`/chatbot/inbox/${s.id}`} className="block p-4">
+                      {/* Customer-Name oben (z.B. @apfel.me oder Phone-Nr) */}
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <User size={14} className="text-neutral-400" />
+                        <span className="text-sm font-semibold text-neutral-900 truncate">
+                          {s.customer_name || <span className="text-neutral-400 font-normal">Unbekannt</span>}
+                        </span>
+                      </div>
                       {/* Top row: badges + zeit */}
                       <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
                         <span className="text-neutral-500 font-medium">
