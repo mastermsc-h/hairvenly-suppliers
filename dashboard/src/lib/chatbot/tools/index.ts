@@ -305,7 +305,29 @@ const getStockEta: ToolDef = {
         };
       }
 
-      // E) Im Inventory gefunden, aber Quantity = 0 → nicht im Unterwegs ⇒ unsicher
+      // E) Im Inventory gefunden, aber Quantity = 0 → AUSVERKAUFT
+      //    (war früher "uncertain → transfer_to_human", was den Bot fälschlich eskalieren ließ)
+      const zeroStockMatches = inventoryMatches.filter(r => r.quantity === 0);
+      if (zeroStockMatches.length > 0) {
+        return {
+          output: JSON.stringify({
+            status: "out_of_stock",
+            message:
+              "Produkt ist im Sortiment, aber AKTUELL AUSVERKAUFT (Bestand = 0). Es ist KEIN Nachschub " +
+              "im Unterwegs-System eingetragen. Sag dem Kunden ehrlich: 'das ist gerade ausverkauft, " +
+              "kein bestätigtes Lieferdatum'. Schlag eine ECHTE ALTERNATIVE vor (andere Farbe, andere Methode, " +
+              "selbe Qualität) — niemals eskaliere wenn du selbst eine Alternative anbieten kannst. " +
+              "NIEMALS sagen 'haben wir sofort da' für diese Produkte!",
+            products_out_of_stock: zeroStockMatches.slice(0, 3).map(r => ({
+              product: r.product,
+              collection: r.collection,
+              quantity: 0,
+            })),
+          }),
+        };
+      }
+
+      // F) Fallback (sollte selten passieren) — nichts klares gefunden
       return {
         output: JSON.stringify({
           status: "uncertain",
