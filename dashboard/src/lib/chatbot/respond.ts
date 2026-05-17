@@ -76,6 +76,21 @@ export async function respondAsBot(sessionId: string): Promise<RespondResult> {
     }
   }
 
+  // Verkaufs-Strategien (höchste Priorität zuerst)
+  const { data: strategies } = await svc
+    .from("chatbot_strategies")
+    .select("name, trigger, steps")
+    .eq("active", true)
+    .order("priority", { ascending: false })
+    .limit(20);
+  if (strategies && strategies.length > 0) {
+    systemPrompt += "\n\n## VERKAUFS-STRATEGIEN\n";
+    systemPrompt += "Wenn der Chat-Kontext zu einer dieser Strategien passt, folge IHRER Reihenfolge:\n\n";
+    for (const s of strategies) {
+      systemPrompt += `### ${s.name}\n**Trigger:** ${s.trigger}\n${s.steps}\n\n`;
+    }
+  }
+
   // Conversation laden — letzte 150 Nachrichten chronologisch
   // (Claude Sonnet 4.5 hat 200k Token Context, weiterer Ausbau via Summarization später)
   const { data: msgsDesc } = await svc

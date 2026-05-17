@@ -159,10 +159,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                     { href: "/chatbot/guardian",   label: "Wächter (Alerts)" },
                     { href: "/chatbot/follow-ups", label: "Follow-Ups" },
                     { href: "/chatbot/insights",   label: "Insights" },
-                    { href: "/chatbot",          label: "Wissensdatenbank" },
-                    { href: "/chatbot/avatars",  label: "Avatars" },
-                    { href: "/chatbot-test",     label: "Bot testen" },
-                    { href: "/chatbot/training", label: "Bot trainieren" },
+                    { href: "/chatbot",            label: "Wissensdatenbank" },
+                    { href: "/chatbot/strategies", label: "Strategien" },
+                    { href: "/chatbot/avatars",    label: "Avatars" },
+                    { href: "/chatbot-test",       label: "Bot testen" },
+                    { href: "/chatbot/training",   label: "Bot trainieren" },
                   ]}
                 />
               </>
