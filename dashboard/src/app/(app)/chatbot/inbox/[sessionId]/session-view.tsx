@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2 } from "lucide-react";
+import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown } from "lucide-react";
 import {
   takeoverSession,
   sendHumanMessage,
@@ -246,59 +246,77 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
           )}
         </div>
         <div className="flex gap-2 items-center">
-          {/* Bot-Modus — versteckt hinter Zahnrad, nur für Power-User */}
+          {/* Bot-Modus — klarer Dropdown-Button mit Pfeil, deutlich klickbar */}
           {session.status === "active" && (
             <div className="relative">
+              <span className="text-[10px] text-neutral-400 uppercase tracking-wide block mb-0.5">Bot-Modus</span>
               <button
                 type="button"
                 onClick={() => setShowModeSettings(v => !v)}
-                title={
-                  session.bot_mode === "auto"     ? "Bot-Modus: Auto-Antwort (sendet selbst bei neuen DMs)" :
-                  session.bot_mode === "assisted" ? "Bot-Modus: Auto-Entwurf bei neuen DMs" :
-                                                     "Bot-Modus: Manuell"
-                }
-                className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border ${
+                disabled={modeSwitching !== null}
+                title="Klick zum Ändern: Manuell · Auto-Entwurf · Auto-Antwort"
+                className={`inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border-2 shadow-sm hover:shadow transition ${
                   session.bot_mode === "auto"
-                    ? "bg-green-50 text-green-700 border-green-200"
+                    ? "bg-green-50 text-green-800 border-green-400 hover:bg-green-100"
                     : session.bot_mode === "assisted"
-                    ? "bg-blue-50 text-blue-700 border-blue-200"
-                    : "bg-neutral-50 text-neutral-600 border-neutral-200"
-                }`}
+                    ? "bg-blue-50 text-blue-800 border-blue-400 hover:bg-blue-100"
+                    : "bg-white text-neutral-800 border-neutral-400 hover:bg-neutral-50"
+                } ${modeSwitching ? "opacity-50 cursor-wait" : "cursor-pointer"}`}
               >
-                <Power size={10} />
-                {session.bot_mode === "auto" ? "Auto" : session.bot_mode === "assisted" ? "Auto-Entwurf" : "Manuell"}
+                {session.bot_mode === "auto" ? "🤖" : session.bot_mode === "assisted" ? "🧑‍🏫" : "⏸"}
+                <span>
+                  {session.bot_mode === "auto"     ? "Auto-Antwort" :
+                   session.bot_mode === "assisted" ? "Auto-Entwurf" :
+                                                     "Manuell"}
+                </span>
+                <ChevronDown size={14} className={`transition-transform ${showModeSettings ? "rotate-180" : ""}`} />
               </button>
               {showModeSettings && (
-                <div className="absolute right-0 top-full mt-1 z-10 w-72 bg-white border border-neutral-200 rounded-lg shadow-lg p-3 space-y-2">
-                  <div className="text-[11px] font-semibold text-neutral-700">Wenn neue DM eintrifft:</div>
-                  {([
-                    { v: "off",      label: "⏸ Nichts tun (manuell)",         desc: "Du klickst pro Antwort auf 'Antwort generieren'." },
-                    { v: "assisted", label: "🧑‍🏫 Auto-Entwurf vorbereiten",   desc: "Bot generiert sofort einen Entwurf, du bestätigst." },
-                    { v: "auto",     label: "🤖 Direkt automatisch antworten", desc: "Bot sendet selbst. Nur für vertraute Avatare." },
-                  ] as const).map(opt => (
-                    <button
-                      key={opt.v}
-                      onClick={() => {
-                        setModeSwitching(opt.v);
-                        setShowModeSettings(false);
-                        startTransition(async () => {
-                          try {
-                            await setBotMode(session.id, opt.v);
-                            router.refresh();
-                          } finally { setModeSwitching(null); }
-                        });
-                      }}
-                      className={`w-full text-left p-2 rounded-md hover:bg-neutral-50 border ${
-                        session.bot_mode === opt.v
-                          ? "border-neutral-900 bg-neutral-50"
-                          : "border-transparent"
-                      }`}
-                    >
-                      <div className="text-xs font-medium">{opt.label}</div>
-                      <div className="text-[10px] text-neutral-500">{opt.desc}</div>
-                    </button>
-                  ))}
-                </div>
+                <>
+                  {/* Click-outside-overlay */}
+                  <div className="fixed inset-0 z-10" onClick={() => setShowModeSettings(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-20 w-80 bg-white border border-neutral-200 rounded-xl shadow-xl p-2 space-y-1">
+                    <div className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wide px-2 pt-1">
+                      Was passiert bei neuer Kundennachricht?
+                    </div>
+                    {([
+                      { v: "off",      icon: "⏸",   color: "neutral", label: "Manuell",         desc: "Bot tut nichts. Du klickst pro Antwort auf „Antwort generieren\"." },
+                      { v: "assisted", icon: "🧑‍🏫", color: "blue",    label: "Auto-Entwurf",    desc: "Bot generiert sofort einen Entwurf, du bestätigst vor dem Senden." },
+                      { v: "auto",     icon: "🤖",   color: "green",   label: "Auto-Antwort",    desc: "Bot sendet selbst ohne Rückfrage. Nur für eingespielte Avatare." },
+                    ] as const).map(opt => {
+                      const isActive = session.bot_mode === opt.v;
+                      return (
+                        <button
+                          key={opt.v}
+                          onClick={() => {
+                            setModeSwitching(opt.v);
+                            setShowModeSettings(false);
+                            startTransition(async () => {
+                              try {
+                                await setBotMode(session.id, opt.v);
+                                router.refresh();
+                              } finally { setModeSwitching(null); }
+                            });
+                          }}
+                          className={`w-full text-left p-2.5 rounded-lg border-2 transition ${
+                            isActive
+                              ? opt.color === "green"   ? "border-green-400 bg-green-50"
+                              : opt.color === "blue"    ? "border-blue-400 bg-blue-50"
+                              :                            "border-neutral-400 bg-neutral-50"
+                              : "border-transparent hover:bg-neutral-50"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">{opt.icon}</span>
+                            <span className="text-sm font-semibold text-neutral-900">{opt.label}</span>
+                            {isActive && <Check size={14} className="text-green-600 ml-auto" />}
+                          </div>
+                          <div className="text-[11px] text-neutral-600 mt-0.5 ml-7">{opt.desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
               )}
             </div>
           )}
