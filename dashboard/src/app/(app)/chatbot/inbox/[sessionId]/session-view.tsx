@@ -16,6 +16,7 @@ import {
   refineDraftWithFeedback,
   generateDraftOnDemand,
   markSessionUnread,
+  deleteMessage,
 } from "@/lib/actions/chat-inbox";
 
 interface Message {
@@ -400,7 +401,12 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
           <div className="text-center text-neutral-400 mt-12 text-sm">Noch keine Nachrichten</div>
         )}
         {messages.map(m => (
-          <MessageRow key={m.id} msg={m} signatureName={session.bot_signature_name} />
+          <MessageRow
+            key={m.id}
+            msg={m}
+            signatureName={session.bot_signature_name}
+            onDeleted={() => setMessages(curr => curr.filter(x => x.id !== m.id))}
+          />
         ))}
       </div>
 
@@ -512,12 +518,40 @@ function formatMsgTime(iso: string): string {
   return `${d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" })} · ${time}`;
 }
 
-function MessageRow({ msg, signatureName }: { msg: Message; signatureName: string | null }) {
+function MessageRow({ msg, signatureName, onDeleted }: { msg: Message; signatureName: string | null; onDeleted: () => void }) {
   const time = formatMsgTime(msg.created_at);
+  const router = useRouter();
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    if (deleting) return;
+    if (!confirm("Diese Nachricht aus dem Verlauf entfernen?\n\nWird nur im Dashboard ausgeblendet — die Nachricht bei Instagram bleibt unverändert. Bot ignoriert sie dann bei zukünftigen Antworten.")) return;
+    setDeleting(true);
+    try {
+      await deleteMessage(msg.id);
+      onDeleted();
+      router.refresh();
+    } catch (e) {
+      alert(`Löschen fehlgeschlagen: ${(e as Error).message}`);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  const DeleteBtn = (
+    <button
+      onClick={handleDelete}
+      disabled={deleting}
+      title="Nachricht aus Inbox entfernen (nur intern, IG bleibt unverändert)"
+      className="opacity-0 group-hover:opacity-100 transition text-neutral-300 hover:text-red-500 p-1"
+    >
+      <Trash2 size={12} />
+    </button>
+  );
 
   if (msg.role === "user") {
     return (
-      <div className="flex gap-2 justify-start">
+      <div className="group flex gap-2 justify-start items-start">
         <div className="w-7 h-7 rounded-full bg-neutral-200 flex-shrink-0 flex items-center justify-center">
           <User size={12} className="text-neutral-600" />
         </div>
@@ -534,13 +568,15 @@ function MessageRow({ msg, signatureName }: { msg: Message; signatureName: strin
           )}
           <div className="text-[10px] text-neutral-400 mt-0.5">Kunde · {time}</div>
         </div>
+        <div className="self-start">{DeleteBtn}</div>
       </div>
     );
   }
 
   if (msg.role === "assistant") {
     return (
-      <div className="flex gap-2 justify-end">
+      <div className="group flex gap-2 justify-end items-start">
+        <div className="self-start order-first">{DeleteBtn}</div>
         <div className="max-w-[70%]">
           <div className="bg-pink-100 rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">{msg.content}</div>
           {msg.tool_calls && msg.tool_calls.length > 0 && (
@@ -562,7 +598,8 @@ function MessageRow({ msg, signatureName }: { msg: Message; signatureName: strin
 
   if (msg.role === "human_agent") {
     return (
-      <div className="flex gap-2 justify-end">
+      <div className="group flex gap-2 justify-end items-start">
+        <div className="self-start order-first">{DeleteBtn}</div>
         <div className="max-w-[70%]">
           <div className="bg-amber-100 border border-amber-200 rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">{msg.content}</div>
           <div className="text-[10px] text-neutral-400 mt-0.5 text-right">

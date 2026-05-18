@@ -527,6 +527,41 @@ export async function reclassifySession(sessionId: string) {
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
 
+/**
+ * Markiert eine einzelne Message als gelöscht (soft-delete via deleted_at).
+ * Notfall-Tool wenn IG-Recall nicht durchgesynced wurde oder
+ * Mitarbeiter eine Nachricht aus der Inbox-Ansicht entfernen will,
+ * damit der Bot sie nicht mehr als "offene Frage" interpretiert.
+ */
+export async function deleteMessage(messageId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const svc = createServiceClient();
+  const { data: msg } = await svc.from("chat_messages")
+    .select("session_id").eq("id", messageId).single();
+  await svc.from("chat_messages")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", messageId);
+  if (msg?.session_id) revalidatePath(`/chatbot/inbox/${msg.session_id}`);
+  revalidatePath("/chatbot/inbox");
+}
+
+/** Macht ein Soft-Delete rückgängig (für versehentliche Löschungen) */
+export async function undeleteMessage(messageId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const svc = createServiceClient();
+  const { data: msg } = await svc.from("chat_messages")
+    .select("session_id").eq("id", messageId).single();
+  await svc.from("chat_messages")
+    .update({ deleted_at: null }).eq("id", messageId);
+  if (msg?.session_id) revalidatePath(`/chatbot/inbox/${msg.session_id}`);
+}
+
 /** Löscht eine Session komplett (inkl. Messages via CASCADE) */
 export async function deleteSession(sessionId: string) {
   const supabase = await createClient();
