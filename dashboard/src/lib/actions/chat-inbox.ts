@@ -115,15 +115,6 @@ export async function setBotMode(sessionId: string, mode: "auto" | "assisted" | 
   }).eq("id", sessionId);
 
   if (mode === "assisted") {
-    // Letzte Message anschauen — wenn vom Kunden, gleich Entwurf erzeugen
-    const { data: lastMsg } = await svc
-      .from("chat_messages")
-      .select("id, role")
-      .eq("session_id", sessionId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
     // Schon ein pending Draft? Dann nichts tun.
     const { data: existingDraft } = await svc
       .from("chat_drafts")
@@ -133,24 +124,53 @@ export async function setBotMode(sessionId: string, mode: "auto" | "assisted" | 
       .limit(1)
       .maybeSingle();
 
-    if (lastMsg && lastMsg.role === "user" && !existingDraft) {
-      try {
-        const { respondAsBot } = await import("@/lib/chatbot/respond");
-        const result = await respondAsBot(sessionId, { assisted: true });
-        if (result.success && result.text) {
-          await svc.from("chat_drafts").insert({
-            session_id:    sessionId,
-            original_text: result.text,
-            tool_calls:    result.toolCalls && result.toolCalls.length > 0 ? result.toolCalls : null,
-            tool_results:  result.toolResults && result.toolResults.length > 0 ? result.toolResults : null,
-            trigger_message_id: lastMsg.id,
-            status:        "pending",
-          });
-        } else {
-          console.error("[setBotMode] respondAsBot failed:", result.error);
+    if (!existingDraft) {
+      // CLUSTER-DETECTION: die letzten 10 Messages laden und schauen,
+      // ob es einen Block offener Kundennachrichten gibt (Kunde hat
+      // mehrfach geschrieben, ohne dass Bot/Mitarbeiter danach geantwortet
+      // hat). respondAsBot sieht ohnehin die letzten 150 Messages, aber
+      // hier entscheiden wir OB überhaupt ein Entwurf erzeugt wird.
+      const { data: recent } = await svc
+        .from("chat_messages")
+        .select("id, role, created_at")
+        .eq("session_id", sessionId)
+        .order("created_at", { ascending: false })
+        .limit(10);
+
+      const msgs = recent || [];
+      // Wir suchen die jüngste Agent-/Bot-Antwort. Alle Kundennachrichten
+      // DANACH sind "offen".
+      const lastAgentIdx = msgs.findIndex(m => m.role === "assistant" || m.role === "human_agent");
+      const openCustomerMsgs =
+        lastAgentIdx === -1
+          ? msgs.filter(m => m.role === "user")                  // gar keine Antwort gegeben — alles offen
+          : msgs.slice(0, lastAgentIdx).filter(m => m.role === "user"); // alles nach letzter Antwort
+
+      if (openCustomerMsgs.length > 0) {
+        // Trigger = ÄLTESTE offene Frage (damit context_messages den ganzen
+        // Verlauf VOR dem Cluster enthält). Bot soll den Cluster
+        // zusammen-beantworten — respondAsBot sieht ihn als Conversation-Tail.
+        const triggerMsg = openCustomerMsgs[openCustomerMsgs.length - 1];
+
+        try {
+          const { respondAsBot } = await import("@/lib/chatbot/respond");
+          const result = await respondAsBot(sessionId, { assisted: true });
+          if (result.success && result.text) {
+            await svc.from("chat_drafts").insert({
+              session_id:    sessionId,
+              original_text: result.text,
+              tool_calls:    result.toolCalls && result.toolCalls.length > 0 ? result.toolCalls : null,
+              tool_results:  result.toolResults && result.toolResults.length > 0 ? result.toolResults : null,
+              trigger_message_id: triggerMsg.id,
+              status:        "pending",
+            });
+            console.log(`[setBotMode] draft for ${openCustomerMsgs.length} open turn(s) created`);
+          } else {
+            console.error("[setBotMode] respondAsBot failed:", result.error);
+          }
+        } catch (e) {
+          console.error("[setBotMode] draft generation crashed:", e);
         }
-      } catch (e) {
-        console.error("[setBotMode] draft generation crashed:", e);
       }
     }
   }

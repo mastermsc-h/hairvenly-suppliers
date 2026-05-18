@@ -120,6 +120,36 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
 
   if (!msgs || msgs.length === 0) return { success: false, error: "no messages" };
 
+  // OFFENE TURNS ERMITTELN — Cluster aller Kundennachrichten nach der letzten
+  // Agent-/Bot-Antwort. Wenn mehr als eine: Bot soll sie ZUSAMMEN beantworten,
+  // nicht jede einzeln. Hinweis wird unten an den System-Prompt angehängt.
+  let openTurnsHint = "";
+  {
+    // letzte ~12 Messages in reverse-chronologischer Reihenfolge betrachten
+    const tail = msgs.slice(-12).slice().reverse();
+    const lastAgentRev = tail.findIndex(m => m.role === "assistant" || m.role === "human_agent");
+    const openUsr = lastAgentRev === -1
+      ? tail.filter(m => m.role === "user")
+      : tail.slice(0, lastAgentRev).filter(m => m.role === "user");
+    if (openUsr.length > 1) {
+      const orderedOldestFirst = openUsr.slice().reverse();
+      openTurnsHint =
+        `\n\n## OFFENE KUNDEN-NACHRICHTEN (${openUsr.length} Stück, in zeitlicher Reihenfolge)\n` +
+        orderedOldestFirst.map((m, i) => `${i + 1}. ${m.content}`).join("\n") +
+        `\n\n→ Diese Nachrichten kamen NACHEINANDER vom Kunden, ohne dass jemand geantwortet hat. ` +
+        `Beantworte sie als ZUSAMMENHÄNGENDEN BLOCK in EINER Antwort — verstehe was der Kunde insgesamt ` +
+        `möchte, nicht stur Punkt für Punkt. Greife auch frühere Punkte aus diesem Block auf, falls sie ` +
+        `noch offen sind. KEINE 5 Absätze — eine natürliche, zusammenhängende Antwort wie eine echte ` +
+        `Mitarbeiterin schreiben würde.`;
+    } else if (openUsr.length === 1) {
+      openTurnsHint =
+        `\n\n## OFFENE KUNDEN-NACHRICHT\nDer Kunde hat eine Frage, die noch unbeantwortet ist. ` +
+        `Achte dabei auf den GESAMTEN bisherigen Verlauf — was wurde schon besprochen, was wurde ` +
+        `versprochen, welche Kundeneigenschaften (Haarstruktur, Farbe, Methode) wurden schon geklärt.`;
+    }
+  }
+  if (openTurnsHint) systemPrompt += openTurnsHint;
+
   const messages: Anthropic.MessageParam[] = [];
   for (const m of msgs) {
     if (m.role === "user") {
