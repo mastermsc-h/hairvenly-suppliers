@@ -438,12 +438,17 @@ const getAvailableColors: ToolDef = {
   schema: {
     name: "get_available_colors",
     description:
-      "Holt die ECHTEN Hairvenly-Farben aus dem Produktkatalog INKLUSIVE aktuellem Stock-Status. " +
+      "Holt ECHTE Hairvenly-Farben aus dem Produktkatalog INKLUSIVE aktuellem Stock-Status. " +
       "NUTZE IMMER bevor du konkrete Farbnamen erwähnst — niemals Farben aus dem Kopf erfinden! " +
-      "Jede Farbe hat ein `in_stock: true/false` Feld + ggf. `eta` (z.B. 'Ende Juni'). " +
-      "WICHTIG: Empfehle dem Kunden NUR Farben mit `in_stock=true`. " +
-      "Nicht vorrätige Farben darfst du erwähnen mit ETA-Hinweis (z.B. 'kommt Ende Juni wieder'), " +
+      "Jede Farbe hat ein `in_stock: true/false` Feld + ggf. `eta`. " +
+      "Empfehle dem Kunden NUR Farben mit `in_stock=true`. Nicht vorrätige darfst du mit ETA erwähnen, " +
       "aber NIE als sofort verfügbar präsentieren. " +
+      "⚠️ ACHTUNG — WICHTIGER FALLSTRICK: Dieses Tool gibt NUR Farben zurück, deren NAME den Suchbegriff " +
+      "enthält. Beispiel: Suche 'braun' findet 'SMOKY BROWN' und 'LATTE BROWN', aber NICHT 'RAW' (obwohl " +
+      "RAW ein warmes Mittelbraun ist) — denn 'RAW' steht nicht im Farbnamen. Du darfst daraus NIEMALS " +
+      "schließen 'RAW gibt es nur als X' oder 'Standard Tapes haben kein RAW'. Wenn du eine spezifische " +
+      "Farbe wie RAW empfehlen willst, rufe IMMER ZUSÄTZLICH get_stock_eta('RAW Standard Tapes Russisch') " +
+      "auf um die echte Verfügbarkeit pro Methode zu prüfen. " +
       "Filter optional nach Methode (tape/bondings/tressen/etc.) und/oder Haarqualität (russisch/usbekisch).",
     input_schema: {
       type: "object",
@@ -633,10 +638,17 @@ const getAvailableColors: ToolDef = {
       return 0;
     });
 
+    const filteredBySearch = !!searchTerms;
     return {
       output: JSON.stringify({
         status: "ok",
         message:
+          (filteredBySearch
+            ? `⚠️ WARNUNG: Diese Liste ist NUR GEFILTERT nach Namen die '${search}' enthalten. ` +
+              `Farben wie RAW (warmes Mittelbraun) erscheinen NICHT obwohl sie inhaltlich passen würden. ` +
+              `Schließe NICHT aus dieser Liste 'X ist nur in Methode Y verfügbar' — das wäre falsch! ` +
+              `Wenn du eine spezifische Farbe wie RAW empfehlen willst, ruf get_stock_eta für genau diese ` +
+              `Methode auf um die echte Verfügbarkeit zu prüfen. ` : "") +
           `${colors.length} ECHTE Farben gefunden — NUR diese darfst du dem Kunden nennen. ` +
           "Bei kuratierten Empfehlungen (3-5 passende statt alle): wenn shopify_url da ist, " +
           "füge sie als Link mit dem Kurznamen ein (z.B. [Pearl White](https://...)). " +
