@@ -158,6 +158,7 @@ export async function setBotMode(sessionId: string, mode: "auto" | "assisted" | 
         .from("chat_messages")
         .select("id, role, created_at")
         .eq("session_id", sessionId)
+        .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(10);
 
@@ -284,6 +285,7 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
         .select("role, content, created_at")
         .eq("session_id", draft.session_id)
         .lt("created_at", trigger.created_at)
+        .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(6);
       const contextMessages = (ctxRows || [])
@@ -416,18 +418,19 @@ export async function generateDraftOnDemand(sessionId: string): Promise<{ ok: tr
     .maybeSingle();
   if (existing) return { ok: false, reason: "Es liegt bereits ein offener Entwurf vor." };
 
-  // Letzte Message muss von Kunde sein (sonst nichts zu antworten)
+  // Letzte (nicht gelöschte) Message muss von Kunde sein (sonst nichts zu antworten)
   const { data: lastMsg } = await svc
     .from("chat_messages")
     .select("id, role")
     .eq("session_id", sessionId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
   if (!lastMsg) return { ok: false, reason: "Keine Nachrichten in dieser Session." };
   if (lastMsg.role !== "user") {
-    return { ok: false, reason: "Letzte Nachricht ist nicht vom Kunden — keine offene Frage zu beantworten." };
+    return { ok: false, reason: "Letzte Nachricht ist nicht vom Kunden — keine offene Frage zu beantworten. (Falls eine Bot-/Mitarbeiter-Antwort die letzte ist, hover über sie und klick das 🗑 Icon um sie zu entfernen, damit der Bot die vorherige Kundenfrage wieder beantwortet.)" };
   }
 
   // Trigger-Message-ID: jüngste offene Kunden-Nachricht (= Cluster-Start für Training)
@@ -435,6 +438,7 @@ export async function generateDraftOnDemand(sessionId: string): Promise<{ ok: tr
     .from("chat_messages")
     .select("id, role, created_at")
     .eq("session_id", sessionId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(10);
   const lastAgentIdx = (recent || []).findIndex(m => m.role === "assistant" || m.role === "human_agent");

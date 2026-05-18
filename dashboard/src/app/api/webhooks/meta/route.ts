@@ -348,6 +348,7 @@ async function routeIncoming(opts: {
   // Letzte gespeicherte User-Message holen — als Trigger für ggf. Entwurf
   const { data: lastUserMsg } = await svc.from("chat_messages")
     .select("id").eq("session_id", session.id).eq("role", "user")
+    .is("deleted_at", null)
     .order("created_at", { ascending: false }).limit(1).single();
 
   // Bot-Modus auswerten — 'auto' = senden, 'assisted' = Entwurf, 'off' = nichts
