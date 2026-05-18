@@ -119,7 +119,7 @@ export async function setBotMode(sessionId: string, mode: "auto" | "assisted" | 
  * - Sendet finalen Text an Channel
  * - Speichert als assistant-Message in chat_messages
  */
-export async function approveDraft(draftId: string, finalText: string) {
+export async function approveDraft(draftId: string, finalText: string, note?: string) {
   if (!finalText?.trim()) throw new Error("Leerer Text");
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -164,22 +164,48 @@ export async function approveDraft(draftId: string, finalText: string) {
     approved_by: user.id,
   }).eq("id", draftId);
 
-  // Training-Eintrag bei Korrektur — Auto-Lern-Modus
-  if (wasEdited && draft.trigger_message_id) {
+  // Training-Eintrag bei Korrektur ODER wenn explizit Notiz mitgegeben — Auto-Lern-Modus
+  const hasNote = !!note?.trim();
+  if ((wasEdited || hasNote) && draft.trigger_message_id) {
     const { data: trigger } = await svc
       .from("chat_messages")
-      .select("content")
+      .select("content, created_at")
       .eq("id", draft.trigger_message_id)
       .maybeSingle();
+
     if (trigger?.content) {
+      // Letzte ~6 Turns VOR der Trigger-Nachricht als Kontext mitspeichern,
+      // damit der Bot beim Lernen den Gesprächsverlauf + Strategie versteht.
+      const { data: ctxRows } = await svc
+        .from("chat_messages")
+        .select("role, content, created_at")
+        .eq("session_id", draft.session_id)
+        .lt("created_at", trigger.created_at)
+        .order("created_at", { ascending: false })
+        .limit(6);
+      const contextMessages = (ctxRows || [])
+        .slice().reverse()
+        .filter(r => (r.role === "user" || r.role === "assistant" || r.role === "human_agent") && r.content)
+        .map(r => ({
+          role: r.role === "human_agent" ? "assistant" : r.role,
+          content: (r.content || "").trim(),
+        }));
+
+      const feedbackParts: string[] = [];
+      if (hasNote) feedbackParts.push(`STRATEGIE-HINWEIS: ${note!.trim()}`);
+      feedbackParts.push(wasEdited
+        ? "Korrektur via Bot-Begleitung (Mitarbeiter editierte Entwurf)"
+        : "Bot-Entwurf war korrekt, Mitarbeiter ergänzte nur Strategie-Notiz");
+
       await svc.from("chatbot_training").insert({
-        user_message: trigger.content,
-        good_answer:  final,
-        bad_answer:   original,
-        feedback:     "Korrektur via Bot-Begleitung (Mitarbeiter editierte Entwurf)",
-        avatar_name:  session.bot_signature_name,
-        active:       true,
-        tags:         ["assisted_correction"],
+        user_message:    trigger.content,
+        good_answer:     final,
+        bad_answer:      wasEdited ? original : null,
+        feedback:        feedbackParts.join(" — "),
+        avatar_name:     session.bot_signature_name,
+        active:          true,
+        tags:            hasNote ? ["assisted_correction", "with_strategy_note"] : ["assisted_correction"],
+        context_messages: contextMessages.length > 0 ? contextMessages : null,
       });
     }
   }

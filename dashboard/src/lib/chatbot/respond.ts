@@ -61,24 +61,34 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     systemPrompt += `\n\n## DEINE PERSÖNLICHKEIT (als ${avatarRow.name})\n${avatarRow.personality}`;
   }
 
-  // Trainings-Beispiele
+  // Trainings-Beispiele (inkl. Gesprächskontext + Strategie-Hinweise aus Bot-Begleitung)
   const { data: training } = await svc
     .from("chatbot_training")
-    .select("user_message, good_answer, bad_answer, feedback, avatar_name")
+    .select("user_message, good_answer, bad_answer, feedback, avatar_name, context_messages")
     .eq("active", true)
     .or(`avatar_name.is.null,avatar_name.eq.${signatureName}`)
     .order("created_at", { ascending: false })
     .limit(15);
   if (training && training.length > 0) {
     systemPrompt += "\n\n## DEINE TRAININGS-BEISPIELE\n";
+    systemPrompt += "Diese Beispiele zeigen dir den GANZEN Gesprächsverlauf — nicht nur die Einzelfrage. ";
+    systemPrompt += "Achte besonders auf STRATEGIE-HINWEISE: sie sagen dir WIE du in ähnlichen Situationen vorgehen sollst.\n\n";
     for (let i = 0; i < training.length; i++) {
       const t = training[i];
       const scope = t.avatar_name ? `nur für ${t.avatar_name}` : "für alle Avatare";
       systemPrompt += `### Beispiel ${i + 1} (${scope})\n`;
-      systemPrompt += `Kunde fragt: ${t.user_message}\n`;
-      systemPrompt += `Gute Antwort: ${t.good_answer}\n`;
-      if (t.bad_answer) systemPrompt += `Schlechte Antwort: ${t.bad_answer}\n`;
-      if (t.feedback)   systemPrompt += `Hinweis: ${t.feedback}\n`;
+      const ctx = (t.context_messages as { role: string; content: string }[] | null) || [];
+      if (ctx.length > 0) {
+        systemPrompt += "Vorheriger Gesprächsverlauf:\n";
+        for (const c of ctx) {
+          const who = c.role === "user" ? "Kunde" : "Bot/Mitarbeiter";
+          systemPrompt += `  ${who}: ${c.content}\n`;
+        }
+      }
+      systemPrompt += `Kunde fragt jetzt: ${t.user_message}\n`;
+      systemPrompt += `→ Gute Antwort: ${t.good_answer}\n`;
+      if (t.bad_answer) systemPrompt += `→ FALSCH wäre: ${t.bad_answer}\n`;
+      if (t.feedback)   systemPrompt += `→ Hinweis: ${t.feedback}\n`;
       systemPrompt += "\n";
     }
   }

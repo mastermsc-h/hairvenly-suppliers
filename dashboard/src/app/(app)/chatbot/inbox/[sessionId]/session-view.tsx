@@ -455,14 +455,17 @@ function DraftBox({
   onDone: () => void;
 }) {
   const [text, setText] = useState(draft.original_text);
+  const [note, setNote] = useState("");
+  const [showNote, setShowNote] = useState(false);
   const [busy, setBusy] = useState<"send" | "grammar" | "discard" | null>(null);
   const wasEdited = text.trim() !== draft.original_text.trim();
+  const hasNote = note.trim().length > 0;
 
   async function handleSend() {
     if (!text.trim() || busy) return;
     setBusy("send");
     try {
-      await approveDraft(draft.id, text.trim());
+      await approveDraft(draft.id, text.trim(), note.trim() || undefined);
       onDone();
     } catch (e) {
       alert(`Senden fehlgeschlagen: ${(e as Error).message}`);
@@ -506,9 +509,9 @@ function DraftBox({
       <div className="flex items-center gap-2 text-xs text-blue-800">
         <Bot size={12} className="text-blue-600" />
         <span className="font-semibold">Bot-Entwurf wartet auf Freigabe</span>
-        {wasEdited && (
+        {(wasEdited || hasNote) && (
           <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-medium">
-            editiert — wird als Training gespeichert
+            {wasEdited && hasNote ? "editiert + Notiz" : wasEdited ? "editiert" : "Notiz"} — wird als Training gespeichert
           </span>
         )}
         <span className="text-blue-500 ml-auto">
@@ -522,6 +525,41 @@ function DraftBox({
         className="w-full rounded-xl border border-blue-200 bg-white px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
         disabled={busy !== null}
       />
+
+      {/* Strategie-Hinweis (optional) — wird mit Gesprächskontext ins Training übernommen */}
+      {showNote ? (
+        <div className="space-y-1">
+          <label className="text-[11px] font-medium text-blue-700 flex items-center gap-1">
+            <Sparkles size={10} /> Strategie-Hinweis fürs Training (optional)
+            <button
+              type="button"
+              onClick={() => { setShowNote(false); setNote(""); }}
+              className="ml-auto text-neutral-400 hover:text-neutral-600 text-[10px]"
+            >
+              Ausblenden
+            </button>
+          </label>
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder='z.B. "Zuerst Haarstruktur erfragen bevor Methode empfohlen wird"'
+            className="w-full rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-400"
+            disabled={busy !== null}
+          />
+          <div className="text-[10px] text-blue-600">
+            Wird zusammen mit dem letzten Gesprächsverlauf gespeichert, damit der Bot lernt WANN diese Antwort passt.
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setShowNote(true)}
+          className="text-[11px] text-blue-600 hover:text-blue-800 inline-flex items-center gap-1 underline-offset-2 hover:underline"
+        >
+          <Sparkles size={10} /> Strategie-Hinweis fürs Training hinzufügen
+        </button>
+      )}
       <div className="flex gap-2 flex-wrap">
         <button
           onClick={handleSend}
