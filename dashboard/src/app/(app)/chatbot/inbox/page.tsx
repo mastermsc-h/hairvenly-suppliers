@@ -4,6 +4,7 @@ import { requireProfile } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User, Mail } from "lucide-react";
 import SyncInstagramButton from "./sync-instagram-button";
+import MarkUnreadButton from "./mark-unread-button";
 
 interface PageProps {
   searchParams: Promise<{ status?: string; mode?: string; channel?: string }>;
@@ -242,8 +243,14 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 return (
                   <li
                     key={s.id}
-                    className={`relative border-b border-neutral-100 hover:bg-blue-50/40 transition-colors ${zebra} ${isUnread ? "border-l-4 border-l-pink-500" : "border-l-4 border-l-transparent"}`}
+                    className={`group relative border-b border-neutral-100 hover:bg-blue-50/40 transition-colors ${zebra} ${isUnread ? "border-l-4 border-l-pink-500" : "border-l-4 border-l-transparent"}`}
                   >
+                    {/* Mark-Unread-Button absolut positioniert, nur bei Hover sichtbar */}
+                    {!isUnread && (
+                      <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition">
+                        <MarkUnreadButton sessionId={s.id} variant="icon" />
+                      </div>
+                    )}
                     <Link href={`/chatbot/inbox/${s.id}`} className="block p-4">
                       {/* Customer-Name oben (z.B. @apfel.me oder Phone-Nr) */}
                       <div className="flex items-center gap-2 mb-1.5">

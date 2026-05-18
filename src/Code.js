@@ -3387,7 +3387,7 @@ function getSubtotalFromSheet(sheet) {
 
 /**
  * Berechnet die geschätzte Ankunft einer Bestellung.
- * China = +56 Tage (8 Wochen), Amanda = +42 Tage (6 Wochen)
+ * China = +56 Tage (8 Wochen), Amanda = +53 Tage (7,5 Wochen)
  * Gibt einen String zurück: "ca. Ankunft: TT.MM.JJJJ"
  */
 function calcAnkunft_(order) {
@@ -3395,7 +3395,7 @@ function calcAnkunft_(order) {
     let parts = order.date.split(".");
     if (parts.length !== 3) return "";
     let bestellDatum = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-    let tage = order.provider === "China" ? 56 : 42;
+    let tage = order.provider === "China" ? 56 : 53;
     let ankunft = new Date(bestellDatum.getTime() + tage * 24 * 60 * 60 * 1000);
     let d = String(ankunft.getDate()).padStart(2, "0");
     let m = String(ankunft.getMonth() + 1).padStart(2, "0");

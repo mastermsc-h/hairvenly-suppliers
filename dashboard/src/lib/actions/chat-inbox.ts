@@ -436,6 +436,17 @@ export async function discardDraft(draftId: string) {
   revalidatePath("/chatbot/inbox");
 }
 
+/**
+ * Markiert eine Session als ungelesen — setzt last_seen_by_agent_at zurück.
+ * In der Inbox erscheint dann der pinke Strich + "NEU"-Badge wieder.
+ */
+export async function markSessionUnread(sessionId: string) {
+  const svc = createServiceClient();
+  await svc.from("chat_sessions").update({ last_seen_by_agent_at: null }).eq("id", sessionId);
+  revalidatePath("/chatbot/inbox");
+  revalidatePath(`/chatbot/inbox/${sessionId}`);
+}
+
 /** Schließt eine Session */
 export async function closeSession(sessionId: string) {
   const svc = createServiceClient();

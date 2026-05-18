@@ -15,6 +15,7 @@ import {
   discardDraft,
   refineDraftWithFeedback,
   generateDraftOnDemand,
+  markSessionUnread,
 } from "@/lib/actions/chat-inbox";
 
 interface Message {
@@ -342,6 +343,19 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               className="text-xs px-3 py-1.5 rounded-lg bg-green-100 text-green-800 hover:bg-green-200 inline-flex items-center gap-1 disabled:opacity-50"
             >
               <RotateCcw size={12} /> Zurück an Bot
+            </button>
+          )}
+          {session.status !== "closed" && (
+            <button
+              onClick={() => startTransition(async () => {
+                await markSessionUnread(session.id);
+                router.refresh();
+              })}
+              disabled={isPending}
+              title="Setzt diese Session wieder auf 'ungelesen' (pinker Strich in der Inbox)"
+              className="text-xs px-3 py-1.5 rounded-lg border border-neutral-300 text-neutral-600 hover:bg-pink-50 hover:text-pink-700 hover:border-pink-300 inline-flex items-center gap-1 disabled:opacity-50"
+            >
+              📨 Als ungelesen
             </button>
           )}
           {session.status !== "closed" && (
