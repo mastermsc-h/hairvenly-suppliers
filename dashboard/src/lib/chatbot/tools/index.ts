@@ -481,6 +481,7 @@ const getAvailableColors: ToolDef = {
       name_hairvenly,
       name_shopify,
       shopify_url,
+      description,
       length:product_lengths!product_colors_length_id_fkey(
         value,
         unit,
@@ -497,6 +498,7 @@ const getAvailableColors: ToolDef = {
       name_hairvenly: string;
       name_shopify: string | null;
       shopify_url: string | null;
+      description: string | null;
       length?: { value?: number; unit?: string; method?: { name?: string; supplier?: { name?: string } | null } | null } | null;
     };
     let rows = (data as unknown as Row[]) || [];
@@ -541,11 +543,12 @@ const getAvailableColors: ToolDef = {
       });
     }
 
-    // Such-Filter — sucht in Kurzname UND im Shopify-Volltitel
-    // (damit "schwarz" auch #EBONY findet wenn der Titel "TIEFSCHWARZ" enthält)
+    // Such-Filter — sucht in Kurzname, Shopify-Volltitel UND Beschreibung
+    // Beschreibung ist der wichtigste Hit: "warmes Mittelbraun" findet RAW
+    // auch wenn "braun" nicht im Produktnamen steht.
     if (searchTerms) {
       rows = rows.filter(r => {
-        const hay = `${r.name_hairvenly} ${r.name_shopify || ""}`.toLowerCase();
+        const hay = `${r.name_hairvenly} ${r.name_shopify || ""} ${r.description || ""}`.toLowerCase();
         return searchTerms.some(t => hay.includes(t));
       });
     }
@@ -579,16 +582,18 @@ const getAvailableColors: ToolDef = {
       lengths: Set<string>;
       methods: Set<string>;
       shopify_url: string | null;
-      in_stock: boolean;          // mindestens 1 Variante aktuell vorrätig
-      eta: string | null;          // erste gefundene Ankunfts-ETA wenn unterwegs
+      description: string | null;
+      in_stock: boolean;
+      eta: string | null;
     };
     const colorMap = new Map<string, ColorEntry>();
     for (const r of rows) {
       if (!r.name_hairvenly) continue;
       const entry = colorMap.get(r.name_hairvenly) || {
         lengths: new Set(), methods: new Set(), shopify_url: null,
-        in_stock: false, eta: null,
+        description: null, in_stock: false, eta: null,
       };
+      if (r.description && !entry.description) entry.description = r.description;
       if (r.length?.value) entry.lengths.add(`${r.length.value}${r.length.unit || "cm"}`);
       if (r.length?.method?.name) entry.methods.add(r.length.method.name);
       if (r.shopify_url && !entry.shopify_url) entry.shopify_url = r.shopify_url;
@@ -624,11 +629,12 @@ const getAvailableColors: ToolDef = {
 
     const colors = Array.from(colorMap.entries()).map(([name, info]) => ({
       name,
+      description: info.description,  // z.B. "warmes Mittelbraun" — nutze beim Empfehlen!
       methods: Array.from(info.methods),
       lengths: Array.from(info.lengths),
-      shopify_url: info.shopify_url,  // null wenn noch nicht gepflegt
-      in_stock: info.in_stock,        // true = aktuell vorrätig, false = NICHT vorrätig
-      eta: info.eta,                  // wenn nicht vorrätig: ETA-Hinweis ('Ende Juni', 'ausverkauft', null)
+      shopify_url: info.shopify_url,
+      in_stock: info.in_stock,
+      eta: info.eta,
     }));
 
     // Sortiere: in_stock zuerst, dann mit ETA, dann ohne

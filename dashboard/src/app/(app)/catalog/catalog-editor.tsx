@@ -207,6 +207,7 @@ function LengthBlock({ length, locale }: { length: CatalogLength; locale: Locale
                   <th className="text-left pb-2 font-medium">{t(locale, "catalog.name_supplier")}</th>
                   <th className="text-left pb-2 font-medium">{t(locale, "catalog.name_shopify")}</th>
                   <th className="text-left pb-2 font-medium w-20">Shop-URL</th>
+                  <th className="text-left pb-2 font-medium">Farbton-Beschr.</th>
                   <th className="text-center pb-2 font-medium w-16">Bot</th>
                   <th className="w-16"></th>
                 </tr>
@@ -237,6 +238,7 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
   const [nameS, setNameS] = useState(color.name_supplier ?? "");
   const [nameSh, setNameSh] = useState(color.name_shopify ?? "");
   const [shopUrl, setShopUrl] = useState(color.shopify_url ?? "");
+  const [descrip, setDescrip] = useState(color.description ?? "");
   const [botActive, setBotActive] = useState(color.bot_active ?? true);
 
   const handleSave = () => {
@@ -245,6 +247,7 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
     fd.set("name_supplier", nameS);
     fd.set("name_shopify", nameSh);
     fd.set("shopify_url", shopUrl);
+    fd.set("description", descrip);
     fd.set("bot_active", botActive ? "true" : "false");
     startTransition(async () => {
       await updateColor(color.id, fd);
@@ -260,6 +263,7 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
     fd.set("name_supplier", nameS);
     fd.set("name_shopify", nameSh);
     fd.set("shopify_url", shopUrl);
+    fd.set("description", descrip);
     fd.set("bot_active", newVal ? "true" : "false");
     startTransition(async () => { await updateColor(color.id, fd); });
   };
@@ -290,6 +294,11 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
             placeholder="https://hairvenly.de/products/..."
             className="w-full rounded border border-neutral-300 px-2 py-1 text-xs" />
         </td>
+        <td className="py-1 pr-2">
+          <input value={descrip} onChange={(e) => setDescrip(e.target.value)} onKeyDown={onKeyDown}
+            placeholder="z.B. warmes Mittelbraun"
+            className="w-full rounded border border-neutral-300 px-2 py-1 text-xs" />
+        </td>
         <td className="py-1 pr-2 text-center">
           <input type="checkbox" checked={botActive} onChange={(e) => setBotActive(e.target.checked)} />
         </td>
@@ -314,6 +323,9 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
             🔗 Shop
           </a>
         ) : <span className="text-neutral-300 text-xs">—</span>}
+      </td>
+      <td className="py-1.5 text-neutral-500 text-xs truncate max-w-[220px]" title={color.description || undefined}>
+        {color.description || <span className="text-neutral-300">—</span>}
       </td>
       <td className="py-1.5 text-center">
         <button
