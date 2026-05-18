@@ -213,10 +213,12 @@ export async function updateColor(id: string, formData: FormData) {
   const name_shopify = (formData.get("name_shopify") as string)?.trim() || null;
   const shopify_url = (formData.get("shopify_url") as string)?.trim() || null;
   const description = (formData.get("description") as string)?.trim() || null;
+  const equivalent_in_other_line = (formData.get("equivalent_in_other_line") as string)?.trim() || null;
   const bot_active_raw = formData.get("bot_active");
   const updates: Record<string, unknown> = { name_hairvenly, name_supplier, name_shopify };
   if (formData.has("shopify_url")) updates.shopify_url = shopify_url;
   if (formData.has("description")) updates.description = description;
+  if (formData.has("equivalent_in_other_line")) updates.equivalent_in_other_line = equivalent_in_other_line;
   if (bot_active_raw !== null) updates.bot_active = bot_active_raw === "true" || bot_active_raw === "on";
 
   const { error } = await supabase

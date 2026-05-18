@@ -497,6 +497,7 @@ const getAvailableColors: ToolDef = {
       name_shopify,
       shopify_url,
       description,
+      equivalent_in_other_line,
       length:product_lengths!product_colors_length_id_fkey(
         value,
         unit,
@@ -514,6 +515,7 @@ const getAvailableColors: ToolDef = {
       name_shopify: string | null;
       shopify_url: string | null;
       description: string | null;
+      equivalent_in_other_line: string | null;
       length?: { value?: number; unit?: string; method?: { name?: string; supplier?: { name?: string } | null } | null } | null;
     };
     let rows = (data as unknown as Row[]) || [];
@@ -598,6 +600,7 @@ const getAvailableColors: ToolDef = {
       methods: Set<string>;
       shopify_url: string | null;
       description: string | null;
+      equivalent_in_other_line: string | null;
       in_stock: boolean;
       eta: string | null;
     };
@@ -606,9 +609,10 @@ const getAvailableColors: ToolDef = {
       if (!r.name_hairvenly) continue;
       const entry = colorMap.get(r.name_hairvenly) || {
         lengths: new Set(), methods: new Set(), shopify_url: null,
-        description: null, in_stock: false, eta: null,
+        description: null, equivalent_in_other_line: null, in_stock: false, eta: null,
       };
       if (r.description && !entry.description) entry.description = r.description;
+      if (r.equivalent_in_other_line && !entry.equivalent_in_other_line) entry.equivalent_in_other_line = r.equivalent_in_other_line;
       if (r.length?.value) entry.lengths.add(`${r.length.value}${r.length.unit || "cm"}`);
       if (r.length?.method?.name) entry.methods.add(r.length.method.name);
       if (r.shopify_url && !entry.shopify_url) entry.shopify_url = r.shopify_url;
@@ -644,7 +648,8 @@ const getAvailableColors: ToolDef = {
 
     const colors = Array.from(colorMap.entries()).map(([name, info]) => ({
       name,
-      description: info.description,  // z.B. "warmes Mittelbraun" — nutze beim Empfehlen!
+      description: info.description,
+      equivalent_in_other_line: info.equivalent_in_other_line,  // direkte Cross-Linie-Matches (gepflegt im Katalog)
       methods: Array.from(info.methods),
       lengths: Array.from(info.lengths),
       shopify_url: info.shopify_url,

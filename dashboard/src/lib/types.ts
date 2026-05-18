@@ -234,6 +234,7 @@ export interface ProductColor {
   name_shopify: string | null;
   shopify_url: string | null;
   description: string | null;
+  equivalent_in_other_line: string | null;
   bot_active: boolean;
   sort_order: number;
   updated_at: string | null;

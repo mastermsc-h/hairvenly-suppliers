@@ -208,6 +208,7 @@ function LengthBlock({ length, locale }: { length: CatalogLength; locale: Locale
                   <th className="text-left pb-2 font-medium">{t(locale, "catalog.name_shopify")}</th>
                   <th className="text-left pb-2 font-medium w-20">Shop-URL</th>
                   <th className="text-left pb-2 font-medium">Farbton-Beschr.</th>
+                  <th className="text-left pb-2 font-medium">Entspricht (andere Linie)</th>
                   <th className="text-center pb-2 font-medium w-16">Bot</th>
                   <th className="w-16"></th>
                 </tr>
@@ -239,18 +240,24 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
   const [nameSh, setNameSh] = useState(color.name_shopify ?? "");
   const [shopUrl, setShopUrl] = useState(color.shopify_url ?? "");
   const [descrip, setDescrip] = useState(color.description ?? "");
+  const [equiv, setEquiv] = useState(color.equivalent_in_other_line ?? "");
   const [botActive, setBotActive] = useState(color.bot_active ?? true);
 
-  const handleSave = () => {
+  const buildFd = (newBotActive?: boolean) => {
     const fd = new FormData();
     fd.set("name_hairvenly", nameH);
     fd.set("name_supplier", nameS);
     fd.set("name_shopify", nameSh);
     fd.set("shopify_url", shopUrl);
     fd.set("description", descrip);
-    fd.set("bot_active", botActive ? "true" : "false");
+    fd.set("equivalent_in_other_line", equiv);
+    fd.set("bot_active", (newBotActive ?? botActive) ? "true" : "false");
+    return fd;
+  };
+
+  const handleSave = () => {
     startTransition(async () => {
-      await updateColor(color.id, fd);
+      await updateColor(color.id, buildFd());
       setEditing(false);
     });
   };
@@ -258,14 +265,7 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
   const toggleBot = () => {
     const newVal = !botActive;
     setBotActive(newVal);
-    const fd = new FormData();
-    fd.set("name_hairvenly", nameH);
-    fd.set("name_supplier", nameS);
-    fd.set("name_shopify", nameSh);
-    fd.set("shopify_url", shopUrl);
-    fd.set("description", descrip);
-    fd.set("bot_active", newVal ? "true" : "false");
-    startTransition(async () => { await updateColor(color.id, fd); });
+    startTransition(async () => { await updateColor(color.id, buildFd(newVal)); });
   };
 
   const handleDelete = () => {
@@ -299,6 +299,11 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
             placeholder="z.B. warmes Mittelbraun"
             className="w-full rounded border border-neutral-300 px-2 py-1 text-xs" />
         </td>
+        <td className="py-1 pr-2">
+          <input value={equiv} onChange={(e) => setEquiv(e.target.value)} onKeyDown={onKeyDown}
+            placeholder="z.B. LATTE BROWN, AUTUMN, FAWN"
+            className="w-full rounded border border-neutral-300 px-2 py-1 text-xs" />
+        </td>
         <td className="py-1 pr-2 text-center">
           <input type="checkbox" checked={botActive} onChange={(e) => setBotActive(e.target.checked)} />
         </td>
@@ -326,6 +331,9 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
       </td>
       <td className="py-1.5 text-neutral-500 text-xs truncate max-w-[220px]" title={color.description || undefined}>
         {color.description || <span className="text-neutral-300">—</span>}
+      </td>
+      <td className="py-1.5 text-neutral-500 text-xs truncate max-w-[200px]" title={color.equivalent_in_other_line || undefined}>
+        {color.equivalent_in_other_line || <span className="text-neutral-300">—</span>}
       </td>
       <td className="py-1.5 text-center">
         <button
