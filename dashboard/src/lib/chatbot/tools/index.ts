@@ -249,23 +249,38 @@ const getStockEta: ToolDef = {
         };
       }
 
-      // B) Produkt unterwegs → ETA zurückgeben
+      // B) Produkt unterwegs → NUR DAS FRÜHESTE ETA zurückgeben (kein "erste Lieferung" Leak)
       if (inUnterwegs.length > 0) {
-        const products = inUnterwegs.slice(0, 3).map(m => ({
-          product: m.product,
-          collection: m.collection,
-          lager_aktuell_g: m.lagerG,
-          unterwegs_g: m.unterwegsG,
-          next_shipments: m.perOrder.map(o => ({
-            order: o.name, ankunft: o.ankunft, menge_g: o.menge,
-          })),
-        }));
+        // Hilfsfunktion: extrahiere Datum aus "ca. Ankunft: 30.05.2026" → "30.05.2026"
+        const extractDate = (s: string): { iso: string | null; text: string } => {
+          const m = s.match(/(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/);
+          if (!m) return { iso: null, text: s };
+          const [, d, mo, y] = m;
+          const yy = y.length === 2 ? `20${y}` : y;
+          const iso = `${yy}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+          return { iso, text: `${d.padStart(2, "0")}.${mo.padStart(2, "0")}.${yy.slice(-2)}` };
+        };
+        // Pro Produkt das früheste Datum finden
+        const products = inUnterwegs.slice(0, 3).map(m => {
+          const dated = m.perOrder.map(o => ({ ...extractDate(o.ankunft || ""), raw: o.ankunft }));
+          dated.sort((a, b) => (a.iso || "9999").localeCompare(b.iso || "9999"));
+          const earliest = dated[0];
+          return {
+            product: m.product,
+            collection: m.collection,
+            // KEINE konkreten Mengen!
+            earliest_eta: earliest?.text || earliest?.raw || "bald",
+            earliest_eta_iso: earliest?.iso || null,
+          };
+        });
         return {
           output: JSON.stringify({
             status: "unterwegs",
             message:
-              "Produkte unterwegs gefunden. Nutze die `ankunft`-Information aus next_shipments für die Antwort " +
-              "(z.B. 'ca. Ende Mai'). Formuliere als 'ca. / voraussichtlich'.",
+              "Produkt ist unterwegs. Verwende NUR 'earliest_eta' für die Antwort und formuliere weich: " +
+              "z.B. 'ca. Ende Mai, also etwa 30.05.' — NIEMALS sagen 'erste Lieferung' oder 'zweite Lieferung'! " +
+              "Es interessiert die Kundin nicht ob es eine oder mehrere Lieferungen gibt. " +
+              "EIN Datum reicht. Keine 'erste Lieferung'-Phrasen!",
             sheet_last_updated: lastUpdated,
             products,
           }),
