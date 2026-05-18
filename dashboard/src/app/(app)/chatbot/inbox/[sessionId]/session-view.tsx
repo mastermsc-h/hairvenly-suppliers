@@ -50,6 +50,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
   const [isPending, startTransition] = useTransition();
   const [suggesting, setSuggesting] = useState(false);
   const [andResume, setAndResume] = useState(false);
+  const [modeSwitching, setModeSwitching] = useState<null | "auto" | "assisted" | "off">(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -234,28 +235,45 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               <Power size={11} className="text-neutral-400" />
               <span className="text-neutral-500">Bot:</span>
               <select
-                value={session.bot_mode}
+                value={modeSwitching || session.bot_mode}
                 onChange={(e) => {
                   const m = e.target.value as "auto" | "assisted" | "off";
+                  setModeSwitching(m);
                   startTransition(async () => {
-                    await setBotMode(session.id, m);
-                    router.refresh();
+                    try {
+                      await setBotMode(session.id, m);
+                      router.refresh();
+                    } finally {
+                      setModeSwitching(null);
+                    }
                   });
                 }}
-                disabled={isPending}
+                disabled={isPending || modeSwitching !== null}
                 title="Auto = sendet selbst · Begleitet = Bot generiert Entwurf, du bestätigst · Aus = kein Bot"
                 className={`text-xs rounded-md border px-2 py-0.5 font-medium ${
-                  session.bot_mode === "auto"
-                    ? "bg-green-100 text-green-800 border-green-300"
-                    : session.bot_mode === "assisted"
+                  modeSwitching === "assisted" || session.bot_mode === "assisted"
                     ? "bg-blue-100 text-blue-800 border-blue-300"
+                    : modeSwitching === "auto" || session.bot_mode === "auto"
+                    ? "bg-green-100 text-green-800 border-green-300"
                     : "bg-neutral-100 text-neutral-600 border-neutral-300"
-                }`}
+                } ${modeSwitching ? "opacity-60 cursor-wait" : ""}`}
               >
                 <option value="auto">🤖 Auto (sendet selbst)</option>
                 <option value="assisted">🧑‍🏫 Begleitet (Entwurf)</option>
                 <option value="off">⏸ Aus</option>
               </select>
+              {modeSwitching === "assisted" && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full whitespace-nowrap">
+                  <Bot size={11} className="animate-pulse" />
+                  Entwurf wird generiert…
+                </span>
+              )}
+              {modeSwitching && modeSwitching !== "assisted" && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-neutral-500">
+                  <RotateCcw size={11} className="animate-spin" />
+                  wechsle…
+                </span>
+              )}
             </div>
           )}
           {!isTakenOver && session.status !== "closed" && (
@@ -295,6 +313,22 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
           </button>
         </div>
       </div>
+
+      {/* Modus-Wechsel-Banner — sehr sichtbar während Bot generiert */}
+      {modeSwitching === "assisted" && (
+        <div className="border-b border-blue-200 bg-gradient-to-r from-blue-50 via-blue-100 to-blue-50 px-5 py-3 flex items-center gap-3">
+          <div className="relative">
+            <div className="w-8 h-8 rounded-full bg-blue-200 flex items-center justify-center">
+              <Bot size={16} className="text-blue-700" />
+            </div>
+            <div className="absolute inset-0 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" />
+          </div>
+          <div className="flex-1">
+            <div className="text-sm font-semibold text-blue-900">Bot generiert Entwurf…</div>
+            <div className="text-xs text-blue-700">Liest Gesprächsverlauf, prüft Lagerbestand und schreibt Antwort auf die offenen Nachrichten. Dauert ca. 5-15 Sekunden.</div>
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-neutral-50">
