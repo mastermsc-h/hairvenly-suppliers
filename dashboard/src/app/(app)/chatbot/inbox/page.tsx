@@ -304,25 +304,17 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         </span>
                       </div>
 
-                      {/* Vorschau: LETZTE Kunden- und LETZTE Bot-/Mitarbeiter-Nachricht */}
-                      <div className="space-y-1.5">
-                        {st.lastUser && (
-                          <div className="flex gap-2 text-sm">
-                            <span className="text-neutral-400 shrink-0 mt-0.5" title="Letzte Kundennachricht">
-                              <User size={13} />
-                            </span>
-                            <span className="text-neutral-700 line-clamp-2">{st.lastUser}</span>
-                          </div>
-                        )}
-                        {st.lastBot && (
-                          <div className="flex gap-2 text-sm">
-                            <span className={`shrink-0 mt-0.5 ${st.lastMsgRole === "human_agent" ? "text-amber-600" : "text-pink-500"}`} title={st.lastMsgRole === "human_agent" ? "Letzte Mitarbeiter-Antwort" : "Letzte Bot-Antwort"}>
-                              {st.lastMsgRole === "human_agent" ? <UserCheck size={13} /> : <Bot size={13} />}
-                            </span>
-                            <span className="text-neutral-600 line-clamp-2">{st.lastBot}</span>
-                          </div>
-                        )}
-                      </div>
+                      {/* Vorschau: nur die LETZTE Kundennachricht — das ist was Aufmerksamkeit braucht.
+                          (Bot-/Mitarbeiter-Antworten weglassen — sind oft veraltet wenn Kunde danach
+                          wieder geschrieben hat, irreführend für "was ist offen?".) */}
+                      {st.lastUser && (
+                        <div className="flex gap-2 text-sm">
+                          <span className="text-neutral-400 shrink-0 mt-0.5" title="Letzte Kundennachricht">
+                            <User size={13} />
+                          </span>
+                          <span className="text-neutral-700 line-clamp-2">{st.lastUser}</span>
+                        </div>
+                      )}
                     </Link>
                   </li>
                 );
