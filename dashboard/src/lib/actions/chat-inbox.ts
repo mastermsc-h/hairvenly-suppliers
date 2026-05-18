@@ -115,6 +115,15 @@ export async function setBotMode(sessionId: string, mode: "auto" | "assisted" | 
   }).eq("id", sessionId);
 
   if (mode === "assisted") {
+    // Klassifikation nachholen falls noch keine (fire-and-forget)
+    (async () => {
+      try {
+        const { classifySession } = await import("@/lib/chatbot/classify");
+        const { data: cur } = await svc.from("chat_sessions").select("category").eq("id", sessionId).single();
+        if (!cur?.category) await classifySession(sessionId);
+      } catch {}
+    })();
+
     // Schon ein pending Draft? Dann nichts tun.
     const { data: existingDraft } = await svc
       .from("chat_drafts")
@@ -454,6 +463,26 @@ export async function closeSession(sessionId: string) {
     .update({ status: "closed" })
     .eq("id", sessionId);
   revalidatePath("/chatbot/inbox");
+}
+
+export type SessionCategory =
+  "availability" | "pricing" | "color_advice" | "appointment"
+  | "complaint" | "order_status" | "partnership" | "general";
+
+/** Manuelles Override der Kategorie (Mitarbeiter korrigiert Bot-Klassifikation) */
+export async function setSessionCategory(sessionId: string, category: SessionCategory) {
+  const svc = createServiceClient();
+  await svc.from("chat_sessions").update({ category }).eq("id", sessionId);
+  revalidatePath("/chatbot/inbox");
+  revalidatePath(`/chatbot/inbox/${sessionId}`);
+}
+
+/** Triggert erneute Auto-Klassifikation via Haiku */
+export async function reclassifySession(sessionId: string) {
+  const { classifySession } = await import("@/lib/chatbot/classify");
+  await classifySession(sessionId);
+  revalidatePath("/chatbot/inbox");
+  revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
 
 /** Löscht eine Session komplett (inkl. Messages via CASCADE) */

@@ -235,6 +235,15 @@ async function routeIncoming(opts: {
     customer_name: session.customer_name || opts.customerName || null,
   }).eq("id", session.id);
 
+  // Auto-Klassifikation der Session (fire-and-forget) — bei jedem Eingang erneut
+  // damit sich die Kategorie an aktuelle Themen anpasst.
+  (async () => {
+    try {
+      const { classifySession } = await import("@/lib/chatbot/classify");
+      await classifySession(session.id);
+    } catch (e) { console.warn("[meta-webhook] classify fail:", (e as Error).message); }
+  })();
+
   // Letzte gespeicherte User-Message holen — als Trigger für ggf. Entwurf
   const { data: lastUserMsg } = await svc.from("chat_messages")
     .select("id").eq("session_id", session.id).eq("role", "user")

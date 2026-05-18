@@ -5,10 +5,22 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User, Mail } from "lucide-react";
 import SyncInstagramButton from "./sync-instagram-button";
 import MarkUnreadButton from "./mark-unread-button";
+import InboxSearchBar from "./search-bar";
 
 interface PageProps {
-  searchParams: Promise<{ status?: string; mode?: string; channel?: string }>;
+  searchParams: Promise<{ status?: string; mode?: string; channel?: string; category?: string; q?: string }>;
 }
+
+const CATEGORY_LABELS: Record<string, { label: string; emoji: string }> = {
+  availability: { label: "Verfügbarkeit", emoji: "📦" },
+  pricing:      { label: "Preis",         emoji: "💰" },
+  color_advice: { label: "Farbberatung",  emoji: "🎨" },
+  appointment:  { label: "Termin",        emoji: "📅" },
+  complaint:    { label: "Reklamation",   emoji: "⚠️" },
+  order_status: { label: "Bestellstatus", emoji: "🚚" },
+  partnership:  { label: "Partnership",   emoji: "🤝" },
+  general:      { label: "Sonstiges",     emoji: "💬" },
+};
 
 interface PreviewMsg { role: string; content: string; created_at: string; }
 interface SessionStats {
@@ -39,28 +51,58 @@ const CHANNEL_LABELS: Record<string, string> = {
 export default async function ChatInboxPage({ searchParams }: PageProps) {
   await requireProfile();
   const params = await searchParams;
-  const filter        = params.status  || "all";
-  const mode          = params.mode    || "all"; // 'all' | 'pure_bot' | 'with_human'
-  const channelFilter = params.channel || "all"; // 'all' | 'web' | 'instagram' | 'whatsapp'
+  const filter        = params.status   || "all";
+  const mode          = params.mode     || "all"; // 'all' | 'pure_bot' | 'with_human'
+  const channelFilter = params.channel  || "all"; // 'all' | 'web' | 'instagram' | 'whatsapp'
+  const categoryFilter = params.category || "all";
+  const searchQuery    = (params.q || "").trim();
 
   const svc = createServiceClient();
   let query = svc
     .from("chat_sessions")
     .select(`
       id, channel, customer_name, status, assigned_to, bot_signature_name,
-      bot_mode, last_message_at, last_customer_msg_at, last_seen_by_agent_at, created_at,
+      bot_mode, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, created_at,
       assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
     `)
     .order("last_message_at", { ascending: false })
-    .limit(100);
+    .limit(200);
 
-  if (filter !== "all") {
-    query = query.eq("status", filter);
-  }
-  if (channelFilter !== "all") {
-    query = query.eq("channel", channelFilter);
-  }
+  if (filter !== "all")        query = query.eq("status", filter);
+  if (channelFilter !== "all") query = query.eq("channel", channelFilter);
+  if (categoryFilter !== "all") query = query.eq("category", categoryFilter);
+  if (searchQuery) query = query.ilike("customer_name", `%${searchQuery}%`);
   const { data: sessions } = await query;
+
+  // Wenn Such-Query: Auch IDs aus chat_messages.content matching suchen
+  // (damit man auch nach Nachricht-Inhalt suchen kann, nicht nur Kundenname)
+  let extraSessionIdsFromMessages: string[] = [];
+  if (searchQuery) {
+    const { data: matchedMsgs } = await svc
+      .from("chat_messages")
+      .select("session_id")
+      .ilike("content", `%${searchQuery}%`)
+      .limit(200);
+    extraSessionIdsFromMessages = Array.from(new Set((matchedMsgs || []).map(m => m.session_id)));
+  }
+  let messageMatchedSessions: typeof sessions = [];
+  if (extraSessionIdsFromMessages.length > 0) {
+    const existingIds = new Set((sessions || []).map(s => s.id));
+    const onlyNew = extraSessionIdsFromMessages.filter(id => !existingIds.has(id));
+    if (onlyNew.length > 0) {
+      const { data: extra } = await svc
+        .from("chat_sessions")
+        .select(`
+          id, channel, customer_name, status, assigned_to, bot_signature_name,
+          bot_mode, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, created_at,
+          assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
+        `)
+        .in("id", onlyNew)
+        .order("last_message_at", { ascending: false });
+      messageMatchedSessions = extra || [];
+    }
+  }
+  const combinedSessions = [...(sessions || []), ...messageMatchedSessions];
 
   // Stats für Follow-Up-Indikator
   const followUpCutoff = new Date(Date.now() - 3 * 86400 * 1000).toISOString();
@@ -72,7 +114,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     .lt("last_message_at", followUpCutoff);
 
   // Pro Session: erste User-Frage, erste Bot-Antwort, letzte Nachricht, Counts
-  const sessionIds = (sessions ?? []).map(s => s.id);
+  const sessionIds = combinedSessions.map(s => s.id);
   const stats: Record<string, SessionStats> = {};
   if (sessionIds.length > 0) {
     const { data: msgs } = await svc
@@ -102,15 +144,22 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   }
 
   // Filter nach Mode: pure_bot = nur Bot hat geantwortet, with_human = Mensch hat reingeschrieben
-  let filteredSessions = sessions ?? [];
+  let filteredSessions = combinedSessions;
   if (mode === "pure_bot") {
     filteredSessions = filteredSessions.filter(s => (stats[s.id]?.humanCount || 0) === 0);
   } else if (mode === "with_human") {
     filteredSessions = filteredSessions.filter(s => (stats[s.id]?.humanCount || 0) > 0);
   }
 
-  const pureBotCount   = (sessions ?? []).filter(s => (stats[s.id]?.humanCount || 0) === 0).length;
-  const withHumanCount = (sessions ?? []).filter(s => (stats[s.id]?.humanCount || 0) > 0).length;
+  const pureBotCount   = combinedSessions.filter(s => (stats[s.id]?.humanCount || 0) === 0).length;
+  const withHumanCount = combinedSessions.filter(s => (stats[s.id]?.humanCount || 0) > 0).length;
+
+  // Kategorie-Counts für die Filter-Chips (basierend auf aktuell sichtbarer Liste)
+  const categoryCounts: Record<string, number> = {};
+  for (const s of combinedSessions) {
+    const c = s.category || "general";
+    categoryCounts[c] = (categoryCounts[c] || 0) + 1;
+  }
 
   // KPIs
   const { count: cntActive } = await svc.from("chat_sessions").select("id", { count: "exact", head: true }).eq("status", "active");
@@ -144,6 +193,16 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         <KPI label="Bot aktiv"        count={cntActive ?? 0}  color="text-green-700"  />
         <KPI label="Warten auf Team"  count={cntWaiting ?? 0} color="text-amber-700"  />
         <KPI label="Abgeschlossen"    count={cntClosed ?? 0}  color="text-neutral-500"/>
+      </div>
+
+      {/* Suche */}
+      <div className="flex items-center gap-3">
+        <InboxSearchBar />
+        {searchQuery && (
+          <span className="text-xs text-neutral-500">
+            {combinedSessions.length} Treffer für &ldquo;<strong className="text-neutral-700">{searchQuery}</strong>&rdquo;
+          </span>
+        )}
       </div>
 
       {/* Filter — Kanal */}
@@ -194,6 +253,52 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         </div>
       </div>
 
+      {/* Filter — Kategorie (Auto-klassifiziert) */}
+      <div className="space-y-2">
+        <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">Kategorie</div>
+        <div className="flex gap-2 flex-wrap">
+          <Link
+            href={`/chatbot/inbox?${new URLSearchParams({
+              ...(filter !== "all" ? { status: filter } : {}),
+              ...(mode !== "all" ? { mode } : {}),
+              ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
+              ...(searchQuery ? { q: searchQuery } : {}),
+            }).toString()}`}
+            className={`text-xs px-3 py-1.5 rounded-full border ${
+              categoryFilter === "all"
+                ? "bg-neutral-900 text-white border-neutral-900"
+                : "bg-white text-neutral-600 border-neutral-300 hover:bg-neutral-50"
+            }`}
+          >
+            Alle Kategorien
+          </Link>
+          {Object.entries(CATEGORY_LABELS).map(([key, meta]) => {
+            const cnt = categoryCounts[key] || 0;
+            return (
+              <Link
+                key={key}
+                href={`/chatbot/inbox?${new URLSearchParams({
+                  ...(filter !== "all" ? { status: filter } : {}),
+                  ...(mode !== "all" ? { mode } : {}),
+                  ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
+                  ...(searchQuery ? { q: searchQuery } : {}),
+                  category: key,
+                }).toString()}`}
+                className={`text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1 ${
+                  categoryFilter === key
+                    ? "bg-neutral-900 text-white border-neutral-900"
+                    : "bg-white text-neutral-600 border-neutral-300 hover:bg-neutral-50"
+                }`}
+              >
+                <span>{meta.emoji}</span>
+                {meta.label}
+                {cnt > 0 && <span className={categoryFilter === key ? "text-white/70" : "text-neutral-400"}>· {cnt}</span>}
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Filter — Mode (Bot vs Mensch) */}
       <div className="space-y-2">
         <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">Bot/Mensch</div>
@@ -239,11 +344,24 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 const isUnread = !!(s.last_customer_msg_at && (
                   !s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at
                 ));
-                const zebra = idx % 2 === 0 ? "bg-white" : "bg-neutral-50/60";
+                // Wir-zuletzt-geantwortet (Kundin dran): leichter blauer Touch
+                const ourTurn = st.lastMsgRole === "assistant" || st.lastMsgRole === "human_agent";
+                // Farb-Hintergrund-Logik (Priorität: unread > ourTurn > zebra)
+                const rowBg = isUnread
+                  ? "bg-pink-50/30"
+                  : ourTurn
+                  ? "bg-blue-50/40"
+                  : (idx % 2 === 0 ? "bg-white" : "bg-neutral-50/60");
                 return (
                   <li
                     key={s.id}
-                    className={`group relative border-b border-neutral-100 hover:bg-blue-50/40 transition-colors ${zebra} ${isUnread ? "border-l-4 border-l-pink-500" : "border-l-4 border-l-transparent"}`}
+                    className={`group relative border-b border-neutral-100 hover:bg-blue-100/40 transition-colors ${rowBg} ${
+                      isUnread
+                        ? "border-l-4 border-l-pink-500"
+                        : ourTurn
+                        ? "border-l-4 border-l-blue-300"
+                        : "border-l-4 border-l-transparent"
+                    }`}
                   >
                     {/* Mark-Unread-Button absolut positioniert, nur bei Hover sichtbar */}
                     {!isUnread && (
@@ -261,6 +379,16 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         {isUnread && (
                           <span className="bg-pink-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide">
                             Neu
+                          </span>
+                        )}
+                        {!isUnread && ourTurn && (
+                          <span className="bg-blue-100 text-blue-700 text-[10px] font-medium px-1.5 py-0.5 rounded-full">
+                            wartet auf Kundin
+                          </span>
+                        )}
+                        {s.category && CATEGORY_LABELS[s.category] && (
+                          <span className="bg-neutral-100 text-neutral-600 text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5">
+                            {CATEGORY_LABELS[s.category].emoji} {CATEGORY_LABELS[s.category].label}
                           </span>
                         )}
                       </div>
