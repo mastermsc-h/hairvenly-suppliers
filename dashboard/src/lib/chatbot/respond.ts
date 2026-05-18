@@ -121,12 +121,28 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   if (!msgs || msgs.length === 0) return { success: false, error: "no messages" };
 
   // OFFENE TURNS ERMITTELN — ALLE Kundennachrichten SEIT der letzten Agent-/
-  // Bot-Antwort gehören zusammen, auch wenn Tage dazwischen lagen. Beispiel:
-  // Kundin fragt Freitag abend, hakt Montag mit "hallo?" nach → beides ist
-  // dasselbe Anliegen, Bot muss BEIDE beachten.
+  // Bot-Antwort gehören zusammen. Sorry nur wenn die WERKTAGS-Stunden ≥ 24h
+  // sind (Wochenenden zählen nicht — Freitag 18h → Montag 9h = kein Sorry).
+  function businessHoursBetween(fromMs: number, toMs: number): number {
+    if (toMs <= fromMs) return 0;
+    let total = 0;
+    const cur = new Date(fromMs);
+    const to = new Date(toMs);
+    while (cur < to) {
+      const day = cur.getDay(); // 0=So, 6=Sa
+      const endOfDay = new Date(cur); endOfDay.setHours(24, 0, 0, 0);
+      const segEnd = endOfDay < to ? endOfDay : to;
+      if (day >= 1 && day <= 5) {
+        total += (segEnd.getTime() - cur.getTime()) / 3600000;
+      }
+      cur.setTime(endOfDay.getTime());
+    }
+    return total;
+  }
+
   let openTurnsHint = "";
   {
-    const tail = msgs.slice(-15).slice().reverse(); // jüngste zuerst
+    const tail = msgs.slice(-15).slice().reverse();
     const lastAgentRev = tail.findIndex(m => m.role === "assistant" || m.role === "human_agent");
     const openUsrDesc = lastAgentRev === -1
       ? tail.filter(m => m.role === "user")
@@ -135,22 +151,10 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     if (openUsrDesc.length > 0) {
       const orderedOldestFirst = openUsrDesc.slice().reverse();
 
-      // Stille-Hinweise zwischen aufeinanderfolgenden Kundennachrichten
-      const gapNotes: string[] = [];
-      for (let i = 1; i < orderedOldestFirst.length; i++) {
-        const prevT = new Date(orderedOldestFirst[i - 1].created_at).getTime();
-        const curT  = new Date(orderedOldestFirst[i].created_at).getTime();
-        const hours = Math.round((curT - prevT) / 3600000);
-        if (hours >= 24) {
-          const days = Math.round(hours / 24);
-          gapNotes.push(`Zwischen Nachricht ${i} und ${i + 1} lagen ~${days} Tag${days === 1 ? "" : "e"} Stille.`);
-        }
-      }
-
-      // Stille seit der jüngsten offenen Frage bis JETZT — falls Mitarbeiter
-      // den Begleitmodus erst Tage später aktiviert
+      // Werktags-Stunden seit der jüngsten offenen Frage bis jetzt
       const youngestT = new Date(orderedOldestFirst[orderedOldestFirst.length - 1].created_at).getTime();
-      const hoursSinceYoungest = Math.round((Date.now() - youngestT) / 3600000);
+      const businessHoursSinceYoungest = businessHoursBetween(youngestT, Date.now());
+      const apologyDue = businessHoursSinceYoungest >= 24;
 
       if (openUsrDesc.length > 1) {
         openTurnsHint =
@@ -161,28 +165,25 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
             return `${i + 1}. [${fmt}] ${m.content}`;
           }).join("\n");
 
-        if (gapNotes.length > 0) {
-          openTurnsHint += `\n\nZeitlicher Verlauf:\n- ` + gapNotes.join("\n- ");
-        }
-        if (hoursSinceYoungest >= 24) {
-          const days = Math.round(hoursSinceYoungest / 24);
-          openTurnsHint += `\n- Seit der letzten Kundennachricht sind ~${days} Tag${days === 1 ? "" : "e"} vergangen — eine Entschuldigung für die späte Antwort ist angebracht.`;
-        }
-
-        openTurnsHint +=
-          `\n\n→ ALLE diese Nachrichten gehören zum SELBEN Anliegen (es kam zwischendurch keine Antwort von uns). ` +
+        openTurnsHint += `\n\n→ ALLE diese Nachrichten gehören zum SELBEN Anliegen (zwischendurch kam keine Antwort von uns). ` +
           `Beantworte sie als ZUSAMMENHÄNGENDEN BLOCK in EINER Antwort — natürlich wie eine echte Mitarbeiterin, ` +
-          `nicht stur Punkt für Punkt. Greife die ältere Sachfrage genauso auf wie das spätere Nachhaken. ` +
-          `Wenn lange Stille dazwischen lag: kurz entschuldigen, dann inhaltlich antworten.`;
+          `nicht stur Punkt für Punkt. Greife die ältere Sachfrage genauso auf wie das spätere Nachhaken.`;
       } else {
         openTurnsHint =
           `\n\n## OFFENE KUNDEN-NACHRICHT\nDer Kunde hat eine Frage, die noch unbeantwortet ist. ` +
-          `Achte auf den GESAMTEN bisherigen Verlauf — was wurde schon besprochen (Haarstruktur, Farbe, ` +
-          `Methode), was wurde versprochen.`;
-        if (hoursSinceYoungest >= 24) {
-          const days = Math.round(hoursSinceYoungest / 24);
-          openTurnsHint += ` Seit der Frage sind ~${days} Tag${days === 1 ? "" : "e"} vergangen — kurz für die späte Antwort entschuldigen, dann inhaltlich antworten.`;
-        }
+          `Achte auf den GESAMTEN bisherigen Verlauf — was wurde schon besprochen (Haarstruktur, Farbe, Methode), ` +
+          `was wurde versprochen.`;
+      }
+
+      // Sorry-Regel: NUR wenn Werktags-Stunden ≥ 24h
+      if (apologyDue) {
+        const businessDays = Math.round(businessHoursSinceYoungest / 24);
+        openTurnsHint += `\n\n**Antwort-Verzögerung:** ~${businessDays} Werktag${businessDays === 1 ? "" : "e"} ` +
+          `(${Math.round(businessHoursSinceYoungest)}h Werktagsstunden) seit der Kundennachricht. ` +
+          `→ Bitte mit kurzer ehrlicher Entschuldigung beginnen, dann inhaltlich antworten.`;
+      } else {
+        openTurnsHint += `\n\n**KEINE Entschuldigung** für die Antwortzeit nötig (Wartezeit innerhalb normaler Werktags-Reaktionszeit, ` +
+          `Wochenenden zählen nicht). Direkt inhaltlich antworten.`;
       }
     }
   }
