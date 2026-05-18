@@ -596,6 +596,43 @@ function DraftBox({
   const wasEdited = text.trim() !== draft.original_text.trim();
   const hasNote = note.trim().length > 0;
 
+  // Resize-State: Höhe der Draft-Box (verschiebbar via Drag-Handle oben)
+  const [height, setHeight] = useState<number>(() => {
+    if (typeof window === "undefined") return 380;
+    const saved = parseInt(localStorage.getItem("draftBoxHeight") || "0", 10);
+    return saved > 0 ? saved : 380;
+  });
+  const [collapsed, setCollapsed] = useState(false);
+  const dragStartRef = useRef<{ y: number; h: number } | null>(null);
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!dragStartRef.current) return;
+      const delta = dragStartRef.current.y - e.clientY;        // hoch ziehen = größer
+      const next = Math.max(180, Math.min(window.innerHeight * 0.8, dragStartRef.current.h + delta));
+      setHeight(next);
+    }
+    function onUp() {
+      if (dragStartRef.current) {
+        try { localStorage.setItem("draftBoxHeight", String(height)); } catch {}
+      }
+      dragStartRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [height]);
+
+  function startResize(e: React.MouseEvent) {
+    dragStartRef.current = { y: e.clientY, h: height };
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+  }
+
   async function handleSend() {
     if (!text.trim() || busy) return;
     setBusy("send");
@@ -656,8 +693,21 @@ function DraftBox({
   }
 
   return (
-    <div className="border-t-2 border-blue-200 bg-blue-50/60 p-3 space-y-2">
-      <div className="flex items-center gap-2 text-xs text-blue-800">
+    <div
+      className="border-t-2 border-blue-200 bg-blue-50/60 flex flex-col relative"
+      style={{ height: collapsed ? 56 : height, transition: dragStartRef.current ? "none" : "height 0.15s" }}
+    >
+      {/* Drag-Handle oben — Resize per Maus-Ziehen */}
+      <div
+        onMouseDown={startResize}
+        title="Ziehen um Höhe zu ändern"
+        className="h-2 -mt-1 cursor-row-resize group flex items-center justify-center hover:bg-blue-200/60 transition"
+      >
+        <div className="w-12 h-1 rounded-full bg-blue-300 group-hover:bg-blue-500 transition" />
+      </div>
+
+      {/* Header */}
+      <div className="px-3 pt-1 pb-2 flex items-center gap-2 text-xs text-blue-800 flex-wrap shrink-0">
         <Bot size={12} className="text-blue-600" />
         <span className="font-semibold">Bot-Entwurf wartet auf Freigabe</span>
         {(wasEdited || hasNote || refineLog.length > 0) && (
@@ -669,10 +719,21 @@ function DraftBox({
             ].filter(Boolean).join(" + ")} — wird als Training gespeichert
           </span>
         )}
-        <span className="text-blue-500 ml-auto">
+        <span className="text-blue-500 ml-auto inline-flex items-center gap-2">
           {formatMsgTime(draft.created_at)}
+          <button
+            type="button"
+            onClick={() => setCollapsed(c => !c)}
+            title={collapsed ? "Aufklappen" : "Einklappen — nur Header zeigen"}
+            className="text-blue-500 hover:text-blue-800 px-1.5 py-0.5 rounded text-xs"
+          >
+            {collapsed ? "▼ Aufklappen" : "▲ Einklappen"}
+          </button>
         </span>
       </div>
+
+      {/* Scrollbarer Inhalt */}
+      <div className={`flex-1 min-h-0 overflow-y-auto px-3 pb-3 space-y-2 ${collapsed ? "hidden" : ""}`}>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -786,6 +847,7 @@ function DraftBox({
           <X size={11} /> Verwerfen
         </button>
       </div>
+      </div>{/* End scrollbarer Inhalt */}
     </div>
   );
 }
