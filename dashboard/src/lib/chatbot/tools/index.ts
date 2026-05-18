@@ -323,8 +323,8 @@ const getStockEta: ToolDef = {
               overallBucket === "comfortable"
                 ? "Produkt ist gut verfügbar (≥300g). Sag dem Kunden NUR 'haben wir da' — knapp, ohne Mengen, ohne Übertreibungen. Verweise auf den Shop. Falls passend: frag nach gewünschten Gramm für Preisangabe. NIEMALS konkrete Lagerzahlen nennen!"
                 : overallBucket === "limited"
-                ? "Produkt ist verfügbar, aber BEGRENZT (150-300g). Sag dem Kunden: 'haben wir da, nur in begrenzter Menge'. NIEMALS konkrete Gramm- oder Stückzahlen nennen!"
-                : "Produkt ist NUR NOCH IN KLEINER MENGE da (<150g). Sag dem Kunden GENAU SO: 'haben wir noch in kleiner Menge da — schau schnell nach, ob das für dich ausreicht.' Das ist ein dezenter Hinweis, dass er sich beeilen sollte ohne Druckverkauf. NIEMALS konkrete Zahlen nennen!",
+                ? "Produkt ist verfügbar, der Lagervorrat geht aber langsam zur Neige. Sag dem Kunden weich: 'haben wir noch da' (ohne 'in begrenzter Menge' zu sagen — das klingt nach Verpackungsmenge). Optional dezenter Hinweis: 'der Vorrat wird langsam knapp'. NIEMALS konkrete Gramm- oder Stückzahlen!"
+                : "Produkt ist nur noch in kleinem Lagervorrat. Sag dem Kunden: 'haben wir noch da — schau aber gerne schnell, da der Vorrat langsam knapp wird.' NIEMALS sagen 'in begrenzter Menge à Xg' (das klingt nach Verpackungs-Größe und ist verwirrend). NIEMALS konkrete Zahlen!",
             products: withStock.slice(0, 5).map(r => ({
               product: r.product,
               collection: r.collection,
