@@ -327,6 +327,15 @@ async function routeIncoming(opts: {
 
   // Bot-Modus auswerten — 'auto' = senden, 'assisted' = Entwurf, 'off' = nichts
   const botMode = session.bot_mode || (session.bot_auto_reply ? "auto" : "off");
+  // ── SELF-DM-GUARD ──
+  // Wenn die Session-Customer-ID identisch mit unserer eigenen IG-User-ID ist,
+  // ist das ein Self-DM-Loop (Bot würde sich selbst antworten). Bot NIE triggern.
+  const ourIgId = process.env.META_INSTAGRAM_USER_ID;
+  if (ourIgId && session.external_id === ourIgId) {
+    console.log(`[meta-webhook] SELF-DM detected (session ${session.id}) — bot triggers skipped`);
+    return;
+  }
+
   if ((botMode === "auto" || botMode === "assisted") && session.status === "active") {
     try {
       // ── DEBOUNCE ──

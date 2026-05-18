@@ -109,6 +109,16 @@ export async function toggleBotAutoReply(sessionId: string, enabled: boolean) {
  */
 export async function setBotMode(sessionId: string, mode: "auto" | "assisted" | "off") {
   const svc = createServiceClient();
+
+  // Self-DM-Guard — Bot darf in Self-DM-Sessions nie aktiviert werden
+  if (mode !== "off") {
+    const { data: ses } = await svc.from("chat_sessions").select("external_id").eq("id", sessionId).single();
+    const ourIgId = process.env.META_INSTAGRAM_USER_ID;
+    if (ses?.external_id && ourIgId && ses.external_id === ourIgId) {
+      throw new Error("Diese Session ist ein Self-DM (unser eigener Account schreibt an sich selbst). Bot kann hier nicht aktiviert werden — bitte Session löschen oder schließen.");
+    }
+  }
+
   await svc.from("chat_sessions").update({
     bot_mode: mode,
     bot_auto_reply: mode === "auto",
@@ -377,6 +387,13 @@ export async function generateDraftOnDemand(sessionId: string): Promise<{ ok: tr
   if (!user) throw new Error("Not authenticated");
 
   const svc = createServiceClient();
+
+  // Self-DM-Guard
+  const { data: ses } = await svc.from("chat_sessions").select("external_id").eq("id", sessionId).single();
+  const ourIgId = process.env.META_INSTAGRAM_USER_ID;
+  if (ses?.external_id && ourIgId && ses.external_id === ourIgId) {
+    return { ok: false, reason: "Self-DM-Session — Bot kann hier nicht antworten (eigener Account)." };
+  }
 
   // Bereits ein Draft offen?
   const { data: existing } = await svc
