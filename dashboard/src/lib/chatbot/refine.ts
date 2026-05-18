@@ -89,7 +89,9 @@ WICHTIG:
     const resp = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 1024,
-      system: systemPrompt,
+      system: [
+        { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } as const },
+      ],
       messages,
     });
     const textBlocks = resp.content.filter((b): b is Anthropic.TextBlock => b.type === "text");

@@ -59,6 +59,7 @@ export default async function ChatSessionPage({ params }: PageProps) {
       agent:profiles!chat_messages_agent_id_fkey(display_name,email)
     `)
     .eq("session_id", sessionId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: true });
 
   return (

@@ -82,6 +82,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
       .from("chat_messages")
       .select("session_id")
       .ilike("content", `%${searchQuery}%`)
+      .is("deleted_at", null)
       .limit(200);
     extraSessionIdsFromMessages = Array.from(new Set((matchedMsgs || []).map(m => m.session_id)));
   }
@@ -121,6 +122,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
       .from("chat_messages")
       .select("session_id, role, content, created_at")
       .in("session_id", sessionIds)
+      .is("deleted_at", null)
       .order("created_at", { ascending: true });
     // Messages kommen aufsteigend (ältester zuerst) — wir überschreiben lastUser/lastBot
     // bei jeder weiteren Message, so steht am Ende die jeweils NEUESTE drin.

@@ -86,7 +86,16 @@ interface MessagingItem {
   sender?: { id: string };
   recipient?: { id: string };
   timestamp?: number;
-  message?: { mid?: string; text?: string; attachments?: Array<{ type: string; payload?: { url?: string } }> };
+  message?: {
+    mid?: string;
+    text?: string;
+    is_deleted?: boolean;             // Recall-Event: IG-User hat Nachricht zurückgerufen
+    is_unsupported?: boolean;
+    is_echo?: boolean;                // wir selbst haben gesendet (über IG-App o.ä.)
+    attachments?: Array<{ type: string; payload?: { url?: string } }>;
+  };
+  // Alternative Recall-Form (manchmal): message_deletes mit mids[]
+  message_deletes?: { mids?: string[] };
 }
 
 interface WhatsAppValue {
@@ -128,6 +137,29 @@ async function processEvents(payload: MetaPayload) {
 
 async function handleInstagramOrMessenger(m: MessagingItem, source: "instagram" | "messenger") {
   if (!m.sender?.id) return;
+
+  // ── RECALL / DELETION events ────────────────────────────────────────────
+  // Variante A: message.is_deleted = true mit message.mid
+  if (m.message?.is_deleted && m.message?.mid) {
+    const svc = createServiceClient();
+    const { error } = await svc.from("chat_messages")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("external_id", m.message.mid)
+      .is("deleted_at", null);
+    console.log(`[meta-webhook] recall: mid=${m.message.mid} ${error ? "ERR " + error.message : "marked deleted"}`);
+    return;
+  }
+  // Variante B: message_deletes.mids[] (Bulk)
+  if (m.message_deletes?.mids && m.message_deletes.mids.length > 0) {
+    const svc = createServiceClient();
+    const { error } = await svc.from("chat_messages")
+      .update({ deleted_at: new Date().toISOString() })
+      .in("external_id", m.message_deletes.mids)
+      .is("deleted_at", null);
+    console.log(`[meta-webhook] recall bulk: ${m.message_deletes.mids.length} mids ${error ? "ERR " + error.message : "marked deleted"}`);
+    return;
+  }
+
   const attachments = (m.message?.attachments || []).map(a => ({
     type: a.type, url: a.payload?.url || "",
   }));
@@ -140,6 +172,40 @@ async function handleInstagramOrMessenger(m: MessagingItem, source: "instagram" 
   // Wenn nur Foto ohne Text: synthetischen Platzhalter — Vision-LLM erkennt Bild selbst
   const text = m.message?.text || (hasAttachments ? "[Foto]" : "");
   const channel = source === "instagram" ? "instagram" : "web";
+
+  // ── ECHO: wir selbst haben über die IG-App eine Nachricht gesendet ──
+  // Sender ist unser eigener IG-Account (META_INSTAGRAM_USER_ID).
+  // → Als human_agent-Message speichern, NICHT als user-Message,
+  //   damit Inbox-Verlauf konsistent bleibt.
+  const igUserId = process.env.META_INSTAGRAM_USER_ID;
+  if (m.message?.is_echo || (igUserId && senderId === igUserId)) {
+    if (!m.recipient?.id) return;
+    const svc = createServiceClient();
+    const { data: session } = await svc.from("chat_sessions")
+      .select("id").eq("channel", "instagram").eq("external_id", m.recipient.id).maybeSingle();
+    if (!session) {
+      console.log(`[meta-webhook] echo to ${m.recipient.id} but no session — ignoring`);
+      return;
+    }
+    // Dedup
+    if (m.message?.mid) {
+      const { data: dup } = await svc.from("chat_messages")
+        .select("id").eq("session_id", session.id).eq("external_id", m.message.mid).maybeSingle();
+      if (dup) return;
+    }
+    await svc.from("chat_messages").insert({
+      session_id:  session.id,
+      role:        "human_agent",
+      content:     text,
+      attachments: attachments,
+      external_id: m.message?.mid || null,
+    });
+    await svc.from("chat_sessions").update({
+      last_message_at: new Date().toISOString(),
+    }).eq("id", session.id);
+    console.log(`[meta-webhook] echo: stored as human_agent in session ${session.id}`);
+    return;
+  }
 
   let customerName: string | undefined;
   if (source === "instagram") {

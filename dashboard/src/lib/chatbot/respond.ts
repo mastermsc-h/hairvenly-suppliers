@@ -100,7 +100,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     .eq("active", true)
     .or(`avatar_name.is.null,avatar_name.eq.${signatureName}`)
     .order("created_at", { ascending: false })
-    .limit(15);
+    .limit(8);
   if (training && training.length > 0) {
     systemPrompt += "\n\n## DEINE TRAININGS-BEISPIELE\n";
     systemPrompt += "Diese Beispiele zeigen dir den GANZEN Gesprächsverlauf — nicht nur die Einzelfrage. ";
@@ -140,14 +140,16 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     }
   }
 
-  // Conversation laden — letzte 150 Nachrichten chronologisch
-  // (Claude Sonnet 4.5 hat 200k Token Context, weiterer Ausbau via Summarization später)
+  // Conversation laden — letzte 60 Nachrichten (reduziert von 150 für Kosten)
+  // Bei sehr langen Verläufen wird damit ältester Kontext verloren — der wichtige
+  // Verlauf der letzten Tage/Stunden bleibt aber vollständig erhalten.
   const { data: msgsDesc } = await svc
     .from("chat_messages")
     .select("role, content, tool_calls, tool_results, attachments, created_at")
     .eq("session_id", sessionId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
-    .limit(150);
+    .limit(60);
   const msgs = (msgsDesc || []).slice().reverse();
 
   if (!msgs || msgs.length === 0) return { success: false, error: "no messages" };
@@ -219,7 +221,12 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       }
     }
   }
-  if (openTurnsHint) systemPrompt += openTurnsHint;
+  // Wichtig: systemPrompt (= persona + avatar + training + strategies) bleibt STABIL
+  // pro Avatar und wird via Prompt-Caching wiederverwendet. Variable Teile
+  // (openTurnsHint, sorry-hint) gehen in einen separaten Block — werden nicht
+  // gecacht, sind aber pro Call eh klein.
+  const systemPromptStable = systemPrompt;
+  const systemPromptVariable = openTurnsHint;
 
   const messages: Anthropic.MessageParam[] = [];
   for (const m of msgs) {
@@ -263,7 +270,9 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     return { success: false, error: "last message not from user" };
   }
 
-  // Claude aufrufen
+  // Claude aufrufen — mit Prompt-Caching auf dem stabilen System-Teil + Tool-Defs
+  // Cache-TTL = 5 Min. Spart ~75% Input-Token-Kosten auf wiederholten Calls
+  // mit gleichem Avatar / gleicher Trainings-Menge / gleichen Strategien.
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const toolCtx: ToolContext = { sessionId, signatureName };
   const toolsUsed: string[] = [];
@@ -272,12 +281,25 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   const allToolCalls: { id: string; name: string; input: Record<string, unknown> }[] = [];
   const allToolResults: { tool_use_id: string; content: string }[] = [];
 
+  const systemBlocks: Anthropic.TextBlockParam[] = [
+    { type: "text", text: systemPromptStable, cache_control: { type: "ephemeral" } as const },
+  ];
+  if (systemPromptVariable.trim()) {
+    systemBlocks.push({ type: "text", text: systemPromptVariable });
+  }
+  // Tools-Schema ebenfalls cachen (letztes Tool kriegt cache_control)
+  const cachedTools = TOOL_SCHEMAS.map((t, i) =>
+    i === TOOL_SCHEMAS.length - 1
+      ? { ...t, cache_control: { type: "ephemeral" } as const }
+      : t
+  );
+
   for (let iter = 0; iter < MAX_ITER; iter++) {
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 1024,
-      system: systemPrompt,
-      tools: TOOL_SCHEMAS,
+      system: systemBlocks,
+      tools: cachedTools,
       messages: convo,
     });
 
@@ -320,7 +342,10 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     const finalResp = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 1024,
-      system: systemPrompt + "\n\nFasse jetzt die Tool-Ergebnisse zusammen und antworte dem Kunden auf seine letzte Frage. KEINE weiteren Tools aufrufen.",
+      system: [
+        { type: "text", text: systemPromptStable, cache_control: { type: "ephemeral" } as const },
+        { type: "text", text: (systemPromptVariable || "") + "\n\nFasse jetzt die Tool-Ergebnisse zusammen und antworte dem Kunden auf seine letzte Frage. KEINE weiteren Tools aufrufen." },
+      ],
       messages: convo,
     });
     const finalBlocks = finalResp.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
