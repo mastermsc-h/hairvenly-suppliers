@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User, Mail } from "lucide-react";
+import SyncInstagramButton from "./sync-instagram-button";
 
 interface PageProps {
   searchParams: Promise<{ status?: string; mode?: string; channel?: string }>;
@@ -106,14 +107,17 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
           <h1 className="text-xl font-semibold text-neutral-900">Chat-Inbox</h1>
           <span className="text-sm text-neutral-500 ml-2">Live-Gespräche aller Kanäle</span>
         </div>
-        {(dueFollowUps ?? 0) > 0 && (
-          <a
-            href="/chatbot/follow-ups"
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs font-medium hover:bg-purple-700"
-          >
-            <Mail size={12} /> {dueFollowUps} Follow-Ups fällig →
-          </a>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          <SyncInstagramButton />
+          {(dueFollowUps ?? 0) > 0 && (
+            <a
+              href="/chatbot/follow-ups"
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs font-medium hover:bg-purple-700"
+            >
+              <Mail size={12} /> {dueFollowUps} Follow-Ups fällig →
+            </a>
+          )}
+        </div>
       </div>
 
       {/* KPIs */}

@@ -127,13 +127,20 @@ async function processEvents(payload: MetaPayload) {
 }
 
 async function handleInstagramOrMessenger(m: MessagingItem, source: "instagram" | "messenger") {
-  if (!m.sender?.id || !m.message?.text) return;
-  const senderId = m.sender.id;
-  const text = m.message.text;
-  const externalId = senderId;
-  const channel = source === "instagram" ? "instagram" : "web"; // messenger fällt vorläufig auf web
+  if (!m.sender?.id) return;
+  const attachments = (m.message?.attachments || []).map(a => ({
+    type: a.type, url: a.payload?.url || "",
+  }));
+  const hasText = !!m.message?.text;
+  const hasAttachments = attachments.length > 0;
+  // FIX: vorher droppten wir Foto-only-DMs. Jetzt: durchlassen wenn Text ODER Anhang da
+  if (!hasText && !hasAttachments) return;
 
-  // Username vom Sender holen (für Inbox-Anzeige statt nur Zahlen-ID)
+  const senderId = m.sender.id;
+  // Wenn nur Foto ohne Text: synthetischen Platzhalter — Vision-LLM erkennt Bild selbst
+  const text = m.message?.text || (hasAttachments ? "[Foto]" : "");
+  const channel = source === "instagram" ? "instagram" : "web";
+
   let customerName: string | undefined;
   if (source === "instagram") {
     const username = await getInstagramUsername(senderId);
@@ -142,22 +149,23 @@ async function handleInstagramOrMessenger(m: MessagingItem, source: "instagram" 
 
   await routeIncoming({
     channel,
-    externalId,
+    externalId: senderId,
     text,
     customerName,
-    attachments: (m.message.attachments || []).map(a => ({
-      type: a.type, url: a.payload?.url || "",
-    })),
+    attachments,
+    messageMid: m.message?.mid,
   });
 }
 
 async function handleWhatsApp(m: NonNullable<WhatsAppValue["messages"]>[number], value: WhatsAppValue) {
-  if (!m.from || !m.text?.body) return;
+  if (!m.from) return;
+  const text = m.text?.body || `[${m.type || "Nachricht"}]`;
   await routeIncoming({
     channel: "whatsapp",
     externalId: m.from,
-    text: m.text.body,
+    text,
     customerName: value.contacts?.[0]?.profile?.name,
+    messageMid: m.id,
   });
 }
 
@@ -169,6 +177,7 @@ async function routeIncoming(opts: {
   text: string;
   attachments?: { type: string; url: string }[];
   customerName?: string;
+  messageMid?: string;
 }) {
   const svc = createServiceClient();
 
@@ -205,11 +214,18 @@ async function routeIncoming(opts: {
 
   // Message speichern + Zeitstempel merken (für Debounce-Check)
   const myMsgTimestamp = new Date().toISOString();
+  if (opts.messageMid) {
+    // Dedup: wenn dieselbe MID schon gespeichert (z.B. Meta sendet Webhook 2x), skip
+    const { data: dup } = await svc.from("chat_messages")
+      .select("id").eq("session_id", session.id).eq("external_id", opts.messageMid).maybeSingle();
+    if (dup) { console.log(`[meta-webhook] dup mid ${opts.messageMid} — skip`); return; }
+  }
   await svc.from("chat_messages").insert({
     session_id: session.id,
     role: "user",
     content: opts.text,
     attachments: opts.attachments || [],
+    external_id: opts.messageMid || null,
   });
 
   // Session updaten
