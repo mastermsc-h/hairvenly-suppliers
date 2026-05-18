@@ -287,19 +287,33 @@ const getStockEta: ToolDef = {
       }
 
       // D) Im Inventory gefunden mit echtem Bestand → verfügbar
+      // WICHTIG: Bot bekommt KEINE konkreten Zahlen mehr (kein 'quantity', kein
+      // 'total_weight_g'). Stattdessen nur eine qualitative Stufe — sonst leakt
+      // er die Zahl wörtlich an den Kunden.
       const withStock = inventoryMatches.filter(r => r.quantity > 0);
       if (withStock.length > 0) {
+        const bucketize = (g: number): "comfortable" | "limited" | "tight" => {
+          if (g >= 300) return "comfortable"; // viel da
+          if (g >= 100) return "limited";     // begrenzt
+          return "tight";                      // sehr wenig
+        };
+        const overallBucket = bucketize(
+          withStock.reduce((s, r) => s + (r.totalWeight || 0), 0)
+        );
         return {
           output: JSON.stringify({
             status: "in_stock",
+            availability_level: overallBucket,
             message:
-              "Produkt ist im Lager vorrätig. Sag dem Kunden bestätigend dass es verfügbar ist " +
-              "und verweise auf den Online-Shop. Falls passend: frag nach gewünschten Gramm für Preisangabe.",
+              overallBucket === "comfortable"
+                ? "Produkt ist im Lager vorrätig — gute Verfügbarkeit. Sag dem Kunden bestätigend dass es verfügbar ist und verweise auf den Online-Shop. Falls passend: frag nach gewünschten Gramm für Preisangabe. NIEMALS konkrete Lagerzahlen nennen!"
+                : overallBucket === "limited"
+                ? "Produkt ist verfügbar, aber Bestand ist BEGRENZT. Sag dem Kunden: 'haben wir da, allerdings nur noch in begrenzter Menge' oder 'magst du zeitnah bestellen'. Schaff sanften Kaufanreiz ohne Druck. NIEMALS konkrete Gramm-/Stückzahlen nennen!"
+                : "Produkt ist nur noch in SEHR GERINGER Menge da. Sag dem Kunden offen: 'haben wir noch da, aber nur noch eine kleine Menge — wenn du sie haben willst, am besten gleich bestellen'. NIEMALS konkrete Zahlen nennen!",
             products: withStock.slice(0, 5).map(r => ({
               product: r.product,
               collection: r.collection,
-              quantity: r.quantity,
-              total_weight_g: r.totalWeight,
+              // KEINE quantity/total_weight_g mehr im Output!
             })),
           }),
         };
@@ -321,7 +335,6 @@ const getStockEta: ToolDef = {
             products_out_of_stock: zeroStockMatches.slice(0, 3).map(r => ({
               product: r.product,
               collection: r.collection,
-              quantity: 0,
             })),
           }),
         };

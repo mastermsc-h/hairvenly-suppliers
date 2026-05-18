@@ -9,6 +9,34 @@ import { TOOLS, TOOL_SCHEMAS, type ToolContext } from "@/lib/chatbot/tools";
 const MODEL = "claude-sonnet-4-5";
 const MAX_ITER = 5;
 
+/**
+ * Entfernt / ersetzt interne Lagerzahlen aus dem Bot-Output.
+ * Wenn Claude trotz System-Prompt mal "850g auf Lager" schreibt, fangen wir
+ * das hier ab und ersetzen mit kunden-sicheren Phrasen.
+ */
+function sanitizeStockLeaks(text: string): string {
+  let t = text;
+  // "850g auf Lager", "850 g verfügbar", "(850g verfügbar)", "1200g vorrätig"
+  t = t.replace(
+    /\(?\s*\d{2,5}\s*g(?:ramm)?\s*(?:auf\s*Lager|verfügbar|vorrätig|im\s*Lager|da)\s*\)?/gi,
+    "haben wir da",
+  );
+  // "850g verfügbar" ohne Klammer-Variante
+  t = t.replace(/\b\d{2,5}\s*g(?:ramm)?\b\s*\b(?:verfügbar|vorrätig|am\s*Lager)\b/gi, "verfügbar");
+  // "Bestand: 125g" / "Lagerbestand: 850g" / "Bestand 0"
+  t = t.replace(/\b(?:Lager(?:bestand)?|Bestand)\s*[:=]?\s*\d{1,5}\s*g?\b/gi, "verfügbar");
+  // "Quantity 0" / "Quantity = 0"
+  t = t.replace(/\bQuantity\s*[:=]?\s*\d+\b/gi, "");
+  // "noch 4 Stück" / "nur noch 12 Packungen"
+  t = t.replace(/\b(?:noch\s+|nur\s+noch\s+)?\d{1,3}\s*(Stück|Packungen)\b/gi, "in begrenzter Menge");
+  // "850g im Lager"
+  t = t.replace(/\b\d{2,5}\s*g(?:ramm)?\s+im\s+Lager\b/gi, "im Lager");
+  // Mehrfach-Leerzeichen / leere Klammern bereinigen
+  t = t.replace(/\(\s*\)/g, "");
+  t = t.replace(/[ \t]{2,}/g, " ");
+  return t;
+}
+
 interface RespondResult {
   success: boolean;
   text?: string;
@@ -296,6 +324,12 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   }
 
   if (!finalText) return { success: false, error: "empty response after fallback" };
+
+  // SAFETY-NET: konkrete Lagerzahlen aus der Bot-Antwort rausfiltern, falls
+  // Claude die System-Prompt-Regel ignoriert hat. Wir suchen typische Muster
+  // wie "850g auf Lager" / "noch 4 Stück" / "Bestand 125g" und ersetzen sie
+  // durch kunden-freundliche Formulierungen.
+  finalText = sanitizeStockLeaks(finalText);
 
   // Im assisted-Modus: NICHT in chat_messages speichern — der Caller speichert
   // erst nach Mitarbeiter-Approval ggf. die korrigierte Version.

@@ -93,8 +93,17 @@ WICHTIG:
       messages,
     });
     const textBlocks = resp.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
-    const newText = textBlocks.map(b => b.text).join("\n").trim();
+    let newText = textBlocks.map(b => b.text).join("\n").trim();
     if (!newText) return { success: false, error: "leere Antwort" };
+    // Safety-Net: Lagerzahlen rausfiltern (gleiche Logik wie in respond.ts)
+    newText = newText
+      .replace(/\(?\s*\d{2,5}\s*g(?:ramm)?\s*(?:auf\s*Lager|verfügbar|vorrätig|im\s*Lager|da)\s*\)?/gi, "haben wir da")
+      .replace(/\b\d{2,5}\s*g(?:ramm)?\b\s*\b(?:verfügbar|vorrätig|am\s*Lager)\b/gi, "verfügbar")
+      .replace(/\b(?:Lager(?:bestand)?|Bestand)\s*[:=]?\s*\d{1,5}\s*g?\b/gi, "verfügbar")
+      .replace(/\bQuantity\s*[:=]?\s*\d+\b/gi, "")
+      .replace(/\b(?:noch\s+|nur\s+noch\s+)?\d{1,3}\s*(Stück|Packungen)\b/gi, "in begrenzter Menge")
+      .replace(/\(\s*\)/g, "")
+      .replace(/[ \t]{2,}/g, " ");
     return { success: true, text: newText };
   } catch (e) {
     return { success: false, error: (e as Error).message };
