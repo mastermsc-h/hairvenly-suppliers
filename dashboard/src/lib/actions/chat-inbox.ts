@@ -465,6 +465,20 @@ export async function closeSession(sessionId: string) {
   revalidatePath("/chatbot/inbox");
 }
 
+/** Globalen Default-Bot-Modus für NEUE Sessions setzen */
+export async function setGlobalDefaultBotMode(mode: "auto" | "assisted" | "off") {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const svc = createServiceClient();
+  await svc.from("chatbot_settings").update({
+    default_bot_mode: mode,
+    updated_at: new Date().toISOString(),
+  }).eq("id", 1);
+  revalidatePath("/chatbot/inbox");
+}
+
 export type SessionCategory =
   "availability" | "pricing" | "color_advice" | "appointment"
   | "complaint" | "order_status" | "partnership" | "general";

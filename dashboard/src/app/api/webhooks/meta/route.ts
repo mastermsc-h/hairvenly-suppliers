@@ -266,12 +266,22 @@ async function routeIncoming(opts: {
       r -= (a.weight || 1);
       if (r <= 0) { picked = a.name; break; }
     }
+    // Globaler Default-Bot-Modus aus chatbot_settings
+    const { data: settings } = await svc
+      .from("chatbot_settings")
+      .select("default_bot_mode")
+      .eq("id", 1)
+      .maybeSingle();
+    const defaultMode = (settings?.default_bot_mode || "off") as "auto" | "assisted" | "off";
+
     const { data: created } = await svc.from("chat_sessions").insert({
       channel: opts.channel,
       external_id: opts.externalId,
       customer_name: opts.customerName,
       bot_signature_name: picked,
       status: "active",
+      bot_mode: defaultMode,
+      bot_auto_reply: defaultMode === "auto",
     }).select().single();
     session = created;
   }

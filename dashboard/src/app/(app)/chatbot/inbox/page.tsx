@@ -6,6 +6,7 @@ import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User, Mail } from "
 import SyncInstagramButton from "./sync-instagram-button";
 import MarkUnreadButton from "./mark-unread-button";
 import InboxSearchBar from "./search-bar";
+import DefaultBotModeToggle from "./default-bot-mode-toggle";
 
 interface PageProps {
   searchParams: Promise<{ status?: string; mode?: string; channel?: string; category?: string; q?: string }>;
@@ -114,6 +115,14 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     .is("follow_up_sent_at", null)
     .lt("last_message_at", followUpCutoff);
 
+  // Globaler Default-Bot-Modus für neue Sessions
+  const { data: globalSettings } = await svc
+    .from("chatbot_settings")
+    .select("default_bot_mode")
+    .eq("id", 1)
+    .maybeSingle();
+  const defaultBotMode = (globalSettings?.default_bot_mode || "off") as "auto" | "assisted" | "off";
+
   // Pro Session: erste User-Frage, erste Bot-Antwort, letzte Nachricht, Counts
   const sessionIds = combinedSessions.map(s => s.id);
   const stats: Record<string, SessionStats> = {};
@@ -177,7 +186,8 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
           <h1 className="text-xl font-semibold text-neutral-900">Chat-Inbox</h1>
           <span className="text-sm text-neutral-500 ml-2">Live-Gespräche aller Kanäle</span>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-end gap-3 flex-wrap">
+          <DefaultBotModeToggle currentMode={defaultBotMode} />
           <SyncInstagramButton />
           {(dueFollowUps ?? 0) > 0 && (
             <a
