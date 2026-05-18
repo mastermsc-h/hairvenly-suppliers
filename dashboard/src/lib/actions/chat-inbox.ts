@@ -36,12 +36,12 @@ export async function sendHumanMessage(sessionId: string, content: string) {
     .eq("id", sessionId).single();
   const wasClosed = cur?.status === "closed";
 
-  await svc.from("chat_messages").insert({
+  const { data: insertedMsg } = await svc.from("chat_messages").insert({
     session_id: sessionId,
     role: "human_agent",
     content: content.trim(),
     agent_id: user.id,
-  });
+  }).select("id").single();
   await svc.from("chat_sessions")
     .update({
       last_message_at: new Date().toISOString(),
@@ -55,12 +55,17 @@ export async function sendHumanMessage(sessionId: string, content: string) {
     const result = await sendInstagramMessage(cur.external_id, content.trim());
     if (!result.success) {
       console.error("[chat-inbox] sendInstagramMessage failed:", result.error);
+    } else if (result.message_id && insertedMsg?.id) {
+      // MID direkt an die Zeile hängen → Echo-Dedup + Recall-Sync funktionieren
+      await svc.from("chat_messages").update({ external_id: result.message_id }).eq("id", insertedMsg.id);
     }
   } else if (cur?.channel === "whatsapp" && cur?.external_id) {
     const { sendWhatsAppMessage } = await import("@/lib/messaging/meta");
     const result = await sendWhatsAppMessage(cur.external_id, content.trim());
     if (!result.success) {
       console.error("[chat-inbox] sendWhatsAppMessage failed:", result.error);
+    } else if (result.message_id && insertedMsg?.id) {
+      await svc.from("chat_messages").update({ external_id: result.message_id }).eq("id", insertedMsg.id);
     }
   }
 
@@ -237,14 +242,14 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
     .eq("id", draft.session_id).single();
   if (!session) throw new Error("Session nicht gefunden");
 
-  // Final-Message als assistant in chat_messages speichern
-  await svc.from("chat_messages").insert({
+  // Final-Message als assistant in chat_messages speichern (ID merken für MID-Update nach Versand)
+  const { data: insertedMsg } = await svc.from("chat_messages").insert({
     session_id:   draft.session_id,
     role:         "assistant",
     content:      final,
     tool_calls:   draft.tool_calls,
     tool_results: draft.tool_results,
-  });
+  }).select("id").single();
   await svc.from("chat_sessions")
     .update({ last_message_at: new Date().toISOString() })
     .eq("id", draft.session_id);
@@ -316,15 +321,21 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
     }
   }
 
-  // An Channel senden
+  // An Channel senden + MID an die assistant-Zeile hängen (Echo-Dedup + Recall-Sync)
   if (session.channel === "instagram" && session.external_id) {
     const { sendInstagramMessage } = await import("@/lib/messaging/meta");
     const r = await sendInstagramMessage(session.external_id, final);
     if (!r.success) console.error("[approveDraft] IG send failed:", r.error);
+    else if (r.message_id && insertedMsg?.id) {
+      await svc.from("chat_messages").update({ external_id: r.message_id }).eq("id", insertedMsg.id);
+    }
   } else if (session.channel === "whatsapp" && session.external_id) {
     const { sendWhatsAppMessage } = await import("@/lib/messaging/meta");
     const r = await sendWhatsAppMessage(session.external_id, final);
     if (!r.success) console.error("[approveDraft] WA send failed:", r.error);
+    else if (r.message_id && insertedMsg?.id) {
+      await svc.from("chat_messages").update({ external_id: r.message_id }).eq("id", insertedMsg.id);
+    }
   }
 
   revalidatePath(`/chatbot/inbox/${draft.session_id}`);

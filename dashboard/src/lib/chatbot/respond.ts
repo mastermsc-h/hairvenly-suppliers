@@ -47,6 +47,8 @@ interface RespondResult {
   toolsUsed?: string[];
   toolCalls?: { id: string; name: string; input: Record<string, unknown> }[];
   toolResults?: { tool_use_id: string; content: string }[];
+  /** ID des gerade gespeicherten assistant-Eintrags — Caller updated external_id (MID) nach Versand */
+  insertedMessageId?: string;
   error?: string;
 }
 
@@ -362,14 +364,16 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
 
   // Im assisted-Modus: NICHT in chat_messages speichern — der Caller speichert
   // erst nach Mitarbeiter-Approval ggf. die korrigierte Version.
+  let insertedMessageId: string | undefined;
   if (!opts.assisted) {
-    await svc.from("chat_messages").insert({
+    const { data: ins } = await svc.from("chat_messages").insert({
       session_id:   sessionId,
       role:         "assistant",
       content:      finalText,
       tool_calls:   allToolCalls.length > 0 ? allToolCalls : null,
       tool_results: allToolResults.length > 0 ? allToolResults : null,
-    });
+    }).select("id").single();
+    insertedMessageId = ins?.id;
     await svc.from("chat_sessions")
       .update({ last_message_at: new Date().toISOString() })
       .eq("id", sessionId);
@@ -381,5 +385,6 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     toolsUsed,
     toolCalls: allToolCalls,
     toolResults: allToolResults,
+    insertedMessageId,
   };
 }

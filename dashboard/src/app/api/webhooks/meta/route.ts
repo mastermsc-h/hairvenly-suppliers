@@ -431,6 +431,13 @@ async function triggerBotResponse(
   if (channel === "instagram") {
     const sendResult = await sendInstagramMessage(externalId, result.text);
     console.log("[meta-webhook] IG reply sent:", sendResult);
+    // MID direkt an die assistant-Zeile hängen → Echo-Dedup + Recall funktionieren
+    if (sendResult.success && sendResult.message_id && result.insertedMessageId) {
+      const svc = createServiceClient();
+      await svc.from("chat_messages")
+        .update({ external_id: sendResult.message_id })
+        .eq("id", result.insertedMessageId);
+    }
   }
   // whatsapp: später analog
 }
