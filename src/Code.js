@@ -3,7 +3,7 @@
 // ==========================================
 // CODE_VERSION: 2026-04-22_23-00_DoSA-days-of-stock-allocator
 // ==========================================
-const CODE_VERSION = "2026-05-13_14-00_Deutsche-Header-Inventar-Sheets-Row2";
+const CODE_VERSION = "2026-05-13_15-00_Amanda-Lieferzeit-6W-zu-7-5W-53Tage";
 
 // IDs der externen Bestellungs-Sheets
 const CHINA_SHEET_ID    = "1zqh50KeQsworvG5OivfxvECM7HUoArwUEGBTUGVB4ZM";
@@ -5980,7 +5980,7 @@ function createBestellungAmanda() {
       ziel = 300; // Ausverkauft/unverkäuflich – Mindestbestellung
     } else {
       let tierCounts = tierCountsCacheA[mapping.collName] || { TOP7: 1, MID: 1, REST: 1 };
-      ziel = getVerkaufsZielGrams_("Russisch Glatt", mapping.collName, tier, tierCounts, 6, colorOneWord, lager, _vaProductDataCacheA); // Amanda: 6 Wochen
+      ziel = getVerkaufsZielGrams_("Russisch Glatt", mapping.collName, tier, tierCounts, 7.5, colorOneWord, lager, _vaProductDataCacheA); // Amanda: 7,5 Wochen Lieferzeit
     }
     if (ziel === 0) continue; // Nicht bestellen
     // Echten Rang aus Topseller-Daten laden (statt pauschaler Platzhalter 1/8/15)
@@ -6014,11 +6014,11 @@ function createBestellungAmanda() {
     let verfügbar = lager + unterwegs;
     let bedarf = Math.max(0, ziel - verfügbar);
 
-    let stockAt42A2 = null; // Option B: Simulierter Lagerbestand bei Ankunft der neuen Bestellung (Tag 42)
+    let stockAt42A2 = null; // Option B: Simulierter Lagerbestand bei Ankunft der neuen Bestellung (Tag 53 = 7,5 Wochen Amanda) — Variablenname historisch
     let tagesVerkaufA2 = 0; // Tagesrate für grundbedarf-Berechnung (wird im Velocity-Check gesetzt)
 
     // ─── VELOCITY-CHECK: Pro Bestellung mit echtem Ankunftsdatum (Amanda) ────────────────────────
-    // Für jede unterwegs-Bestellung: Ankunft = Bestelldatum + 42 Tage (6 Wochen Amanda)
+    // Für jede unterwegs-Bestellung: Ankunft = Bestelldatum + 53 Tage (7,5 Wochen Amanda)
     {
       // VERKAUFS_DATA aus Properties-Cache (einmal geladen, siehe oben — spart 50+s über alle Iterationen)
       if (_vdParsedA) {
@@ -6075,7 +6075,7 @@ function createBestellungAmanda() {
             let bedarfVelocityA2 = bedarf;
             for (const detail of unterwegsDetailsA2) {
               const bestellDatumA2 = parseDateDE(detail.date);
-              const ankunftDatumA2 = new Date(bestellDatumA2.getTime() + 42 * 24 * 60 * 60 * 1000); // +42 Tage
+              const ankunftDatumA2 = new Date(bestellDatumA2.getTime() + 53 * 24 * 60 * 60 * 1000); // +53 Tage (7,5 Wochen)
               const tagesBisAnkunftA2 = Math.max(0, Math.round((ankunftDatumA2 - heuteA2) / (24 * 60 * 60 * 1000)));
               const verbrauchBisAnkunftA2 = Math.round(tagesVerkaufA2 * tagesBisAnkunftA2);
               lagerSimuliertA2 = Math.max(0, lagerSimuliertA2 - verbrauchBisAnkunftA2);
@@ -6085,9 +6085,9 @@ function createBestellungAmanda() {
                 bedarfVelocityA2 = bedarfNachAnkunftA2;
               }
               // ── VORAUSBLICK: Reicht das Lager nach Ankunft bis zur nächsten Bestellung? ──
-              // Nächste Bestellung kommt frühestens in (tagesBisAnkunftA2 + 42) Tagen an
-              // (= aktuelle Lieferung kommt an, dann sofort neu bestellen, +42 Tage Lieferzeit)
-              const tagesBisNächsteAnkunftA2 = tagesBisAnkunftA2 + 42;
+              // Nächste Bestellung kommt frühestens in (tagesBisAnkunftA2 + 53) Tagen an
+              // (= aktuelle Lieferung kommt an, dann sofort neu bestellen, +53 Tage Lieferzeit)
+              const tagesBisNächsteAnkunftA2 = tagesBisAnkunftA2 + 53;
               const verbrauchBisNächsteA2 = Math.round(tagesVerkaufA2 * tagesBisNächsteAnkunftA2);
               const lagerBeiNächsterAnkunftA2 = Math.max(0, verfügbarBeiAnkunftA2 - verbrauchBisNächsteA2);
               const minLagerA2 = Math.round(tagesVerkaufA2 * 14); // 2 Wochen Mindestpuffer
@@ -6097,7 +6097,7 @@ function createBestellungAmanda() {
                 if (fehlmengeA2 > bedarfVelocityA2) {
                   bedarfVelocityA2 = fehlmengeA2;
                   Logger.log("⚡ Vorausblick Amanda: " + invRow.product +
-                    " | Lager nach Ankunft+6W=" + lagerBeiNächsterAnkunftA2 + "g < Puffer=" + minLagerA2 + "g → Fehlmenge=" + fehlmengeA2 + "g");
+                    " | Lager nach Ankunft+7,5W=" + lagerBeiNächsterAnkunftA2 + "g < Puffer=" + minLagerA2 + "g → Fehlmenge=" + fehlmengeA2 + "g");
                 }
               }
               Logger.log("⚡ Velocity Amanda: " + invRow.product +
@@ -6108,24 +6108,24 @@ function createBestellungAmanda() {
               lastTagesBisAnkunftA2 = tagesBisAnkunftA2; // Option B: merke Ankunftstag der letzten Lieferung
             }
             if (unterwegsDetailsA2.length === 0) {
-              // Nichts unterwegs. Frage: Reicht das Lager bis diese Bestellung ankommt (42 Tage)?
-              const verbrauchBisAnkunftA2 = Math.round(tagesVerkaufA2 * 42);
+              // Nichts unterwegs. Frage: Reicht das Lager bis diese Bestellung ankommt (53 Tage)?
+              const verbrauchBisAnkunftA2 = Math.round(tagesVerkaufA2 * 53);
               const lagerBeiAnkunftA2 = Math.max(0, lager - verbrauchBisAnkunftA2);
               bedarfVelocityA2 = Math.max(bedarfVelocityA2, Math.max(0, ziel - lagerBeiAnkunftA2));
             }
             if (bedarfVelocityA2 > bedarf) {
               bedarf = bedarfVelocityA2;
             }
-            // ── Option B: Lager bei Ankunft der NEUEN Bestellung (Tag 42 ab heute) ──────────────
+            // ── Option B: Lager bei Ankunft der NEUEN Bestellung (Tag 53 ab heute, 7,5 Wochen) ──
             // lagerSimuliertA2 = Bestand nach letzter bekannter Lieferung
             // lastTagesBisAnkunftA2 = Tage bis diese letzte Lieferung ankommt (0 wenn keine unterwegs)
-            // Neue Bestellung kommt in 42 Tagen an → verbrauche bis dahin weiter
+            // Neue Bestellung kommt in 53 Tagen an → verbrauche bis dahin weiter
             {
-              const daysToNew42 = Math.max(0, 42 - lastTagesBisAnkunftA2);
-              stockAt42A2 = Math.max(0, lagerSimuliertA2 - Math.round(tagesVerkaufA2 * daysToNew42));
-              Logger.log("📦 Option B stock_at_42 " + invRow.product + ": lagerSim=" + lagerSimuliertA2 +
-                "g lastArrival=T+" + lastTagesBisAnkunftA2 + " daysToNew=" + daysToNew42 +
-                " → stock_at_42=" + stockAt42A2 + "g (vs. raw unterwegs=" + unterwegs + "g)");
+              const daysToNew53 = Math.max(0, 53 - lastTagesBisAnkunftA2);
+              stockAt42A2 = Math.max(0, lagerSimuliertA2 - Math.round(tagesVerkaufA2 * daysToNew53));
+              Logger.log("📦 Option B stock_at_53 " + invRow.product + ": lagerSim=" + lagerSimuliertA2 +
+                "g lastArrival=T+" + lastTagesBisAnkunftA2 + " daysToNew=" + daysToNew53 +
+                " → stock_at_53=" + stockAt42A2 + "g (vs. raw unterwegs=" + unterwegs + "g)");
             }
           }
         } catch(eA2) { Logger.log("Velocity-Check Amanda Fehler: " + eA2.message); }
@@ -6468,7 +6468,7 @@ function createBestellungAmanda() {
   };
 
   // ── Kritisch-Check: Produkt wird vor Ankunft der neuen Bestellung ausverkauft sein ──
-  // Berücksichtigt Lieferzeit (42 Tage) + aktuelle Velocity
+  // Berücksichtigt Lieferzeit (53 Tage = 7,5 Wochen Amanda) + aktuelle Velocity
   function isCriticalA(c) {
     if (c.lager === 0 && c.unterwegs === 0) return true;
     if (c.stock_at_arrival != null && c.stock_at_arrival <= 0) return true;

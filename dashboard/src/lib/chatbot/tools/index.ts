@@ -666,12 +666,82 @@ const getAvailableColors: ToolDef = {
   },
 };
 
+// ── create_reservation ──────────────────────────────────────────────────────
+const createReservationTool: ToolDef = {
+  schema: {
+    name: "create_reservation",
+    description:
+      "Legt eine WARTELISTEN-RESERVIERUNG an: Kunde möchte benachrichtigt werden, sobald ein " +
+      "aktuell nicht verfügbares Produkt (unterwegs/ausverkauft) wieder da ist. " +
+      "Nutze NUR wenn die Kundin EXPLIZIT 'ja' sagt zu deinem Angebot 'magst du dass wir dich " +
+      "benachrichtigen?' — niemals ungefragt anlegen. " +
+      "Bestätige der Kundin nach dem Anlegen kurz: 'Hab ich notiert — wir melden uns sobald die da ist 💕'",
+    input_schema: {
+      type: "object",
+      properties: {
+        product_name: {
+          type: "string",
+          description: "Konkretes Produkt, möglichst genau (z.B. 'EBONY Russisch Standard Tapes' oder 'Smoky Brown Bondings').",
+        },
+        color: {
+          type: "string",
+          description: "Farb-Name (z.B. 'RAW', '#2A', 'EBONY')",
+        },
+        method: {
+          type: "string",
+          description: "Methode (z.B. 'Standard Tapes', 'Mini Tapes', 'Bondings', 'Tressen')",
+        },
+        eta_hint: {
+          type: "string",
+          description: "ETA-Hinweis falls bekannt (z.B. 'Anfang Juni' oder 'ca. 04.06.2026'). Aus get_stock_eta wenn vorhanden.",
+        },
+        product_url: {
+          type: "string",
+          description: "Shopify-URL des Produkts falls bekannt.",
+        },
+        notes: {
+          type: "string",
+          description: "Optionale Notiz für die Mitarbeiterin, z.B. 'Kundin braucht es bis 15.06 für Hochzeit'.",
+        },
+      },
+      required: ["product_name"],
+    },
+  },
+  async execute(input, ctx) {
+    const { createReservation } = await import("@/lib/actions/chat-reservations");
+    try {
+      const r = await createReservation({
+        sessionId:   ctx.sessionId,
+        productName: input.product_name as string,
+        color:       input.color as string | undefined,
+        method:      input.method as string | undefined,
+        etaHint:     input.eta_hint as string | undefined,
+        productUrl:  input.product_url as string | undefined,
+        notes:       input.notes as string | undefined,
+      });
+      return {
+        output: JSON.stringify({
+          status: "ok",
+          reservation_id: r.id,
+          message:
+            "Reservierung angelegt. Bestätige der Kundin jetzt kurz: 'Hab ich notiert — wir melden uns sobald die da ist 💕'. " +
+            "Eine Mitarbeiterin sieht die Reservierung im Dashboard und meldet sich aktiv wenn die Ware da ist. " +
+            "VERSPRICH KEIN exaktes Datum, außer eta_hint ist klar bekannt.",
+        }),
+      };
+    } catch (e) {
+      return { output: `Reservierung-Fehler: ${(e as Error).message}` };
+    }
+  },
+};
+
 export const TOOLS: Record<string, ToolDef> = {
   get_price:             getPrice,
   search_faq:            searchFaq,
   get_stock_eta:         getStockEta,
   get_available_colors:  getAvailableColors,
   analyze_hair_photo:    analyzeHairPhoto,
+  create_reservation:    createReservationTool,
   transfer_to_human:     transferToHuman,
 };
 
