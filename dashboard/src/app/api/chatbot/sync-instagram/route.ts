@@ -172,7 +172,10 @@ export async function POST(req: NextRequest) {
           continue;
         }
         const fromIsUs = m.from?.id === igUserId;
-        const role = fromIsUs ? "assistant" : "user";
+        // WICHTIG: Historische DMs wurden manuell von Mitarbeitern beantwortet,
+        // NICHT vom Bot. Daher role='human_agent' statt 'assistant' — sonst sieht's
+        // in der UI so aus, als hätte der Bot geantwortet ("Ava von Yale").
+        const role = fromIsUs ? "human_agent" : "user";
 
         // Attachments aufbereiten — IG liefert image_data.url oder file_url
         const attachData = m.attachments?.data || [];

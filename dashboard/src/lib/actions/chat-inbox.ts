@@ -101,14 +101,60 @@ export async function toggleBotAutoReply(sessionId: string, enabled: boolean) {
   revalidatePath("/chatbot/inbox");
 }
 
-/** Setzt den Bot-Modus (auto/assisted/off) für eine Session */
+/**
+ * Setzt den Bot-Modus (auto/assisted/off) für eine Session.
+ * Bei Wechsel auf 'assisted': generiert sofort einen Entwurf zur letzten
+ * Kundennachricht (falls noch keine Antwort/Entwurf darauf existiert), damit
+ * man nicht auf eine neue DM warten muss.
+ */
 export async function setBotMode(sessionId: string, mode: "auto" | "assisted" | "off") {
   const svc = createServiceClient();
   await svc.from("chat_sessions").update({
     bot_mode: mode,
-    // Kompat: bot_auto_reply spiegelt 'auto' wider
     bot_auto_reply: mode === "auto",
   }).eq("id", sessionId);
+
+  if (mode === "assisted") {
+    // Letzte Message anschauen — wenn vom Kunden, gleich Entwurf erzeugen
+    const { data: lastMsg } = await svc
+      .from("chat_messages")
+      .select("id, role")
+      .eq("session_id", sessionId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    // Schon ein pending Draft? Dann nichts tun.
+    const { data: existingDraft } = await svc
+      .from("chat_drafts")
+      .select("id")
+      .eq("session_id", sessionId)
+      .eq("status", "pending")
+      .limit(1)
+      .maybeSingle();
+
+    if (lastMsg && lastMsg.role === "user" && !existingDraft) {
+      try {
+        const { respondAsBot } = await import("@/lib/chatbot/respond");
+        const result = await respondAsBot(sessionId, { assisted: true });
+        if (result.success && result.text) {
+          await svc.from("chat_drafts").insert({
+            session_id:    sessionId,
+            original_text: result.text,
+            tool_calls:    result.toolCalls && result.toolCalls.length > 0 ? result.toolCalls : null,
+            tool_results:  result.toolResults && result.toolResults.length > 0 ? result.toolResults : null,
+            trigger_message_id: lastMsg.id,
+            status:        "pending",
+          });
+        } else {
+          console.error("[setBotMode] respondAsBot failed:", result.error);
+        }
+      } catch (e) {
+        console.error("[setBotMode] draft generation crashed:", e);
+      }
+    }
+  }
+
   revalidatePath(`/chatbot/inbox/${sessionId}`);
   revalidatePath("/chatbot/inbox");
 }

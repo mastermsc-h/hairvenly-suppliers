@@ -346,13 +346,18 @@ function KPI({ label, count, color }: { label: string; count: number; color: str
 
 function formatRelative(iso: string): string {
   const date = new Date(iso);
-  const diff = Date.now() - date.getTime();
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
   const min = Math.floor(diff / 60000);
-  if (min < 1) return "gerade eben";
-  if (min < 60) return `vor ${min} Min`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `vor ${h}h`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return `vor ${d}d`;
-  return date.toLocaleDateString("de-DE");
+  const sameDay = date.toDateString() === now.toDateString();
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  const isYesterday = date.toDateString() === yesterday.toDateString();
+  const timeStr = date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  if (min < 1)        return "gerade eben";
+  if (min < 60)       return `vor ${min} Min`;
+  if (sameDay)        return `heute · ${timeStr}`;
+  if (isYesterday)    return `gestern · ${timeStr}`;
+  const sameYear = date.getFullYear() === now.getFullYear();
+  if (sameYear)       return `${date.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })} · ${timeStr}`;
+  return `${date.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" })} · ${timeStr}`;
 }

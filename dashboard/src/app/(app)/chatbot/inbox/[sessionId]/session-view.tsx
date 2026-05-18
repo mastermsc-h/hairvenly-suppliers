@@ -381,8 +381,22 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
   );
 }
 
+function formatMsgTime(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  const isYesterday = d.toDateString() === yesterday.toDateString();
+  const sameYear = d.getFullYear() === now.getFullYear();
+  const time = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  if (sameDay)     return `heute · ${time}`;
+  if (isYesterday) return `gestern · ${time}`;
+  if (sameYear)    return `${d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })} · ${time}`;
+  return `${d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" })} · ${time}`;
+}
+
 function MessageRow({ msg, signatureName }: { msg: Message; signatureName: string | null }) {
-  const time = new Date(msg.created_at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const time = formatMsgTime(msg.created_at);
 
   if (msg.role === "user") {
     return (
@@ -539,7 +553,7 @@ function DraftBox({
           </span>
         )}
         <span className="text-blue-500 ml-auto">
-          {new Date(draft.created_at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}
+          {formatMsgTime(draft.created_at)}
         </span>
       </div>
       <textarea
