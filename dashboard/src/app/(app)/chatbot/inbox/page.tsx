@@ -10,7 +10,15 @@ interface PageProps {
 }
 
 interface PreviewMsg { role: string; content: string; created_at: string; }
-interface SessionStats { firstUser?: string; firstBot?: string; lastMsg?: string; lastMsgRole?: string; botCount: number; humanCount: number; }
+interface SessionStats {
+  firstUser?: string;
+  lastUser?: string;
+  lastBot?: string;
+  lastMsg?: string;
+  lastMsgRole?: string;
+  botCount: number;
+  humanCount: number;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +47,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     .from("chat_sessions")
     .select(`
       id, channel, customer_name, status, assigned_to, bot_signature_name,
-      last_message_at, created_at,
+      bot_mode, last_message_at, last_customer_msg_at, last_seen_by_agent_at, created_at,
       assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
     `)
     .order("last_message_at", { ascending: false })
@@ -71,12 +79,22 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
       .select("session_id, role, content, created_at")
       .in("session_id", sessionIds)
       .order("created_at", { ascending: true });
+    // Messages kommen aufsteigend (ältester zuerst) — wir überschreiben lastUser/lastBot
+    // bei jeder weiteren Message, so steht am Ende die jeweils NEUESTE drin.
     for (const m of msgs ?? []) {
       const s = stats[m.session_id] ??= { botCount: 0, humanCount: 0 };
-      if (m.role === "user" && !s.firstUser) s.firstUser = m.content;
-      if (m.role === "assistant" && !s.firstBot) s.firstBot = m.content;
-      if (m.role === "assistant") s.botCount++;
-      if (m.role === "human_agent") s.humanCount++;
+      if (m.role === "user") {
+        if (!s.firstUser) s.firstUser = m.content;
+        s.lastUser = m.content;
+      }
+      if (m.role === "assistant") {
+        s.lastBot = m.content;
+        s.botCount++;
+      }
+      if (m.role === "human_agent") {
+        s.lastBot = m.content; // im Vorschau-Bereich wie Bot anzeigen (von uns gesendet)
+        s.humanCount++;
+      }
       s.lastMsg = m.content;
       s.lastMsgRole = m.role;
     }
@@ -208,23 +226,36 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
           </div>
         ) : (
           <Suspense fallback={null}>
-            <ul className="divide-y divide-neutral-100">
-              {filteredSessions.map(s => {
+            <ul>
+              {filteredSessions.map((s, idx) => {
                 const meta = STATUS_LABELS[s.status] || STATUS_LABELS.active;
                 const Icon = meta.icon;
                 const st = stats[s.id] || { botCount: 0, humanCount: 0 };
                 const profile = (s.assigned_profile as unknown as { display_name?: string; email?: string } | null);
                 const assignedName = profile?.display_name || profile?.email || null;
                 const isHybrid = st.humanCount > 0;
+                // Ungelesen wenn letzte Kundennachricht NACH letztem Agent-Besuch der Session
+                const isUnread = !!(s.last_customer_msg_at && (
+                  !s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at
+                ));
+                const zebra = idx % 2 === 0 ? "bg-white" : "bg-neutral-50/60";
                 return (
-                  <li key={s.id} className="hover:bg-neutral-50 transition-colors">
+                  <li
+                    key={s.id}
+                    className={`relative border-b border-neutral-100 hover:bg-blue-50/40 transition-colors ${zebra} ${isUnread ? "border-l-4 border-l-pink-500" : "border-l-4 border-l-transparent"}`}
+                  >
                     <Link href={`/chatbot/inbox/${s.id}`} className="block p-4">
                       {/* Customer-Name oben (z.B. @apfel.me oder Phone-Nr) */}
                       <div className="flex items-center gap-2 mb-1.5">
                         <User size={14} className="text-neutral-400" />
-                        <span className="text-sm font-semibold text-neutral-900 truncate">
+                        <span className={`text-sm truncate ${isUnread ? "font-bold text-neutral-900" : "font-medium text-neutral-800"}`}>
                           {s.customer_name || <span className="text-neutral-400 font-normal">Unbekannt</span>}
                         </span>
+                        {isUnread && (
+                          <span className="bg-pink-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide">
+                            Neu
+                          </span>
+                        )}
                       </div>
                       {/* Top row: badges + zeit */}
                       <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
@@ -273,22 +304,22 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         </span>
                       </div>
 
-                      {/* Kunde + Bot Vorschau */}
+                      {/* Vorschau: LETZTE Kunden- und LETZTE Bot-/Mitarbeiter-Nachricht */}
                       <div className="space-y-1.5">
-                        {st.firstUser && (
+                        {st.lastUser && (
                           <div className="flex gap-2 text-sm">
-                            <span className="text-neutral-400 shrink-0 mt-0.5">
+                            <span className="text-neutral-400 shrink-0 mt-0.5" title="Letzte Kundennachricht">
                               <User size={13} />
                             </span>
-                            <span className="text-neutral-700 line-clamp-2">{st.firstUser}</span>
+                            <span className="text-neutral-700 line-clamp-2">{st.lastUser}</span>
                           </div>
                         )}
-                        {st.firstBot && (
+                        {st.lastBot && (
                           <div className="flex gap-2 text-sm">
-                            <span className="text-pink-500 shrink-0 mt-0.5">
-                              <Bot size={13} />
+                            <span className={`shrink-0 mt-0.5 ${st.lastMsgRole === "human_agent" ? "text-amber-600" : "text-pink-500"}`} title={st.lastMsgRole === "human_agent" ? "Letzte Mitarbeiter-Antwort" : "Letzte Bot-Antwort"}>
+                              {st.lastMsgRole === "human_agent" ? <UserCheck size={13} /> : <Bot size={13} />}
                             </span>
-                            <span className="text-neutral-600 line-clamp-2">{st.firstBot}</span>
+                            <span className="text-neutral-600 line-clamp-2">{st.lastBot}</span>
                           </div>
                         )}
                       </div>
