@@ -7,6 +7,7 @@ import SyncInstagramButton from "./sync-instagram-button";
 import MarkUnreadButton from "./mark-unread-button";
 import InboxSearchBar from "./search-bar";
 import DefaultBotModeToggle from "./default-bot-mode-toggle";
+import ClassifyBackfillButton from "./classify-backfill-button";
 
 interface PageProps {
   searchParams: Promise<{ status?: string; mode?: string; channel?: string; category?: string; q?: string }>;
@@ -267,7 +268,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
 
       {/* Filter — Kategorie (Auto-klassifiziert) */}
       <div className="space-y-2">
-        <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">Kategorie</div>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">Kategorie</div>
+          <ClassifyBackfillButton />
+        </div>
         <div className="flex gap-2 flex-wrap">
           <Link
             href={`/chatbot/inbox?${new URLSearchParams({

@@ -18,14 +18,14 @@ export type Category =
   | "general";
 
 const CATEGORY_DESC: Record<Category, string> = {
-  availability:  "Verfügbarkeit / Lager — 'habt ihr X auf Lager?', 'wann kommt Y wieder?'",
-  pricing:       "Preis / Kosten — 'was kostet eine Verlängerung?', Rabatte, Zahlungsfragen",
-  color_advice:  "Farbberatung — 'welche Farbe passt zu #2A?', Farb-Match Fragen",
-  appointment:   "Termin / Salon — Buchungsanfragen, Beratungstermin, Ansatz färben",
-  complaint:     "Reklamation / Beschwerde — Beschädigung, Unzufriedenheit, Rückgabe",
-  order_status:  "Bestellstatus — 'wo ist meine Bestellung?', Tracking, Versand-Probleme",
-  partnership:   "Partnership / B2B — Lieferanten-Outreach, Kooperationsanfragen von Firmen",
-  general:       "Sonstiges / unklar — alles was nicht in die anderen passt",
+  availability:  "Verfügbarkeit / Lager — 'habt ihr X auf Lager?', 'wann kommt Y wieder?', 'noch da?', Anfragen zu bestimmten Farben oder Mengen",
+  pricing:       "Preis / Kosten — 'was kostet eine Verlängerung?', Rabatte, Zahlungsfragen, Versandkosten, 'wie viel für 100g'",
+  color_advice:  "Farbberatung — 'welche Farbe passt zu #2A?', Farb-Match, Foto-Beratung, 'bin skeptisch welche Farbe', Beratungswunsch zu Farbton/Haar",
+  appointment:   "Termin / Salon — Buchungsanfragen, Beratungstermin, Ansatz färben, Showroom-Besuch, vor Ort vorbeikommen, im Laden anschauen",
+  complaint:     "Reklamation / Beschwerde — Beschädigung, Unzufriedenheit, falsche Lieferung, Rückgabe-Anfragen, Problem mit Produkt",
+  order_status:  "Bestellstatus — 'wo ist meine Bestellung?', Tracking, Versand-Probleme, Bestellung nicht angekommen, Rechnungsfragen",
+  partnership:   "Partnership / B2B — Lieferanten-Outreach von Drittanbietern ('we sell hair extensions'), Kooperationsanfragen, Friseurin-Anfrage für Gewerbe, Jobsuche/Mitarbeitersuche ('eleman ariyormusunuz')",
+  general:       "Sonstiges / unklar — NUR verwenden wenn wirklich keine der anderen Kategorien passt (z.B. reine Begrüßung ohne Anliegen, 'Dankeschön', unverständliche Nachricht)",
 };
 
 /**
@@ -60,11 +60,20 @@ export async function classifySession(sessionId: string): Promise<Category | nul
     const resp = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 50,
-      system: `Du bist ein Klassifikator. Lies die Kundennachrichten und wähle EINE Kategorie aus dieser Liste:
+      system: `Du klassifizierst Kundennachrichten an einen Haar-Extension-Shop (Hairvenly).
+Wähle GENAU EINE Kategorie aus dieser Liste:
 
 ${categoryList}
 
-Antworte AUSSCHLIESSLICH mit dem Kategorie-Key (z.B. "availability") — kein Erklärtext, keine Anführungszeichen.`,
+WICHTIGE REGELN:
+- "general" NUR verwenden wenn es WIRKLICH keine spezifische Kategorie ist (reine Grüße, "Danke", oder unverständlich)
+- Bei Beratungswunsch zu Farbe / "welche Farbe passt" → color_advice (NICHT general)
+- Bei "habt ihr X" / "auf Lager" / "noch da" → availability
+- Bei "kann ich vorbeikommen" / "im Laden" / "Showroom" → appointment
+- Bei "we have hair to sell" / "eleman ariyor" / Friseur-Outreach → partnership
+- Bei konkretem Beratungswunsch zur Verlängerung → color_advice
+
+Antworte AUSSCHLIESSLICH mit dem Kategorie-Key in Kleinbuchstaben (z.B. "availability") — kein Erklärtext, keine Anführungszeichen, kein Punkt.`,
       messages: [{ role: "user", content: userText }],
     });
     const out = resp.content
