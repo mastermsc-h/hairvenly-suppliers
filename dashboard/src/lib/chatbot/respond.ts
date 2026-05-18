@@ -21,6 +21,11 @@ interface RespondResult {
 interface RespondOptions {
   /** Wenn true: Text NICHT in chat_messages speichern (für Bot-Begleitung-Entwurf) */
   assisted?: boolean;
+  /**
+   * ISO-Timestamp: ab wann gilt eine Kundennachricht als "im aktuellen Burst".
+   * Verhindert dass uralte unbeantwortete Fragen mit-beantwortet werden.
+   */
+  burstSinceIso?: string;
 }
 
 /**
@@ -120,32 +125,54 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
 
   if (!msgs || msgs.length === 0) return { success: false, error: "no messages" };
 
-  // OFFENE TURNS ERMITTELN — Cluster aller Kundennachrichten nach der letzten
-  // Agent-/Bot-Antwort. Wenn mehr als eine: Bot soll sie ZUSAMMEN beantworten,
-  // nicht jede einzeln. Hinweis wird unten an den System-Prompt angehängt.
+  // OFFENE TURNS ERMITTELN — nur AKTUELLER BURST (Cluster zusammenhängender
+  // Kundennachrichten innerhalb kurzer Zeitfenster). Alte unbeantwortete
+  // Fragen von vor Wochen/Monaten werden NICHT mit-beantwortet, auch wenn
+  // technisch noch offen.
   let openTurnsHint = "";
   {
-    // letzte ~12 Messages in reverse-chronologischer Reihenfolge betrachten
-    const tail = msgs.slice(-12).slice().reverse();
+    const BURST_MAX_GAP_MS = 6 * 60 * 60 * 1000; // 6h zwischen Kundennachrichten = noch derselbe Burst
+    const tail = msgs.slice(-12).slice().reverse(); // jüngste zuerst
+
+    // Bis zur jüngsten Agent-/Bot-Antwort gehen
     const lastAgentRev = tail.findIndex(m => m.role === "assistant" || m.role === "human_agent");
-    const openUsr = lastAgentRev === -1
+    const candidate = lastAgentRev === -1
       ? tail.filter(m => m.role === "user")
       : tail.slice(0, lastAgentRev).filter(m => m.role === "user");
-    if (openUsr.length > 1) {
-      const orderedOldestFirst = openUsr.slice().reverse();
+
+    // Cluster aufbauen: jüngste rein, dann rückwärts solange Gap < 6h
+    const burst: typeof candidate = [];
+    for (let i = 0; i < candidate.length; i++) {
+      if (i === 0) {
+        // Optionale harte Untergrenze vom Caller (z.B. setBotMode setzt das Datum
+        // der ältesten erkannten offenen Nachricht). Falls jüngste älter ist als
+        // dieses Datum, gar nichts mehr aufnehmen.
+        if (opts.burstSinceIso && candidate[0].created_at < opts.burstSinceIso) break;
+        burst.push(candidate[i]);
+        continue;
+      }
+      const prev = new Date(candidate[i - 1].created_at).getTime();
+      const cur  = new Date(candidate[i].created_at).getTime();
+      if (prev - cur > BURST_MAX_GAP_MS) break;
+      if (opts.burstSinceIso && candidate[i].created_at < opts.burstSinceIso) break;
+      burst.push(candidate[i]);
+    }
+
+    if (burst.length > 1) {
+      const orderedOldestFirst = burst.slice().reverse();
       openTurnsHint =
-        `\n\n## OFFENE KUNDEN-NACHRICHTEN (${openUsr.length} Stück, in zeitlicher Reihenfolge)\n` +
+        `\n\n## OFFENE KUNDEN-NACHRICHTEN — AKTUELLER BURST (${burst.length} Stück, in zeitlicher Reihenfolge)\n` +
         orderedOldestFirst.map((m, i) => `${i + 1}. ${m.content}`).join("\n") +
-        `\n\n→ Diese Nachrichten kamen NACHEINANDER vom Kunden, ohne dass jemand geantwortet hat. ` +
-        `Beantworte sie als ZUSAMMENHÄNGENDEN BLOCK in EINER Antwort — verstehe was der Kunde insgesamt ` +
-        `möchte, nicht stur Punkt für Punkt. Greife auch frühere Punkte aus diesem Block auf, falls sie ` +
-        `noch offen sind. KEINE 5 Absätze — eine natürliche, zusammenhängende Antwort wie eine echte ` +
-        `Mitarbeiterin schreiben würde.`;
-    } else if (openUsr.length === 1) {
+        `\n\n→ Diese Nachrichten kamen vom Kunden NACHEINANDER und gehören zum aktuellen Anliegen. ` +
+        `Beantworte sie als ZUSAMMENHÄNGENDEN BLOCK in EINER Antwort — natürlich wie eine echte ` +
+        `Mitarbeiterin, nicht Punkt für Punkt abgearbeitet. ` +
+        `WICHTIG: Falls es im Verlauf noch ältere unbeantwortete Fragen gab (vor diesem Burst), ` +
+        `NICHT mit-beantworten — die sind veraltet. Konzentriere dich NUR auf den aktuellen Burst.`;
+    } else if (burst.length === 1) {
       openTurnsHint =
-        `\n\n## OFFENE KUNDEN-NACHRICHT\nDer Kunde hat eine Frage, die noch unbeantwortet ist. ` +
-        `Achte dabei auf den GESAMTEN bisherigen Verlauf — was wurde schon besprochen, was wurde ` +
-        `versprochen, welche Kundeneigenschaften (Haarstruktur, Farbe, Methode) wurden schon geklärt.`;
+        `\n\n## OFFENE KUNDEN-NACHRICHT\nDer Kunde hat eine aktuelle Frage. Beziehe den bisherigen ` +
+        `Verlauf ein (was wurde schon geklärt — Haarstruktur, Farbe, Methode), aber beantworte NUR ` +
+        `die aktuelle Frage. Eventuelle ältere offene Fragen aus früheren Phasen NICHT mit-aufgreifen.`;
     }
   }
   if (openTurnsHint) systemPrompt += openTurnsHint;
