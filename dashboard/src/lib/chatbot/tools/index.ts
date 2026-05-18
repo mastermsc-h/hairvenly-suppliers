@@ -293,9 +293,9 @@ const getStockEta: ToolDef = {
       const withStock = inventoryMatches.filter(r => r.quantity > 0);
       if (withStock.length > 0) {
         const bucketize = (g: number): "comfortable" | "limited" | "tight" => {
-          if (g >= 300) return "comfortable"; // viel da
-          if (g >= 100) return "limited";     // begrenzt
-          return "tight";                      // sehr wenig
+          if (g >= 300) return "comfortable"; // ≥ 300g — entspannt
+          if (g >= 150) return "limited";     // 150-299g — begrenzt
+          return "tight";                      // < 150g — sehr wenig
         };
         const overallBucket = bucketize(
           withStock.reduce((s, r) => s + (r.totalWeight || 0), 0)
@@ -306,10 +306,10 @@ const getStockEta: ToolDef = {
             availability_level: overallBucket,
             message:
               overallBucket === "comfortable"
-                ? "Produkt ist im Lager vorrätig — gute Verfügbarkeit. Sag dem Kunden bestätigend dass es verfügbar ist und verweise auf den Online-Shop. Falls passend: frag nach gewünschten Gramm für Preisangabe. NIEMALS konkrete Lagerzahlen nennen!"
+                ? "Produkt ist gut verfügbar (≥300g). Sag dem Kunden NUR 'haben wir da' — knapp, ohne Mengen, ohne Übertreibungen. Verweise auf den Shop. Falls passend: frag nach gewünschten Gramm für Preisangabe. NIEMALS konkrete Lagerzahlen nennen!"
                 : overallBucket === "limited"
-                ? "Produkt ist verfügbar, aber Bestand ist BEGRENZT. Sag dem Kunden: 'haben wir da, allerdings nur noch in begrenzter Menge' oder 'magst du zeitnah bestellen'. Schaff sanften Kaufanreiz ohne Druck. NIEMALS konkrete Gramm-/Stückzahlen nennen!"
-                : "Produkt ist nur noch in SEHR GERINGER Menge da. Sag dem Kunden offen: 'haben wir noch da, aber nur noch eine kleine Menge — wenn du sie haben willst, am besten gleich bestellen'. NIEMALS konkrete Zahlen nennen!",
+                ? "Produkt ist verfügbar, aber BEGRENZT (150-300g). Sag dem Kunden: 'haben wir da, nur in begrenzter Menge'. NIEMALS konkrete Gramm- oder Stückzahlen nennen!"
+                : "Produkt ist NUR NOCH IN KLEINER MENGE da (<150g). Sag dem Kunden GENAU SO: 'haben wir noch in kleiner Menge da — schau schnell nach, ob das für dich ausreicht.' Das ist ein dezenter Hinweis, dass er sich beeilen sollte ohne Druckverkauf. NIEMALS konkrete Zahlen nennen!",
             products: withStock.slice(0, 5).map(r => ({
               product: r.product,
               collection: r.collection,

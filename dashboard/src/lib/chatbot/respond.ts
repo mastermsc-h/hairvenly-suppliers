@@ -16,6 +16,10 @@ const MAX_ITER = 5;
  */
 function sanitizeStockLeaks(text: string): string {
   let t = text;
+  // ZUERST: "Bestand 0" / "Quantity 0" / "Quantity = 0" → ausverkauft
+  // (vor den anderen Patterns, sonst frisst die generische Regel die 0)
+  t = t.replace(/\b(?:Lager(?:bestand)?|Bestand)\s*[:=]?\s*0\s*g?\b/gi, "ausverkauft");
+  t = t.replace(/\bQuantity\s*[:=]?\s*0\b/gi, "ausverkauft");
   // "850g auf Lager", "850 g verfügbar", "(850g verfügbar)", "1200g vorrätig"
   t = t.replace(
     /\(?\s*\d{2,5}\s*g(?:ramm)?\s*(?:auf\s*Lager|verfügbar|vorrätig|im\s*Lager|da)\s*\)?/gi,
@@ -23,9 +27,9 @@ function sanitizeStockLeaks(text: string): string {
   );
   // "850g verfügbar" ohne Klammer-Variante
   t = t.replace(/\b\d{2,5}\s*g(?:ramm)?\b\s*\b(?:verfügbar|vorrätig|am\s*Lager)\b/gi, "verfügbar");
-  // "Bestand: 125g" / "Lagerbestand: 850g" / "Bestand 0"
+  // "Bestand: 125g" / "Lagerbestand: 850g" (Zahlen ≠ 0, schon oben gemacht)
   t = t.replace(/\b(?:Lager(?:bestand)?|Bestand)\s*[:=]?\s*\d{1,5}\s*g?\b/gi, "verfügbar");
-  // "Quantity 0" / "Quantity = 0"
+  // "Quantity = 5" (Zahl ≠ 0)
   t = t.replace(/\bQuantity\s*[:=]?\s*\d+\b/gi, "");
   // "noch 4 Stück" / "nur noch 12 Packungen"
   t = t.replace(/\b(?:noch\s+|nur\s+noch\s+)?\d{1,3}\s*(Stück|Packungen)\b/gi, "in begrenzter Menge");

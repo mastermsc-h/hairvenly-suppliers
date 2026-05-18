@@ -97,6 +97,9 @@ WICHTIG:
     if (!newText) return { success: false, error: "leere Antwort" };
     // Safety-Net: Lagerzahlen rausfiltern (gleiche Logik wie in respond.ts)
     newText = newText
+      // ZUERST Bestand/Quantity = 0 → ausverkauft (vor generischer Zahlen-Regel)
+      .replace(/\b(?:Lager(?:bestand)?|Bestand)\s*[:=]?\s*0\s*g?\b/gi, "ausverkauft")
+      .replace(/\bQuantity\s*[:=]?\s*0\b/gi, "ausverkauft")
       .replace(/\(?\s*\d{2,5}\s*g(?:ramm)?\s*(?:auf\s*Lager|verfügbar|vorrätig|im\s*Lager|da)\s*\)?/gi, "haben wir da")
       .replace(/\b\d{2,5}\s*g(?:ramm)?\b\s*\b(?:verfügbar|vorrätig|am\s*Lager)\b/gi, "verfügbar")
       .replace(/\b(?:Lager(?:bestand)?|Bestand)\s*[:=]?\s*\d{1,5}\s*g?\b/gi, "verfügbar")
