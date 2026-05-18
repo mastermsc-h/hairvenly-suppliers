@@ -13,6 +13,7 @@ import {
   setBotMode,
   approveDraft,
   discardDraft,
+  refineDraftWithFeedback,
 } from "@/lib/actions/chat-inbox";
 
 interface Message {
@@ -457,7 +458,10 @@ function DraftBox({
   const [text, setText] = useState(draft.original_text);
   const [note, setNote] = useState("");
   const [showNote, setShowNote] = useState(false);
-  const [busy, setBusy] = useState<"send" | "grammar" | "discard" | null>(null);
+  const [refineInput, setRefineInput] = useState("");
+  const [refineLog, setRefineLog] = useState<string[]>([]);
+  const [busy, setBusy] = useState<"send" | "grammar" | "discard" | "refine" | null>(null);
+  // Aktueller Stand vs Original: zeigt ob editiert
   const wasEdited = text.trim() !== draft.original_text.trim();
   const hasNote = note.trim().length > 0;
 
@@ -492,6 +496,22 @@ function DraftBox({
     }
   }
 
+  async function handleRefine() {
+    if (!refineInput.trim() || busy) return;
+    const fb = refineInput.trim();
+    setBusy("refine");
+    try {
+      const r = await refineDraftWithFeedback(draft.id, text.trim(), fb);
+      setText(r.newText);
+      setRefineLog(l => [...l, fb]);
+      setRefineInput("");
+    } catch (e) {
+      alert(`Neu generieren fehlgeschlagen: ${(e as Error).message}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function handleDiscard() {
     if (busy) return;
     if (!confirm("Diesen Bot-Entwurf verwerfen? Es wird KEINE Nachricht gesendet.")) return;
@@ -509,9 +529,13 @@ function DraftBox({
       <div className="flex items-center gap-2 text-xs text-blue-800">
         <Bot size={12} className="text-blue-600" />
         <span className="font-semibold">Bot-Entwurf wartet auf Freigabe</span>
-        {(wasEdited || hasNote) && (
+        {(wasEdited || hasNote || refineLog.length > 0) && (
           <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-medium">
-            {wasEdited && hasNote ? "editiert + Notiz" : wasEdited ? "editiert" : "Notiz"} — wird als Training gespeichert
+            {[
+              refineLog.length > 0 ? `${refineLog.length}× neu generiert` : null,
+              wasEdited ? "editiert" : null,
+              hasNote ? "Notiz" : null,
+            ].filter(Boolean).join(" + ")} — wird als Training gespeichert
           </span>
         )}
         <span className="text-blue-500 ml-auto">
@@ -525,6 +549,46 @@ function DraftBox({
         className="w-full rounded-xl border border-blue-200 bg-white px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
         disabled={busy !== null}
       />
+
+      {/* Refine-Loop: Bot per Beschreibung anweisen statt selbst editieren */}
+      <div className="rounded-xl border border-purple-200 bg-purple-50/40 p-2.5 space-y-1.5">
+        <div className="text-[11px] font-medium text-purple-700 flex items-center gap-1">
+          <Wand2 size={11} /> Bot anweisen — sag in Worten was falsch ist
+        </div>
+        {refineLog.length > 0 && (
+          <div className="space-y-1">
+            {refineLog.map((fb, i) => (
+              <div key={i} className="text-[11px] text-purple-900 bg-white border border-purple-100 rounded-md px-2 py-1">
+                <span className="font-medium text-purple-500">#{i + 1}:</span> {fb}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-1.5">
+          <input
+            type="text"
+            value={refineInput}
+            onChange={(e) => setRefineInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleRefine(); }
+            }}
+            placeholder='z.B. "Kürzer halten, keine Markdown-Formatierung, erst nach Haarstruktur fragen"'
+            className="flex-1 rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400"
+            disabled={busy !== null}
+          />
+          <button
+            type="button"
+            onClick={handleRefine}
+            disabled={busy !== null || !refineInput.trim()}
+            className="bg-purple-600 text-white rounded-lg px-3 py-1.5 hover:bg-purple-700 disabled:opacity-40 inline-flex items-center gap-1 text-xs font-medium whitespace-nowrap"
+          >
+            <RotateCcw size={11} /> {busy === "refine" ? "Schreibt…" : "Neu generieren"}
+          </button>
+        </div>
+        <div className="text-[10px] text-purple-500">
+          Bot bekommt den ganzen Chat-Verlauf + alle bisherigen Feedbacks und schreibt die Antwort neu. Beim finalen Senden landen alle deine Kommentare als Lern-Hinweis im Training.
+        </div>
+      </div>
 
       {/* Strategie-Hinweis (optional) — wird mit Gesprächskontext ins Training übernommen */}
       {showNote ? (

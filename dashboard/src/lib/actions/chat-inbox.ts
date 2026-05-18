@@ -128,7 +128,7 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
   const svc = createServiceClient();
   const { data: draft } = await svc
     .from("chat_drafts")
-    .select("id, session_id, original_text, tool_calls, tool_results, status, trigger_message_id")
+    .select("id, session_id, original_text, tool_calls, tool_results, status, trigger_message_id, refinement_history")
     .eq("id", draftId).single();
   if (!draft) throw new Error("Entwurf nicht gefunden");
   if (draft.status !== "pending") throw new Error("Entwurf bereits bearbeitet");
@@ -164,9 +164,14 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
     approved_by: user.id,
   }).eq("id", draftId);
 
-  // Training-Eintrag bei Korrektur ODER wenn explizit Notiz mitgegeben — Auto-Lern-Modus
+  // Refinement-Feedbacks (alle Kommentare während des Loops) zu einem Strategie-Text bündeln
+  const refineHistory = (draft.refinement_history as Array<{ feedback: string }> | null) || [];
+  const refineFeedbacks = refineHistory.map(h => h.feedback).filter(Boolean);
+
+  // Training-Eintrag bei Korrektur ODER wenn explizit Notiz mitgegeben ODER Refine-Feedbacks da — Auto-Lern-Modus
   const hasNote = !!note?.trim();
-  if ((wasEdited || hasNote) && draft.trigger_message_id) {
+  const hasRefineFeedback = refineFeedbacks.length > 0;
+  if ((wasEdited || hasNote || hasRefineFeedback) && draft.trigger_message_id) {
     const { data: trigger } = await svc
       .from("chat_messages")
       .select("content, created_at")
@@ -192,19 +197,27 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
         }));
 
       const feedbackParts: string[] = [];
+      if (hasRefineFeedback) {
+        feedbackParts.push(
+          "REFINE-FEEDBACKS DER MITARBEITERIN (in chronologischer Reihenfolge):\n" +
+          refineFeedbacks.map((f, i) => `${i + 1}. ${f}`).join("\n")
+        );
+      }
       if (hasNote) feedbackParts.push(`STRATEGIE-HINWEIS: ${note!.trim()}`);
-      feedbackParts.push(wasEdited
-        ? "Korrektur via Bot-Begleitung (Mitarbeiter editierte Entwurf)"
-        : "Bot-Entwurf war korrekt, Mitarbeiter ergänzte nur Strategie-Notiz");
+      if (wasEdited) feedbackParts.push("Mitarbeiterin hat finalen Text noch direkt editiert");
+
+      const tags = ["assisted_correction"];
+      if (hasRefineFeedback) tags.push("refined");
+      if (hasNote) tags.push("with_strategy_note");
 
       await svc.from("chatbot_training").insert({
         user_message:    trigger.content,
         good_answer:     final,
-        bad_answer:      wasEdited ? original : null,
-        feedback:        feedbackParts.join(" — "),
+        bad_answer:      hasRefineFeedback ? (refineHistory[0] as { prev_text?: string })?.prev_text || (wasEdited ? original : null) : (wasEdited ? original : null),
+        feedback:        feedbackParts.join("\n\n") || "Bot-Begleitung Approval",
         avatar_name:     session.bot_signature_name,
         active:          true,
-        tags:            hasNote ? ["assisted_correction", "with_strategy_note"] : ["assisted_correction"],
+        tags,
         context_messages: contextMessages.length > 0 ? contextMessages : null,
       });
     }
@@ -223,6 +236,48 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
 
   revalidatePath(`/chatbot/inbox/${draft.session_id}`);
   revalidatePath("/chatbot/inbox");
+}
+
+/**
+ * Refine: Mitarbeiter gibt Feedback in natürlicher Sprache,
+ * Bot generiert die Antwort neu. Feedback wird in refinement_history gespeichert,
+ * landet beim finalen Approval automatisch im Strategie-Hinweis.
+ */
+export async function refineDraftWithFeedback(
+  draftId: string,
+  currentText: string,
+  feedback: string,
+): Promise<{ newText: string }> {
+  if (!feedback?.trim()) throw new Error("Feedback leer");
+  const svc = createServiceClient();
+  const { data: draft } = await svc
+    .from("chat_drafts")
+    .select("session_id, refinement_history, status")
+    .eq("id", draftId).single();
+  if (!draft) throw new Error("Entwurf nicht gefunden");
+  if (draft.status !== "pending") throw new Error("Entwurf bereits bearbeitet");
+
+  const { refineBotDraft } = await import("@/lib/chatbot/refine");
+  const result = await refineBotDraft(draft.session_id, currentText, feedback);
+  if (!result.success || !result.text) {
+    throw new Error(result.error || "Refine fehlgeschlagen");
+  }
+
+  const history = (draft.refinement_history as Array<{ feedback: string; prev_text: string; new_text: string; at: string }> | null) || [];
+  history.push({
+    feedback: feedback.trim(),
+    prev_text: currentText,
+    new_text: result.text,
+    at: new Date().toISOString(),
+  });
+
+  await svc.from("chat_drafts").update({
+    original_text: result.text,           // neuester Stand wird Default beim erneuten Laden
+    refinement_history: history,
+  }).eq("id", draftId);
+
+  revalidatePath(`/chatbot/inbox/${draft.session_id}`);
+  return { newText: result.text };
 }
 
 /** Verwirft einen Entwurf ohne zu senden */
