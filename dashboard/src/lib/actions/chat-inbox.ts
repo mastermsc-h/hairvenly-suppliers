@@ -354,6 +354,79 @@ export async function refineDraftWithFeedback(
   return { newText: result.text };
 }
 
+/**
+ * On-Demand: Mitarbeiter klickt "Antwort generieren" → Bot erstellt sofort
+ * einen Entwurf zur aktuellen Session-Lage. Ändert NICHT den Modus.
+ *
+ * Wirft Fehler wenn:
+ *  - keine offenen Kundennachrichten da sind (Bot hätte nichts zu antworten)
+ *  - bereits ein pending Draft existiert (UI sollte den Button verstecken)
+ */
+export async function generateDraftOnDemand(sessionId: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const svc = createServiceClient();
+
+  // Bereits ein Draft offen?
+  const { data: existing } = await svc
+    .from("chat_drafts")
+    .select("id")
+    .eq("session_id", sessionId)
+    .eq("status", "pending")
+    .limit(1)
+    .maybeSingle();
+  if (existing) return { ok: false, reason: "Es liegt bereits ein offener Entwurf vor." };
+
+  // Letzte Message muss von Kunde sein (sonst nichts zu antworten)
+  const { data: lastMsg } = await svc
+    .from("chat_messages")
+    .select("id, role")
+    .eq("session_id", sessionId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!lastMsg) return { ok: false, reason: "Keine Nachrichten in dieser Session." };
+  if (lastMsg.role !== "user") {
+    return { ok: false, reason: "Letzte Nachricht ist nicht vom Kunden — keine offene Frage zu beantworten." };
+  }
+
+  // Trigger-Message-ID: jüngste offene Kunden-Nachricht (= Cluster-Start für Training)
+  const { data: recent } = await svc
+    .from("chat_messages")
+    .select("id, role, created_at")
+    .eq("session_id", sessionId)
+    .order("created_at", { ascending: false })
+    .limit(10);
+  const lastAgentIdx = (recent || []).findIndex(m => m.role === "assistant" || m.role === "human_agent");
+  const openMsgs = lastAgentIdx === -1
+    ? (recent || []).filter(m => m.role === "user")
+    : (recent || []).slice(0, lastAgentIdx).filter(m => m.role === "user");
+  const triggerMsgId = (openMsgs[openMsgs.length - 1] || lastMsg).id;
+
+  try {
+    const { respondAsBot } = await import("@/lib/chatbot/respond");
+    const result = await respondAsBot(sessionId, { assisted: true });
+    if (!result.success || !result.text) {
+      return { ok: false, reason: result.error || "Generierung fehlgeschlagen" };
+    }
+    await svc.from("chat_drafts").insert({
+      session_id:    sessionId,
+      original_text: result.text,
+      tool_calls:    result.toolCalls && result.toolCalls.length > 0 ? result.toolCalls : null,
+      tool_results:  result.toolResults && result.toolResults.length > 0 ? result.toolResults : null,
+      trigger_message_id: triggerMsgId,
+      status:        "pending",
+    });
+    revalidatePath(`/chatbot/inbox/${sessionId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: (e as Error).message };
+  }
+}
+
 /** Verwirft einen Entwurf ohne zu senden */
 export async function discardDraft(draftId: string) {
   const svc = createServiceClient();

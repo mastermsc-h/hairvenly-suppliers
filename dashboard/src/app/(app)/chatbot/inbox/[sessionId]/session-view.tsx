@@ -14,6 +14,7 @@ import {
   approveDraft,
   discardDraft,
   refineDraftWithFeedback,
+  generateDraftOnDemand,
 } from "@/lib/actions/chat-inbox";
 
 interface Message {
@@ -51,6 +52,8 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
   const [suggesting, setSuggesting] = useState(false);
   const [andResume, setAndResume] = useState(false);
   const [modeSwitching, setModeSwitching] = useState<null | "auto" | "assisted" | "off">(null);
+  const [generating, setGenerating] = useState(false);
+  const [showModeSettings, setShowModeSettings] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -167,6 +170,20 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
     });
   }
 
+  async function handleGenerate() {
+    if (generating) return;
+    setGenerating(true);
+    try {
+      const r = await generateDraftOnDemand(session.id);
+      if (!r.ok) alert(r.reason);
+      else router.refresh();
+    } catch (e) {
+      alert(`Generierung fehlgeschlagen: ${(e as Error).message}`);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   async function handleDelete() {
     if (!confirm("Diese Session komplett löschen (mit allen Nachrichten)? Kann nicht rückgängig gemacht werden.")) return;
     startTransition(async () => {
@@ -229,52 +246,67 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
           )}
         </div>
         <div className="flex gap-2 items-center">
-          {/* Bot-Modus Selector: Auto · Begleitet · Aus */}
+          {/* Bot-Modus — versteckt hinter Zahnrad, nur für Power-User */}
           {session.status === "active" && (
-            <div className="inline-flex items-center gap-1 text-xs">
-              <Power size={11} className="text-neutral-400" />
-              <span className="text-neutral-500">Bot:</span>
-              <select
-                value={modeSwitching || session.bot_mode}
-                onChange={(e) => {
-                  const m = e.target.value as "auto" | "assisted" | "off";
-                  setModeSwitching(m);
-                  startTransition(async () => {
-                    try {
-                      await setBotMode(session.id, m);
-                      router.refresh();
-                    } finally {
-                      setModeSwitching(null);
-                    }
-                  });
-                }}
-                disabled={isPending || modeSwitching !== null}
-                title="Auto = sendet selbst · Begleitet = Bot generiert Entwurf, du bestätigst · Aus = kein Bot"
-                className={`text-xs rounded-md border px-2 py-0.5 font-medium ${
-                  modeSwitching === "assisted" || session.bot_mode === "assisted"
-                    ? "bg-blue-100 text-blue-800 border-blue-300"
-                    : modeSwitching === "auto" || session.bot_mode === "auto"
-                    ? "bg-green-100 text-green-800 border-green-300"
-                    : "bg-neutral-100 text-neutral-600 border-neutral-300"
-                } ${modeSwitching ? "opacity-60 cursor-wait" : ""}`}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowModeSettings(v => !v)}
+                title={
+                  session.bot_mode === "auto"     ? "Bot-Modus: Auto-Antwort (sendet selbst bei neuen DMs)" :
+                  session.bot_mode === "assisted" ? "Bot-Modus: Auto-Entwurf bei neuen DMs" :
+                                                     "Bot-Modus: Manuell"
+                }
+                className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border ${
+                  session.bot_mode === "auto"
+                    ? "bg-green-50 text-green-700 border-green-200"
+                    : session.bot_mode === "assisted"
+                    ? "bg-blue-50 text-blue-700 border-blue-200"
+                    : "bg-neutral-50 text-neutral-600 border-neutral-200"
+                }`}
               >
-                <option value="auto">🤖 Auto (sendet selbst)</option>
-                <option value="assisted">🧑‍🏫 Begleitet (Entwurf)</option>
-                <option value="off">⏸ Aus</option>
-              </select>
-              {modeSwitching === "assisted" && (
-                <span className="inline-flex items-center gap-1 text-[11px] text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full whitespace-nowrap">
-                  <Bot size={11} className="animate-pulse" />
-                  Entwurf wird generiert…
-                </span>
-              )}
-              {modeSwitching && modeSwitching !== "assisted" && (
-                <span className="inline-flex items-center gap-1 text-[11px] text-neutral-500">
-                  <RotateCcw size={11} className="animate-spin" />
-                  wechsle…
-                </span>
+                <Power size={10} />
+                {session.bot_mode === "auto" ? "Auto" : session.bot_mode === "assisted" ? "Auto-Entwurf" : "Manuell"}
+              </button>
+              {showModeSettings && (
+                <div className="absolute right-0 top-full mt-1 z-10 w-72 bg-white border border-neutral-200 rounded-lg shadow-lg p-3 space-y-2">
+                  <div className="text-[11px] font-semibold text-neutral-700">Wenn neue DM eintrifft:</div>
+                  {([
+                    { v: "off",      label: "⏸ Nichts tun (manuell)",         desc: "Du klickst pro Antwort auf 'Antwort generieren'." },
+                    { v: "assisted", label: "🧑‍🏫 Auto-Entwurf vorbereiten",   desc: "Bot generiert sofort einen Entwurf, du bestätigst." },
+                    { v: "auto",     label: "🤖 Direkt automatisch antworten", desc: "Bot sendet selbst. Nur für vertraute Avatare." },
+                  ] as const).map(opt => (
+                    <button
+                      key={opt.v}
+                      onClick={() => {
+                        setModeSwitching(opt.v);
+                        setShowModeSettings(false);
+                        startTransition(async () => {
+                          try {
+                            await setBotMode(session.id, opt.v);
+                            router.refresh();
+                          } finally { setModeSwitching(null); }
+                        });
+                      }}
+                      className={`w-full text-left p-2 rounded-md hover:bg-neutral-50 border ${
+                        session.bot_mode === opt.v
+                          ? "border-neutral-900 bg-neutral-50"
+                          : "border-transparent"
+                      }`}
+                    >
+                      <div className="text-xs font-medium">{opt.label}</div>
+                      <div className="text-[10px] text-neutral-500">{opt.desc}</div>
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
+          )}
+          {modeSwitching && (
+            <span className="inline-flex items-center gap-1 text-[11px] text-neutral-500">
+              <RotateCcw size={11} className="animate-spin" />
+              wechsle…
+            </span>
           )}
           {!isTakenOver && session.status !== "closed" && (
             <button
@@ -314,8 +346,8 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
         </div>
       </div>
 
-      {/* Modus-Wechsel-Banner — sehr sichtbar während Bot generiert */}
-      {modeSwitching === "assisted" && (
+      {/* Banner — sehr sichtbar während Bot generiert (egal ob via Mode-Switch oder Button) */}
+      {(modeSwitching === "assisted" || generating) && (
         <div className="border-b border-blue-200 bg-gradient-to-r from-blue-50 via-blue-100 to-blue-50 px-5 py-3 flex items-center gap-3">
           <div className="relative">
             <div className="w-8 h-8 rounded-full bg-blue-200 flex items-center justify-center">
@@ -386,18 +418,37 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             <span>Nach dieser Antwort wieder an Bot übergeben</span>
           </label>
         </div>
-      ) : session.status === "active" && pendingDraft && session.bot_mode === "assisted" ? (
+      ) : session.status === "active" && pendingDraft ? (
         <DraftBox
           draft={pendingDraft}
           onDone={() => router.refresh()}
         />
       ) : session.status === "active" ? (
-        <div className="border-t border-neutral-100 p-3 text-center text-xs text-neutral-400 italic">
-          {session.bot_mode === "off"
-            ? "Bot ist deaktiviert. Klick \"Übernehmen\" um selbst zu antworten."
-            : session.bot_mode === "assisted"
-            ? "Bot-Begleitung aktiv. Wartet auf nächste Kundennachricht — Entwurf erscheint hier."
-            : "Bot antwortet automatisch. Klick \"Übernehmen\" um selbst zu antworten."}
+        <div className="border-t border-neutral-100 p-3 flex items-center justify-between gap-3 flex-wrap bg-gradient-to-r from-blue-50/40 to-transparent">
+          <div className="text-xs text-neutral-500 flex-1 min-w-0">
+            {session.bot_mode === "auto"
+              ? <span>🤖 Bot antwortet bei neuen Nachrichten automatisch.</span>
+              : session.bot_mode === "assisted"
+              ? <span>🧑‍🏫 Bot bereitet bei neuen Nachrichten automatisch einen Entwurf vor.</span>
+              : <span>Klick auf <b>Antwort generieren</b> und Bot schreibt einen Entwurf zur aktuellen Lage.</span>}
+          </div>
+          <div className="flex gap-2 items-center">
+            <button
+              onClick={handleGenerate}
+              disabled={generating || isPending}
+              className="bg-blue-600 text-white rounded-xl px-4 py-2 hover:bg-blue-700 disabled:opacity-40 inline-flex items-center gap-1.5 text-sm font-medium shadow-sm"
+            >
+              <Sparkles size={14} className={generating ? "animate-pulse" : ""} />
+              {generating ? "Generiert…" : "Antwort generieren"}
+            </button>
+            <button
+              onClick={handleTakeover}
+              disabled={isPending}
+              className="text-xs px-3 py-2 rounded-xl border border-neutral-300 text-neutral-600 hover:bg-neutral-50 inline-flex items-center gap-1"
+            >
+              <Hand size={12} /> selbst antworten
+            </button>
+          </div>
         </div>
       ) : (
         <div className="border-t border-neutral-100 p-3 text-center text-xs text-neutral-500 flex items-center justify-center gap-2">
