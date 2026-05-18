@@ -46,13 +46,25 @@ export async function GET(req: NextRequest) {
   // Auch Session-Status mitliefern damit Widget weiß ob Bot oder Mensch antwortet
   const { data: session } = await svc
     .from("chat_sessions")
-    .select("status, bot_signature_name")
+    .select("status, bot_signature_name, bot_mode")
     .eq("id", sessionId)
     .single();
+
+  // Pending Draft (Bot-Begleitung) — Hash/ID damit Client erkennt ob neu
+  const { data: pendingDraft } = await svc
+    .from("chat_drafts")
+    .select("id, created_at")
+    .eq("session_id", sessionId)
+    .eq("status", "pending")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
   return NextResponse.json({
     messages,
     status: session?.status,
     bot_signature_name: session?.bot_signature_name,
+    bot_mode: session?.bot_mode,
+    pending_draft_id: pendingDraft?.id || null,
   });
 }

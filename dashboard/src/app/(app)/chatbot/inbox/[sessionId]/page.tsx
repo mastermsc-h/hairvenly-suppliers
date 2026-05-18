@@ -20,7 +20,7 @@ export default async function ChatSessionPage({ params }: PageProps) {
     .from("chat_sessions")
     .select(`
       id, channel, customer_name, status, assigned_to, bot_signature_name,
-      bot_auto_reply, external_id,
+      bot_auto_reply, bot_mode, external_id,
       last_message_at, created_at,
       assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
     `)
@@ -41,6 +41,16 @@ export default async function ChatSessionPage({ params }: PageProps) {
     .select("name")
     .eq("active", true)
     .order("name");
+
+  // Pending Draft (falls Bot-Begleitung Modus)
+  const { data: pendingDraft } = await svc
+    .from("chat_drafts")
+    .select("id, original_text, created_at")
+    .eq("session_id", sessionId)
+    .eq("status", "pending")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
   const { data: messages } = await svc
     .from("chat_messages")
@@ -70,12 +80,18 @@ export default async function ChatSessionPage({ params }: PageProps) {
           bot_signature_name: session.bot_signature_name,
           customer_name: session.customer_name,
           bot_auto_reply: session.bot_auto_reply ?? false,
+          bot_mode: (session.bot_mode ?? (session.bot_auto_reply ? "auto" : "off")) as "auto" | "assisted" | "off",
           assigned_name: (() => {
             const p = session.assigned_profile as unknown as { display_name?: string; email?: string } | null;
             return p?.display_name || p?.email || null;
           })(),
         }}
         avatarOptions={(avatars || []).map(a => a.name)}
+        pendingDraft={pendingDraft ? {
+          id: pendingDraft.id,
+          original_text: pendingDraft.original_text,
+          created_at: pendingDraft.created_at,
+        } : null}
         initialMessages={(messages ?? []).map(m => ({
           id: m.id,
           role: m.role,

@@ -219,8 +219,14 @@ async function routeIncoming(opts: {
     customer_name: session.customer_name || opts.customerName || null,
   }).eq("id", session.id);
 
-  // Bot-Auto-Antwort wenn aktiviert für diese Session
-  if (session.bot_auto_reply && session.status === "active") {
+  // Letzte gespeicherte User-Message holen — als Trigger für ggf. Entwurf
+  const { data: lastUserMsg } = await svc.from("chat_messages")
+    .select("id").eq("session_id", session.id).eq("role", "user")
+    .order("created_at", { ascending: false }).limit(1).single();
+
+  // Bot-Modus auswerten — 'auto' = senden, 'assisted' = Entwurf, 'off' = nichts
+  const botMode = session.bot_mode || (session.bot_auto_reply ? "auto" : "off");
+  if ((botMode === "auto" || botMode === "assisted") && session.status === "active") {
     try {
       // ── DEBOUNCE ──
       // Warte 4 Sekunden bevor du antwortest. Falls in der Zwischenzeit eine
@@ -232,7 +238,7 @@ async function routeIncoming(opts: {
 
       const { data: refreshed } = await svc
         .from("chat_sessions")
-        .select("last_customer_msg_at, status, bot_auto_reply")
+        .select("last_customer_msg_at, status, bot_mode, bot_auto_reply")
         .eq("id", session.id)
         .single();
 
@@ -242,27 +248,51 @@ async function routeIncoming(opts: {
         return;
       }
       // Status hat sich geändert (z.B. Mitarbeiter hat übernommen)?
-      if (refreshed?.status !== "active" || !refreshed?.bot_auto_reply) {
-        console.log(`[meta-webhook] debounce: session no longer active+auto, skipping`);
+      const curMode = refreshed?.bot_mode || (refreshed?.bot_auto_reply ? "auto" : "off");
+      if (refreshed?.status !== "active" || (curMode !== "auto" && curMode !== "assisted")) {
+        console.log(`[meta-webhook] debounce: session no longer active+bot, skipping`);
         return;
       }
-      // Alles klar → Bot antwortet jetzt
-      await triggerBotResponse(session.id, opts.channel, opts.externalId);
+      // Alles klar → Bot generiert
+      await triggerBotResponse(session.id, opts.channel, opts.externalId, curMode, lastUserMsg?.id);
     } catch (e) {
       console.error("[meta-webhook] bot reply failed:", e);
     }
   }
 }
 
-// Bot-Antwort generieren + an passenden Channel senden
-async function triggerBotResponse(sessionId: string, channel: string, externalId: string) {
+// Bot-Antwort generieren + an Channel senden ODER als Entwurf speichern (assisted mode)
+async function triggerBotResponse(
+  sessionId: string,
+  channel: string,
+  externalId: string,
+  mode: string,
+  triggerMessageId?: string,
+) {
   const { respondAsBot } = await import("@/lib/chatbot/respond");
-  const result = await respondAsBot(sessionId);
+  // assisted=true → respondAsBot soll NICHT in chat_messages speichern, sondern nur Text+Tools zurückgeben
+  const result = await respondAsBot(sessionId, { assisted: mode === "assisted" });
   if (!result.success || !result.text) {
     console.error("[meta-webhook] bot response failed:", result.error);
     return;
   }
-  // An echten Channel zurücksenden
+
+  if (mode === "assisted") {
+    // Entwurf in chat_drafts speichern — NICHT senden
+    const svc = createServiceClient();
+    await svc.from("chat_drafts").insert({
+      session_id:    sessionId,
+      original_text: result.text,
+      tool_calls:    result.toolCalls && result.toolCalls.length > 0 ? result.toolCalls : null,
+      tool_results:  result.toolResults && result.toolResults.length > 0 ? result.toolResults : null,
+      trigger_message_id: triggerMessageId || null,
+      status:        "pending",
+    });
+    console.log(`[meta-webhook] draft created for session ${sessionId}`);
+    return;
+  }
+
+  // mode = 'auto' → direkt senden
   if (channel === "instagram") {
     const sendResult = await sendInstagramMessage(externalId, result.text);
     console.log("[meta-webhook] IG reply sent:", sendResult);

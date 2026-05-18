@@ -13,14 +13,21 @@ interface RespondResult {
   success: boolean;
   text?: string;
   toolsUsed?: string[];
+  toolCalls?: { id: string; name: string; input: Record<string, unknown> }[];
+  toolResults?: { tool_use_id: string; content: string }[];
   error?: string;
+}
+
+interface RespondOptions {
+  /** Wenn true: Text NICHT in chat_messages speichern (für Bot-Begleitung-Entwurf) */
+  assisted?: boolean;
 }
 
 /**
  * Generiert Bot-Antwort für eine Session basierend auf bisherigem Verlauf,
  * speichert sie als assistant-Message in chat_messages.
  */
-export async function respondAsBot(sessionId: string): Promise<RespondResult> {
+export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
 
   // Session laden
@@ -211,17 +218,26 @@ export async function respondAsBot(sessionId: string): Promise<RespondResult> {
 
   if (!finalText) return { success: false, error: "empty response after fallback" };
 
-  // In DB speichern
-  await svc.from("chat_messages").insert({
-    session_id:   sessionId,
-    role:         "assistant",
-    content:      finalText,
-    tool_calls:   allToolCalls.length > 0 ? allToolCalls : null,
-    tool_results: allToolResults.length > 0 ? allToolResults : null,
-  });
-  await svc.from("chat_sessions")
-    .update({ last_message_at: new Date().toISOString() })
-    .eq("id", sessionId);
+  // Im assisted-Modus: NICHT in chat_messages speichern — der Caller speichert
+  // erst nach Mitarbeiter-Approval ggf. die korrigierte Version.
+  if (!opts.assisted) {
+    await svc.from("chat_messages").insert({
+      session_id:   sessionId,
+      role:         "assistant",
+      content:      finalText,
+      tool_calls:   allToolCalls.length > 0 ? allToolCalls : null,
+      tool_results: allToolResults.length > 0 ? allToolResults : null,
+    });
+    await svc.from("chat_sessions")
+      .update({ last_message_at: new Date().toISOString() })
+      .eq("id", sessionId);
+  }
 
-  return { success: true, text: finalText, toolsUsed };
+  return {
+    success: true,
+    text: finalText,
+    toolsUsed,
+    toolCalls: allToolCalls,
+    toolResults: allToolResults,
+  };
 }

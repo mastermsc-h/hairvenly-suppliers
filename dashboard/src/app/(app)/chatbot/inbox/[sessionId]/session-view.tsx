@@ -2,15 +2,17 @@
 
 import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power } from "lucide-react";
+import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2 } from "lucide-react";
 import {
   takeoverSession,
   sendHumanMessage,
   resumeBot,
   closeSession,
   deleteSession,
-  toggleBotAutoReply,
   setSessionAvatar,
+  setBotMode,
+  approveDraft,
+  discardDraft,
 } from "@/lib/actions/chat-inbox";
 
 interface Message {
@@ -32,13 +34,15 @@ interface Props {
     bot_signature_name: string | null;
     customer_name: string | null;
     bot_auto_reply: boolean;
+    bot_mode: "auto" | "assisted" | "off";
     assigned_name: string | null;
   };
   initialMessages: Message[];
   avatarOptions: string[];
+  pendingDraft: { id: string; original_text: string; created_at: string } | null;
 }
 
-export default function ChatSessionView({ session, initialMessages, avatarOptions }: Props) {
+export default function ChatSessionView({ session, initialMessages, avatarOptions, pendingDraft }: Props) {
   const router = useRouter();
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState("");
@@ -54,6 +58,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
   // Polling für neue Nachrichten alle 3s — mit Dedup gegen Optimistic-Updates
   useEffect(() => {
     let lastTs = messages.length > 0 ? messages[messages.length - 1].created_at : new Date().toISOString();
+    let lastDraftId = pendingDraft?.id || null;
     const interval = setInterval(async () => {
       const res = await fetch(`/api/chat/messages?sessionId=${session.id}&since=${encodeURIComponent(lastTs)}`);
       if (!res.ok) return;
@@ -70,6 +75,12 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
           return fresh.length > 0 ? [...m, ...fresh] : m;
         });
         lastTs = data.messages[data.messages.length - 1].created_at;
+        router.refresh();
+      }
+      // Draft-Wechsel erkennen (neuer Entwurf erschienen oder vorhandener verschwunden)
+      const curDraftId = data.pending_draft_id || null;
+      if (curDraftId !== lastDraftId) {
+        lastDraftId = curDraftId;
         router.refresh();
       }
     }, 3000);
@@ -216,23 +227,35 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
           )}
         </div>
         <div className="flex gap-2 items-center">
-          {/* Bot-Auto-Reply Toggle */}
+          {/* Bot-Modus Selector: Auto · Begleitet · Aus */}
           {session.status === "active" && (
-            <button
-              onClick={() => startTransition(async () => {
-                await toggleBotAutoReply(session.id, !session.bot_auto_reply);
-                router.refresh();
-              })}
-              disabled={isPending}
-              title={session.bot_auto_reply ? "Bot antwortet automatisch — Klick zum Deaktivieren" : "Bot antwortet NICHT automatisch — Klick zum Aktivieren"}
-              className={`text-xs px-2.5 py-1.5 rounded-lg inline-flex items-center gap-1 ${
-                session.bot_auto_reply
-                  ? "bg-green-100 text-green-800 hover:bg-green-200"
-                  : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
-              }`}
-            >
-              <Power size={11} /> Bot-Auto: {session.bot_auto_reply ? "AN" : "AUS"}
-            </button>
+            <div className="inline-flex items-center gap-1 text-xs">
+              <Power size={11} className="text-neutral-400" />
+              <span className="text-neutral-500">Bot:</span>
+              <select
+                value={session.bot_mode}
+                onChange={(e) => {
+                  const m = e.target.value as "auto" | "assisted" | "off";
+                  startTransition(async () => {
+                    await setBotMode(session.id, m);
+                    router.refresh();
+                  });
+                }}
+                disabled={isPending}
+                title="Auto = sendet selbst · Begleitet = Bot generiert Entwurf, du bestätigst · Aus = kein Bot"
+                className={`text-xs rounded-md border px-2 py-0.5 font-medium ${
+                  session.bot_mode === "auto"
+                    ? "bg-green-100 text-green-800 border-green-300"
+                    : session.bot_mode === "assisted"
+                    ? "bg-blue-100 text-blue-800 border-blue-300"
+                    : "bg-neutral-100 text-neutral-600 border-neutral-300"
+                }`}
+              >
+                <option value="auto">🤖 Auto (sendet selbst)</option>
+                <option value="assisted">🧑‍🏫 Begleitet (Entwurf)</option>
+                <option value="off">⏸ Aus</option>
+              </select>
+            </div>
           )}
           {!isTakenOver && session.status !== "closed" && (
             <button
@@ -328,9 +351,18 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             <span>Nach dieser Antwort wieder an Bot übergeben</span>
           </label>
         </div>
+      ) : session.status === "active" && pendingDraft && session.bot_mode === "assisted" ? (
+        <DraftBox
+          draft={pendingDraft}
+          onDone={() => router.refresh()}
+        />
       ) : session.status === "active" ? (
         <div className="border-t border-neutral-100 p-3 text-center text-xs text-neutral-400 italic">
-          Bot antwortet automatisch. Klick &ldquo;Übernehmen&rdquo; um selbst zu antworten.
+          {session.bot_mode === "off"
+            ? "Bot ist deaktiviert. Klick \"Übernehmen\" um selbst zu antworten."
+            : session.bot_mode === "assisted"
+            ? "Bot-Begleitung aktiv. Wartet auf nächste Kundennachricht — Entwurf erscheint hier."
+            : "Bot antwortet automatisch. Klick \"Übernehmen\" um selbst zu antworten."}
         </div>
       ) : (
         <div className="border-t border-neutral-100 p-3 text-center text-xs text-neutral-500 flex items-center justify-center gap-2">
@@ -413,4 +445,114 @@ function MessageRow({ msg, signatureName }: { msg: Message; signatureName: strin
   }
 
   return null;
+}
+
+function DraftBox({
+  draft,
+  onDone,
+}: {
+  draft: { id: string; original_text: string; created_at: string };
+  onDone: () => void;
+}) {
+  const [text, setText] = useState(draft.original_text);
+  const [busy, setBusy] = useState<"send" | "grammar" | "discard" | null>(null);
+  const wasEdited = text.trim() !== draft.original_text.trim();
+
+  async function handleSend() {
+    if (!text.trim() || busy) return;
+    setBusy("send");
+    try {
+      await approveDraft(draft.id, text.trim());
+      onDone();
+    } catch (e) {
+      alert(`Senden fehlgeschlagen: ${(e as Error).message}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleGrammar() {
+    if (!text.trim() || busy) return;
+    setBusy("grammar");
+    try {
+      const res = await fetch("/api/chat/grammar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+      if (data.corrected) setText(data.corrected);
+    } catch (e) {
+      alert(`Grammatik-Check fehlgeschlagen: ${(e as Error).message}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleDiscard() {
+    if (busy) return;
+    if (!confirm("Diesen Bot-Entwurf verwerfen? Es wird KEINE Nachricht gesendet.")) return;
+    setBusy("discard");
+    try {
+      await discardDraft(draft.id);
+      onDone();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="border-t-2 border-blue-200 bg-blue-50/60 p-3 space-y-2">
+      <div className="flex items-center gap-2 text-xs text-blue-800">
+        <Bot size={12} className="text-blue-600" />
+        <span className="font-semibold">Bot-Entwurf wartet auf Freigabe</span>
+        {wasEdited && (
+          <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-medium">
+            editiert — wird als Training gespeichert
+          </span>
+        )}
+        <span className="text-blue-500 ml-auto">
+          {new Date(draft.created_at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}
+        </span>
+      </div>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={Math.max(4, Math.min(12, (text.match(/\n/g)?.length || 0) + 3))}
+        className="w-full rounded-xl border border-blue-200 bg-white px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+        disabled={busy !== null}
+      />
+      <div className="flex gap-2 flex-wrap">
+        <button
+          onClick={handleSend}
+          disabled={busy !== null || !text.trim()}
+          className="bg-green-600 text-white rounded-xl px-4 py-2 hover:bg-green-700 disabled:opacity-40 inline-flex items-center gap-1 text-xs font-medium"
+        >
+          <Check size={12} /> {busy === "send" ? "Sende…" : "Senden ✓"}
+        </button>
+        <button
+          onClick={handleGrammar}
+          disabled={busy !== null || !text.trim()}
+          className="bg-purple-600 text-white rounded-xl px-3 py-2 hover:bg-purple-700 disabled:opacity-40 inline-flex items-center gap-1 text-xs font-medium"
+          title="KI korrigiert nur Grammatik/Rechtschreibung — Inhalt + Tonalität bleiben"
+        >
+          <Wand2 size={12} /> {busy === "grammar" ? "Prüfe…" : "Grammatik per KI"}
+        </button>
+        <button
+          onClick={() => setText(draft.original_text)}
+          disabled={busy !== null || text === draft.original_text}
+          className="text-xs px-3 py-2 rounded-xl border border-neutral-300 text-neutral-600 hover:bg-neutral-50 disabled:opacity-40 inline-flex items-center gap-1"
+        >
+          <RotateCcw size={11} /> Original
+        </button>
+        <button
+          onClick={handleDiscard}
+          disabled={busy !== null}
+          className="text-xs px-3 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 inline-flex items-center gap-1 ml-auto"
+        >
+          <X size={11} /> Verwerfen
+        </button>
+      </div>
+    </div>
+  );
 }

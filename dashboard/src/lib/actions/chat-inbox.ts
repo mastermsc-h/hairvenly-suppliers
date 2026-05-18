@@ -101,6 +101,113 @@ export async function toggleBotAutoReply(sessionId: string, enabled: boolean) {
   revalidatePath("/chatbot/inbox");
 }
 
+/** Setzt den Bot-Modus (auto/assisted/off) für eine Session */
+export async function setBotMode(sessionId: string, mode: "auto" | "assisted" | "off") {
+  const svc = createServiceClient();
+  await svc.from("chat_sessions").update({
+    bot_mode: mode,
+    // Kompat: bot_auto_reply spiegelt 'auto' wider
+    bot_auto_reply: mode === "auto",
+  }).eq("id", sessionId);
+  revalidatePath(`/chatbot/inbox/${sessionId}`);
+  revalidatePath("/chatbot/inbox");
+}
+
+/**
+ * Approve eines Bot-Entwurfs:
+ * - Bei Korrektur: Training-Eintrag (bad=Original, good=Edit)
+ * - Sendet finalen Text an Channel
+ * - Speichert als assistant-Message in chat_messages
+ */
+export async function approveDraft(draftId: string, finalText: string) {
+  if (!finalText?.trim()) throw new Error("Leerer Text");
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const svc = createServiceClient();
+  const { data: draft } = await svc
+    .from("chat_drafts")
+    .select("id, session_id, original_text, tool_calls, tool_results, status, trigger_message_id")
+    .eq("id", draftId).single();
+  if (!draft) throw new Error("Entwurf nicht gefunden");
+  if (draft.status !== "pending") throw new Error("Entwurf bereits bearbeitet");
+
+  const final = finalText.trim();
+  const original = draft.original_text.trim();
+  const wasEdited = final !== original;
+
+  // Session-Daten für Channel + Avatar
+  const { data: session } = await svc
+    .from("chat_sessions")
+    .select("channel, external_id, bot_signature_name")
+    .eq("id", draft.session_id).single();
+  if (!session) throw new Error("Session nicht gefunden");
+
+  // Final-Message als assistant in chat_messages speichern
+  await svc.from("chat_messages").insert({
+    session_id:   draft.session_id,
+    role:         "assistant",
+    content:      final,
+    tool_calls:   draft.tool_calls,
+    tool_results: draft.tool_results,
+  });
+  await svc.from("chat_sessions")
+    .update({ last_message_at: new Date().toISOString() })
+    .eq("id", draft.session_id);
+
+  // Draft als approved markieren
+  await svc.from("chat_drafts").update({
+    edited_text: wasEdited ? final : null,
+    status:      "approved",
+    approved_at: new Date().toISOString(),
+    approved_by: user.id,
+  }).eq("id", draftId);
+
+  // Training-Eintrag bei Korrektur — Auto-Lern-Modus
+  if (wasEdited && draft.trigger_message_id) {
+    const { data: trigger } = await svc
+      .from("chat_messages")
+      .select("content")
+      .eq("id", draft.trigger_message_id)
+      .maybeSingle();
+    if (trigger?.content) {
+      await svc.from("chatbot_training").insert({
+        user_message: trigger.content,
+        good_answer:  final,
+        bad_answer:   original,
+        feedback:     "Korrektur via Bot-Begleitung (Mitarbeiter editierte Entwurf)",
+        avatar_name:  session.bot_signature_name,
+        active:       true,
+        tags:         ["assisted_correction"],
+      });
+    }
+  }
+
+  // An Channel senden
+  if (session.channel === "instagram" && session.external_id) {
+    const { sendInstagramMessage } = await import("@/lib/messaging/meta");
+    const r = await sendInstagramMessage(session.external_id, final);
+    if (!r.success) console.error("[approveDraft] IG send failed:", r.error);
+  } else if (session.channel === "whatsapp" && session.external_id) {
+    const { sendWhatsAppMessage } = await import("@/lib/messaging/meta");
+    const r = await sendWhatsAppMessage(session.external_id, final);
+    if (!r.success) console.error("[approveDraft] WA send failed:", r.error);
+  }
+
+  revalidatePath(`/chatbot/inbox/${draft.session_id}`);
+  revalidatePath("/chatbot/inbox");
+}
+
+/** Verwirft einen Entwurf ohne zu senden */
+export async function discardDraft(draftId: string) {
+  const svc = createServiceClient();
+  const { data: draft } = await svc.from("chat_drafts").select("session_id").eq("id", draftId).single();
+  await svc.from("chat_drafts").update({ status: "discarded" }).eq("id", draftId);
+  if (draft?.session_id) revalidatePath(`/chatbot/inbox/${draft.session_id}`);
+  revalidatePath("/chatbot/inbox");
+}
+
 /** Schließt eine Session */
 export async function closeSession(sessionId: string) {
   const svc = createServiceClient();
