@@ -187,12 +187,37 @@ async function handleInstagramOrMessenger(m: MessagingItem, source: "instagram" 
       console.log(`[meta-webhook] echo to ${m.recipient.id} but no session — ignoring`);
       return;
     }
-    // Dedup
+    // Dedup-Check 1: MID schon gespeichert?
     if (m.message?.mid) {
       const { data: dup } = await svc.from("chat_messages")
         .select("id").eq("session_id", session.id).eq("external_id", m.message.mid).maybeSingle();
       if (dup) return;
     }
+
+    // CLAIM-LOGIK: Wenn wir gerade (letzte 120s) selbst eine assistant- oder human_agent-
+    // Message in diese Session gesendet haben OHNE external_id, dann ist dieser Echo
+    // höchstwahrscheinlich genau diese Message zurück von Meta. Statt eine neue Zeile
+    // einzufügen → hänge die MID an die bestehende Zeile (Dedup statt Duplikat).
+    const cutoff = new Date(Date.now() - 120_000).toISOString();
+    const { data: recentSelf } = await svc.from("chat_messages")
+      .select("id")
+      .eq("session_id", session.id)
+      .in("role", ["assistant", "human_agent"])
+      .is("external_id", null)
+      .gte("created_at", cutoff)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (recentSelf) {
+      await svc.from("chat_messages")
+        .update({ external_id: m.message?.mid || null })
+        .eq("id", recentSelf.id);
+      console.log(`[meta-webhook] echo: claimed existing row ${recentSelf.id} (mid=${m.message?.mid})`);
+      return;
+    }
+
+    // Fallback: Echo kommt rein, ohne dass wir gerade selbst gesendet haben
+    // → echte manuelle IG-App-Antwort von außerhalb. Als human_agent speichern.
     await svc.from("chat_messages").insert({
       session_id:  session.id,
       role:        "human_agent",
@@ -203,7 +228,7 @@ async function handleInstagramOrMessenger(m: MessagingItem, source: "instagram" 
     await svc.from("chat_sessions").update({
       last_message_at: new Date().toISOString(),
     }).eq("id", session.id);
-    console.log(`[meta-webhook] echo: stored as human_agent in session ${session.id}`);
+    console.log(`[meta-webhook] echo: stored as human_agent (external) in session ${session.id}`);
     return;
   }
 
