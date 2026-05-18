@@ -21,11 +21,6 @@ interface RespondResult {
 interface RespondOptions {
   /** Wenn true: Text NICHT in chat_messages speichern (für Bot-Begleitung-Entwurf) */
   assisted?: boolean;
-  /**
-   * ISO-Timestamp: ab wann gilt eine Kundennachricht als "im aktuellen Burst".
-   * Verhindert dass uralte unbeantwortete Fragen mit-beantwortet werden.
-   */
-  burstSinceIso?: string;
 }
 
 /**
@@ -125,54 +120,70 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
 
   if (!msgs || msgs.length === 0) return { success: false, error: "no messages" };
 
-  // OFFENE TURNS ERMITTELN — nur AKTUELLER BURST (Cluster zusammenhängender
-  // Kundennachrichten innerhalb kurzer Zeitfenster). Alte unbeantwortete
-  // Fragen von vor Wochen/Monaten werden NICHT mit-beantwortet, auch wenn
-  // technisch noch offen.
+  // OFFENE TURNS ERMITTELN — ALLE Kundennachrichten SEIT der letzten Agent-/
+  // Bot-Antwort gehören zusammen, auch wenn Tage dazwischen lagen. Beispiel:
+  // Kundin fragt Freitag abend, hakt Montag mit "hallo?" nach → beides ist
+  // dasselbe Anliegen, Bot muss BEIDE beachten.
   let openTurnsHint = "";
   {
-    const BURST_MAX_GAP_MS = 6 * 60 * 60 * 1000; // 6h zwischen Kundennachrichten = noch derselbe Burst
-    const tail = msgs.slice(-12).slice().reverse(); // jüngste zuerst
-
-    // Bis zur jüngsten Agent-/Bot-Antwort gehen
+    const tail = msgs.slice(-15).slice().reverse(); // jüngste zuerst
     const lastAgentRev = tail.findIndex(m => m.role === "assistant" || m.role === "human_agent");
-    const candidate = lastAgentRev === -1
+    const openUsrDesc = lastAgentRev === -1
       ? tail.filter(m => m.role === "user")
       : tail.slice(0, lastAgentRev).filter(m => m.role === "user");
 
-    // Cluster aufbauen: jüngste rein, dann rückwärts solange Gap < 6h
-    const burst: typeof candidate = [];
-    for (let i = 0; i < candidate.length; i++) {
-      if (i === 0) {
-        // Optionale harte Untergrenze vom Caller (z.B. setBotMode setzt das Datum
-        // der ältesten erkannten offenen Nachricht). Falls jüngste älter ist als
-        // dieses Datum, gar nichts mehr aufnehmen.
-        if (opts.burstSinceIso && candidate[0].created_at < opts.burstSinceIso) break;
-        burst.push(candidate[i]);
-        continue;
-      }
-      const prev = new Date(candidate[i - 1].created_at).getTime();
-      const cur  = new Date(candidate[i].created_at).getTime();
-      if (prev - cur > BURST_MAX_GAP_MS) break;
-      if (opts.burstSinceIso && candidate[i].created_at < opts.burstSinceIso) break;
-      burst.push(candidate[i]);
-    }
+    if (openUsrDesc.length > 0) {
+      const orderedOldestFirst = openUsrDesc.slice().reverse();
 
-    if (burst.length > 1) {
-      const orderedOldestFirst = burst.slice().reverse();
-      openTurnsHint =
-        `\n\n## OFFENE KUNDEN-NACHRICHTEN — AKTUELLER BURST (${burst.length} Stück, in zeitlicher Reihenfolge)\n` +
-        orderedOldestFirst.map((m, i) => `${i + 1}. ${m.content}`).join("\n") +
-        `\n\n→ Diese Nachrichten kamen vom Kunden NACHEINANDER und gehören zum aktuellen Anliegen. ` +
-        `Beantworte sie als ZUSAMMENHÄNGENDEN BLOCK in EINER Antwort — natürlich wie eine echte ` +
-        `Mitarbeiterin, nicht Punkt für Punkt abgearbeitet. ` +
-        `WICHTIG: Falls es im Verlauf noch ältere unbeantwortete Fragen gab (vor diesem Burst), ` +
-        `NICHT mit-beantworten — die sind veraltet. Konzentriere dich NUR auf den aktuellen Burst.`;
-    } else if (burst.length === 1) {
-      openTurnsHint =
-        `\n\n## OFFENE KUNDEN-NACHRICHT\nDer Kunde hat eine aktuelle Frage. Beziehe den bisherigen ` +
-        `Verlauf ein (was wurde schon geklärt — Haarstruktur, Farbe, Methode), aber beantworte NUR ` +
-        `die aktuelle Frage. Eventuelle ältere offene Fragen aus früheren Phasen NICHT mit-aufgreifen.`;
+      // Stille-Hinweise zwischen aufeinanderfolgenden Kundennachrichten
+      const gapNotes: string[] = [];
+      for (let i = 1; i < orderedOldestFirst.length; i++) {
+        const prevT = new Date(orderedOldestFirst[i - 1].created_at).getTime();
+        const curT  = new Date(orderedOldestFirst[i].created_at).getTime();
+        const hours = Math.round((curT - prevT) / 3600000);
+        if (hours >= 24) {
+          const days = Math.round(hours / 24);
+          gapNotes.push(`Zwischen Nachricht ${i} und ${i + 1} lagen ~${days} Tag${days === 1 ? "" : "e"} Stille.`);
+        }
+      }
+
+      // Stille seit der jüngsten offenen Frage bis JETZT — falls Mitarbeiter
+      // den Begleitmodus erst Tage später aktiviert
+      const youngestT = new Date(orderedOldestFirst[orderedOldestFirst.length - 1].created_at).getTime();
+      const hoursSinceYoungest = Math.round((Date.now() - youngestT) / 3600000);
+
+      if (openUsrDesc.length > 1) {
+        openTurnsHint =
+          `\n\n## OFFENE KUNDEN-NACHRICHTEN (${openUsrDesc.length} Stück seit letzter Antwort von uns)\n` +
+          orderedOldestFirst.map((m, i) => {
+            const dt = new Date(m.created_at);
+            const fmt = `${dt.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })} ${dt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
+            return `${i + 1}. [${fmt}] ${m.content}`;
+          }).join("\n");
+
+        if (gapNotes.length > 0) {
+          openTurnsHint += `\n\nZeitlicher Verlauf:\n- ` + gapNotes.join("\n- ");
+        }
+        if (hoursSinceYoungest >= 24) {
+          const days = Math.round(hoursSinceYoungest / 24);
+          openTurnsHint += `\n- Seit der letzten Kundennachricht sind ~${days} Tag${days === 1 ? "" : "e"} vergangen — eine Entschuldigung für die späte Antwort ist angebracht.`;
+        }
+
+        openTurnsHint +=
+          `\n\n→ ALLE diese Nachrichten gehören zum SELBEN Anliegen (es kam zwischendurch keine Antwort von uns). ` +
+          `Beantworte sie als ZUSAMMENHÄNGENDEN BLOCK in EINER Antwort — natürlich wie eine echte Mitarbeiterin, ` +
+          `nicht stur Punkt für Punkt. Greife die ältere Sachfrage genauso auf wie das spätere Nachhaken. ` +
+          `Wenn lange Stille dazwischen lag: kurz entschuldigen, dann inhaltlich antworten.`;
+      } else {
+        openTurnsHint =
+          `\n\n## OFFENE KUNDEN-NACHRICHT\nDer Kunde hat eine Frage, die noch unbeantwortet ist. ` +
+          `Achte auf den GESAMTEN bisherigen Verlauf — was wurde schon besprochen (Haarstruktur, Farbe, ` +
+          `Methode), was wurde versprochen.`;
+        if (hoursSinceYoungest >= 24) {
+          const days = Math.round(hoursSinceYoungest / 24);
+          openTurnsHint += ` Seit der Frage sind ~${days} Tag${days === 1 ? "" : "e"} vergangen — kurz für die späte Antwort entschuldigen, dann inhaltlich antworten.`;
+        }
+      }
     }
   }
   if (openTurnsHint) systemPrompt += openTurnsHint;

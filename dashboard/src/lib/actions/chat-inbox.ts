@@ -138,34 +138,18 @@ export async function setBotMode(sessionId: string, mode: "auto" | "assisted" | 
         .limit(10);
 
       const msgs = recent || [];
-      // Wir suchen die jüngste Agent-/Bot-Antwort. Alle Kundennachrichten
-      // DANACH sind grundsätzlich "offen".
+      // CLUSTER = alle Kundennachrichten SEIT der letzten Agent-/Bot-Antwort.
+      // KEINE Zeit-Gap-Trennung: wenn Kunde Freitag fragt und Montag nachhakt,
+      // gehört das zusammen — Bot soll auch die Freitags-Frage angucken.
       const lastAgentIdx = msgs.findIndex(m => m.role === "assistant" || m.role === "human_agent");
-      const candidateOpen =
+      const openCustomerMsgs =
         lastAgentIdx === -1
           ? msgs.filter(m => m.role === "user")
           : msgs.slice(0, lastAgentIdx).filter(m => m.role === "user");
 
-      // CLUSTER-CUTOFF: nur den aktuellen Burst aufnehmen, KEINE alten
-      // unbeantworteten Fragen von vor Wochen/Monaten zusammen mit heutigen
-      // Fragen beantworten lassen.
-      //
-      // Regel: Liste ist absteigend (jüngste zuerst). Wir starten beim
-      // jüngsten und gehen rückwärts. Sobald die Lücke zwischen zwei
-      // aufeinanderfolgenden Kundennachrichten > 6h ist, brechen wir ab.
-      const BURST_MAX_GAP_MS = 6 * 60 * 60 * 1000;
-      const openCustomerMsgs: typeof candidateOpen = [];
-      for (let i = 0; i < candidateOpen.length; i++) {
-        if (i === 0) { openCustomerMsgs.push(candidateOpen[i]); continue; }
-        const prev = new Date(candidateOpen[i - 1].created_at).getTime();
-        const cur  = new Date(candidateOpen[i].created_at).getTime();
-        if (prev - cur > BURST_MAX_GAP_MS) break; // zu großer Sprung — Cluster zuende
-        openCustomerMsgs.push(candidateOpen[i]);
-      }
-
-      // Zusätzlich: jüngste Frage muss < 30 Tage alt sein, sonst kein Auto-Draft
-      // (sehr alte Sessions reaktivieren wir nicht von selbst).
-      const STALE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+      // STALE-SCHUTZ: Sessions wo selbst die JÜNGSTE offene Frage älter als
+      // 60 Tage ist, werden nicht von selbst reaktiviert.
+      const STALE_MAX_AGE_MS = 60 * 24 * 60 * 60 * 1000;
       if (openCustomerMsgs.length > 0) {
         const youngest = new Date(openCustomerMsgs[0].created_at).getTime();
         if (Date.now() - youngest > STALE_MAX_AGE_MS) {
@@ -175,12 +159,10 @@ export async function setBotMode(sessionId: string, mode: "auto" | "assisted" | 
 
       if (openCustomerMsgs.length > 0) {
         const triggerMsg = openCustomerMsgs[openCustomerMsgs.length - 1];
-        // Cluster-Range für den Prompt-Hint an respondAsBot
-        const burstSinceIso = openCustomerMsgs[openCustomerMsgs.length - 1].created_at;
 
         try {
           const { respondAsBot } = await import("@/lib/chatbot/respond");
-          const result = await respondAsBot(sessionId, { assisted: true, burstSinceIso });
+          const result = await respondAsBot(sessionId, { assisted: true });
           if (result.success && result.text) {
             await svc.from("chat_drafts").insert({
               session_id:    sessionId,
