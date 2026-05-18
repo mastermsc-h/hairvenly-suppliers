@@ -36,36 +36,59 @@ interface GraphConversation {
 }
 
 export async function POST(req: NextRequest) {
-  const profile = await requireProfile();
-  if (!profile.is_admin) {
-    return NextResponse.json({ error: "admin only" }, { status: 403 });
-  }
+  try {
+    let profile;
+    try {
+      profile = await requireProfile();
+    } catch (e) {
+      return NextResponse.json({ error: "auth", details: (e as Error).message }, { status: 401 });
+    }
+    if (!profile.is_admin) {
+      return NextResponse.json({ error: "admin only" }, { status: 403 });
+    }
 
-  const url = new URL(req.url);
-  const convoLimit = Math.min(Number(url.searchParams.get("limit") || 100), 200);
+    const url = new URL(req.url);
+    const convoLimit = Math.min(Number(url.searchParams.get("limit") || 50), 200);
 
-  const token   = process.env.META_PAGE_ACCESS_TOKEN;
-  const igUserId = process.env.META_INSTAGRAM_USER_ID;
-  if (!token || !igUserId) {
-    return NextResponse.json({ error: "META_PAGE_ACCESS_TOKEN / META_INSTAGRAM_USER_ID fehlt" }, { status: 500 });
-  }
-  const host = token.startsWith("IGAA") ? "https://graph.instagram.com" : "https://graph.facebook.com";
+    const token   = process.env.META_PAGE_ACCESS_TOKEN;
+    const igUserId = process.env.META_INSTAGRAM_USER_ID;
+    if (!token || !igUserId) {
+      return NextResponse.json({ error: "META_PAGE_ACCESS_TOKEN / META_INSTAGRAM_USER_ID fehlt" }, { status: 500 });
+    }
+    const host = token.startsWith("IGAA") ? "https://graph.instagram.com" : "https://graph.facebook.com";
 
-  // 1. Conversations holen
-  const convoRes = await fetch(
-    `${host}/${GRAPH_VERSION}/${igUserId}/conversations?platform=instagram` +
-    `&fields=id,updated_time,participants,messages.limit(50){id,created_time,from,to,message,attachments}` +
-    `&limit=${convoLimit}&access_token=${encodeURIComponent(token)}`,
-  );
-  const convoJson = await convoRes.json();
-  if (!convoRes.ok) {
-    return NextResponse.json({
-      error: "Graph API Fehler",
-      details: convoJson.error?.message || `HTTP ${convoRes.status}`,
-    }, { status: 502 });
-  }
+    // 1. Conversations holen
+    console.log(`[sync-instagram] fetching conversations from ${host}, limit=${convoLimit}`);
+    const convoUrl = `${host}/${GRAPH_VERSION}/${igUserId}/conversations?platform=instagram` +
+      `&fields=id,updated_time,participants,messages.limit(25){id,created_time,from,to,message,attachments}` +
+      `&limit=${convoLimit}&access_token=${encodeURIComponent(token)}`;
+    let convoRes: Response;
+    try {
+      convoRes = await fetch(convoUrl);
+    } catch (e) {
+      return NextResponse.json({ error: "fetch failed", details: (e as Error).message }, { status: 502 });
+    }
+    const convoText = await convoRes.text();
+    let convoJson: { data?: GraphConversation[]; error?: { message?: string } };
+    try {
+      convoJson = JSON.parse(convoText);
+    } catch {
+      return NextResponse.json({
+        error: "Graph API gab kein JSON zurück",
+        details: convoText.slice(0, 500),
+        status: convoRes.status,
+      }, { status: 502 });
+    }
+    if (!convoRes.ok) {
+      return NextResponse.json({
+        error: "Graph API Fehler",
+        details: convoJson.error?.message || `HTTP ${convoRes.status}`,
+        full: convoJson,
+      }, { status: 502 });
+    }
 
-  const convos = (convoJson.data || []) as GraphConversation[];
+    const convos = (convoJson.data || []) as GraphConversation[];
+    console.log(`[sync-instagram] got ${convos.length} conversations`);
 
   const svc = createServiceClient();
   let createdSessions = 0;
@@ -187,11 +210,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({
-    conversations_seen:    convos.length,
-    sessions_created:      createdSessions,
-    messages_created:      createdMessages,
-    messages_skipped:      skippedExisting,
-    errors,
-  });
+    return NextResponse.json({
+      conversations_seen:    convos.length,
+      sessions_created:      createdSessions,
+      messages_created:      createdMessages,
+      messages_skipped:      skippedExisting,
+      errors,
+    });
+  } catch (e) {
+    console.error("[sync-instagram] uncaught:", e);
+    return NextResponse.json({
+      error: "uncaught",
+      details: (e as Error).message,
+      stack: (e as Error).stack?.slice(0, 1000),
+    }, { status: 500 });
+  }
 }
