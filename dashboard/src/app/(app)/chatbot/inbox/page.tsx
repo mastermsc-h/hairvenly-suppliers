@@ -11,8 +11,10 @@ import DefaultBotModeToggle from "./default-bot-mode-toggle";
 import ClassifyBackfillButton from "./classify-backfill-button";
 
 interface PageProps {
-  searchParams: Promise<{ status?: string; mode?: string; channel?: string; category?: string; q?: string; unread?: string }>;
+  searchParams: Promise<{ status?: string; mode?: string; channel?: string; category?: string; q?: string; unread?: string; limit?: string }>;
 }
+
+const PAGE_SIZE = 50;
 
 const CATEGORY_LABELS: Record<string, { label: string; emoji: string }> = {
   availability: { label: "Verfügbarkeit", emoji: "📦" },
@@ -59,7 +61,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   const channelFilter = params.channel  || "all"; // 'all' | 'web' | 'instagram' | 'whatsapp'
   const categoryFilter = params.category || "all";
   const searchQuery    = (params.q || "").trim();
-  const onlyUnread     = params.unread === "1";
+  // Default = nur unbeantwortet. User kann via "unread=0" alles anzeigen.
+  const onlyUnread     = params.unread !== "0";
+  // Pagination: max 50 pro "Klick", über "Weitere laden" wird der Limit erhöht
+  const limit = Math.min(Math.max(Number(params.limit) || PAGE_SIZE, PAGE_SIZE), 1000);
 
   const svc = createServiceClient();
   let query = svc
@@ -70,7 +75,9 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
       assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
     `)
     .order("last_message_at", { ascending: false })
-    .limit(200);
+    // Candidate-Pool deutlich größer als das Anzeige-Limit — Filter (unread/mode/...)
+    // arbeiten in JS, daher brauchen wir Headroom. 500 reicht für > 50 unread + Filter.
+    .limit(500);
 
   if (filter !== "all")        query = query.eq("status", filter);
   if (channelFilter !== "all") query = query.eq("channel", channelFilter);
@@ -194,6 +201,11 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
       });
   }
 
+  // Pagination: total nach Filter merken, dann auf "limit" trimmen
+  const totalAfterFilters = filteredSessions.length;
+  const hasMore = totalAfterFilters > limit;
+  filteredSessions = filteredSessions.slice(0, limit);
+
   const pureBotCount   = combinedSessions.filter(s => (stats[s.id]?.humanCount || 0) === 0).length;
   const withHumanCount = combinedSessions.filter(s => (stats[s.id]?.humanCount || 0) > 0).length;
 
@@ -232,7 +244,8 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
               if (channelFilter !== "all") next.set("channel",  channelFilter);
               if (categoryFilter !== "all") next.set("category", categoryFilter);
               if (searchQuery)             next.set("q",        searchQuery);
-              if (!onlyUnread)             next.set("unread",   "1");
+              // Default ist jetzt "nur unbeantwortet" — zum Aufheben explizit unread=0 setzen
+              if (onlyUnread) next.set("unread", "0");
               const qs = next.toString();
               return `/chatbot/inbox${qs ? "?" + qs : ""}`;
             })()}
@@ -242,10 +255,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 : "bg-white text-pink-700 border-pink-300 hover:bg-pink-50"
             }`}
             title={onlyUnread
-              ? "Filter aktiv — Klick zum Aufheben"
+              ? "Filter aktiv — Klick zeigt ALLE Sessions (auch beantwortete)"
               : "Nur Sessions zeigen, bei denen die Kundin zuletzt geschrieben hat"}
           >
-            🔔 Nur unbeantwortet
+            🔔 {onlyUnread ? "Nur unbeantwortet" : "Alle Sessions"}
             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
               onlyUnread ? "bg-white/25 text-white" : "bg-pink-100 text-pink-700"
             }`}>
@@ -293,7 +306,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 ...(c !== "all" ? { channel: c } : {}),
                 ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
                 ...(searchQuery ? { q: searchQuery } : {}),
-                ...(onlyUnread ? { unread: "1" } : {}),
+                ...(!onlyUnread ? { unread: "0" } : {}),
               }).toString()}`}
               className={`text-xs px-3 py-1.5 rounded-full border ${
                 channelFilter === c
@@ -320,7 +333,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
                 ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
                 ...(searchQuery ? { q: searchQuery } : {}),
-                ...(onlyUnread ? { unread: "1" } : {}),
+                ...(!onlyUnread ? { unread: "0" } : {}),
               }).toString()}`}
               className={`text-xs px-3 py-1.5 rounded-full border ${
                 filter === s
@@ -347,7 +360,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
               ...(mode !== "all" ? { mode } : {}),
               ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
               ...(searchQuery ? { q: searchQuery } : {}),
-              ...(onlyUnread ? { unread: "1" } : {}),
+              ...(!onlyUnread ? { unread: "0" } : {}),
             }).toString()}`}
             className={`text-xs px-3 py-1.5 rounded-full border ${
               categoryFilter === "all"
@@ -367,7 +380,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                   ...(mode !== "all" ? { mode } : {}),
                   ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
                   ...(searchQuery ? { q: searchQuery } : {}),
-                  ...(onlyUnread ? { unread: "1" } : {}),
+                  ...(!onlyUnread ? { unread: "0" } : {}),
                   category: key,
                 }).toString()}`}
                 className={`text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1 ${
@@ -402,7 +415,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
                 ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
                 ...(searchQuery ? { q: searchQuery } : {}),
-                ...(onlyUnread ? { unread: "1" } : {}),
+                ...(!onlyUnread ? { unread: "0" } : {}),
               }).toString()}`}
               className={`text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1 ${
                 mode === opt.key
@@ -582,6 +595,36 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
               })}
             </ul>
           </Suspense>
+        )}
+
+        {/* Pagination — "Weitere laden" Button am Listenende */}
+        {hasMore && (
+          <div className="border-t border-neutral-100 p-4 text-center">
+            <Link
+              href={(() => {
+                const next = new URLSearchParams();
+                if (filter !== "all")         next.set("status",   filter);
+                if (mode !== "all")           next.set("mode",     mode);
+                if (channelFilter !== "all")  next.set("channel",  channelFilter);
+                if (categoryFilter !== "all") next.set("category", categoryFilter);
+                if (searchQuery)              next.set("q",        searchQuery);
+                if (!onlyUnread)              next.set("unread",   "0");
+                next.set("limit", String(limit + PAGE_SIZE));
+                return `/chatbot/inbox?${next.toString()}`;
+              })()}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neutral-100 text-neutral-700 hover:bg-neutral-200 text-sm font-medium transition"
+            >
+              Weitere {Math.min(PAGE_SIZE, totalAfterFilters - limit)} laden
+              <span className="text-xs text-neutral-500">
+                ({limit} von {totalAfterFilters} angezeigt)
+              </span>
+            </Link>
+          </div>
+        )}
+        {!hasMore && filteredSessions.length > PAGE_SIZE && (
+          <div className="border-t border-neutral-100 p-3 text-center text-xs text-neutral-400">
+            Alle {filteredSessions.length} Sessions angezeigt
+          </div>
         )}
       </div>
     </div>
