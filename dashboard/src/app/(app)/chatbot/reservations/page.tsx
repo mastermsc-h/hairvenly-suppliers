@@ -3,6 +3,7 @@ import { requireProfile } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { Mail, MessageSquare, Clock, CheckCircle2, XCircle, Bot } from "lucide-react";
 import ReservationRow from "./reservation-row";
+import StockCheckButton from "./stock-check-button";
 
 export const dynamic = "force-dynamic";
 
@@ -33,10 +34,13 @@ export default async function ReservationsPage({ searchParams }: PageProps) {
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
-      <div className="flex items-center gap-2">
-        <Mail size={20} className="text-neutral-700" />
-        <h1 className="text-xl font-semibold text-neutral-900">Reservierungen / Warteliste</h1>
-        <span className="text-sm text-neutral-500 ml-2">Kundinnen warten auf Wareneingang — 1-Klick-Benachrichtigung wenn da</span>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Mail size={20} className="text-neutral-700" />
+          <h1 className="text-xl font-semibold text-neutral-900">Reservierungen / Warteliste</h1>
+          <span className="text-sm text-neutral-500 ml-2">Kundinnen warten auf Wareneingang — 1-Klick-Benachrichtigung wenn da</span>
+        </div>
+        <StockCheckButton />
       </div>
 
       <div className="grid grid-cols-3 gap-4">

@@ -162,6 +162,98 @@ export async function updateReservationNotes(reservationId: string, notes: strin
   revalidatePath("/chatbot/reservations");
 }
 
+export interface StockCheckResult {
+  reservationId: string;
+  productName: string;
+  status: "in_stock" | "unterwegs" | "out_of_stock" | "unknown";
+  eta?: string;
+  matchedProduct?: string;
+}
+
+/**
+ * Lager-Scan: prüft für jede "waiting" Reservierung, ob das Produkt aktuell
+ * im Lager / unterwegs / ausverkauft ist. Liest aus den Stock-Sheets
+ * (gleiche Quelle wie das get_stock_eta Tool des Bots) — keine extra DB,
+ * keine extra Auflösung nötig.
+ */
+export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]> {
+  const svc = createServiceClient();
+  const { data: rows } = await svc
+    .from("chat_reservations")
+    .select("id, product_name, color, method")
+    .eq("status", "waiting");
+
+  if (!rows || rows.length === 0) return [];
+
+  const { readDashboardAlerts, readInventorySheet } = await import("@/lib/stock-sheets");
+  const [{ unterwegs, nullbestand }, ruSheet, uzSheet] = await Promise.all([
+    readDashboardAlerts(),
+    readInventorySheet("Russisch - GLATT"),
+    readInventorySheet("Usbekisch - WELLIG"),
+  ]);
+  const allInventory = [...ruSheet.rows, ...uzSheet.rows];
+
+  // Reuse get_stock_eta-Logik: Tokens bauen (color + method + base product_name),
+  // dann Substring-Match gegen die Sheet-Produktnamen.
+  const tokenize = (s: string): string[] => {
+    const STOP = new Set(["und", "in", "die", "der", "das", "russisch", "russische", "usbekisch", "usbekische", "tape", "tapes", "extension", "extensions"]);
+    return s
+      .toLowerCase()
+      .replace(/[^a-z0-9äöüß\s]+/gi, " ")
+      .split(/\s+/)
+      .filter(t => t && t.length > 1 && !STOP.has(t));
+  };
+  const matchTokens = (toks: string[]) => (text: string) => {
+    const hay = text.toLowerCase();
+    return toks.every(t => hay.includes(t));
+  };
+
+  const results: StockCheckResult[] = [];
+  for (const r of rows) {
+    const searchStr = [r.color, r.method, r.product_name].filter(Boolean).join(" ");
+    const tokens = tokenize(searchStr);
+    if (tokens.length === 0) {
+      results.push({ reservationId: r.id, productName: r.product_name, status: "unknown" });
+      continue;
+    }
+    const matcher = matchTokens(tokens);
+    const stocked = allInventory.filter(row => matcher(`${row.collection} ${row.product}`) && row.quantity > 0);
+    if (stocked.length > 0) {
+      results.push({
+        reservationId: r.id,
+        productName: r.product_name,
+        status: "in_stock",
+        matchedProduct: stocked[0].product,
+      });
+      continue;
+    }
+    const onTheWay = unterwegs.filter(u => matcher(`${u.collection} ${u.product}`));
+    if (onTheWay.length > 0) {
+      const eta = onTheWay[0].perOrder?.[0]?.ankunft || "bald";
+      results.push({
+        reservationId: r.id,
+        productName: r.product_name,
+        status: "unterwegs",
+        eta,
+        matchedProduct: onTheWay[0].product,
+      });
+      continue;
+    }
+    const oos = nullbestand.filter(p => matcher(`${p.collection} ${p.product}`));
+    if (oos.length > 0) {
+      results.push({
+        reservationId: r.id,
+        productName: r.product_name,
+        status: "out_of_stock",
+        matchedProduct: oos[0].product,
+      });
+      continue;
+    }
+    results.push({ reservationId: r.id, productName: r.product_name, status: "unknown" });
+  }
+  return results;
+}
+
 /** Komplett löschen */
 export async function deleteReservation(reservationId: string) {
   const svc = createServiceClient();
