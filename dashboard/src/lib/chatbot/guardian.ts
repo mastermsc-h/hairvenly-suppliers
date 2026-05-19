@@ -15,6 +15,11 @@ ALERT-TYPEN (nur prüfen — nicht zwanghaft welche finden):
 - "unhappy_customer": Kunde ist frustriert, sauer, enttäuscht (Sprachmuster: "schade", "nicht zufrieden", "echt jetzt?", lange Beschwerden, Caps-Lock)
 - "lost_deal_risk": Kunde hat klare Kaufabsicht gezeigt (konkrete Methode/Farbe/Menge genannt) aber Team hat nicht abgeschlossen (kein "soll ich dir den Link schicken?", kein Termin-Vorschlag, kein Closing)
 - "missed_followup": Team hat eine offene Frage gestellt aber dann nichts gemacht wenn Kunde nicht antwortet — oder umgekehrt: Kunde hat konkrete Frage gestellt die nie beantwortet wurde
+- "no_alternative_offered": Team hat eine konkrete Kunden-Anfrage (z.B. Wunschtermin am Datum X, bestimmtes Produkt, bestimmte Farbe) abgelehnt OHNE eine Alternative anzubieten. Beispiele die IMMER einen Alert auslösen MÜSSEN:
+   • "am 29.05. leider kein Termin mehr frei" ohne nach Flexibilität (paar Tage vor/nach) zu fragen oder Benachrichtigung bei Frei-Werden anzubieten
+   • "leider ausverkauft" ohne Alternative (andere Länge, andere Linie, Benachrichtigung, ETA)
+   • "geht leider nicht" ohne Workaround-Vorschlag
+   Severity: WARNING (oder critical wenn Kundin Dringlichkeit signalisiert — "dringend", "brauche unbedingt")
 - "bad_phrase_used": Team hat deflectierend geantwortet ("leider nicht", "schau auf der Webseite") ohne Alternative anzubieten
 - "rude_or_dismissive": Team-Antwort war kurz angebunden, unfreundlich, hat den Kunden abgewimmelt
 - "no_effort": Team hat nur Standard-Floskeln geliefert, keine Mühe gegeben (3-Wort-Antworten ohne Inhalt, generische Sätze)
@@ -59,7 +64,9 @@ export async function analyzeSession(sessionId: string): Promise<AlertOut[]> {
     .order("created_at", { ascending: true })
     .limit(40);
 
-  if (!msgs || msgs.length < 3) return [];
+  // Auch kurze Sessions (2 Messages: 1 Kunde + 1 Team-Antwort) müssen geprüft werden,
+  // weil genau dort oft "abgewimmelt"-Antworten passieren ohne Alternative.
+  if (!msgs || msgs.length < 2) return [];
 
   const transcript = msgs.map(m => {
     const role = m.role === "user" ? "Kunde" : m.role === "assistant" ? "Bot" : "Team";
