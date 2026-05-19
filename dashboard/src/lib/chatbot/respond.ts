@@ -332,12 +332,39 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       }
     }
   }
+  // BEGRÜSSUNGS-REGEL: dynamisch je nach Zeit seit letztem Bot/Agent-Message
+  // Wenn unsere letzte Antwort < 12h her ist → KEINE neue Begrüßung am Anfang
+  // (das hatte der User mehrfach explizit gefordert)
+  let greetingHint = "";
+  {
+    const lastOurMsg = msgs.slice().reverse().find(m => m.role === "assistant" || m.role === "human_agent");
+    if (lastOurMsg) {
+      const hoursAgo = (Date.now() - new Date(lastOurMsg.created_at).getTime()) / 3600000;
+      if (hoursAgo < 12) {
+        greetingHint = `\n\n## ❌ KEINE BEGRÜSSUNG am Anfang!
+Unsere letzte Antwort kam vor ca. ${Math.round(hoursAgo)} Stunden — die Konversation läuft. Beginne NICHT mit "Hey 💕" / "Hallo Liebes" / "Hi 💕" etc.
+Starte direkt mit der inhaltlichen Antwort. Beispiel:
+
+❌ "Hey 💕 Zum Versand..."
+✅ "Zum Versand..."
+
+❌ "Hallo Liebes! Bei deiner Frage..."
+✅ "Bei deiner Frage..."`;
+      } else if (hoursAgo > 24 * 7) {
+        // Sehr lange Pause → warme Begrüßung erlaubt
+        greetingHint = `\n\n## ✅ Begrüßung am Anfang ist OK
+Unsere letzte Antwort ist >7 Tage her — eine warme Begrüßung ("Hi Liebes 💕") passt hier.`;
+      }
+      // Zwischen 12h-7d: keine spezielle Anweisung, Bot entscheidet kontext-basiert
+    }
+  }
+
   // Wichtig: systemPrompt (= persona + avatar + training + strategies) bleibt STABIL
   // pro Avatar und wird via Prompt-Caching wiederverwendet. Variable Teile
-  // (openTurnsHint, sorry-hint) gehen in einen separaten Block — werden nicht
-  // gecacht, sind aber pro Call eh klein.
+  // (openTurnsHint, sorry-hint, greetingHint) gehen in einen separaten Block —
+  // werden nicht gecacht, sind aber pro Call eh klein.
   const systemPromptStable = systemPrompt;
-  const systemPromptVariable = openTurnsHint;
+  const systemPromptVariable = openTurnsHint + greetingHint;
 
   const messages: Anthropic.MessageParam[] = [];
   for (const m of msgs) {
