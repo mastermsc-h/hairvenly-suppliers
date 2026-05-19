@@ -331,7 +331,7 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
       if (hasRefineFeedback) tags.push("refined");
       if (hasNote) tags.push("with_strategy_note");
 
-      await svc.from("chatbot_training").insert({
+      const { error: trainErr } = await svc.from("chatbot_training").insert({
         user_message:    trigger.content,
         good_answer:     final,
         bad_answer:      hasRefineFeedback ? (refineHistory[0] as { prev_text?: string })?.prev_text || (wasEdited ? original : null) : (wasEdited ? original : null),
@@ -343,8 +343,16 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
         avatar_name:     null,
         active:          true,
         tags:            [...tags, `from_avatar:${session.bot_signature_name || "unknown"}`],
-        context_messages: contextMessages.length > 0 ? contextMessages : null,
+        // context_messages ist NOT NULL in der DB (default '[]') — niemals null senden,
+        // sonst schlägt der Insert silently fehl und es entsteht KEIN Trainings-Eintrag.
+        // Bei brandneuen Sessions (Trigger ist die erste Nachricht) ist contextMessages [].
+        context_messages: contextMessages,
       });
+      if (trainErr) {
+        console.error("[approveDraft] chatbot_training INSERT FAILED:", trainErr.code, trainErr.message);
+      } else {
+        console.log("[approveDraft] training row created", { wasEdited, hasNote, hasRefineFeedback, ctxLen: contextMessages.length });
+      }
     }
   }
 
