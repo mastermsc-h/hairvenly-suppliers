@@ -755,14 +755,108 @@ const createReservationTool: ToolDef = {
   },
 };
 
+// ── get_salon_service_price ─────────────────────────────────────────────────
+const getSalonServicePrice: ToolDef = {
+  schema: {
+    name: "get_salon_service_price",
+    description:
+      "Holt SERVICE-Preise und Dauer für Vor-Ort-Termine im Hairvenly-Salon Bremen " +
+      "(Einarbeitung, Hochsetzen, Entfernen, Coloration, Balayage, Strähnen, Schnitt). " +
+      "Das ist ANDERS als get_price (= Produkt-Preise für Extension-Verkauf): " +
+      "dieses Tool gibt die DIENSTLEISTUNG am Salon-Tag zurück. " +
+      "Nutze es wenn Kundin nach Service-Preisen fragt ('was kostet einarbeiten?', " +
+      "'wie viel kostet eine Verlängerung?', 'was kostet Bondings 100g?'). " +
+      "Optional Filter nach Service-Begriff (z.B. 'bonding', 'tape', 'balayage'). " +
+      "Bot soll am Ende immer auch auf Planity verweisen: https://www.planity.com/de-DE/hairvenly-28217-bremen",
+    input_schema: {
+      type: "object",
+      properties: {
+        search: {
+          type: "string",
+          description: "Optional: Service-Begriff (z.B. 'bondings', 'tapes', 'balayage', 'coloration', 'strähnen', 'tressen', 'entfernen', 'hochsetzen', 'mini tapes', 'invisible')",
+        },
+        haartyp: {
+          type: "string",
+          enum: ["wellig", "glatt", "any"],
+          description: "Optional: Haartyp-Filter — 'wellig' = Usbekisch, 'glatt' = Russisch",
+        },
+        gramm: {
+          type: "number",
+          description: "Optional: spezifische Menge (50, 75, 100, 125, 150)",
+        },
+      },
+    },
+  },
+  async execute(input) {
+    const svc = createServiceClient();
+    const search = (input.search as string | undefined)?.toLowerCase();
+    const haartyp = (input.haartyp as string | undefined)?.toLowerCase();
+    const gramm = input.gramm as number | undefined;
+
+    const { data, error } = await svc
+      .from("salon_services")
+      .select("category, service, price_min, price_max, duration_min")
+      .eq("active", true)
+      .order("display_order", { ascending: true })
+      .limit(120);
+
+    if (error) return { output: `Fehler: ${error.message}` };
+    let rows = (data || []) as Array<{ category: string; service: string; price_min: number | null; price_max: number | null; duration_min: number | null }>;
+
+    if (search) {
+      rows = rows.filter(r =>
+        `${r.category} ${r.service}`.toLowerCase().includes(search)
+      );
+    }
+    if (haartyp === "wellig") {
+      rows = rows.filter(r => /wellig|usbekisch/i.test(r.category) || !/glatt|russisch/i.test(r.category));
+    } else if (haartyp === "glatt") {
+      rows = rows.filter(r => /glatt|russisch|invisible|mini tapes/i.test(r.category));
+    }
+    if (gramm) {
+      rows = rows.filter(r => new RegExp(`\\b${gramm}g\\b`, "i").test(r.service));
+    }
+
+    if (rows.length === 0) {
+      return {
+        output: JSON.stringify({
+          status: "not_found",
+          message: "Kein passender Service gefunden. Verweise die Kundin auf Planity für die volle Preisliste: https://www.planity.com/de-DE/hairvenly-28217-bremen",
+        }),
+      };
+    }
+
+    const services = rows.slice(0, 20).map(r => ({
+      category: r.category,
+      service: r.service,
+      price: r.price_max ? `${r.price_min}-${r.price_max}€` : `${r.price_min}€`,
+      duration: r.duration_min ? `${r.duration_min} Min` : null,
+    }));
+
+    return {
+      output: JSON.stringify({
+        status: "ok",
+        count: services.length,
+        message:
+          "Nenne der Kundin den/die relevanten Preise KURZ und KLAR — max. 2-3 Services pro Antwort. " +
+          "Füge IMMER am Ende den Planity-Link hinzu für 'alle Preise + Termin buchen': " +
+          "https://www.planity.com/de-DE/hairvenly-28217-bremen — formuliere natürlich, nicht wie Liste.",
+        services,
+        planity_link: "https://www.planity.com/de-DE/hairvenly-28217-bremen",
+      }),
+    };
+  },
+};
+
 export const TOOLS: Record<string, ToolDef> = {
-  get_price:             getPrice,
-  search_faq:            searchFaq,
-  get_stock_eta:         getStockEta,
-  get_available_colors:  getAvailableColors,
-  analyze_hair_photo:    analyzeHairPhoto,
-  create_reservation:    createReservationTool,
-  transfer_to_human:     transferToHuman,
+  get_price:                getPrice,
+  search_faq:               searchFaq,
+  get_stock_eta:            getStockEta,
+  get_available_colors:     getAvailableColors,
+  get_salon_service_price:  getSalonServicePrice,
+  analyze_hair_photo:       analyzeHairPhoto,
+  create_reservation:       createReservationTool,
+  transfer_to_human:        transferToHuman,
 };
 
 export const TOOL_SCHEMAS = Object.values(TOOLS).map((t) => t.schema);
