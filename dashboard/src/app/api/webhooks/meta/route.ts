@@ -362,7 +362,22 @@ async function routeIncoming(opts: {
     return;
   }
 
-  if ((botMode === "auto" || botMode === "assisted") && session.status === "active") {
+  // ── AUTO-RESPOND-OVERRIDE für Standard-Eröffnungen ──
+  // Auch bei bot_mode='off' antworten wir automatisch wenn die Kundennachricht
+  // ein klares Standard-Muster ist: generische Info-Anfrage ohne Kontext,
+  // oder Farbberatungs-Wunsch ohne Foto. In beiden Fällen reagiert der Bot
+  // mit einem höflichen Opener der die Konversation für den Menschen vorbereitet.
+  let effectiveBotMode = botMode;
+  let autoOverrideType: "intro" | "color_no_photo" | null = null;
+  if (botMode === "off" && session.status === "active") {
+    autoOverrideType = detectAutoRespondType(opts.text, opts.attachments || []);
+    if (autoOverrideType) {
+      effectiveBotMode = "auto";
+      console.log(`[meta-webhook] auto-respond override (${autoOverrideType}) for session ${session.id} despite mode=off`);
+    }
+  }
+
+  if ((effectiveBotMode === "auto" || effectiveBotMode === "assisted") && session.status === "active") {
     try {
       // ── SMART DEBOUNCE ──
       // Default 6s. Aber: wenn die letzte Bot-/Mitarbeiter-Nachricht mehrere
@@ -396,16 +411,54 @@ async function routeIncoming(opts: {
       }
       // Status hat sich geändert (z.B. Mitarbeiter hat übernommen)?
       const curMode = refreshed?.bot_mode || (refreshed?.bot_auto_reply ? "auto" : "off");
-      if (refreshed?.status !== "active" || (curMode !== "auto" && curMode !== "assisted")) {
+      // Bei Auto-Respond-Override darf curMode auch 'off' sein — wir antworten trotzdem.
+      const effectiveCurMode = autoOverrideType && curMode === "off" ? "auto" : curMode;
+      if (refreshed?.status !== "active" || (effectiveCurMode !== "auto" && effectiveCurMode !== "assisted")) {
         console.log(`[meta-webhook] debounce: session no longer active+bot, skipping`);
         return;
       }
-      // Alles klar → Bot generiert
-      await triggerBotResponse(session.id, opts.channel, opts.externalId, curMode, lastUserMsg?.id);
+      // Alles klar → Bot generiert (Auto-Respond-Override forciert curMode='auto')
+      await triggerBotResponse(session.id, opts.channel, opts.externalId, effectiveCurMode, lastUserMsg?.id);
     } catch (e) {
       console.error("[meta-webhook] bot reply failed:", e);
     }
   }
+}
+
+/**
+ * Erkennt Standard-Eröffnungs-Patterns die der Bot AUTOMATISCH beantworten kann,
+ * auch wenn die Session auf bot_mode='off' steht. Spart der Mitarbeiterin
+ * generische Antworten und bereitet die Konversation vor.
+ */
+function detectAutoRespondType(text: string, attachments: { type: string; url: string }[]): "intro" | "color_no_photo" | null {
+  const t = (text || "").toLowerCase().trim();
+  const hasImages = attachments.some(a => a.type === "image" && a.url);
+  if (t.length === 0) return null;
+
+  // Pattern A: generische Info-Anfrage ohne konkreten Kontext (zu kurz für klare Beratung)
+  const introPatterns = [
+    /\b(mehr\s+info|kann\s+ich.{0,15}info|könnte\s+ich.{0,15}info|hätte\s+gern.{0,15}info|info[s]?\s+(?:bekommen|kriegen|haben|hätte))/,
+    /\b(hierzu|dazu)\s+(?:mehr|noch|weitere)\b.*info/,
+    /^(hallo|hi|hey|servus|moin)[\s!.?]*$/,
+    /^(hallo|hi|hey)[\s,!]+(?:könnte|kannst du|kann ich|hast du)\b.{0,40}\b(info|hilfe|fragen?)/,
+    /\binteressiere mich(?!\s+für\s+(?:tape|bonding|tressen|clip|verlängerung|verdichtung|haarvenly|extension|65|55|45|85|60|150g|175g|100g))/,
+  ];
+  if (introPatterns.some(p => p.test(t))) return "intro";
+
+  // Pattern B: Farbberatungs-Wunsch OHNE Foto
+  if (!hasImages) {
+    const colorPatterns = [
+      /\bwelche\s+farbe.*(?:passt|empf|ratet|nehme|kaufe|für\s+mich)/,
+      /\bfarb(?:e|en)?\s*beratung/,
+      /\bkannst\s+du\s+mir.{0,20}farbe.{0,15}(?:empfehl|sag|raten)/,
+      /\bwelche\s+(?:nuance|farbe).*meinem?\s+haar/,
+      /\b(weiß|wei[ßs])\s+nicht.{0,15}welche\s+farbe/,
+      /\bhilf(?:e|st)?.{0,10}farbwahl/,
+    ];
+    if (colorPatterns.some(p => p.test(t))) return "color_no_photo";
+  }
+
+  return null;
 }
 
 // Bot-Antwort generieren + an Channel senden ODER als Entwurf speichern (assisted mode)
