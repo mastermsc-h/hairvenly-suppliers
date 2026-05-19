@@ -70,7 +70,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   let query = svc
     .from("chat_sessions")
     .select(`
-      id, channel, customer_name, status, assigned_to, bot_signature_name,
+      id, channel, customer_name, customer_full_name, status, assigned_to, bot_signature_name,
       bot_mode, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
       assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
     `)
@@ -105,7 +105,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
       const { data: extra } = await svc
         .from("chat_sessions")
         .select(`
-          id, channel, customer_name, status, assigned_to, bot_signature_name,
+          id, channel, customer_name, customer_full_name, status, assigned_to, bot_signature_name,
           bot_mode, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
           assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
         `)
@@ -506,7 +506,18 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                       <div className={`flex items-center gap-2 ${onlyUnread ? "mb-2.5" : "mb-1.5"}`}>
                         <User size={14} className="text-neutral-400" />
                         <span className={`text-sm truncate ${isUnseen ? "font-bold text-neutral-900" : "font-normal text-neutral-700"}`}>
-                          {s.customer_name || <span className="text-neutral-400 font-normal">Unbekannt</span>}
+                          {(s as { customer_full_name?: string | null }).customer_full_name ? (
+                            <>
+                              {(s as { customer_full_name?: string | null }).customer_full_name}
+                              {s.customer_name && (
+                                <span className="ml-1.5 text-xs font-normal text-neutral-500">
+                                  {s.customer_name}
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            s.customer_name || <span className="text-neutral-400 font-normal">Unbekannt</span>
+                          )}
                         </span>
                         {isUnread && !onlyUnread && (
                           <span className="bg-pink-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide">

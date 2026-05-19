@@ -40,6 +40,7 @@ interface Props {
     assigned_to: string | null;
     bot_signature_name: string | null;
     customer_name: string | null;
+    customer_full_name: string | null;
     bot_auto_reply: boolean;
     bot_mode: "auto" | "assisted" | "off";
     category: null | "availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "general";
@@ -220,7 +221,16 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             <span className="text-neutral-400">
               {session.channel === "instagram" ? "📷" : session.channel === "whatsapp" ? "💬" : "🌐"} Kunde:
             </span>{" "}
-            <span className="font-medium">{session.customer_name || "—"}</span>
+            {session.customer_full_name ? (
+              <>
+                <span className="font-medium">{session.customer_full_name}</span>
+                {session.customer_name && (
+                  <span className="ml-1.5 text-xs text-neutral-500">{session.customer_name}</span>
+                )}
+              </>
+            ) : (
+              <span className="font-medium">{session.customer_name || "—"}</span>
+            )}
           </div>
           <div className="text-sm text-neutral-700 inline-flex items-center gap-1">
             <span className="text-neutral-400">Bot:</span>

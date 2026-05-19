@@ -13,7 +13,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { verifyMetaSignature, getInstagramUsername, sendInstagramMessage } from "@/lib/messaging/meta";
+import { verifyMetaSignature, getInstagramUsername, getInstagramUserInfo, sendInstagramMessage } from "@/lib/messaging/meta";
 
 // Vercel-Function-Timeout auf 60s setzen (Default = 10s zu kurz für Bot+Tools)
 export const maxDuration = 60;
@@ -233,9 +233,11 @@ async function handleInstagramOrMessenger(m: MessagingItem, source: "instagram" 
   }
 
   let customerName: string | undefined;
+  let customerFullName: string | undefined;
   if (source === "instagram") {
-    const username = await getInstagramUsername(senderId);
-    if (username) customerName = `@${username}`;
+    const info = await getInstagramUserInfo(senderId);
+    if (info?.username) customerName = `@${info.username}`;
+    if (info?.name) customerFullName = info.name;
   }
 
   await routeIncoming({
@@ -243,6 +245,7 @@ async function handleInstagramOrMessenger(m: MessagingItem, source: "instagram" 
     externalId: senderId,
     text,
     customerName,
+    customerFullName,
     attachments,
     messageMid: m.message?.mid,
   });
@@ -268,6 +271,7 @@ async function routeIncoming(opts: {
   text: string;
   attachments?: { type: string; url: string }[];
   customerName?: string;
+  customerFullName?: string;
   messageMid?: string;
 }) {
   const svc = createServiceClient();
@@ -303,12 +307,17 @@ async function routeIncoming(opts: {
       channel: opts.channel,
       external_id: opts.externalId,
       customer_name: opts.customerName,
+      customer_full_name: opts.customerFullName || null,
       bot_signature_name: picked,
       status: "active",
       bot_mode: defaultMode,
       bot_auto_reply: defaultMode === "auto",
     }).select().single();
     session = created;
+  } else if (opts.customerFullName && !session.customer_full_name) {
+    // Bestehende Session ohne Full-Name → backfilling beim nächsten Webhook-Hit
+    await svc.from("chat_sessions").update({ customer_full_name: opts.customerFullName }).eq("id", session.id);
+    session.customer_full_name = opts.customerFullName;
   }
 
   if (!session) return;

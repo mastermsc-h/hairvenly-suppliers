@@ -107,8 +107,10 @@ export async function sendWhatsAppMessage(
   }
 }
 
-/** Resolved IGSID (Instagram-Scoped ID aus Webhook) zu Username via Graph API */
-export async function getInstagramUsername(igsid: string): Promise<string | null> {
+/** Resolved IGSID (Instagram-Scoped ID aus Webhook) zu Username + Full Name via Graph API */
+export async function getInstagramUserInfo(
+  igsid: string,
+): Promise<{ username: string | null; name: string | null } | null> {
   const token = process.env.META_PAGE_ACCESS_TOKEN;
   if (!token) return null;
   const host = token.startsWith("IGAA") ? "https://graph.instagram.com" : "https://graph.facebook.com";
@@ -118,14 +120,20 @@ export async function getInstagramUsername(igsid: string): Promise<string | null
     );
     const data = await res.json();
     if (!res.ok) {
-      console.warn("[meta] getInstagramUsername failed:", data.error?.message);
+      console.warn("[meta] getInstagramUserInfo failed:", data.error?.message);
       return null;
     }
-    return data.username || data.name || null;
+    return { username: data.username || null, name: data.name || null };
   } catch (e) {
-    console.warn("[meta] getInstagramUsername error:", (e as Error).message);
+    console.warn("[meta] getInstagramUserInfo error:", (e as Error).message);
     return null;
   }
+}
+
+/** Backward-compat: nur den Username zurückgeben */
+export async function getInstagramUsername(igsid: string): Promise<string | null> {
+  const info = await getInstagramUserInfo(igsid);
+  return info?.username || info?.name || null;
 }
 
 /** Verifiziert Meta-Webhook-Signature (X-Hub-Signature-256 Header) */

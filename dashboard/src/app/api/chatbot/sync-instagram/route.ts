@@ -117,15 +117,34 @@ export async function POST(req: NextRequest) {
       let sessionId: string;
       if (existing) {
         sessionId = existing.id;
-      } else {
-        // Username holen falls nicht im Participant — manchmal nur ID
-        let displayName: string | undefined;
-        if (customer.username) displayName = `@${customer.username}`;
-        else if (customer.name) displayName = customer.name;
-        else {
-          const u = await getInstagramUsername(customer.id);
-          if (u) displayName = `@${u}`;
+        // Wenn die Session schon existiert aber Name fehlt: nachträglich befüllen
+        const { getInstagramUserInfo } = await import("@/lib/messaging/meta");
+        const exData = await svc.from("chat_sessions")
+          .select("customer_full_name, customer_name").eq("id", sessionId).maybeSingle();
+        if (exData.data && !exData.data.customer_full_name) {
+          const info = await getInstagramUserInfo(customer.id);
+          const fullName = customer.name || info?.name || null;
+          const igUsername = customer.username || info?.username || null;
+          const patch: { customer_full_name?: string | null; customer_name?: string } = {};
+          if (fullName) patch.customer_full_name = fullName;
+          if (igUsername && !exData.data.customer_name) patch.customer_name = `@${igUsername}`;
+          if (Object.keys(patch).length > 0) {
+            await svc.from("chat_sessions").update(patch).eq("id", sessionId);
+          }
         }
+      } else {
+        // Username + Full Name holen falls nicht im Participant — manchmal nur ID
+        let displayName: string | undefined;
+        let fullName: string | undefined;
+        if (customer.name) fullName = customer.name;
+        if (customer.username) displayName = `@${customer.username}`;
+        if (!displayName || !fullName) {
+          const { getInstagramUserInfo } = await import("@/lib/messaging/meta");
+          const info = await getInstagramUserInfo(customer.id);
+          if (info?.username && !displayName) displayName = `@${info.username}`;
+          if (info?.name && !fullName) fullName = info.name;
+        }
+        if (!displayName && fullName) displayName = fullName;
 
         // Avatar zufällig gewichtet
         const { data: avatars } = await svc.from("chatbot_avatars")
@@ -140,6 +159,7 @@ export async function POST(req: NextRequest) {
           channel: "instagram",
           external_id: customer.id,
           customer_name: displayName,
+          customer_full_name: fullName || null,
           bot_signature_name: picked,
           status: "active",
           bot_mode: "off",           // wichtig: kein Auto-Reply auf Historie
