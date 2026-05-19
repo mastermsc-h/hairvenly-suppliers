@@ -359,19 +359,16 @@ Unsere letzte Antwort ist >7 Tage her — eine warme Begrüßung ("Hi Liebes �
     }
   }
 
-  // STIL-REGEL: kein KI-typischer Gedankenstrich (—), trotzdem einfach bleiben
-  const styleRule = `\n\n## ✏️ STIL-REGEL — keine Gedankenstriche
-Vermeide den langen Gedankenstrich " — " (Em-Dash). Den nutzt sonst keiner und es klingt nach KI.
-Stattdessen: kurzer Satz mit Punkt, ein Komma, oder ganz weglassen.
+  // STIL-REGEL: Gedankenstriche sparsam, nicht jede Nachricht — sonst KI-typisch
+  const styleRule = `\n\n## ✏️ STIL-REGEL — Gedankenstriche sparsam
+Der lange Gedankenstrich " — " (Em-Dash) ist nicht verboten. Aber sobald er in fast jeder Nachricht vorkommt, klingt es nach KI.
+Faustregel: maximal EINER pro Nachricht, und nur wenn er wirklich passt. Im Zweifel ein Komma oder Punkt nehmen.
 
-❌ "Soft Blond Balayage in 65cm — sofort verfügbar."
-✅ "Soft Blond Balayage in 65cm haben wir sofort da."
-✅ "Soft Blond Balayage in 65cm. Sofort verfügbar."
+Statt jeder Antwort mit Gedankenstrich:
+❌ "Soft Blond Balayage in 65cm — sofort verfügbar. Magst du die nehmen — oder lieber warten?"
+✅ "Soft Blond Balayage in 65cm haben wir sofort da. Magst du die nehmen oder lieber warten?"
 
-❌ "Komm gerne im Showroom vorbei — Hans-Böckler-Str. 60."
-✅ "Komm gerne im Showroom vorbei, Hans-Böckler-Str. 60."
-
-Bleib trotzdem locker und einfach — keine verschachtelten Sätze. Eher zwei kurze Sätze als einer mit Gedankenstrich-Einschüben.`;
+Bleib trotzdem locker und einfach. Kurze Sätze, normale Sprache.`;
 
   // URL-REGEL: niemals URLs raten oder zusammenbauen. Nur shopify_url aus Tool-Outputs.
   const urlRule = `\n\n## 🔗 URL-REGEL — KOMPROMISSLOS
@@ -569,16 +566,28 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
   // SAFETY-NET 1: konkrete Lagerzahlen rausfiltern
   finalText = sanitizeStockLeaks(finalText);
 
-  // SAFETY-NET 1z: Em-Dash / En-Dash mit Spaces → Komma (klingt menschlicher).
-  // Klassisches KI-Pattern " — " (Word-Word-Word — Word) wird grammatikalisch
-  // i.d.R. korrekt zu ", ". En-Dash " – " genauso. Wir lassen normale Bindestriche
-  // (Compound-Words wie "Mini-Tape", "65-cm") unangetastet.
-  finalText = finalText
-    .replace(/ +[—–] +/g, ", ")   // " — " oder " – " (mit Spaces) → ", "
-    .replace(/\s*[—–]\s*\n/g, "\n") // " —\n" am Zeilenende → einfach Zeilenumbruch
-    .replace(/, ,/g, ",")          // Doppelte Kommas wegputzen
-    .replace(/,\s*\./g, ".")       // ", ." → "."
-    .replace(/ ,/g, ",");          // " ," → ","
+  // SAFETY-NET 1z: Em-Dash-Bremse — erster bleibt, ab dem zweiten ersetzen.
+  // Em-Dash an sich ist nicht falsch. Nur das KI-typische Hyperaufkommen
+  // (in jeder Nachricht mehrere) wirkt unnatürlich. Wir lassen den ersten
+  // " — " / " – " im Text stehen und ersetzen alle weiteren durch ", ".
+  // Normale Bindestriche ("Mini-Tape", "65-cm") bleiben sowieso unangetastet.
+  {
+    const dashRe = / +[—–] +/g;
+    let count = 0;
+    finalText = finalText.replace(dashRe, (m) => {
+      count++;
+      return count === 1 ? m : ", ";
+    });
+    // " —\n" am Zeilenende: nur ersetzen wenn schon einer durchgelassen wurde
+    if (count >= 1) {
+      finalText = finalText.replace(/\s*[—–]\s*\n/g, "\n");
+    }
+    // Aufräumen von durch Replace entstandenen Doppel-Kommas etc.
+    finalText = finalText
+      .replace(/, ,/g, ",")
+      .replace(/,\s*\./g, ".")
+      .replace(/ ,/g, ",");
+  }
 
   // SAFETY-NET 1a: HALLUZINIERTE URLs eliminieren
   // Jede hairvenly.de/products-URL in der finalen Antwort wird gegen die echte
