@@ -208,13 +208,19 @@ const getStockEta: ToolDef = {
       const isRussisch = /\bruss/.test(search);
       const isUsbekisch = /\busbek/.test(search);
 
-      // Match-Logik: alle Tokens müssen vorkommen, ABER:
-      //  - "russisch" matched "russische" (substring)
-      //  - "tape" matched "tapes" (substring)
-      const matchTokens = (text: string) => {
+      // Match-Logik mit ZWEI Stufen:
+      // Stufe 1 (strict): alle Tokens müssen vorkommen (substring-Match)
+      // Stufe 2 (loose): falls 0 Treffer, retry OHNE numerische Längen-/Gramm-Tokens
+      //                  ("60cm", "225g") da Produktnamen diese nicht immer enthalten
+      //                  (Clip-Ins haben [225g] aber kein "60cm" im Namen).
+      const buildMatcher = (toks: string[]) => (text: string) => {
         const hay = text.toLowerCase();
-        return tokens.every(t => hay.includes(t));
+        return toks.every(t => hay.includes(t));
       };
+      const matchTokens = buildMatcher(tokens);
+      const NUMERIC_LENGTH_GRAM = /^\d+(cm|g|gramm|gr)$/i;
+      const looseTokens = tokens.filter(t => !NUMERIC_LENGTH_GRAM.test(t));
+      const matchLoose = buildMatcher(looseTokens);
 
       // 1) Lade Dashboard (Unterwegs + Nullbestand)
       const { unterwegs, nullbestand, lastUpdated } = await readDashboardAlerts();
@@ -225,12 +231,27 @@ const getStockEta: ToolDef = {
       if (!isRussisch)  sheets.push("Usbekisch - WELLIG");
       const inventoryRows = (await Promise.all(sheets.map(s => readInventorySheet(s))))
         .flatMap(r => r.rows.map(row => ({ ...row, _sheet: r === undefined ? "" : "" })));
-      const inventoryMatches = inventoryRows.filter(r => matchTokens(`${r.collection} ${r.product}`));
 
-      // 3) Match in Unterwegs
-      const inUnterwegs = unterwegs.filter(item => matchTokens(`${item.collection} ${item.product}`));
-      // 4) Match in Nullbestand
-      const inNullbestand = nullbestand.filter(item => matchTokens(`${item.collection} ${item.product}`));
+      let inventoryMatches = inventoryRows.filter(r => matchTokens(`${r.collection} ${r.product}`));
+      let inUnterwegs = unterwegs.filter(item => matchTokens(`${item.collection} ${item.product}`));
+      let inNullbestand = nullbestand.filter(item => matchTokens(`${item.collection} ${item.product}`));
+
+      // FALLBACK: wenn strict 0 Treffer hat UND wir haben Längen/Gramm-Tokens entfernt,
+      // versuche nochmal loose. Beispiel: Bot sucht "RAW 60cm 225g Clip" — Produktname
+      // im Sheet ist "#RAW - INVISIBLE CLIP EXTENSIONS - SCHWARZBRAUN [225g]" (kein "60cm").
+      // Strict scheitert wegen "60cm", loose findet den Treffer.
+      if (
+        inventoryMatches.length === 0 &&
+        inUnterwegs.length === 0 &&
+        inNullbestand.length === 0 &&
+        looseTokens.length > 0 &&
+        looseTokens.length < tokens.length
+      ) {
+        inventoryMatches = inventoryRows.filter(r => matchLoose(`${r.collection} ${r.product}`));
+        inUnterwegs = unterwegs.filter(item => matchLoose(`${item.collection} ${item.product}`));
+        inNullbestand = nullbestand.filter(item => matchLoose(`${item.collection} ${item.product}`));
+        console.log(`[get_stock_eta] loose-fallback aktiviert (Tokens: ${JSON.stringify(tokens)} → ${JSON.stringify(looseTokens)}), Treffer: inv=${inventoryMatches.length}, unterwegs=${inUnterwegs.length}, null=${inNullbestand.length}`);
+      }
 
       // ENTSCHEIDUNGSBAUM:
 
