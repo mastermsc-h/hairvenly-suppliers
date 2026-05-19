@@ -580,44 +580,41 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         </span>
                       </div>
 
-                      {/* Vorschau: NUR die wirklich letzte Nachricht der Session — egal von wem.
-                          Vorher haben wir Kundennachricht + unsere Antwort gepaart, das suggerierte
-                          oft einen falschen Zusammenhang (alte Antwort + neue Kundenfrage zu anderem
-                          Thema). Rollen-Icon + Bold-Optik + Zeitstempel reichen für den Kontext. */}
-                      {st.lastMsg && (() => {
-                        const role = st.lastMsgRole;
-                        const isCustomer = role === "user";
-                        const isHumanAgent = role === "human_agent";
-                        return (
-                          <div className="flex gap-2 text-sm">
-                            <span
-                              className={`shrink-0 mt-0.5 ${
-                                isCustomer
-                                  ? "text-neutral-400"
-                                  : (isHumanAgent || lastReplyViaIgApp)
-                                  ? "text-amber-600"
-                                  : "text-pink-500"
-                              }`}
-                              title={
-                                isCustomer
-                                  ? "Letzte Nachricht von der Kundin"
-                                  : isHumanAgent
-                                  ? "Letzte Mitarbeiter-Antwort"
-                                  : "Letzte Bot-Antwort"
-                              }
-                            >
-                              {isCustomer
-                                ? <User size={13} />
-                                : (isHumanAgent || lastReplyViaIgApp)
-                                ? <UserCheck size={13} />
-                                : <Bot size={13} />}
-                            </span>
-                            <span className={`line-clamp-2 ${isCustomer && isUnseen ? "text-neutral-900 font-medium" : "text-neutral-600"}`}>
-                              {st.lastMsg}
-                            </span>
-                          </div>
-                        );
-                      })()}
+                      {/* Vorschau-Regel:
+                          - Wenn KUNDIN zuletzt schrieb (ourTurn = false): nur ihre Nachricht zeigen.
+                            Ein veralteter Bot-Reply wäre hier irreführend (anderes Thema).
+                          - Wenn WIR zuletzt antworteten (ourTurn = true): Q&A-Paar zeigen — letzte
+                            Kundenfrage + unsere Antwort. Sind in dem Fall thematisch verbunden, weil
+                            wir GERADE darauf reagiert haben. */}
+                      {!ourTurn && st.lastUser && (
+                        <div className="flex gap-2 text-sm">
+                          <span className="text-neutral-400 shrink-0 mt-0.5" title="Letzte Nachricht von der Kundin">
+                            <User size={13} />
+                          </span>
+                          <span className={`line-clamp-2 ${isUnseen ? "text-neutral-900 font-medium" : "text-neutral-600"}`}>
+                            {st.lastUser}
+                          </span>
+                        </div>
+                      )}
+                      {ourTurn && st.lastUser && (
+                        <div className="flex gap-2 text-sm">
+                          <span className="text-neutral-400 shrink-0 mt-0.5" title="Letzte Kundennachricht">
+                            <User size={13} />
+                          </span>
+                          <span className="text-neutral-700 line-clamp-2">{st.lastUser}</span>
+                        </div>
+                      )}
+                      {ourTurn && st.lastBot && (
+                        <div className={`flex gap-2 text-sm ${onlyUnread ? "mt-2" : "mt-1"}`}>
+                          <span
+                            className={`shrink-0 mt-0.5 ${st.lastMsgRole === "human_agent" || lastReplyViaIgApp ? "text-amber-600" : "text-pink-500"}`}
+                            title={st.lastMsgRole === "human_agent" ? "Letzte Mitarbeiter-Antwort" : "Letzte Bot-Antwort"}
+                          >
+                            {(st.lastMsgRole === "human_agent" || lastReplyViaIgApp) ? <UserCheck size={13} /> : <Bot size={13} />}
+                          </span>
+                          <span className="text-neutral-500 line-clamp-2">{st.lastBot}</span>
+                        </div>
+                      )}
                     </Link>
                   </li>
                 );
