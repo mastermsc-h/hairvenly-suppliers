@@ -580,33 +580,44 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         </span>
                       </div>
 
-                      {/* Vorschau: zeigt IMMER beides (Kunde + Bot/Agent-Antwort wenn vorhanden).
-                          - Bei "Kundin zuletzt geschrieben" (isUnread/lastMsgRole=user): Bot-Antwort
-                            etwas gedimmt + Hinweis "(beantwortet, aber Kundin schrieb seither nochmal)".
-                          - Bei "wir zuletzt geantwortet": Bot-Antwort normal hervorgehoben. */}
-                      {st.lastUser && (
-                        <div className="flex gap-2 text-sm">
-                          <span className="text-neutral-400 shrink-0 mt-0.5" title="Letzte Kundennachricht">
-                            <User size={13} />
-                          </span>
-                          <span className="text-neutral-700 line-clamp-2">{st.lastUser}</span>
-                        </div>
-                      )}
-                      {st.lastBot && (
-                        <div className={`flex gap-2 text-sm ${onlyUnread ? "mt-2" : "mt-1"} ${st.lastMsgRole === "user" ? "opacity-50" : ""}`}>
-                          <span
-                            className={`shrink-0 mt-0.5 ${st.lastMsgRole === "human_agent" || lastReplyViaIgApp ? "text-amber-600" : "text-pink-500"}`}
-                            title={
-                              st.lastMsgRole === "user"
-                                ? "Letzte Antwort von uns — Kundin schrieb seither nochmal"
-                                : (st.lastMsgRole === "human_agent" ? "Letzte Mitarbeiter-Antwort" : "Letzte Bot-Antwort")
-                            }
-                          >
-                            {(st.lastMsgRole === "human_agent" || lastReplyViaIgApp) ? <UserCheck size={13} /> : <Bot size={13} />}
-                          </span>
-                          <span className="text-neutral-500 line-clamp-2">{st.lastBot}</span>
-                        </div>
-                      )}
+                      {/* Vorschau: NUR die wirklich letzte Nachricht der Session — egal von wem.
+                          Vorher haben wir Kundennachricht + unsere Antwort gepaart, das suggerierte
+                          oft einen falschen Zusammenhang (alte Antwort + neue Kundenfrage zu anderem
+                          Thema). Rollen-Icon + Bold-Optik + Zeitstempel reichen für den Kontext. */}
+                      {st.lastMsg && (() => {
+                        const role = st.lastMsgRole;
+                        const isCustomer = role === "user";
+                        const isHumanAgent = role === "human_agent";
+                        return (
+                          <div className="flex gap-2 text-sm">
+                            <span
+                              className={`shrink-0 mt-0.5 ${
+                                isCustomer
+                                  ? "text-neutral-400"
+                                  : (isHumanAgent || lastReplyViaIgApp)
+                                  ? "text-amber-600"
+                                  : "text-pink-500"
+                              }`}
+                              title={
+                                isCustomer
+                                  ? "Letzte Nachricht von der Kundin"
+                                  : isHumanAgent
+                                  ? "Letzte Mitarbeiter-Antwort"
+                                  : "Letzte Bot-Antwort"
+                              }
+                            >
+                              {isCustomer
+                                ? <User size={13} />
+                                : (isHumanAgent || lastReplyViaIgApp)
+                                ? <UserCheck size={13} />
+                                : <Bot size={13} />}
+                            </span>
+                            <span className={`line-clamp-2 ${isCustomer && isUnseen ? "text-neutral-900 font-medium" : "text-neutral-600"}`}>
+                              {st.lastMsg}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </Link>
                   </li>
                 );
