@@ -364,12 +364,20 @@ async function routeIncoming(opts: {
 
   if ((botMode === "auto" || botMode === "assisted") && session.status === "active") {
     try {
-      // ── DEBOUNCE ──
-      // Warte 4 Sekunden bevor du antwortest. Falls in der Zwischenzeit eine
-      // neuere Nachricht reinkommt, lass DEREN Webhook antworten (dieser hier skipped).
-      // → Kunde schreibt 3 kurze Nachrichten hintereinander = 1 Bot-Antwort auf
-      //   alle drei zusammen, nicht 3 einzelne Antworten.
-      const DEBOUNCE_MS = 6000;
+      // ── SMART DEBOUNCE ──
+      // Default 6s. Aber: wenn die letzte Bot-/Mitarbeiter-Nachricht mehrere
+      // Fragen enthielt (mind. 2 "?"), erwartet sie ein längeren Tipp-Vorgang
+      // von der Kundin → wir warten länger (bis 45s), damit Bursts erfasst
+      // werden und Bot nicht halb-Antworten generiert.
+      const { data: lastBot } = await svc.from("chat_messages")
+        .select("content, role").eq("session_id", session.id)
+        .in("role", ["assistant", "human_agent"])
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(1).maybeSingle();
+      const questionCount = (lastBot?.content || "").match(/\?/g)?.length || 0;
+      const DEBOUNCE_MS = questionCount >= 2 ? 45_000 : 6_000;
+      console.log(`[meta-webhook] debounce ${DEBOUNCE_MS}ms (last bot had ${questionCount} questions)`);
       await new Promise(r => setTimeout(r, DEBOUNCE_MS));
 
       const { data: refreshed } = await svc
