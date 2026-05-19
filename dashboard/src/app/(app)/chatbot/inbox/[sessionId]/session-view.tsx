@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown } from "lucide-react";
 import CategorySelector from "./category-selector";
+import AddToWaitlistButton from "./add-to-waitlist-button";
 import {
   takeoverSession,
   sendHumanMessage,
@@ -363,6 +364,9 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             >
               ✓ Als erledigt
             </button>
+          )}
+          {session.status !== "closed" && (
+            <AddToWaitlistButton sessionId={session.id} />
           )}
           {session.status !== "closed" && (
             <button
