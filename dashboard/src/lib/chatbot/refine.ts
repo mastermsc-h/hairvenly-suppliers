@@ -97,8 +97,11 @@ WICHTIG:
     const textBlocks = resp.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
     let newText = textBlocks.map(b => b.text).join("\n").trim();
     if (!newText) return { success: false, error: "leere Antwort" };
-    // Safety-Net: Lagerzahlen rausfiltern (gleiche Logik wie in respond.ts)
+    // Safety-Net: verbotene Wörter + Lagerzahlen rausfiltern (gleiche Logik wie in respond.ts)
     newText = newText
+      // Verbotene Fachwörter
+      .replace(/\bGrammatur\b/g, "Menge")
+      .replace(/\bgrammatur\b/g, "menge")
       // "in begrenzter Menge"-Phrase komplett entfernen — verboten
       .replace(/\(?\s*(?:in\s+)?begrenzter?\s+Menge\s*(?=à\s*\d+\s*g)/gi, "")
       .replace(/\s*,?\s*\(?(?:in\s+)?begrenzter?\s+Menge\)?\s*/gi, " ")

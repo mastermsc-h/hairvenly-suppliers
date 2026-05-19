@@ -110,6 +110,13 @@ export function splitLongMessage(text: string, maxLen = 700): string[] {
  */
 function sanitizeStockLeaks(text: string): string {
   let t = text;
+  // Verbotene Fachwörter ersetzen — Persona-Regel "Einfache Sprache" hart durchsetzen
+  // (Claude ignoriert die Regel manchmal trotz System-Prompt — daher Post-Filter)
+  t = t.replace(/\bGrammatur\b/g, "Menge");
+  t = t.replace(/\bgrammatur\b/g, "menge");
+  t = t.replace(/\b(zur|über die|nach der)\s+Grammatur\b/gi, (_m, p) => `${p} Menge`);
+  // "vormerken" / "reservieren wir dir" — Bot kann nicht reservieren
+  t = t.replace(/\bich\s+(merke|reserviere|leg(?:e)?)\s+dir\b/gi, "wir notieren dir");
   // ZUERST: Phrase "in begrenzter Menge" raus — Bot mischt das oft mit
   // Verpackungsgrößen ("in begrenzter Menge à 25g") was wie Restposten klingt.
   // Wenn "à Xg" folgt, behalten wir nur das.
