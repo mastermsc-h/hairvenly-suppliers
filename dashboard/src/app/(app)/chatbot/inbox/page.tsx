@@ -393,7 +393,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                       </div>
                     )}
                     <Link href={`/chatbot/inbox/${s.id}`} className="block p-4">
-                      {/* Customer-Name oben (z.B. @apfel.me oder Phone-Nr) */}
+                      {/* Customer-Name oben + Status-Badges links / IG-App-Hinweis rechts */}
                       <div className="flex items-center gap-2 mb-1.5">
                         <User size={14} className="text-neutral-400" />
                         <span className={`text-sm truncate ${isUnread ? "font-bold text-neutral-900" : "font-medium text-neutral-800"}`}>
@@ -409,17 +409,18 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                             wartet auf Kundin
                           </span>
                         )}
-                        {lastReplyViaIgApp && (
-                          <span
-                            title="Diese Antwort wurde direkt über die Instagram-App geschickt, nicht aus dem Dashboard."
-                            className="bg-purple-100 text-purple-700 text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
-                          >
-                            📱 via IG-App
-                          </span>
-                        )}
                         {s.category && CATEGORY_LABELS[s.category] && (
                           <span className="bg-neutral-100 text-neutral-600 text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5">
                             {CATEGORY_LABELS[s.category].emoji} {CATEGORY_LABELS[s.category].label}
+                          </span>
+                        )}
+                        {/* via IG-App Badge — ganz rechts wegen "ml-auto" */}
+                        {lastReplyViaIgApp && (
+                          <span
+                            title="Diese Antwort wurde direkt über die Instagram-App geschickt, nicht aus dem Dashboard."
+                            className="ml-auto bg-purple-100 text-purple-700 text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
+                          >
+                            📱 via IG-App
                           </span>
                         )}
                       </div>
