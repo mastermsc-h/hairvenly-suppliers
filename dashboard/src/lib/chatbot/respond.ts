@@ -457,28 +457,44 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   // Fallback: wenn nach MAX_ITER kein Text vorhanden, einen finalen text-only Call
   // damit Claude die Tool-Ergebnisse in eine Antwort verpackt
   if (!finalText) {
-    console.warn("[respond] empty after tool loop — forcing final text-only call");
-    const finalResp = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 1024,
-      system: [
-        { type: "text", text: systemPromptStable, cache_control: { type: "ephemeral" } as const },
-        { type: "text", text: (systemPromptVariable || "") + "\n\nFasse jetzt die Tool-Ergebnisse zusammen und antworte dem Kunden auf seine letzte Frage. KEINE weiteren Tools aufrufen." },
-      ],
-      messages: convo,
-    });
-    const finalBlocks = finalResp.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
-    const fdedup: string[] = [];
-    for (const fb of finalBlocks) {
-      const t = (fb.text || "").trim();
-      if (!t) continue;
-      if (fdedup.length > 0 && fdedup[fdedup.length - 1] === t) continue;
-      fdedup.push(t);
+    console.warn(`[respond] empty after tool loop — forcing final text-only call (iter done, toolCalls=${allToolCalls.length}, toolResults=${allToolResults.length})`);
+    try {
+      const finalResp = await anthropic.messages.create({
+        model: MODEL,
+        max_tokens: 1024,
+        system: [
+          { type: "text", text: systemPromptStable, cache_control: { type: "ephemeral" } as const },
+          { type: "text", text: (systemPromptVariable || "") + "\n\nFasse jetzt die Tool-Ergebnisse zusammen und antworte dem Kunden auf seine letzte Frage. KEINE weiteren Tools aufrufen. SCHREIBE UNBEDINGT EINE KOMPLETTE ANTWORT — auch wenn du dir unsicher bist, formuliere mit den verfügbaren Infos das Beste was du kannst." },
+        ],
+        messages: convo,
+      });
+      const finalBlocks = finalResp.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
+      const fdedup: string[] = [];
+      for (const fb of finalBlocks) {
+        const t = (fb.text || "").trim();
+        if (!t) continue;
+        if (fdedup.length > 0 && fdedup[fdedup.length - 1] === t) continue;
+        fdedup.push(t);
+      }
+      finalText = fdedup.join("\n").trim();
+    } catch (e) {
+      console.error("[respond] fallback call failed:", (e as Error).message);
     }
-    finalText = fdedup.join("\n").trim();
   }
 
-  if (!finalText) return { success: false, error: "empty response after fallback" };
+  // ZWEITER Fallback: graceful default statt hartem Error.
+  // Wenn auch nach Tool-Loop + Fallback nichts kommt, generieren wir manuell eine
+  // sichere "weiß-noch-nicht"-Antwort statt zu crashen — Mitarbeiter sieht den
+  // Entwurf und kann selbst editieren.
+  if (!finalText) {
+    console.error(`[respond] EMPTY response even after fallback — session=${sessionId}, toolsUsed=${toolsUsed.join(",")}, msgCount=${msgs.length}`);
+    const toolsHint = toolsUsed.length > 0
+      ? ` Ich habe folgende Infos gesammelt: ${toolsUsed.join(", ")}.`
+      : "";
+    finalText = `Hi 💕 Lass mich das eben mit einer Kollegin abklären — sie meldet sich gleich bei dir.${toolsHint}`;
+  }
+
+  // (Hier kommt finalText immer mit etwas drin an — graceful Fallback weiter oben.)
 
   // SAFETY-NET 1: konkrete Lagerzahlen rausfiltern
   finalText = sanitizeStockLeaks(finalText);

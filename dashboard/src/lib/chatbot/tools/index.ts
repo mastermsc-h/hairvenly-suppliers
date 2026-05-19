@@ -270,6 +270,48 @@ const getStockEta: ToolDef = {
         };
       }
 
+      // KOMBINIERTER STATUS: wenn SOWOHL etwas im Lager als auch etwas unterwegs ist
+      // (verschiedene Varianten/Längen) → BEIDE Infos zurückgeben.
+      // Vorher: B (unterwegs) feuerte zuerst → Bot hat nie erfahren dass es 65cm sofort gibt.
+      const withStockEarly = inventoryMatches.filter(r => r.quantity > 0);
+      if (withStockEarly.length > 0 && inUnterwegs.length > 0) {
+        const extractDate = (s: string): { iso: string | null; text: string } => {
+          const m = s.match(/(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/);
+          if (!m) return { iso: null, text: s };
+          const [, d, mo, y] = m;
+          const yy = y.length === 2 ? `20${y}` : y;
+          const iso = `${yy}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+          return { iso, text: `${d.padStart(2, "0")}.${mo.padStart(2, "0")}.${yy.slice(-2)}` };
+        };
+        const comingSoon = inUnterwegs.slice(0, 3).map(m => {
+          const dated = m.perOrder.map(o => ({ ...extractDate(o.ankunft || ""), raw: o.ankunft }));
+          dated.sort((a, b) => (a.iso || "9999").localeCompare(b.iso || "9999"));
+          return {
+            product: m.product,
+            collection: m.collection,
+            earliest_eta: dated[0]?.text || dated[0]?.raw || "bald",
+          };
+        });
+        return {
+          output: JSON.stringify({
+            status: "in_stock_partial_unterwegs",
+            message:
+              "WICHTIG: Manche Varianten sind SOFORT VERFÜGBAR, andere sind unterwegs. " +
+              "Erwähne BEIDES: erst was sofort da ist (das ist die beste Option für die Kundin!), " +
+              "dann was später kommt. " +
+              "Beispiel: 'Soft Blond Balayage hätten wir in 65cm sofort verfügbar 💕 " +
+              "In 55cm/85cm ist die Farbe gerade unterwegs (ca. Anfang Juni). " +
+              "Magst du die 65cm nehmen oder lieber auf die andere Länge warten?'",
+            available_now: withStockEarly.slice(0, 5).map(r => ({
+              product: r.product,
+              collection: r.collection,
+            })),
+            coming_soon: comingSoon,
+            sheet_last_updated: lastUpdated,
+          }),
+        };
+      }
+
       // B) Produkt unterwegs → NUR DAS FRÜHESTE ETA zurückgeben (kein "erste Lieferung" Leak)
       if (inUnterwegs.length > 0) {
         // Hilfsfunktion: extrahiere Datum aus "ca. Ankunft: 30.05.2026" → "30.05.2026"
