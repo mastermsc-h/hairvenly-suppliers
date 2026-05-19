@@ -32,6 +32,7 @@ interface SessionStats {
   lastBot?: string;
   lastMsg?: string;
   lastMsgRole?: string;
+  lastMsgAgentId?: string | null;
   botCount: number;
   humanCount: number;
 }
@@ -131,7 +132,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   if (sessionIds.length > 0) {
     const { data: msgs } = await svc
       .from("chat_messages")
-      .select("session_id, role, content, created_at")
+      .select("session_id, role, content, created_at, agent_id")
       .in("session_id", sessionIds)
       .is("deleted_at", null)
       .order("created_at", { ascending: true });
@@ -153,6 +154,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
       }
       s.lastMsg = m.content;
       s.lastMsgRole = m.role;
+      s.lastMsgAgentId = (m as { agent_id?: string | null }).agent_id ?? null;
     }
   }
 
@@ -357,12 +359,16 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 const profile = (s.assigned_profile as unknown as { display_name?: string; email?: string } | null);
                 const assignedName = profile?.display_name || profile?.email || null;
                 const isHybrid = st.humanCount > 0;
-                // Ungelesen wenn letzte Kundennachricht NACH letztem Agent-Besuch der Session
-                const isUnread = !!(s.last_customer_msg_at && (
-                  !s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at
-                ));
                 // Wir-zuletzt-geantwortet (Kundin dran): leichter blauer Touch
                 const ourTurn = st.lastMsgRole === "assistant" || st.lastMsgRole === "human_agent";
+                // Ungelesen NUR wenn KUNDIN zuletzt schrieb UND nicht gesehen
+                // (Wenn wir / IG-App geantwortet haben → nicht mehr ungelesen)
+                const isUnread = !ourTurn && !!(s.last_customer_msg_at && (
+                  !s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at
+                ));
+                // Antwort kam via Instagram-App (nicht aus Dashboard): human_agent OHNE agent_id
+                // → entstand durch Echo-Webhook von einer externen Mitarbeiter-Antwort
+                const lastReplyViaIgApp = st.lastMsgRole === "human_agent" && !st.lastMsgAgentId;
                 // Farb-Hintergrund-Logik (Priorität: unread > ourTurn > zebra)
                 const rowBg = isUnread
                   ? "bg-pink-50/30"
@@ -401,6 +407,14 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         {!isUnread && ourTurn && (
                           <span className="bg-blue-100 text-blue-700 text-[10px] font-medium px-1.5 py-0.5 rounded-full">
                             wartet auf Kundin
+                          </span>
+                        )}
+                        {lastReplyViaIgApp && (
+                          <span
+                            title="Diese Antwort wurde direkt über die Instagram-App geschickt, nicht aus dem Dashboard."
+                            className="bg-purple-100 text-purple-700 text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
+                          >
+                            📱 via IG-App
                           </span>
                         )}
                         {s.category && CATEGORY_LABELS[s.category] && (
