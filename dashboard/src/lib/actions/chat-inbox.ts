@@ -589,16 +589,20 @@ export type SessionCategory =
   "availability" | "pricing" | "color_advice" | "appointment"
   | "complaint" | "order_status" | "gewerbe" | "partnership" | "general";
 
-/** Manuelles Override der Kategorie (Mitarbeiter korrigiert Bot-Klassifikation) */
+/** Manuelles Override der Kategorie (Mitarbeiter korrigiert Bot-Klassifikation).
+ *  Setzt zusätzlich category_manual=true, damit der Auto-Klassifizierer
+ *  bei eingehenden Nachrichten den Wert nicht überschreibt. */
 export async function setSessionCategory(sessionId: string, category: SessionCategory) {
   const svc = createServiceClient();
-  await svc.from("chat_sessions").update({ category }).eq("id", sessionId);
+  await svc.from("chat_sessions").update({ category, category_manual: true }).eq("id", sessionId);
   revalidatePath("/chatbot/inbox");
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
 
-/** Triggert erneute Auto-Klassifikation via Haiku */
+/** Triggert erneute Auto-Klassifikation via Haiku — hebt das Manual-Lock auf */
 export async function reclassifySession(sessionId: string) {
+  const svc = createServiceClient();
+  await svc.from("chat_sessions").update({ category_manual: false }).eq("id", sessionId);
   const { classifySession } = await import("@/lib/chatbot/classify");
   await classifySession(sessionId);
   revalidatePath("/chatbot/inbox");

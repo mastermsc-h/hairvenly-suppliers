@@ -37,6 +37,19 @@ const CATEGORY_DESC: Record<Category, string> = {
  */
 export async function classifySession(sessionId: string): Promise<Category | null> {
   const svc = createServiceClient();
+
+  // Manuelles Lock respektieren: wenn die Mitarbeiterin die Kategorie selbst
+  // gesetzt hat, NICHT überschreiben. Nur reclassifySession() (= bewusster
+  // Klick auf "Neu klassifizieren") setzt das Lock zurück.
+  const { data: cur } = await svc
+    .from("chat_sessions")
+    .select("category, category_manual")
+    .eq("id", sessionId)
+    .maybeSingle();
+  if (cur?.category_manual) {
+    return (cur.category as Category) || null;
+  }
+
   const { data: msgs } = await svc
     .from("chat_messages")
     .select("role, content")
