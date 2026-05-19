@@ -519,6 +519,16 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   // SAFETY-NET 1: konkrete Lagerzahlen rausfiltern
   finalText = sanitizeStockLeaks(finalText);
 
+  // SAFETY-NET 1b: Auto-Lern-Wortfilter aus DB anwenden
+  // Wörter/Phrasen die der Mitarbeiter wiederholt entfernt hat, werden hier gnadenlos ersetzt.
+  try {
+    const { loadActiveWordFilters, applyWordFilters } = await import("@/lib/chatbot/word-filter-learning");
+    const filters = await loadActiveWordFilters();
+    if (filters.length > 0) finalText = applyWordFilters(finalText, filters);
+  } catch (e) {
+    console.warn("[respond] word-filter apply failed:", (e as Error).message);
+  }
+
   // SAFETY-NET 2: Dedup wenn ganze Antwort sich wiederholt (Claude-Stutter)
   // Heuristik: wenn finalText aus zwei identischen Hälften besteht, halbieren
   finalText = dedupRepeatedHalf(finalText);

@@ -116,6 +116,14 @@ WICHTIG:
       .replace(/\b(noch|nur\s+noch)\s+\d{1,3}\s*(Stück|Packungen)\b/gi, "$1 etwas")
       .replace(/\(\s*\)/g, "")
       .replace(/[ \t]{2,}/g, " ");
+    // Auto-Lern-Filter aus DB anwenden
+    try {
+      const { loadActiveWordFilters, applyWordFilters } = await import("@/lib/chatbot/word-filter-learning");
+      const filters = await loadActiveWordFilters();
+      if (filters.length > 0) newText = applyWordFilters(newText, filters);
+    } catch (e) {
+      console.warn("[refine] word-filter apply failed:", (e as Error).message);
+    }
     return { success: true, text: newText };
   } catch (e) {
     return { success: false, error: (e as Error).message };

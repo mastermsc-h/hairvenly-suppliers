@@ -162,6 +162,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                     { href: "/chatbot/insights",   label: "Insights" },
                     { href: "/chatbot",            label: "Wissensdatenbank", exact: true },
                     { href: "/chatbot/strategies", label: "Strategien" },
+                    { href: "/chatbot/word-filters", label: "Wortfilter (Auto-Lernen)" },
                     { href: "/chatbot/avatars",    label: "Avatars" },
                     { href: "/chatbot-test",       label: "Bot testen" },
                     { href: "/chatbot/training",   label: "Bot trainieren" },

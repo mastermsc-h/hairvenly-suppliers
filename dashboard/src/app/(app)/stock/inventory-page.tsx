@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Package, AlertTriangle, Scale, Printer, X } from "lucide-react";
+import { Package, AlertTriangle, Scale, Printer, X, Search } from "lucide-react";
 import JsBarcode from "jsbarcode";
 import StockSearch from "./stock-search";
 import StockTable, { slugify } from "./stock-table";
@@ -360,11 +360,20 @@ function PrintModal({
     return Array.from(set).sort((a, b) => a - b);
   }, [isClipIn, itemsWithBarcode]);
   const [variantFilter, setVariantFilter] = useState<number | null>(null);
+  const [query, setQuery] = useState("");
 
   const visibleItems = useMemo(() => {
-    if (!variantFilter) return itemsWithBarcode;
-    return itemsWithBarcode.filter((r) => r.unitWeight === variantFilter);
-  }, [itemsWithBarcode, variantFilter]);
+    let out = itemsWithBarcode;
+    if (variantFilter) out = out.filter((r) => r.unitWeight === variantFilter);
+    const q = query.trim().toLowerCase();
+    if (q) {
+      out = out.filter((r) =>
+        r.product.toLowerCase().includes(q) ||
+        (r.barcode ?? "").toLowerCase().includes(q),
+      );
+    }
+    return out;
+  }, [itemsWithBarcode, variantFilter, query]);
 
   // Gruppen für Sub-Header-Rendering — nur bei Clip-Ins ohne aktiven Filter
   const groupedByWeight = useMemo(() => {
@@ -433,6 +442,36 @@ function PrintModal({
           >
             <X size={20} />
           </button>
+        </div>
+
+        {/* Suche — filtert nach Produktname oder Barcode */}
+        <div className="px-5 py-3 border-b border-neutral-200">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              autoFocus
+              placeholder="Farbe oder EAN suchen..."
+              className="w-full pl-9 pr-9 py-2 text-sm bg-neutral-50 border border-neutral-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:bg-white"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 p-1"
+                aria-label="Suche leeren"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          {query && (
+            <div className="mt-1.5 text-[11px] text-neutral-500">
+              {visibleItems.length} {visibleItems.length === 1 ? "Treffer" : "Treffer"} für „{query}"
+            </div>
+          )}
         </div>
 
         {/* Warnung wenn doppelte EANs in der Gruppe — Daten-Bug in Shopify */}

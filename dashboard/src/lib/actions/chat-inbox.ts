@@ -277,6 +277,20 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
   // Training-Eintrag bei Korrektur ODER wenn explizit Notiz mitgegeben ODER Refine-Feedbacks da — Auto-Lern-Modus
   const hasNote = !!note?.trim();
   const hasRefineFeedback = refineFeedbacks.length > 0;
+  // AUTO-LERN-SANITIZER: aus dem Edit-Diff erkennen welche Wörter/Phrasen der
+  // Mitarbeiter entfernt hat. Ab 3 Vorkommen → automatisch im Sanitizer aktiv.
+  if (wasEdited) {
+    try {
+      const { recordEditDiff } = await import("@/lib/chatbot/word-filter-learning");
+      const stats = await recordEditDiff(original, final, draft.session_id);
+      if (stats.auto_activated > 0) {
+        console.log(`[approveDraft] AUTO-AKTIVIERT: ${stats.auto_activated} neue Wort-Filter (gelernt aus Edit-Diff)`);
+      }
+    } catch (e) {
+      console.warn("[approveDraft] word-filter-learning failed:", (e as Error).message);
+    }
+  }
+
   if ((wasEdited || hasNote || hasRefineFeedback) && draft.trigger_message_id) {
     const { data: trigger } = await svc
       .from("chat_messages")
