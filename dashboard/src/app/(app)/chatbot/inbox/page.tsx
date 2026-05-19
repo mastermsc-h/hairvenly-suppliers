@@ -130,12 +130,19 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   const sessionIds = combinedSessions.map(s => s.id);
   const stats: Record<string, SessionStats> = {};
   if (sessionIds.length > 0) {
+    // Bei vielen Sessions hätte Supabase's Default-Limit (1000) die NEUESTEN
+    // Messages abgeschnitten (weil ASC sortiert). Daher: explizites High-Limit
+    // + Zeit-Filter (nur Messages der letzten 120 Tage — ältere brauchen wir
+    // für die Vorschau nicht).
+    const cutoff = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString();
     const { data: msgs } = await svc
       .from("chat_messages")
       .select("session_id, role, content, created_at, agent_id")
       .in("session_id", sessionIds)
       .is("deleted_at", null)
-      .order("created_at", { ascending: true });
+      .gte("created_at", cutoff)
+      .order("created_at", { ascending: true })
+      .limit(20000);
     // Messages kommen aufsteigend (ältester zuerst) — wir überschreiben lastUser/lastBot
     // bei jeder weiteren Message, so steht am Ende die jeweils NEUESTE drin.
     for (const m of msgs ?? []) {
