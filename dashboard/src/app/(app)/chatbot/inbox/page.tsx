@@ -429,8 +429,9 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      {/* Sessions Liste */}
-      <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
+      {/* Sessions Liste — im "Nur unbeantwortet"-Modus transparenter Container,
+          damit die einzelnen Karten gut atmen können; sonst klassische Card-Wand. */}
+      <div className={onlyUnread ? "" : "bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden"}>
         {filteredSessions.length === 0 ? (
           <div className="p-12 text-center text-neutral-400">
             <Bot size={32} className="mx-auto mb-2 text-neutral-300" />
@@ -438,7 +439,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
           </div>
         ) : (
           <Suspense fallback={null}>
-            <ul>
+            <ul className={onlyUnread ? "p-2 space-y-2" : ""}>
               {filteredSessions.map((s, idx) => {
                 const meta = STATUS_LABELS[s.status] || STATUS_LABELS.active;
                 const Icon = meta.icon;
@@ -456,22 +457,30 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 // Antwort kam via Instagram-App (nicht aus Dashboard): human_agent OHNE agent_id
                 // → entstand durch Echo-Webhook von einer externen Mitarbeiter-Antwort
                 const lastReplyViaIgApp = st.lastMsgRole === "human_agent" && !st.lastMsgAgentId;
-                // Farb-Hintergrund-Logik (Priorität: unread > ourTurn > zebra)
-                const rowBg = isUnread
+                // Im "Nur unbeantwortet"-Modus ist alles eh unread → keine dramatischen
+                // Farben/Streifen, sondern eine ruhige, freundliche Karten-Optik mit
+                // sanftem Mint-Touch und Atmung. In der Gesamt-Ansicht (alle Sessions)
+                // bleibt's wie bisher mit klarer visueller Unterscheidung.
+                const rowBg = onlyUnread
+                  ? "bg-white"
+                  : isUnread
                   ? "bg-pink-50/30"
                   : ourTurn
                   ? "bg-blue-50/40"
                   : (idx % 2 === 0 ? "bg-white" : "bg-neutral-50/60");
-                return (
-                  <li
-                    key={s.id}
-                    className={`group relative border-b border-neutral-100 hover:bg-blue-100/40 transition-colors ${rowBg} ${
+                const baseLi = onlyUnread
+                  ? "rounded-xl border border-neutral-200 hover:border-emerald-300 hover:shadow-sm transition-all"
+                  : `border-b border-neutral-100 hover:bg-blue-100/40 transition-colors ${
                       isUnread
                         ? "border-l-4 border-l-pink-500"
                         : ourTurn
                         ? "border-l-4 border-l-blue-300"
                         : "border-l-4 border-l-transparent"
-                    }`}
+                    }`;
+                return (
+                  <li
+                    key={s.id}
+                    className={`group relative ${baseLi} ${rowBg}`}
                   >
                     {/* Hover-Buttons rechts oben:
                         - Wenn unread (Kundin schrieb zuletzt): grüner Haken = "als erledigt markieren"
@@ -483,14 +492,14 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         <MarkUnreadButton sessionId={s.id} variant="icon" />
                       )}
                     </div>
-                    <Link href={`/chatbot/inbox/${s.id}`} className="block p-4">
+                    <Link href={`/chatbot/inbox/${s.id}`} className={`block ${onlyUnread ? "p-5" : "p-4"}`}>
                       {/* Customer-Name oben + Status-Badges links / IG-App-Hinweis rechts */}
-                      <div className="flex items-center gap-2 mb-1.5">
+                      <div className={`flex items-center gap-2 ${onlyUnread ? "mb-2.5" : "mb-1.5"}`}>
                         <User size={14} className="text-neutral-400" />
-                        <span className={`text-sm truncate ${isUnread ? "font-bold text-neutral-900" : "font-medium text-neutral-800"}`}>
+                        <span className={`text-sm truncate ${isUnread && !onlyUnread ? "font-bold text-neutral-900" : "font-medium text-neutral-800"}`}>
                           {s.customer_name || <span className="text-neutral-400 font-normal">Unbekannt</span>}
                         </span>
-                        {isUnread && (
+                        {isUnread && !onlyUnread && (
                           <span className="bg-pink-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide">
                             Neu
                           </span>
@@ -516,7 +525,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         )}
                       </div>
                       {/* Top row: badges + zeit */}
-                      <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
+                      <div className={`flex items-center gap-2 flex-wrap text-xs ${onlyUnread ? "mb-3" : "mb-2"}`}>
                         <span className="text-neutral-500 font-medium">
                           {CHANNEL_LABELS[s.channel] || s.channel}
                         </span>
@@ -575,7 +584,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         </div>
                       )}
                       {st.lastBot && (
-                        <div className={`flex gap-2 text-sm mt-1 ${st.lastMsgRole === "user" ? "opacity-50" : ""}`}>
+                        <div className={`flex gap-2 text-sm ${onlyUnread ? "mt-2" : "mt-1"} ${st.lastMsgRole === "user" ? "opacity-50" : ""}`}>
                           <span
                             className={`shrink-0 mt-0.5 ${st.lastMsgRole === "human_agent" || lastReplyViaIgApp ? "text-amber-600" : "text-pink-500"}`}
                             title={

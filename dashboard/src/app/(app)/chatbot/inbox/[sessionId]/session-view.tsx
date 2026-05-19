@@ -17,6 +17,7 @@ import {
   refineDraftWithFeedback,
   generateDraftOnDemand,
   markSessionUnread,
+  markSessionAsSeen,
   deleteMessage,
 } from "@/lib/actions/chat-inbox";
 
@@ -348,6 +349,19 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               className="text-xs px-3 py-1.5 rounded-lg bg-green-100 text-green-800 hover:bg-green-200 inline-flex items-center gap-1 disabled:opacity-50"
             >
               <RotateCcw size={12} /> Zurück an Bot
+            </button>
+          )}
+          {session.status !== "closed" && (
+            <button
+              onClick={() => startTransition(async () => {
+                await markSessionAsSeen(session.id);
+                router.refresh();
+              })}
+              disabled={isPending}
+              title="Markiert diese Session als erledigt — sie verschwindet aus 'Nur unbeantwortet'"
+              className="text-xs px-3 py-1.5 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300 inline-flex items-center gap-1 disabled:opacity-50"
+            >
+              ✓ Als erledigt
             </button>
           )}
           {session.status !== "closed" && (
