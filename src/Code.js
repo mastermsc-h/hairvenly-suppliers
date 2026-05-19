@@ -3,7 +3,7 @@
 // ==========================================
 // CODE_VERSION: 2026-04-22_23-00_DoSA-days-of-stock-allocator
 // ==========================================
-const CODE_VERSION = "2026-05-13_15-00_Amanda-Lieferzeit-6W-zu-7-5W-53Tage";
+const CODE_VERSION = "2026-05-13_18-45_OrderID-Dedup-fix-Doppelzaehlung";
 
 // IDs der externen Bestellungs-Sheets
 const CHINA_SHEET_ID    = "1zqh50KeQsworvG5OivfxvECM7HUoArwUEGBTUGVB4ZM";
@@ -2363,6 +2363,148 @@ function backfillProductUrls() {
     Logger.log("🔗 " + name + ": " + count + " URLs nachgetragen.");
   }
   Logger.log("✅ backfillProductUrls fertig.");
+}
+
+/**
+ * Debug-Funktion: Findet alle Verkaufs-Bestellungen für einen Clip-In Farbcode + Variante
+ * in den letzten N Tagen und dumpt sie ins Log mit Order-ID + Datum + qty + gPerUnit.
+ *
+ * Aufruf aus dem Editor: debugClipInSales("DUBAI", 150, 30)
+ *   → Zeigt alle DUBAI 150g-Verkäufe der letzten 30 Tage
+ */
+function debugClipInSales(colorSubstring, variantGrams, days) {
+  colorSubstring = (colorSubstring || "").toUpperCase();
+  variantGrams = parseInt(variantGrams) || 150;
+  days = parseInt(days) || 30;
+
+  const SHOP_NAME = "339520-3";
+  const ACCESS_TOKEN = "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";
+  const BASE_URL = "https://" + SHOP_NAME + ".myshopify.com/admin/api/2025-01";
+
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const sinceIso = Utilities.formatDate(since, "GMT", "yyyy-MM-dd'T'HH:mm:ss'Z'");
+  Logger.log("🔍 Suche " + colorSubstring + " " + variantGrams + "g seit " + sinceIso);
+
+  let url = BASE_URL + "/orders.json?status=any&created_at_min=" + sinceIso +
+            "&financial_status=paid&limit=250&fields=id,name,created_at,line_items";
+  let totalQty = 0;
+  let totalG = 0;
+  let totalOrders = 0;
+  const hits = [];
+
+  while (url) {
+    Utilities.sleep(300);
+    const resp = UrlFetchApp.fetch(url, {
+      headers: { "X-Shopify-Access-Token": ACCESS_TOKEN },
+      muteHttpExceptions: true
+    });
+    const data = JSON.parse(resp.getContentText());
+    for (const order of (data.orders || [])) {
+      for (const item of (order.line_items || [])) {
+        const name = (item.name || "").toUpperCase();
+        const varTitle = (item.variant_title || "").toUpperCase();
+        // Farb-Match: muss in name oder variant_title vorkommen
+        if (!name.includes(colorSubstring) && !varTitle.includes(colorSubstring)) continue;
+        // Variant-Match: muss "150g" o.ä. enthalten
+        const varStr = name + " | " + varTitle;
+        const vm = varStr.match(/(\d+)\s*g/i);
+        const itemG = vm ? parseInt(vm[1], 10) : (item.grams || 0);
+        const checkG = itemG === 250 ? 225 : itemG;
+        if (checkG !== variantGrams) continue;
+        // Treffer!
+        const qty = item.quantity || 0;
+        totalQty += qty;
+        totalG += qty * variantGrams;
+        hits.push({
+          order_id: order.id,
+          order_name: order.name,
+          created: order.created_at,
+          item_name: item.name,
+          variant_title: item.variant_title,
+          qty: qty,
+          gPerUnit: variantGrams
+        });
+      }
+    }
+    totalOrders += (data.orders || []).length;
+    const lh = resp.getHeaders()["Link"] || "";
+    url = null;
+    if (lh.indexOf('rel="next"') !== -1) {
+      for (const part of lh.split(",")) {
+        if (part.indexOf('rel="next"') !== -1) {
+          const m = part.match(/<([^>]+)>/); if (m) { url = m[1]; break; }
+        }
+      }
+    }
+  }
+
+  Logger.log("📦 " + totalOrders + " Bestellungen durchsucht | " + hits.length + " Treffer für " + colorSubstring + " " + variantGrams + "g");
+  for (const h of hits) {
+    Logger.log("  ▸ " + h.order_name + " (" + h.created.substring(0, 10) + ") qty=" + h.qty +
+               " | " + h.item_name + " | variant=" + h.variant_title);
+  }
+  Logger.log("───────────────────────────────────────");
+  Logger.log("✅ SUMME: " + totalQty + " Stk × " + variantGrams + "g = " + totalG + "g");
+  Logger.log("(Vergleiche mit Topseller-Tab → wenn dort höher → Bug. Wenn gleich → Verkaufszahl stimmt.)");
+}
+
+/**
+ * Debug-Funktion: Zeigt alle Clip-In Varianten für einen Farbcode aus Shopify
+ * + was der Parser als gPerUnit zuweist. Damit sieht man wo grams falsch zugeordnet werden.
+ *
+ * Aufruf aus dem Editor: debugClipInVariants("DUBAI")
+ */
+function debugClipInVariants(colorSubstring) {
+  colorSubstring = (colorSubstring || "").toUpperCase();
+  const SHOP_NAME = "339520-3";
+  const ACCESS_TOKEN = "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";
+  const BASE_URL = "https://" + SHOP_NAME + ".myshopify.com/admin/api/2025-01";
+
+  // Alle Produkte mit CLIP + Farbcode finden
+  let prodUrl = BASE_URL + "/products.json?limit=250&fields=id,title,handle,variants";
+  let totalProds = 0;
+  let matchedProds = 0;
+  while (prodUrl) {
+    Utilities.sleep(300);
+    const resp = UrlFetchApp.fetch(prodUrl, {
+      headers: { "X-Shopify-Access-Token": ACCESS_TOKEN },
+      muteHttpExceptions: true
+    });
+    const data = JSON.parse(resp.getContentText());
+    for (const prod of (data.products || [])) {
+      totalProds++;
+      const titleU = (prod.title || "").toUpperCase();
+      if (!titleU.includes("CLIP")) continue;
+      if (!titleU.includes(colorSubstring)) continue;
+      matchedProds++;
+      Logger.log("──────────────────────────────");
+      Logger.log("📦 " + prod.title + " (id=" + prod.id + ", handle=" + prod.handle + ")");
+      for (const v of (prod.variants || [])) {
+        const titleMatch = (v.title || "").match(/(\d+)\s*g/i);
+        const titleParsed = titleMatch ? parseInt(titleMatch[1], 10) : null;
+        let parserResult = v.grams || 0;
+        if (titleParsed) parserResult = titleParsed;
+        if (parserResult === 250) parserResult = 225;
+        Logger.log("  • variant_id=" + v.id + " | title='" + v.title + "' | option1='" + v.option1 + "' | shopify.grams=" + v.grams +
+                   " | titleParsed=" + (titleParsed || "—") + " | → Parser nimmt: " + parserResult + "g");
+      }
+    }
+    const lh = resp.getHeaders()["Link"] || "";
+    prodUrl = null;
+    if (lh.indexOf('rel="next"') !== -1) {
+      for (const part of lh.split(",")) {
+        if (part.indexOf('rel="next"') !== -1) {
+          const m = part.match(/<([^>]+)>/); if (m) { prodUrl = m[1]; break; }
+        }
+      }
+    }
+  }
+  Logger.log("══════════════════════════════");
+  Logger.log("Gescannt: " + totalProds + " Produkte | Match: " + matchedProds);
+  Logger.log("");
+  Logger.log("ANALYSE:");
+  Logger.log("- titleParsed=—   → Regex schlug fehl, Parser nutzt shopify.grams (potentieller Fehler!)");
+  Logger.log("- shopify.grams=150 bei einer 100g/225g-Variante → bekannter Shopify-Bug → Title-Parse soll greifen");
 }
 
 function fetchAllCollections(shopName, accessToken) {
@@ -9309,6 +9451,15 @@ function refreshVerkaufsanalyse() {
     }
   }
 
+  // ── Order-ID-Dedup: verhindert Doppelzählung bei Resume nach Crash ──
+  // (Bei Apps-Script-Hard-Kill zwischen productData-Save und checkpoint-Save → alte URL,
+  //  neue Daten gespeichert → ohne Dedup würde dieselbe Order nochmal addiert.)
+  // Persistent über Trigger-Runs via Chunked-Storage.
+  const PROCESSED_ORDER_IDS_KEY = "VA_PROCESSED_ORDER_IDS";
+  const processedOrderIdsArr = loadChunked_(props, PROCESSED_ORDER_IDS_KEY) || [];
+  const processedOrderIds = new Set(Array.isArray(processedOrderIdsArr) ? processedOrderIdsArr : []);
+  Logger.log("🔒 Order-Dedup: " + processedOrderIds.size + " IDs bereits verarbeitet");
+
   // Hilfsfunktion: product_id → COLL_MAP_VA-Eintrag (spezifischste Collection gewinnt)
   function getCollMapping(pid) {
     const cids = prodToCollIds[String(pid)] || [];
@@ -9336,13 +9487,17 @@ function refreshVerkaufsanalyse() {
     while (orderUrl) {
       // Zeitlimit prüfen (globalStart gilt für die gesamte Ausführung inkl. Vorbereitungsphase)
       if (Date.now() - globalStart > GLOBAL_MAX_MS) {
-        // Zwischenspeichern und abbrechen
-        props.setProperty(SALES_KEY, JSON.stringify(sales));
-        saveChunked_(props, "VA_PRODUCT_DATA", productData);
+        // Zwischenspeichern und abbrechen — REIHENFOLGE WICHTIG:
+        // Checkpoint ZUERST speichern, dann productData. Falls Apps Script zwischen den Saves
+        // hart killt → Checkpoint zeigt auf neue URL, productData ggf. stale → kein Schaden
+        // (vorher: productData neu, Checkpoint alt → Duplikat-Bug). Order-Dedup-Set schützt zusätzlich.
         checkpoint.nextUrl = orderUrl;
         checkpoint.page = page;
         props.setProperty(CHECKPOINT_KEY, JSON.stringify(checkpoint));
-        Logger.log("⏸️ Zeitlimit erreicht nach Seite " + page + ". Auto-Trigger läuft in 5 Min. weiter.");
+        saveChunked_(props, PROCESSED_ORDER_IDS_KEY, Array.from(processedOrderIds));
+        props.setProperty(SALES_KEY, JSON.stringify(sales));
+        saveChunked_(props, "VA_PRODUCT_DATA", productData);
+        Logger.log("⏸️ Zeitlimit erreicht nach Seite " + page + " (" + processedOrderIds.size + " Orders verarbeitet). Auto-Trigger läuft in 5 Min. weiter.");
         return;
       }
 
@@ -9354,6 +9509,11 @@ function refreshVerkaufsanalyse() {
       page++;
 
       for (const order of orders) {
+        // ── Order-ID-Dedup: bereits verarbeitete Order überspringen ──
+        const orderIdStr = String(order.id || "");
+        if (orderIdStr && processedOrderIds.has(orderIdStr)) continue;
+        if (orderIdStr) processedOrderIds.add(orderIdStr);
+
         const orderTs = order.created_at ? new Date(order.created_at).getTime() : 0;
         const in12M   = orderTs >= ts12M;
         const in3M    = orderTs >= ts3M;
@@ -9426,7 +9586,9 @@ function refreshVerkaufsanalyse() {
     props.setProperty(CHECKPOINT_KEY, JSON.stringify(checkpoint));
     props.setProperty(SALES_KEY, JSON.stringify(sales));
     saveChunked_(props, "VA_PRODUCT_DATA", productData);
-    Logger.log("✅ Alle Bestellungen geladen (" + page + " Seiten) | " + Object.keys(productData).length + " Produkte getrackt");
+    // Order-Dedup-Set nach abgeschlossener Schleife löschen (nächster Lauf von vorne erlaubt)
+    saveChunked_(props, PROCESSED_ORDER_IDS_KEY, []);
+    Logger.log("✅ Alle Bestellungen geladen (" + page + " Seiten, " + processedOrderIds.size + " Orders) | " + Object.keys(productData).length + " Produkte getrackt");
   } else if (checkpoint.status === "done") {
     // Bereits fertig geladen → nur Tab neu schreiben
     Logger.log("✅ Verwende gecachte Bestelldaten (status=done)");
@@ -10000,9 +10162,10 @@ function resetVerkaufsanalyse() {
   props.deleteProperty("VA_SALES");
   saveChunked_(props, "VA_COLLMAP", {}); // Alle Chunks löschen
   saveChunked_(props, "VA_PRODUCT_DATA", {}); // Alle Chunks löschen
+  saveChunked_(props, "VA_PROCESSED_ORDER_IDS", []); // Order-Dedup-Set löschen
   props.deleteProperty("VA_PREP");
   props.deleteProperty("VA_TRIGGER_ID");
-  Logger.log("✅ Verkaufsanalyse zurückgesetzt (inkl. Trigger).");
+  Logger.log("✅ Verkaufsanalyse zurückgesetzt (inkl. Trigger + Order-Dedup-Set).");
   safeAlert_("✅ Zurückgesetzt!\n\nBitte jetzt einmal auf \"Verkaufsanalyse aktualisieren\" klicken.\nDer Rest läuft automatisch.");
 }
 

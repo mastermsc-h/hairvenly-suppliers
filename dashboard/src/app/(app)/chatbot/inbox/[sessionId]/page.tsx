@@ -29,11 +29,12 @@ export default async function ChatSessionPage({ params }: PageProps) {
 
   if (!session) notFound();
 
-  // Markieren als "von Mitarbeiter gesehen" — für Unread-Counter
-  await svc
-    .from("chat_sessions")
-    .update({ last_seen_by_agent_at: new Date().toISOString() })
-    .eq("id", sessionId);
+  // WICHTIG: KEIN automatisches Markieren als "gesehen" beim Öffnen.
+  // Sonst verschwindet eine Session aus dem "Nur unbeantwortet"-Filter sobald
+  // man sie nur anklickt — auch ohne zu antworten. last_seen_by_agent_at wird
+  // jetzt erst beim tatsächlichen Senden (approveDraft / sendHumanMessage)
+  // aktualisiert. Falls man eine Session aktiv als gelesen markieren will,
+  // kann man via "Als ungelesen"-Toggle bewusst steuern.
 
   // Aktive Avatars für Selector
   const { data: avatars } = await svc

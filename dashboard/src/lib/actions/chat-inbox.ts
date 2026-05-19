@@ -45,6 +45,8 @@ export async function sendHumanMessage(sessionId: string, content: string) {
   await svc.from("chat_sessions")
     .update({
       last_message_at: new Date().toISOString(),
+      // Beim tatsächlichen Senden gilt die Session als "gesehen"
+      last_seen_by_agent_at: new Date().toISOString(),
       ...(wasClosed ? { status: "awaiting_human", assigned_to: user.id } : {}),
     })
     .eq("id", sessionId);
@@ -259,7 +261,11 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
     tool_results: draft.tool_results,
   }).select("id").single();
   await svc.from("chat_sessions")
-    .update({ last_message_at: new Date().toISOString() })
+    .update({
+      last_message_at: new Date().toISOString(),
+      // Approve = aktive Antwort vom Mitarbeiter → Session ist "gesehen"
+      last_seen_by_agent_at: new Date().toISOString(),
+    })
     .eq("id", draft.session_id);
 
   // Draft als approved markieren

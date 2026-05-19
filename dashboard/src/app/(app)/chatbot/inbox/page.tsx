@@ -25,9 +25,7 @@ const CATEGORY_LABELS: Record<string, { label: string; emoji: string }> = {
   general:      { label: "Sonstiges",     emoji: "💬" },
 };
 
-interface PreviewMsg { role: string; content: string; created_at: string; }
 interface SessionStats {
-  firstUser?: string;
   lastUser?: string;
   lastBot?: string;
   lastMsg?: string;
@@ -127,14 +125,16 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     .maybeSingle();
   const defaultBotMode = (globalSettings?.default_bot_mode || "off") as "auto" | "assisted" | "off";
 
-  // Pro Session: erste User-Frage, erste Bot-Antwort, letzte Nachricht, Counts
+  // Pro Session: Counts + jeweils NEUESTE User-Message + neueste Bot/Agent-Antwort
   const sessionIds = combinedSessions.map(s => s.id);
   const stats: Record<string, SessionStats> = {};
   if (sessionIds.length > 0) {
-    // Bei vielen Sessions hätte Supabase's Default-Limit (1000) die NEUESTEN
-    // Messages abgeschnitten (weil ASC sortiert). Daher: explizites High-Limit
-    // + Zeit-Filter (nur Messages der letzten 120 Tage — ältere brauchen wir
-    // für die Vorschau nicht).
+    // WICHTIG: DESC sortieren + first-seen-wins.
+    // Vorher: ASC + Limit 20000 → bei vielen Sessions wurden die NEUESTEN Messages
+    // abgeschnitten, lastMsgRole landete auf einem alten User-Eintrag → Sessions die
+    // längst beantwortet waren tauchten als "unbeantwortet" auf, und Vorschau zeigte
+    // veraltete Nachrichten. Jetzt: neueste zuerst, "lastX" wird beim ERSTEN Treffer
+    // gesetzt (= dem aktuell jüngsten), botCount/humanCount zählen alle.
     const cutoff = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString();
     const { data: msgs } = await svc
       .from("chat_messages")
@@ -142,27 +142,22 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
       .in("session_id", sessionIds)
       .is("deleted_at", null)
       .gte("created_at", cutoff)
-      .order("created_at", { ascending: true })
+      .order("created_at", { ascending: false })
       .limit(20000);
-    // Messages kommen aufsteigend (ältester zuerst) — wir überschreiben lastUser/lastBot
-    // bei jeder weiteren Message, so steht am Ende die jeweils NEUESTE drin.
     for (const m of msgs ?? []) {
       const s = stats[m.session_id] ??= { botCount: 0, humanCount: 0 };
-      if (m.role === "user") {
-        if (!s.firstUser) s.firstUser = m.content;
-        s.lastUser = m.content;
+      if (m.role === "assistant") s.botCount++;
+      if (m.role === "human_agent") s.humanCount++;
+      // first-seen wins = aktuell neuestes Vorkommen
+      if (!s.lastMsgRole) {
+        s.lastMsg = m.content;
+        s.lastMsgRole = m.role;
+        s.lastMsgAgentId = (m as { agent_id?: string | null }).agent_id ?? null;
       }
-      if (m.role === "assistant") {
+      if (m.role === "user" && !s.lastUser) s.lastUser = m.content;
+      if ((m.role === "assistant" || m.role === "human_agent") && !s.lastBot) {
         s.lastBot = m.content;
-        s.botCount++;
       }
-      if (m.role === "human_agent") {
-        s.lastBot = m.content; // im Vorschau-Bereich wie Bot anzeigen (von uns gesendet)
-        s.humanCount++;
-      }
-      s.lastMsg = m.content;
-      s.lastMsgRole = m.role;
-      s.lastMsgAgentId = (m as { agent_id?: string | null }).agent_id ?? null;
     }
   }
 
