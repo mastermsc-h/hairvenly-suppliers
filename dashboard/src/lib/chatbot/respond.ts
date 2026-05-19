@@ -16,25 +16,16 @@ const MAX_ITER = 5;
  */
 function dedupRepeatedHalf(text: string): string {
   const t = text.trim();
-  if (t.length < 60) return t;
-  // Geradzahlige Halbierung — wenn beide Hälften gleich sind
-  if (t.length % 2 === 0) {
-    const half = t.length / 2;
-    if (t.slice(0, half).trim() === t.slice(half).trim()) {
-      return t.slice(0, half).trim();
-    }
-  }
-  // Heuristik: wenn der Anfang (erste 80 Zeichen) auch ungefähr in der Mitte
-  // wieder auftaucht, dedupliziere bis dahin.
-  const prefix = t.slice(0, Math.min(80, Math.floor(t.length / 3)));
-  const secondHalfStart = t.indexOf(prefix, prefix.length + 10);
-  if (secondHalfStart > 0 && secondHalfStart < t.length * 0.6) {
-    const a = t.slice(0, secondHalfStart).trim();
-    const b = t.slice(secondHalfStart).trim();
-    // Beide Teile müssen ähnlich lang sein und ähnlich anfangen
-    if (Math.abs(a.length - b.length) < 30) {
-      return a;
-    }
+  if (t.length < 80) return t;
+
+  // Aggressiver Check: wenn die ersten 50 Zeichen IM SELBEN TEXT nochmal auftauchen
+  // (nicht direkt am Anfang) → Bot hat sich wiederholt, schneide ab dem Wiederbeginn.
+  // Toleriert auch leicht abweichende zweite Hälfte (Claude kürzt manchmal).
+  const PREFIX_LEN = 50;
+  const prefix = t.slice(0, PREFIX_LEN);
+  const secondOccur = t.indexOf(prefix, PREFIX_LEN + 5);
+  if (secondOccur > 0 && secondOccur < t.length * 0.9) {
+    return t.slice(0, secondOccur).trim();
   }
   return t;
 }
@@ -85,6 +76,12 @@ export function splitLongMessage(text: string, maxLen = 700): string[] {
  */
 function sanitizeStockLeaks(text: string): string {
   let t = text;
+  // ZUERST: Phrase "in begrenzter Menge" raus — Bot mischt das oft mit
+  // Verpackungsgrößen ("in begrenzter Menge à 25g") was wie Restposten klingt.
+  // Wenn "à Xg" folgt, behalten wir nur das.
+  t = t.replace(/\(?\s*(?:in\s+)?begrenzter?\s+Menge\s*(?=à\s*\d+\s*g)/gi, "");
+  // Sonst komplett raus inkl. umliegende Klammern/Kommata
+  t = t.replace(/\s*,?\s*\(?(?:in\s+)?begrenzter?\s+Menge\)?\s*/gi, " ");
   // ZUERST: "Bestand 0" / "Quantity 0" / "Quantity = 0" → ausverkauft
   // (vor den anderen Patterns, sonst frisst die generische Regel die 0)
   t = t.replace(/\b(?:Lager(?:bestand)?|Bestand)\s*[:=]?\s*0\s*g?\b/gi, "ausverkauft");

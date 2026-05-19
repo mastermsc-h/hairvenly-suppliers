@@ -376,8 +376,11 @@ async function routeIncoming(opts: {
         .order("created_at", { ascending: false })
         .limit(1).maybeSingle();
       const questionCount = (lastBot?.content || "").match(/\?/g)?.length || 0;
-      const DEBOUNCE_MS = questionCount >= 2 ? 45_000 : 6_000;
-      console.log(`[meta-webhook] debounce ${DEBOUNCE_MS}ms (last bot had ${questionCount} questions)`);
+      // Kurze Customer-Messages (z.B. "?", "ja", "ok") brauchen KEINEN langen
+      // Tipp-Puffer — der Bot soll schnell antworten.
+      const customerMsgShort = (opts.text || "").trim().length <= 30;
+      const DEBOUNCE_MS = (questionCount >= 2 && !customerMsgShort) ? 45_000 : 6_000;
+      console.log(`[meta-webhook] debounce ${DEBOUNCE_MS}ms (last bot ?-count=${questionCount}, customer-len=${(opts.text || "").length})`);
       await new Promise(r => setTimeout(r, DEBOUNCE_MS));
 
       const { data: refreshed } = await svc
