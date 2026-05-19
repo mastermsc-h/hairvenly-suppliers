@@ -491,15 +491,15 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                     key={s.id}
                     className={`group relative ${baseLi} ${rowBg}`}
                   >
-                    {/* Hover-Buttons rechts oben:
-                        - Wenn unread (Kundin schrieb zuletzt): grüner Haken = "als erledigt markieren"
-                        - Wenn schon gesehen: pinke Mail = "als ungelesen markieren" */}
-                    <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition">
-                      {isUnread ? (
-                        <MarkSeenButton sessionId={s.id} />
-                      ) : (
-                        <MarkUnreadButton sessionId={s.id} variant="icon" />
-                      )}
+                    {/* Hover-Buttons rechts oben (beide unabhängig sichtbar):
+                        - Grüner Haken — wenn die Session noch im "Nur unbeantwortet" steckt
+                          (= aus dem Filter rausnehmen / als erledigt markieren)
+                        - Pinke Mail — wenn der Name nicht mehr fett ist (du hast schon
+                          reingeschaut), und du sie wieder als ungelesen markieren willst
+                        Beide gleichzeitig: du hast reingeschaut UND noch nicht reagiert. */}
+                    <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition flex items-center gap-0.5">
+                      {isUnread && <MarkSeenButton sessionId={s.id} />}
+                      {!isUnseen && <MarkUnreadButton sessionId={s.id} variant="icon" />}
                     </div>
                     <Link href={`/chatbot/inbox/${s.id}`} className={`block ${onlyUnread ? "p-5" : "p-4"}`}>
                       {/* Customer-Name oben + Status-Badges links / IG-App-Hinweis rechts */}

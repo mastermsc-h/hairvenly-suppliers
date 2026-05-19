@@ -536,7 +536,13 @@ export async function discardDraft(draftId: string) {
  */
 export async function markSessionUnread(sessionId: string) {
   const svc = createServiceClient();
-  await svc.from("chat_sessions").update({ last_seen_by_agent_at: null }).eq("id", sessionId);
+  // BEIDE Spalten zurücksetzen:
+  // - last_seen_by_agent_at = null → Session erscheint wieder im "Nur unbeantwortet"-Filter
+  // - last_opened_by_agent_at = null → Name wird in der Liste wieder fett (Bold-Optik)
+  await svc.from("chat_sessions").update({
+    last_seen_by_agent_at: null,
+    last_opened_by_agent_at: null,
+  }).eq("id", sessionId);
   revalidatePath("/chatbot/inbox");
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }

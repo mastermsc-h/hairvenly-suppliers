@@ -13,20 +13,13 @@ import { markSessionUnread } from "@/lib/actions/chat-inbox";
 export default function MarkUnreadButton({
   sessionId,
   variant = "icon",
-  isUnread = false,
 }: {
   sessionId: string;
   variant?: "icon" | "labeled";
-  isUnread?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [pending, startTransition] = useTransition();
-
-  if (isUnread) {
-    // Schon ungelesen — keinen Button anzeigen
-    return null;
-  }
 
   function handleClick(e: React.MouseEvent) {
     e.preventDefault();
