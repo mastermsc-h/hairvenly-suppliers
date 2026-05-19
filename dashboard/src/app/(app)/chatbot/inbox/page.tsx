@@ -470,12 +470,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         </span>
                       </div>
 
-                      {/* Vorschau-Regel:
-                          - IMMER die letzte Kundennachricht (was wartet auf Antwort).
-                          - ZUSÄTZLICH unsere Antwort NUR wenn sie die ALLERLETZTE Message ist
-                            (lastMsgRole === assistant|human_agent) → bedeutet: wir haben zuletzt
-                            geantwortet, nichts mehr offen. Wenn Kundin danach wieder geschrieben hat
-                            (lastMsgRole === user), Bot-Antwort weglassen, weil veraltet/irreführend. */}
+                      {/* Vorschau: zeigt IMMER beides (Kunde + Bot/Agent-Antwort wenn vorhanden).
+                          - Bei "Kundin zuletzt geschrieben" (isUnread/lastMsgRole=user): Bot-Antwort
+                            etwas gedimmt + Hinweis "(beantwortet, aber Kundin schrieb seither nochmal)".
+                          - Bei "wir zuletzt geantwortet": Bot-Antwort normal hervorgehoben. */}
                       {st.lastUser && (
                         <div className="flex gap-2 text-sm">
                           <span className="text-neutral-400 shrink-0 mt-0.5" title="Letzte Kundennachricht">
@@ -484,13 +482,17 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                           <span className="text-neutral-700 line-clamp-2">{st.lastUser}</span>
                         </div>
                       )}
-                      {st.lastBot && (st.lastMsgRole === "assistant" || st.lastMsgRole === "human_agent") && (
-                        <div className="flex gap-2 text-sm mt-1">
+                      {st.lastBot && (
+                        <div className={`flex gap-2 text-sm mt-1 ${st.lastMsgRole === "user" ? "opacity-50" : ""}`}>
                           <span
-                            className={`shrink-0 mt-0.5 ${st.lastMsgRole === "human_agent" ? "text-amber-600" : "text-pink-500"}`}
-                            title={st.lastMsgRole === "human_agent" ? "Letzte Mitarbeiter-Antwort" : "Letzte Bot-Antwort"}
+                            className={`shrink-0 mt-0.5 ${st.lastMsgRole === "human_agent" || lastReplyViaIgApp ? "text-amber-600" : "text-pink-500"}`}
+                            title={
+                              st.lastMsgRole === "user"
+                                ? "Letzte Antwort von uns — Kundin schrieb seither nochmal"
+                                : (st.lastMsgRole === "human_agent" ? "Letzte Mitarbeiter-Antwort" : "Letzte Bot-Antwort")
+                            }
                           >
-                            {st.lastMsgRole === "human_agent" ? <UserCheck size={13} /> : <Bot size={13} />}
+                            {(st.lastMsgRole === "human_agent" || lastReplyViaIgApp) ? <UserCheck size={13} /> : <Bot size={13} />}
                           </span>
                           <span className="text-neutral-500 line-clamp-2">{st.lastBot}</span>
                         </div>
