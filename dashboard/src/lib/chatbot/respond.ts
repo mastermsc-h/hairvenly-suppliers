@@ -359,12 +359,21 @@ Unsere letzte Antwort ist >7 Tage her — eine warme Begrüßung ("Hi Liebes �
     }
   }
 
+  // URL-REGEL: niemals URLs raten oder zusammenbauen. Nur shopify_url aus Tool-Outputs.
+  const urlRule = `\n\n## 🔗 URL-REGEL — KOMPROMISSLOS
+Wenn du einen Produkt-Link schickst, kopiere die URL AUSSCHLIESSLICH aus dem Feld \`shopify_url\` eines Tool-Outputs (z.B. get_stock_eta, get_available_colors).
+NIEMALS selbst URLs zusammenbauen, erraten oder nach Muster bilden — auch wenn die URL "logisch" wirkt. Hairvenly-Produkt-Slugs folgen KEINEM vorhersehbaren Schema (z.B. "soft-balayge-tape-extensions" statt "usbekisch-soft-blond-balayage-65cm-tapes").
+Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe stattdessen nur den Produktnamen.
+
+❌ FALSCH: "hairvenly.de/products/usbekisch-soft-blond-balayage-65cm-tapes" (selbst gebaut)
+✅ RICHTIG: exakt der String aus shopify_url, sonst kein Link.`;
+
   // Wichtig: systemPrompt (= persona + avatar + training + strategies) bleibt STABIL
   // pro Avatar und wird via Prompt-Caching wiederverwendet. Variable Teile
-  // (openTurnsHint, sorry-hint, greetingHint) gehen in einen separaten Block —
+  // (openTurnsHint, sorry-hint, greetingHint, urlRule) gehen in einen separaten Block —
   // werden nicht gecacht, sind aber pro Call eh klein.
   const systemPromptStable = systemPrompt;
-  const systemPromptVariable = openTurnsHint + greetingHint;
+  const systemPromptVariable = openTurnsHint + greetingHint + urlRule;
 
   const messages: Anthropic.MessageParam[] = [];
   for (const m of msgs) {

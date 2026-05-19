@@ -253,6 +253,36 @@ const getStockEta: ToolDef = {
         console.log(`[get_stock_eta] loose-fallback aktiviert (Tokens: ${JSON.stringify(tokens)} → ${JSON.stringify(looseTokens)}), Treffer: inv=${inventoryMatches.length}, unterwegs=${inUnterwegs.length}, null=${inNullbestand.length}`);
       }
 
+      // URL-LOOKUP: pro Produkt-Variante die ECHTE shopify_url aus product_colors holen.
+      // Der Bot hatte vorher nur eine globale URL pro Farbname (also nur EINE für alle
+      // Längen+Methoden zusammen) und hat dann andere URLs halluziniert. Jetzt: pro
+      // konkretem product-String (name_shopify im Katalog) ein 1:1-Mapping.
+      const normalizeProductName = (s: string) =>
+        s.toUpperCase().replace(/\s+/g, " ").replace(/[♡♥]/g, "").trim();
+      const svcForUrls = createServiceClient();
+      const allProductNames = [
+        ...inventoryMatches.map(r => r.product),
+        ...inUnterwegs.map(m => m.product),
+        ...inNullbestand.map(p => p.product),
+      ].filter(Boolean);
+      const urlMap = new Map<string, string>();
+      if (allProductNames.length > 0) {
+        const { data: urlRows } = await svcForUrls
+          .from("product_colors")
+          .select("name_shopify, shopify_url")
+          .not("name_shopify", "is", null)
+          .not("shopify_url", "is", null);
+        const byNorm = new Map<string, string>();
+        for (const row of (urlRows as { name_shopify: string; shopify_url: string }[] | null) || []) {
+          byNorm.set(normalizeProductName(row.name_shopify), row.shopify_url);
+        }
+        for (const name of allProductNames) {
+          const url = byNorm.get(normalizeProductName(name));
+          if (url) urlMap.set(name, url);
+        }
+      }
+      const urlFor = (productName: string): string | null => urlMap.get(productName) || null;
+
       // ENTSCHEIDUNGSBAUM:
 
       // A) Produkt nicht in Inventory UND nicht in Unterwegs/Nullbestand → existiert nicht im Sortiment
@@ -290,6 +320,7 @@ const getStockEta: ToolDef = {
             product: m.product,
             collection: m.collection,
             earliest_eta: dated[0]?.text || dated[0]?.raw || "bald",
+            shopify_url: urlFor(m.product),
           };
         });
         return {
@@ -301,10 +332,13 @@ const getStockEta: ToolDef = {
               "dann was später kommt. " +
               "Beispiel: 'Soft Blond Balayage hätten wir in 65cm sofort verfügbar 💕 " +
               "In 55cm/85cm ist die Farbe gerade unterwegs (ca. Anfang Juni). " +
-              "Magst du die 65cm nehmen oder lieber auf die andere Länge warten?'",
+              "Magst du die 65cm nehmen oder lieber auf die andere Länge warten?' " +
+              "URL-REGEL: Wenn du einen Produkt-Link postest, nimm AUSSCHLIESSLICH die " +
+              "shopify_url aus diesem Tool-Output. NIEMALS selbst URLs bauen oder raten.",
             available_now: withStockEarly.slice(0, 5).map(r => ({
               product: r.product,
               collection: r.collection,
+              shopify_url: urlFor(r.product),
             })),
             coming_soon: comingSoon,
             sheet_last_updated: lastUpdated,
@@ -334,6 +368,7 @@ const getStockEta: ToolDef = {
             // KEINE konkreten Mengen!
             earliest_eta: earliest?.text || earliest?.raw || "bald",
             earliest_eta_iso: earliest?.iso || null,
+            shopify_url: urlFor(m.product),
           };
         });
         return {
@@ -343,7 +378,9 @@ const getStockEta: ToolDef = {
               "Produkt ist unterwegs. Verwende NUR 'earliest_eta' für die Antwort und formuliere weich: " +
               "z.B. 'ca. Ende Mai, also etwa 30.05.' — NIEMALS sagen 'erste Lieferung' oder 'zweite Lieferung'! " +
               "Es interessiert die Kundin nicht ob es eine oder mehrere Lieferungen gibt. " +
-              "EIN Datum reicht. Keine 'erste Lieferung'-Phrasen!",
+              "EIN Datum reicht. Keine 'erste Lieferung'-Phrasen! " +
+              "URL-REGEL: Wenn du einen Produkt-Link postest, nimm AUSSCHLIESSLICH die " +
+              "shopify_url aus diesem Tool-Output. NIEMALS selbst URLs bauen oder raten.",
             sheet_last_updated: lastUpdated,
             products,
           }),
@@ -391,8 +428,10 @@ const getStockEta: ToolDef = {
             products: withStock.slice(0, 5).map(r => ({
               product: r.product,
               collection: r.collection,
+              shopify_url: urlFor(r.product),
               // KEINE quantity/total_weight_g mehr im Output!
             })),
+            url_rule: "Wenn du einen Produkt-Link schickst, kopiere AUSSCHLIESSLICH die shopify_url aus diesem Output. NIEMALS URLs selbst zusammenbauen, erfinden oder raten.",
           }),
         };
       }
