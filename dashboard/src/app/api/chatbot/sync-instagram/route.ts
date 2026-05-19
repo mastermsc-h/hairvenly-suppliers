@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
     // 1. Conversations holen
     console.log(`[sync-instagram] fetching conversations from ${host}, limit=${convoLimit}`);
     const convoUrl = `${host}/${GRAPH_VERSION}/${igUserId}/conversations?platform=instagram` +
-      `&fields=id,updated_time,participants,messages.limit(25){id,created_time,from,to,message,attachments}` +
+      `&fields=id,updated_time,participants,messages.limit(100){id,created_time,from,to,message,attachments}` +
       `&limit=${convoLimit}&access_token=${encodeURIComponent(token)}`;
     let convoRes: Response;
     try {
