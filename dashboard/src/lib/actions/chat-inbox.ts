@@ -434,7 +434,7 @@ export async function generateDraftOnDemand(sessionId: string): Promise<{ ok: tr
     .maybeSingle();
   if (existing) return { ok: false, reason: "Es liegt bereits ein offener Entwurf vor." };
 
-  // Letzte (nicht gelöschte) Message muss von Kunde sein (sonst nichts zu antworten)
+  // Letzte (nicht gelöschte) Message holen — egal von wem.
   const { data: lastMsg } = await svc
     .from("chat_messages")
     .select("id, role")
@@ -445,23 +445,28 @@ export async function generateDraftOnDemand(sessionId: string): Promise<{ ok: tr
     .maybeSingle();
 
   if (!lastMsg) return { ok: false, reason: "Keine Nachrichten in dieser Session." };
-  if (lastMsg.role !== "user") {
-    return { ok: false, reason: "Letzte Nachricht ist nicht vom Kunden — keine offene Frage zu beantworten. (Falls eine Bot-/Mitarbeiter-Antwort die letzte ist, hover über sie und klick das 🗑 Icon um sie zu entfernen, damit der Bot die vorherige Kundenfrage wieder beantwortet.)" };
-  }
 
-  // Trigger-Message-ID: jüngste offene Kunden-Nachricht (= Cluster-Start für Training)
+  // Letzte 15 Messages durchsuchen — wir brauchen mindestens EINE Kundennachricht
+  // damit der Bot was zu beantworten hat. Egal ob die letzte Message von uns ist —
+  // der Bot guckt sich den Verlauf an und antwortet auf die offene Kundenfragen.
   const { data: recent } = await svc
     .from("chat_messages")
     .select("id, role, created_at")
     .eq("session_id", sessionId)
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
-    .limit(10);
-  const lastAgentIdx = (recent || []).findIndex(m => m.role === "assistant" || m.role === "human_agent");
-  const openMsgs = lastAgentIdx === -1
-    ? (recent || []).filter(m => m.role === "user")
-    : (recent || []).slice(0, lastAgentIdx).filter(m => m.role === "user");
-  const triggerMsgId = (openMsgs[openMsgs.length - 1] || lastMsg).id;
+    .limit(15);
+
+  // Gibt es überhaupt eine Kundennachricht in den letzten 15?
+  const hasAnyCustomerMsg = (recent || []).some(m => m.role === "user");
+  if (!hasAnyCustomerMsg) {
+    return { ok: false, reason: "Keine Kundennachricht in den letzten 15 Messages — der Bot hätte nichts zu beantworten." };
+  }
+  // Trigger-Message-ID = jüngste Kundennachricht überhaupt (für Training-Kontext).
+  // Falls letzte Message von uns ist und davor Kundenfragen offen → Bot guckt
+  // sich Verlauf an und antwortet darauf.
+  const mostRecentUserMsg = (recent || []).find(m => m.role === "user");
+  const triggerMsgId = mostRecentUserMsg?.id || lastMsg.id;
 
   try {
     const { respondAsBot } = await import("@/lib/chatbot/respond");
