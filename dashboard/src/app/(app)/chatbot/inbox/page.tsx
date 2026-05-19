@@ -10,7 +10,7 @@ import DefaultBotModeToggle from "./default-bot-mode-toggle";
 import ClassifyBackfillButton from "./classify-backfill-button";
 
 interface PageProps {
-  searchParams: Promise<{ status?: string; mode?: string; channel?: string; category?: string; q?: string }>;
+  searchParams: Promise<{ status?: string; mode?: string; channel?: string; category?: string; q?: string; unread?: string }>;
 }
 
 const CATEGORY_LABELS: Record<string, { label: string; emoji: string }> = {
@@ -60,6 +60,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   const channelFilter = params.channel  || "all"; // 'all' | 'web' | 'instagram' | 'whatsapp'
   const categoryFilter = params.category || "all";
   const searchQuery    = (params.q || "").trim();
+  const onlyUnread     = params.unread === "1";
 
   const svc = createServiceClient();
   let query = svc
@@ -165,12 +166,36 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     }
   }
 
+  // Pro Session: ist sie "unbeantwortet"? = Kundin zuletzt geschrieben + nicht gesehen
+  const unreadMap: Record<string, boolean> = {};
+  for (const s of combinedSessions) {
+    const st = stats[s.id];
+    const lastRole = st?.lastMsgRole;
+    const ourTurn = lastRole === "assistant" || lastRole === "human_agent";
+    unreadMap[s.id] = !ourTurn && !!(s.last_customer_msg_at && (
+      !s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at
+    ));
+  }
+  const totalUnreadCount = combinedSessions.filter(s => unreadMap[s.id]).length;
+
   // Filter nach Mode: pure_bot = nur Bot hat geantwortet, with_human = Mensch hat reingeschrieben
   let filteredSessions = combinedSessions;
   if (mode === "pure_bot") {
     filteredSessions = filteredSessions.filter(s => (stats[s.id]?.humanCount || 0) === 0);
   } else if (mode === "with_human") {
     filteredSessions = filteredSessions.filter(s => (stats[s.id]?.humanCount || 0) > 0);
+  }
+
+  // "Nur unbeantwortet" Filter + Sortierung nach Kundin-Zeitstempel (neueste zuerst)
+  if (onlyUnread) {
+    filteredSessions = filteredSessions
+      .filter(s => unreadMap[s.id])
+      .slice()
+      .sort((a, b) => {
+        const ta = a.last_customer_msg_at || a.last_message_at || "";
+        const tb = b.last_customer_msg_at || b.last_message_at || "";
+        return tb.localeCompare(ta);
+      });
   }
 
   const pureBotCount   = combinedSessions.filter(s => (stats[s.id]?.humanCount || 0) === 0).length;
@@ -200,6 +225,37 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         <div className="flex items-end gap-3 flex-wrap">
           <DefaultBotModeToggle currentMode={defaultBotMode} />
           <SyncInstagramButton />
+          {/* Toggle: Nur unbeantwortet zeigen (Kundin schrieb zuletzt, wir noch nicht reagiert).
+              Beim Aktivieren werden alle anderen Filter beibehalten und die Liste nach
+              last_customer_msg_at DESC sortiert — neueste Kunden-Nachricht oben. */}
+          <Link
+            href={(() => {
+              const next = new URLSearchParams();
+              if (filter !== "all")        next.set("status",   filter);
+              if (mode !== "all")          next.set("mode",     mode);
+              if (channelFilter !== "all") next.set("channel",  channelFilter);
+              if (categoryFilter !== "all") next.set("category", categoryFilter);
+              if (searchQuery)             next.set("q",        searchQuery);
+              if (!onlyUnread)             next.set("unread",   "1");
+              const qs = next.toString();
+              return `/chatbot/inbox${qs ? "?" + qs : ""}`;
+            })()}
+            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+              onlyUnread
+                ? "bg-pink-600 text-white border-pink-600 hover:bg-pink-700"
+                : "bg-white text-pink-700 border-pink-300 hover:bg-pink-50"
+            }`}
+            title={onlyUnread
+              ? "Filter aktiv — Klick zum Aufheben"
+              : "Nur Sessions zeigen, bei denen die Kundin zuletzt geschrieben hat"}
+          >
+            🔔 Nur unbeantwortet
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+              onlyUnread ? "bg-white/25 text-white" : "bg-pink-100 text-pink-700"
+            }`}>
+              {totalUnreadCount}
+            </span>
+          </Link>
           {(dueFollowUps ?? 0) > 0 && (
             <a
               href="/chatbot/follow-ups"
@@ -239,6 +295,9 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 ...(filter !== "all" ? { status: filter } : {}),
                 ...(mode !== "all" ? { mode } : {}),
                 ...(c !== "all" ? { channel: c } : {}),
+                ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
+                ...(searchQuery ? { q: searchQuery } : {}),
+                ...(onlyUnread ? { unread: "1" } : {}),
               }).toString()}`}
               className={`text-xs px-3 py-1.5 rounded-full border ${
                 channelFilter === c
@@ -263,6 +322,9 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 ...(s !== "all" ? { status: s } : {}),
                 ...(mode !== "all" ? { mode } : {}),
                 ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
+                ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
+                ...(searchQuery ? { q: searchQuery } : {}),
+                ...(onlyUnread ? { unread: "1" } : {}),
               }).toString()}`}
               className={`text-xs px-3 py-1.5 rounded-full border ${
                 filter === s
@@ -289,6 +351,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
               ...(mode !== "all" ? { mode } : {}),
               ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
               ...(searchQuery ? { q: searchQuery } : {}),
+              ...(onlyUnread ? { unread: "1" } : {}),
             }).toString()}`}
             className={`text-xs px-3 py-1.5 rounded-full border ${
               categoryFilter === "all"
@@ -308,6 +371,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                   ...(mode !== "all" ? { mode } : {}),
                   ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
                   ...(searchQuery ? { q: searchQuery } : {}),
+                  ...(onlyUnread ? { unread: "1" } : {}),
                   category: key,
                 }).toString()}`}
                 className={`text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1 ${
@@ -336,7 +400,14 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
           ].map(opt => (
             <Link
               key={opt.key}
-              href={`/chatbot/inbox?${new URLSearchParams({ ...(filter !== "all" ? { status: filter } : {}), ...(opt.key !== "all" ? { mode: opt.key } : {}) }).toString()}`}
+              href={`/chatbot/inbox?${new URLSearchParams({
+                ...(filter !== "all" ? { status: filter } : {}),
+                ...(opt.key !== "all" ? { mode: opt.key } : {}),
+                ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
+                ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
+                ...(searchQuery ? { q: searchQuery } : {}),
+                ...(onlyUnread ? { unread: "1" } : {}),
+              }).toString()}`}
               className={`text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1 ${
                 mode === opt.key
                   ? "bg-neutral-900 text-white border-neutral-900"
