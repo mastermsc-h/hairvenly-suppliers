@@ -10,6 +10,75 @@ const MODEL = "claude-sonnet-4-5";
 const MAX_ITER = 5;
 
 /**
+ * Falls Claude in einen Stutter-Loop fällt und denselben Text 2× hintereinander
+ * schreibt (z.B. "Ich bin da... Magst du... Ich bin da... Magst du..."),
+ * halbieren wir die Antwort.
+ */
+function dedupRepeatedHalf(text: string): string {
+  const t = text.trim();
+  if (t.length < 60) return t;
+  // Geradzahlige Halbierung — wenn beide Hälften gleich sind
+  if (t.length % 2 === 0) {
+    const half = t.length / 2;
+    if (t.slice(0, half).trim() === t.slice(half).trim()) {
+      return t.slice(0, half).trim();
+    }
+  }
+  // Heuristik: wenn der Anfang (erste 80 Zeichen) auch ungefähr in der Mitte
+  // wieder auftaucht, dedupliziere bis dahin.
+  const prefix = t.slice(0, Math.min(80, Math.floor(t.length / 3)));
+  const secondHalfStart = t.indexOf(prefix, prefix.length + 10);
+  if (secondHalfStart > 0 && secondHalfStart < t.length * 0.6) {
+    const a = t.slice(0, secondHalfStart).trim();
+    const b = t.slice(secondHalfStart).trim();
+    // Beide Teile müssen ähnlich lang sein und ähnlich anfangen
+    if (Math.abs(a.length - b.length) < 30) {
+      return a;
+    }
+  }
+  return t;
+}
+
+/**
+ * Teilt lange Texte an Absatz-Grenzen in Stücke <= maxLen Zeichen.
+ * Instagram-Messaging-API: 1000 Zeichen pro Message → wir splitten ab 700 sicher.
+ */
+export function splitLongMessage(text: string, maxLen = 700): string[] {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxLen) return [trimmed];
+  const paragraphs = trimmed.split(/\n\n+/);
+  const parts: string[] = [];
+  let buf = "";
+  for (const p of paragraphs) {
+    const candidate = buf ? `${buf}\n\n${p}` : p;
+    if (candidate.length <= maxLen) {
+      buf = candidate;
+    } else {
+      if (buf) parts.push(buf);
+      // Wenn ein einzelner Absatz selbst zu lang ist: hart splitten an Satz-Grenze
+      if (p.length > maxLen) {
+        const sentences = p.split(/(?<=[.!?])\s+/);
+        let sbuf = "";
+        for (const s of sentences) {
+          const sc = sbuf ? `${sbuf} ${s}` : s;
+          if (sc.length <= maxLen) sbuf = sc;
+          else {
+            if (sbuf) parts.push(sbuf);
+            sbuf = s.length > maxLen ? s.slice(0, maxLen) : s;
+          }
+        }
+        if (sbuf) buf = sbuf;
+        else buf = "";
+      } else {
+        buf = p;
+      }
+    }
+  }
+  if (buf) parts.push(buf);
+  return parts.filter(p => p.trim().length > 0);
+}
+
+/**
  * Entfernt / ersetzt interne Lagerzahlen aus dem Bot-Output.
  * Wenn Claude trotz System-Prompt mal "850g auf Lager" schreibt, fangen wir
  * das hier ab und ersetzen mit kunden-sicheren Phrasen.
@@ -308,9 +377,18 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
     const toolBlocks = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
 
+    // Dedup identische konsekutive Text-Blöcke (Claude-Stutter vermeiden)
+    const dedupedTexts: string[] = [];
+    for (const tb of textBlocks) {
+      const t = (tb.text || "").trim();
+      if (!t) continue;
+      if (dedupedTexts.length > 0 && dedupedTexts[dedupedTexts.length - 1] === t) continue;
+      dedupedTexts.push(t);
+    }
+
     // Text NUR überschreiben wenn diese Iteration auch Text produziert hat
     // (sonst löscht eine letzte tool-only-Iteration den vorigen Text)
-    const iterText = textBlocks.map(b => b.text).join("\n").trim();
+    const iterText = dedupedTexts.join("\n").trim();
     if (iterText) finalText = iterText;
 
     if (toolBlocks.length === 0 || response.stop_reason === "end_turn") break;
@@ -351,16 +429,24 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       messages: convo,
     });
     const finalBlocks = finalResp.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
-    finalText = finalBlocks.map(b => b.text).join("\n").trim();
+    const fdedup: string[] = [];
+    for (const fb of finalBlocks) {
+      const t = (fb.text || "").trim();
+      if (!t) continue;
+      if (fdedup.length > 0 && fdedup[fdedup.length - 1] === t) continue;
+      fdedup.push(t);
+    }
+    finalText = fdedup.join("\n").trim();
   }
 
   if (!finalText) return { success: false, error: "empty response after fallback" };
 
-  // SAFETY-NET: konkrete Lagerzahlen aus der Bot-Antwort rausfiltern, falls
-  // Claude die System-Prompt-Regel ignoriert hat. Wir suchen typische Muster
-  // wie "850g auf Lager" / "noch 4 Stück" / "Bestand 125g" und ersetzen sie
-  // durch kunden-freundliche Formulierungen.
+  // SAFETY-NET 1: konkrete Lagerzahlen rausfiltern
   finalText = sanitizeStockLeaks(finalText);
+
+  // SAFETY-NET 2: Dedup wenn ganze Antwort sich wiederholt (Claude-Stutter)
+  // Heuristik: wenn finalText aus zwei identischen Hälften besteht, halbieren
+  finalText = dedupRepeatedHalf(finalText);
 
   // Im assisted-Modus: NICHT in chat_messages speichern — der Caller speichert
   // erst nach Mitarbeiter-Approval ggf. die korrigierte Version.

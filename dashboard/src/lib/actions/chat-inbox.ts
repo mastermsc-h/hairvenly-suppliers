@@ -51,13 +51,20 @@ export async function sendHumanMessage(sessionId: string, content: string) {
 
   // An echten Channel zurücksenden (außer 'web' — da pollt der Browser)
   if (cur?.channel === "instagram" && cur?.external_id) {
-    const { sendInstagramMessage } = await import("@/lib/messaging/meta");
-    const result = await sendInstagramMessage(cur.external_id, content.trim());
-    if (!result.success) {
-      console.error("[chat-inbox] sendInstagramMessage failed:", result.error);
-    } else if (result.message_id && insertedMsg?.id) {
-      // MID direkt an die Zeile hängen → Echo-Dedup + Recall-Sync funktionieren
-      await svc.from("chat_messages").update({ external_id: result.message_id }).eq("id", insertedMsg.id);
+    const [{ sendInstagramMessage }, { splitLongMessage }] = await Promise.all([
+      import("@/lib/messaging/meta"),
+      import("@/lib/chatbot/respond"),
+    ]);
+    const parts = splitLongMessage(content.trim());
+    let firstMid: string | undefined;
+    for (let i = 0; i < parts.length; i++) {
+      const result = await sendInstagramMessage(cur.external_id, parts[i]);
+      if (!result.success) console.error(`[chat-inbox] IG send failed (${i + 1}/${parts.length}):`, result.error);
+      else if (i === 0 && result.message_id) firstMid = result.message_id;
+      if (i < parts.length - 1) await new Promise(s => setTimeout(s, 600));
+    }
+    if (firstMid && insertedMsg?.id) {
+      await svc.from("chat_messages").update({ external_id: firstMid }).eq("id", insertedMsg.id);
     }
   } else if (cur?.channel === "whatsapp" && cur?.external_id) {
     const { sendWhatsAppMessage } = await import("@/lib/messaging/meta");
@@ -323,13 +330,22 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
     }
   }
 
-  // An Channel senden + MID an die assistant-Zeile hängen (Echo-Dedup + Recall-Sync)
+  // An Channel senden — bei IG: lange Texte automatisch in mehrere Messages splitten
   if (session.channel === "instagram" && session.external_id) {
-    const { sendInstagramMessage } = await import("@/lib/messaging/meta");
-    const r = await sendInstagramMessage(session.external_id, final);
-    if (!r.success) console.error("[approveDraft] IG send failed:", r.error);
-    else if (r.message_id && insertedMsg?.id) {
-      await svc.from("chat_messages").update({ external_id: r.message_id }).eq("id", insertedMsg.id);
+    const [{ sendInstagramMessage }, { splitLongMessage }] = await Promise.all([
+      import("@/lib/messaging/meta"),
+      import("@/lib/chatbot/respond"),
+    ]);
+    const parts = splitLongMessage(final);
+    let firstMid: string | undefined;
+    for (let i = 0; i < parts.length; i++) {
+      const r = await sendInstagramMessage(session.external_id, parts[i]);
+      if (!r.success) console.error(`[approveDraft] IG send failed (${i + 1}/${parts.length}):`, r.error);
+      else if (i === 0 && r.message_id) firstMid = r.message_id;
+      if (i < parts.length - 1) await new Promise(s => setTimeout(s, 600));
+    }
+    if (firstMid && insertedMsg?.id) {
+      await svc.from("chat_messages").update({ external_id: firstMid }).eq("id", insertedMsg.id);
     }
   } else if (session.channel === "whatsapp" && session.external_id) {
     const { sendWhatsAppMessage } = await import("@/lib/messaging/meta");
@@ -513,7 +529,7 @@ export async function setGlobalDefaultBotMode(mode: "auto" | "assisted" | "off")
 
 export type SessionCategory =
   "availability" | "pricing" | "color_advice" | "appointment"
-  | "complaint" | "order_status" | "partnership" | "general";
+  | "complaint" | "order_status" | "gewerbe" | "partnership" | "general";
 
 /** Manuelles Override der Kategorie (Mitarbeiter korrigiert Bot-Klassifikation) */
 export async function setSessionCategory(sessionId: string, category: SessionCategory) {

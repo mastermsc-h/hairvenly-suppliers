@@ -428,15 +428,24 @@ async function triggerBotResponse(
     return;
   }
 
-  // mode = 'auto' → direkt senden
+  // mode = 'auto' → senden, ggf. in mehrere IG-Messages splitten wenn > 700 Zeichen
   if (channel === "instagram") {
-    const sendResult = await sendInstagramMessage(externalId, result.text);
-    console.log("[meta-webhook] IG reply sent:", sendResult);
-    // MID direkt an die assistant-Zeile hängen → Echo-Dedup + Recall funktionieren
-    if (sendResult.success && sendResult.message_id && result.insertedMessageId) {
-      const svc = createServiceClient();
+    const { splitLongMessage } = await import("@/lib/chatbot/respond");
+    const parts = splitLongMessage(result.text);
+    const svc = createServiceClient();
+    let firstMid: string | undefined;
+    for (let i = 0; i < parts.length; i++) {
+      const sendResult = await sendInstagramMessage(externalId, parts[i]);
+      console.log(`[meta-webhook] IG reply sent (${i + 1}/${parts.length}):`, sendResult);
+      if (i === 0 && sendResult.success && sendResult.message_id) {
+        firstMid = sendResult.message_id;
+      }
+      if (i < parts.length - 1) await new Promise(r => setTimeout(r, 600));
+    }
+    // MID an die assistant-Zeile hängen (nur ein Eintrag in der DB, eine MID — Echo-Dedup)
+    if (firstMid && result.insertedMessageId) {
       await svc.from("chat_messages")
-        .update({ external_id: sendResult.message_id })
+        .update({ external_id: firstMid })
         .eq("id", result.insertedMessageId);
     }
   }

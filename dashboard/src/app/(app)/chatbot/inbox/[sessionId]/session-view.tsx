@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown } from "lucide-react";
+import CategorySelector from "./category-selector";
 import {
   takeoverSession,
   sendHumanMessage,
@@ -39,6 +40,7 @@ interface Props {
     customer_name: string | null;
     bot_auto_reply: boolean;
     bot_mode: "auto" | "assisted" | "off";
+    category: null | "availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "general";
     assigned_name: string | null;
   };
   initialMessages: Message[];
@@ -246,6 +248,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               <span className="font-medium">{session.assigned_name}</span>
             </div>
           )}
+          <CategorySelector sessionId={session.id} currentCategory={session.category} />
         </div>
         <div className="flex gap-2 items-center">
           {/* Bot-Modus — klarer Dropdown-Button mit Pfeil, deutlich klickbar */}

@@ -20,6 +20,7 @@ const CATEGORY_LABELS: Record<string, { label: string; emoji: string }> = {
   appointment:  { label: "Termin",        emoji: "📅" },
   complaint:    { label: "Reklamation",   emoji: "⚠️" },
   order_status: { label: "Bestellstatus", emoji: "🚚" },
+  gewerbe:      { label: "Gewerbe",       emoji: "💼" },
   partnership:  { label: "Partnership",   emoji: "🤝" },
   general:      { label: "Sonstiges",     emoji: "💬" },
 };

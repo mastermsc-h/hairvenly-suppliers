@@ -14,6 +14,7 @@ export type Category =
   | "appointment"
   | "complaint"
   | "order_status"
+  | "gewerbe"
   | "partnership"
   | "general";
 
@@ -24,7 +25,8 @@ const CATEGORY_DESC: Record<Category, string> = {
   appointment:   "Termin / Salon — Buchungsanfragen, Beratungstermin, Ansatz färben, Showroom-Besuch, vor Ort vorbeikommen, im Laden anschauen",
   complaint:     "Reklamation / Beschwerde — Beschädigung, Unzufriedenheit, falsche Lieferung, Rückgabe-Anfragen, Problem mit Produkt",
   order_status:  "Bestellstatus — 'wo ist meine Bestellung?', Tracking, Versand-Probleme, Bestellung nicht angekommen, Rechnungsfragen",
-  partnership:   "Partnership / B2B — Lieferanten-Outreach von Drittanbietern ('we sell hair extensions'), Kooperationsanfragen, Friseurin-Anfrage für Gewerbe, Jobsuche/Mitarbeitersuche ('eleman ariyormusunuz')",
+  gewerbe:       "Gewerbe / B2B-Kundin — Friseurin/Salon will Extensions kaufen, Gewerbenachweis, Netto-Preise, Wiederverkäufer-Anfrage, 'ich bin Friseurin und möchte für meinen Salon bestellen'",
+  partnership:   "Partnership / Lieferanten-Outreach von Drittanbietern — 'we sell hair extensions to you', Kooperations-Spam, externe Firmen die UNS etwas verkaufen wollen, Jobsuche/Mitarbeitersuche ('eleman ariyormusunuz')",
   general:       "Sonstiges / unklar — NUR verwenden wenn wirklich keine der anderen Kategorien passt (z.B. reine Begrüßung ohne Anliegen, 'Dankeschön', unverständliche Nachricht)",
 };
 
