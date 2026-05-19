@@ -58,6 +58,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
   const [modeSwitching, setModeSwitching] = useState<null | "auto" | "assisted" | "off">(null);
   const [generating, setGenerating] = useState(false);
   const [showModeSettings, setShowModeSettings] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -409,9 +410,36 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             msg={m}
             signatureName={session.bot_signature_name}
             onDeleted={() => setMessages(curr => curr.filter(x => x.id !== m.id))}
+            onImageClick={(url) => setLightboxImage(url)}
           />
         ))}
       </div>
+
+      {/* Lightbox-Modal für Vollbild-Anzeige */}
+      {lightboxImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 cursor-zoom-out"
+          onClick={() => setLightboxImage(null)}
+          onKeyDown={(e) => { if (e.key === "Escape") setLightboxImage(null); }}
+          tabIndex={-1}
+        >
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setLightboxImage(null); }}
+            className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white rounded-full p-2 transition"
+            aria-label="Schließen"
+          >
+            <X size={20} />
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightboxImage}
+            alt="Vollbild"
+            className="max-h-[95vh] max-w-[95vw] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
 
       {/* Input — nur wenn übernommen */}
       {isTakenOver ? (
@@ -521,7 +549,7 @@ function formatMsgTime(iso: string): string {
   return `${d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" })} · ${time}`;
 }
 
-function MessageRow({ msg, signatureName, onDeleted }: { msg: Message; signatureName: string | null; onDeleted: () => void }) {
+function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Message; signatureName: string | null; onDeleted: () => void; onImageClick?: (url: string) => void }) {
   const time = formatMsgTime(msg.created_at);
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
@@ -559,14 +587,33 @@ function MessageRow({ msg, signatureName, onDeleted }: { msg: Message; signature
           <User size={12} className="text-neutral-600" />
         </div>
         <div className="max-w-[70%]">
-          <div className="bg-white border border-neutral-200 rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">{msg.content}</div>
+          {/* Text nur anzeigen wenn nicht reiner [Foto]-Platzhalter mit Image-Attachment */}
+          {(() => {
+            const hasImage = msg.attachments?.some(a => a.type === "image" && a.url);
+            const isJustFotoPlaceholder = hasImage && (msg.content || "").trim() === "[Foto]";
+            if (isJustFotoPlaceholder || !msg.content) return null;
+            return (
+              <div className="bg-white border border-neutral-200 rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">{msg.content}</div>
+            );
+          })()}
           {msg.attachments?.length > 0 && (
-            <div className="flex gap-1 mt-1">
-              {msg.attachments.map((a, i) => (
-                <a key={i} href={a.url} target="_blank" rel="noopener" className="text-xs text-blue-600 underline">
-                  📎 {a.type}
-                </a>
-              ))}
+            <div className="flex gap-1.5 mt-1 flex-wrap">
+              {msg.attachments.map((a, i) =>
+                a.type === "image" && a.url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={i}
+                    src={a.url}
+                    alt="Anhang"
+                    onClick={() => onImageClick?.(a.url)}
+                    className="max-h-48 max-w-[200px] rounded-xl border border-neutral-200 shadow-sm cursor-zoom-in hover:shadow-md hover:border-neutral-400 transition object-cover"
+                  />
+                ) : (
+                  <a key={i} href={a.url} target="_blank" rel="noopener" className="text-xs text-blue-600 underline">
+                    📎 {a.type}
+                  </a>
+                )
+              )}
             </div>
           )}
           <div className="text-[10px] text-neutral-400 mt-0.5">Kunde · {time}</div>
