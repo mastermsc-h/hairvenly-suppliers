@@ -541,6 +541,21 @@ export async function markSessionUnread(sessionId: string) {
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
 
+/**
+ * Markiert eine Session manuell als erledigt/beantwortet — auch wenn die letzte
+ * Nachricht von der Kundin kam und gar keine Antwort nötig ist (z.B. "Danke!").
+ * Setzt last_seen_by_agent_at = jetzt, damit sie aus dem "Nur unbeantwortet"-Filter
+ * verschwindet, OHNE den Status der Session zu verändern.
+ */
+export async function markSessionAsSeen(sessionId: string) {
+  const svc = createServiceClient();
+  await svc.from("chat_sessions")
+    .update({ last_seen_by_agent_at: new Date().toISOString() })
+    .eq("id", sessionId);
+  revalidatePath("/chatbot/inbox");
+  revalidatePath(`/chatbot/inbox/${sessionId}`);
+}
+
 /** Schließt eine Session */
 export async function closeSession(sessionId: string) {
   const svc = createServiceClient();

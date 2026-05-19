@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User, Mail } from "lucide-react";
 import SyncInstagramButton from "./sync-instagram-button";
 import MarkUnreadButton from "./mark-unread-button";
+import MarkSeenButton from "./mark-seen-button";
 import InboxSearchBar from "./search-bar";
 import DefaultBotModeToggle from "./default-bot-mode-toggle";
 import ClassifyBackfillButton from "./classify-backfill-button";
@@ -459,12 +460,16 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         : "border-l-4 border-l-transparent"
                     }`}
                   >
-                    {/* Mark-Unread-Button absolut positioniert, nur bei Hover sichtbar */}
-                    {!isUnread && (
-                      <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition">
+                    {/* Hover-Buttons rechts oben:
+                        - Wenn unread (Kundin schrieb zuletzt): grüner Haken = "als erledigt markieren"
+                        - Wenn schon gesehen: pinke Mail = "als ungelesen markieren" */}
+                    <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition">
+                      {isUnread ? (
+                        <MarkSeenButton sessionId={s.id} />
+                      ) : (
                         <MarkUnreadButton sessionId={s.id} variant="icon" />
-                      </div>
-                    )}
+                      )}
+                    </div>
                     <Link href={`/chatbot/inbox/${s.id}`} className="block p-4">
                       {/* Customer-Name oben + Status-Badges links / IG-App-Hinweis rechts */}
                       <div className="flex items-center gap-2 mb-1.5">
