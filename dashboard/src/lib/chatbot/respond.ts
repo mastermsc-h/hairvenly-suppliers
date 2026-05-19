@@ -98,7 +98,9 @@ function sanitizeStockLeaks(text: string): string {
   // "Quantity = 5" (Zahl ≠ 0)
   t = t.replace(/\bQuantity\s*[:=]?\s*\d+\b/gi, "");
   // "noch 4 Stück" / "nur noch 12 Packungen"
-  t = t.replace(/\b(?:noch\s+|nur\s+noch\s+)?\d{1,3}\s*(Stück|Packungen)\b/gi, "in begrenzter Menge");
+  // NUR Stock-Leaks wie "noch 4 Stück" / "nur noch 12 Packungen" abfangen — NICHT
+  // normale Preis-Kalkulationen wie "6 Packungen à 25g". Daher Anker auf "noch/nur noch".
+  t = t.replace(/\b(noch|nur\s+noch)\s+\d{1,3}\s*(Stück|Packungen)\b/gi, "$1 etwas");
   // "850g im Lager"
   t = t.replace(/\b\d{2,5}\s*g(?:ramm)?\s+im\s+Lager\b/gi, "im Lager");
   // Mehrfach-Leerzeichen / leere Klammern bereinigen

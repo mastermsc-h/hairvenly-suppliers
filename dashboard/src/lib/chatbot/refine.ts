@@ -99,6 +99,9 @@ WICHTIG:
     if (!newText) return { success: false, error: "leere Antwort" };
     // Safety-Net: Lagerzahlen rausfiltern (gleiche Logik wie in respond.ts)
     newText = newText
+      // "in begrenzter Menge"-Phrase komplett entfernen — verboten
+      .replace(/\(?\s*(?:in\s+)?begrenzter?\s+Menge\s*(?=à\s*\d+\s*g)/gi, "")
+      .replace(/\s*,?\s*\(?(?:in\s+)?begrenzter?\s+Menge\)?\s*/gi, " ")
       // ZUERST Bestand/Quantity = 0 → ausverkauft (vor generischer Zahlen-Regel)
       .replace(/\b(?:Lager(?:bestand)?|Bestand)\s*[:=]?\s*0\s*g?\b/gi, "ausverkauft")
       .replace(/\bQuantity\s*[:=]?\s*0\b/gi, "ausverkauft")
@@ -106,7 +109,8 @@ WICHTIG:
       .replace(/\b\d{2,5}\s*g(?:ramm)?\b\s*\b(?:verfügbar|vorrätig|am\s*Lager)\b/gi, "verfügbar")
       .replace(/\b(?:Lager(?:bestand)?|Bestand)\s*[:=]?\s*\d{1,5}\s*g?\b/gi, "verfügbar")
       .replace(/\bQuantity\s*[:=]?\s*\d+\b/gi, "")
-      .replace(/\b(?:noch\s+|nur\s+noch\s+)?\d{1,3}\s*(Stück|Packungen)\b/gi, "in begrenzter Menge")
+      // NUR Stock-Leaks ("noch X Stück") abfangen, NICHT normale Preis-Kalk
+      .replace(/\b(noch|nur\s+noch)\s+\d{1,3}\s*(Stück|Packungen)\b/gi, "$1 etwas")
       .replace(/\(\s*\)/g, "")
       .replace(/[ \t]{2,}/g, " ");
     return { success: true, text: newText };
