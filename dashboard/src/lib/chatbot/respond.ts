@@ -359,6 +359,20 @@ Unsere letzte Antwort ist >7 Tage her — eine warme Begrüßung ("Hi Liebes �
     }
   }
 
+  // STIL-REGEL: kein KI-typischer Gedankenstrich (—), trotzdem einfach bleiben
+  const styleRule = `\n\n## ✏️ STIL-REGEL — keine Gedankenstriche
+Vermeide den langen Gedankenstrich " — " (Em-Dash). Den nutzt sonst keiner und es klingt nach KI.
+Stattdessen: kurzer Satz mit Punkt, ein Komma, oder ganz weglassen.
+
+❌ "Soft Blond Balayage in 65cm — sofort verfügbar."
+✅ "Soft Blond Balayage in 65cm haben wir sofort da."
+✅ "Soft Blond Balayage in 65cm. Sofort verfügbar."
+
+❌ "Komm gerne im Showroom vorbei — Hans-Böckler-Str. 60."
+✅ "Komm gerne im Showroom vorbei, Hans-Böckler-Str. 60."
+
+Bleib trotzdem locker und einfach — keine verschachtelten Sätze. Eher zwei kurze Sätze als einer mit Gedankenstrich-Einschüben.`;
+
   // URL-REGEL: niemals URLs raten oder zusammenbauen. Nur shopify_url aus Tool-Outputs.
   const urlRule = `\n\n## 🔗 URL-REGEL — KOMPROMISSLOS
 Wenn du einen Produkt-Link schickst, kopiere die URL AUSSCHLIESSLICH aus dem Feld \`shopify_url\` eines Tool-Outputs (z.B. get_stock_eta, get_available_colors).
@@ -373,7 +387,7 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
   // (openTurnsHint, sorry-hint, greetingHint, urlRule) gehen in einen separaten Block —
   // werden nicht gecacht, sind aber pro Call eh klein.
   const systemPromptStable = systemPrompt;
-  const systemPromptVariable = openTurnsHint + greetingHint + urlRule;
+  const systemPromptVariable = openTurnsHint + greetingHint + urlRule + styleRule;
 
   const messages: Anthropic.MessageParam[] = [];
   for (const m of msgs) {
@@ -554,6 +568,17 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
 
   // SAFETY-NET 1: konkrete Lagerzahlen rausfiltern
   finalText = sanitizeStockLeaks(finalText);
+
+  // SAFETY-NET 1z: Em-Dash / En-Dash mit Spaces → Komma (klingt menschlicher).
+  // Klassisches KI-Pattern " — " (Word-Word-Word — Word) wird grammatikalisch
+  // i.d.R. korrekt zu ", ". En-Dash " – " genauso. Wir lassen normale Bindestriche
+  // (Compound-Words wie "Mini-Tape", "65-cm") unangetastet.
+  finalText = finalText
+    .replace(/ +[—–] +/g, ", ")   // " — " oder " – " (mit Spaces) → ", "
+    .replace(/\s*[—–]\s*\n/g, "\n") // " —\n" am Zeilenende → einfach Zeilenumbruch
+    .replace(/, ,/g, ",")          // Doppelte Kommas wegputzen
+    .replace(/,\s*\./g, ".")       // ", ." → "."
+    .replace(/ ,/g, ",");          // " ," → ","
 
   // SAFETY-NET 1a: HALLUZINIERTE URLs eliminieren
   // Jede hairvenly.de/products-URL in der finalen Antwort wird gegen die echte
