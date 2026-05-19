@@ -322,9 +322,13 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
         good_answer:     final,
         bad_answer:      hasRefineFeedback ? (refineHistory[0] as { prev_text?: string })?.prev_text || (wasEdited ? original : null) : (wasEdited ? original : null),
         feedback:        feedbackParts.join("\n\n") || "Bot-Begleitung Approval",
-        avatar_name:     session.bot_signature_name,
+        // avatar_name=null → ALLE Avatare lernen aus dieser Korrektur (Avatar-übergreifend).
+        // Vorher: nur derjenige Avatar der die Session gerade hatte. Jetzt: universelles Lernen.
+        // Wenn die Lektion wirklich Avatar-spezifisch wäre, würde der Mitarbeiter das in der
+        // Strategie-Notiz festhalten.
+        avatar_name:     null,
         active:          true,
-        tags,
+        tags:            [...tags, `from_avatar:${session.bot_signature_name || "unknown"}`],
         context_messages: contextMessages.length > 0 ? contextMessages : null,
       });
     }
