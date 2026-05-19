@@ -375,9 +375,22 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     }
   }
 
-  // Letzte Message MUSS user sein
+  // Letzte Message ist nicht von user (z.B. Mitarbeiter klickte "generieren"
+  // obwohl wir schon geantwortet haben). Statt zu crashen: synthetische
+  // User-Message anhängen die dem Bot Kontext gibt was zu tun ist.
   if (messages[messages.length - 1].role !== "user") {
-    return { success: false, error: "last message not from user" };
+    messages.push({
+      role: "user",
+      content:
+        "[INTERNE SYSTEM-NACHRICHT — NICHT VOM KUNDEN]\n\n" +
+        "Eine Mitarbeiterin hat 'Antwort generieren' geklickt, obwohl die letzte Message von uns kam. " +
+        "Bitte schreibe einen sinnvollen FOLLOW-UP basierend auf dem bisherigen Verlauf. Möglichkeiten:\n" +
+        "1. Wenn unsere letzte Antwort offene Fragen enthielt → freundlich nachhaken (z.B. 'Sag Bescheid wenn du was wissen magst 💕')\n" +
+        "2. Wenn die Kundin zuvor Interesse gezeigt hat → konkretes Angebot oder Foto-Beratung anbieten\n" +
+        "3. Falls Reservierungs-Potenzial (Produkt unterwegs) → nochmal sanft anbieten zu benachrichtigen\n" +
+        "4. Wenn der Verlauf positiv endete → kurze Schluss-Geste ('Genieße deine Haare!') + ggf. Bewertung erbitten\n\n" +
+        "WICHTIG: SCHREIBE WIRKLICH EINEN TEXT. Kurz und natürlich. Antwortet die Mitarbeiterin nicht passend → sie editiert es eh.",
+    });
   }
 
   // Claude aufrufen — mit Prompt-Caching auf dem stabilen System-Teil + Tool-Defs
