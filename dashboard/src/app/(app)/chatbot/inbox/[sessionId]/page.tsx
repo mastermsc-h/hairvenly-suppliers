@@ -29,12 +29,17 @@ export default async function ChatSessionPage({ params }: PageProps) {
 
   if (!session) notFound();
 
-  // WICHTIG: KEIN automatisches Markieren als "gesehen" beim Öffnen.
-  // Sonst verschwindet eine Session aus dem "Nur unbeantwortet"-Filter sobald
-  // man sie nur anklickt — auch ohne zu antworten. last_seen_by_agent_at wird
-  // jetzt erst beim tatsächlichen Senden (approveDraft / sendHumanMessage)
-  // aktualisiert. Falls man eine Session aktiv als gelesen markieren will,
-  // kann man via "Als ungelesen"-Toggle bewusst steuern.
+  // INSTAGRAM-STYLE "gelesen"-Indikator: beim Öffnen setzen wir
+  // last_opened_by_agent_at. Das governt NUR die Bold/Normal-Optik des Namens
+  // in der Inbox (Name fett wenn die Kundin seither nochmal geschrieben hat).
+  // last_seen_by_agent_at bleibt unberührt — der "Nur unbeantwortet"-Filter
+  // läuft separat und ändert sich erst bei echten Aktionen (Antworten /
+  // "Als erledigt"-Button), damit die Session beim bloßen Anschauen nicht
+  // aus dem Filter rausfällt.
+  await svc
+    .from("chat_sessions")
+    .update({ last_opened_by_agent_at: new Date().toISOString() })
+    .eq("id", sessionId);
 
   // Aktive Avatars für Selector
   const { data: avatars } = await svc

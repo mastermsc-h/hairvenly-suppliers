@@ -71,7 +71,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     .from("chat_sessions")
     .select(`
       id, channel, customer_name, status, assigned_to, bot_signature_name,
-      bot_mode, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, created_at,
+      bot_mode, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
       assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
     `)
     .order("last_message_at", { ascending: false })
@@ -106,7 +106,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         .from("chat_sessions")
         .select(`
           id, channel, customer_name, status, assigned_to, bot_signature_name,
-          bot_mode, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, created_at,
+          bot_mode, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
           assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
         `)
         .in("id", onlyNew)
@@ -449,10 +449,19 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 const isHybrid = st.humanCount > 0;
                 // Wir-zuletzt-geantwortet (Kundin dran): leichter blauer Touch
                 const ourTurn = st.lastMsgRole === "assistant" || st.lastMsgRole === "human_agent";
-                // Ungelesen NUR wenn KUNDIN zuletzt schrieb UND nicht gesehen
-                // (Wenn wir / IG-App geantwortet haben → nicht mehr ungelesen)
+                // "unread" für den Filter: Kundin schrieb zuletzt UND wurde
+                // nicht aktiv abgehandelt (Antworten / "Als erledigt"-Klick).
                 const isUnread = !ourTurn && !!(s.last_customer_msg_at && (
                   !s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at
+                ));
+                // "unseen" für die Bold/Normal-Optik (Instagram-Style):
+                // Name+@ fett, solange der Mitarbeiter die Session seit der letzten
+                // Kunden-Message NICHT geöffnet hat. Beim Reinklicken wird
+                // last_opened_by_agent_at gesetzt → Name normal beim nächsten Reload.
+                const sessRaw = s as { last_opened_by_agent_at?: string | null };
+                const isUnseen = !ourTurn && !!(s.last_customer_msg_at && (
+                  !sessRaw.last_opened_by_agent_at ||
+                  s.last_customer_msg_at > sessRaw.last_opened_by_agent_at
                 ));
                 // Antwort kam via Instagram-App (nicht aus Dashboard): human_agent OHNE agent_id
                 // → entstand durch Echo-Webhook von einer externen Mitarbeiter-Antwort
@@ -496,7 +505,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                       {/* Customer-Name oben + Status-Badges links / IG-App-Hinweis rechts */}
                       <div className={`flex items-center gap-2 ${onlyUnread ? "mb-2.5" : "mb-1.5"}`}>
                         <User size={14} className="text-neutral-400" />
-                        <span className={`text-sm truncate ${isUnread && !onlyUnread ? "font-bold text-neutral-900" : "font-medium text-neutral-800"}`}>
+                        <span className={`text-sm truncate ${isUnseen ? "font-bold text-neutral-900" : "font-normal text-neutral-700"}`}>
                           {s.customer_name || <span className="text-neutral-400 font-normal">Unbekannt</span>}
                         </span>
                         {isUnread && !onlyUnread && (
