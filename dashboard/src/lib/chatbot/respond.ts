@@ -555,6 +555,38 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
   // SAFETY-NET 1: konkrete Lagerzahlen rausfiltern
   finalText = sanitizeStockLeaks(finalText);
 
+  // SAFETY-NET 1a: HALLUZINIERTE URLs eliminieren
+  // Jede hairvenly.de/products-URL in der finalen Antwort wird gegen die echte
+  // product_colors-Tabelle verifiziert. Unbekannte URLs (vom LLM erfunden) werden
+  // entfernt — der Produktname bleibt stehen, der Link verschwindet.
+  // Deterministisch, kein LLM-Vertrauen nötig.
+  try {
+    const urlPattern = /https?:\/\/(?:www\.)?hairvenly\.de\/(?:products|collections)\/[A-Za-z0-9_\-/]+/gi;
+    const foundUrls = Array.from(new Set(finalText.match(urlPattern) || []));
+    if (foundUrls.length > 0) {
+      const { data: valid } = await svc
+        .from("product_colors")
+        .select("shopify_url")
+        .in("shopify_url", foundUrls);
+      const validSet = new Set((valid || []).map(r => r.shopify_url));
+      for (const url of foundUrls) {
+        if (validSet.has(url)) continue;
+        console.warn(`[respond] DROPPED hallucinated URL: ${url}`);
+        // Markdown-Link [Text](url) → Text   ·   nackte URL → leer
+        const escUrl = url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        finalText = finalText.replace(new RegExp(`\\[([^\\]]+)\\]\\(${escUrl}\\)`, "g"), "$1");
+        finalText = finalText.replace(new RegExp(escUrl, "g"), "");
+      }
+      // Aufräumen: doppelte Leerzeilen / einzelne dangling Zeilen die durch Linkentfernung entstehen
+      finalText = finalText
+        .replace(/^[ \t]*(?:Hier (?:der|ist der)? ?Link[: ]*)?$/gim, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    }
+  } catch (e) {
+    console.warn("[respond] URL-sanitizer failed:", (e as Error).message);
+  }
+
   // SAFETY-NET 1b: Auto-Lern-Wortfilter aus DB anwenden
   // Wörter/Phrasen die der Mitarbeiter wiederholt entfernt hat, werden hier gnadenlos ersetzt.
   try {
