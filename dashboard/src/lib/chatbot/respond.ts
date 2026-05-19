@@ -10,6 +10,40 @@ const MODEL = "claude-sonnet-4-5";
 const MAX_ITER = 5;
 
 /**
+ * Lädt ein Bild selbst und gibt Base64 + MIME zurück.
+ * Workaround: Anthropic Vision API respektiert robots.txt — Instagram CDN
+ * blockt externe Fetcher. Daher müssen WIR das Bild fetchen und Base64 senden.
+ * Gibt null zurück bei Fehlern (Bild expired / nicht erreichbar) — Caller
+ * lässt das Bild dann einfach weg.
+ */
+async function fetchImageAsBase64(url: string): Promise<{ mediaType: string; data: string } | null> {
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 Hairvenly-Bot" },
+    });
+    if (!res.ok) {
+      console.warn(`[respond] image fetch HTTP ${res.status} for ${url.slice(0, 80)}…`);
+      return null;
+    }
+    const contentType = (res.headers.get("content-type") || "image/jpeg").split(";")[0].trim();
+    // Nur Image-Typen erlauben (kein HTML wenn Link tot)
+    if (!contentType.startsWith("image/")) {
+      console.warn(`[respond] image fetch wrong content-type: ${contentType}`);
+      return null;
+    }
+    const buf = await res.arrayBuffer();
+    const data = Buffer.from(buf).toString("base64");
+    // Anthropic akzeptiert: jpeg, png, gif, webp
+    const allowed = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    const mediaType = allowed.includes(contentType) ? contentType : "image/jpeg";
+    return { mediaType, data };
+  } catch (e) {
+    console.warn(`[respond] image fetch failed for ${url.slice(0, 80)}: ${(e as Error).message}`);
+    return null;
+  }
+}
+
+/**
  * Falls Claude in einen Stutter-Loop fällt und denselben Text 2× hintereinander
  * schreibt (z.B. "Ich bin da... Magst du... Ich bin da... Magst du..."),
  * halbieren wir die Antwort.
@@ -302,17 +336,23 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   for (const m of msgs) {
     if (m.role === "user") {
       // Foto-Anhänge als Image-Blocks an Claude weitergeben (Vision)
+      // WICHTIG: wir holen das Bild SELBST und übergeben Base64 — Anthropic
+      // Vision API respektiert robots.txt und IG CDN blockt externe Fetcher.
       const attachments = (m.attachments as { type: string; url: string }[] | null) || [];
       const images = attachments.filter(a => a.type === "image" && a.url);
       if (images.length > 0) {
         const blocks: Anthropic.ContentBlockParam[] = [];
         for (const img of images) {
+          const fetched = await fetchImageAsBase64(img.url);
+          if (!fetched) continue; // skippe nicht ladbare Bilder, Bot reagiert dann textbasiert
           blocks.push({
             type: "image",
-            source: { type: "url", url: img.url },
+            source: { type: "base64", media_type: fetched.mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp", data: fetched.data },
           });
         }
         if (m.content) blocks.push({ type: "text", text: m.content });
+        // Wenn alle Bilder skipped + kein Content → trotzdem leeren Text-Hinweis
+        if (blocks.length === 0) blocks.push({ type: "text", text: "[Foto konnte nicht geladen werden — bitte Kundin um Neusendung]" });
         messages.push({ role: "user", content: blocks });
       } else {
         messages.push({ role: "user", content: m.content || "" });
