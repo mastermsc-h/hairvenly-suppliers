@@ -12,8 +12,14 @@ import DefaultBotModeToggle from "./default-bot-mode-toggle";
 import ClassifyBackfillButton from "./classify-backfill-button";
 
 interface PageProps {
-  searchParams: Promise<{ status?: string; mode?: string; channel?: string; category?: string; q?: string; unread?: string; limit?: string }>;
+  searchParams: Promise<{ status?: string; mode?: string; channel?: string; category?: string; q?: string; unread?: string; limit?: string; sort?: string }>;
 }
+
+const SORT_OPTIONS: Record<string, { label: string; emoji: string }> = {
+  newest:          { label: "Neueste zuerst",      emoji: "🆕" },
+  longest_waiting: { label: "Am längsten wartend", emoji: "⏱" },
+  oldest:          { label: "Älteste zuerst",      emoji: "📜" },
+};
 
 const PAGE_SIZE = 50;
 
@@ -64,6 +70,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   const searchQuery    = (params.q || "").trim();
   // Default = nur unbeantwortet. User kann via "unread=0" alles anzeigen.
   const onlyUnread     = params.unread !== "0";
+  const sortMode       = params.sort && SORT_OPTIONS[params.sort] ? params.sort : "newest";
   // Pagination: max 50 pro "Klick", über "Weitere laden" wird der Limit erhöht
   const limit = Math.min(Math.max(Number(params.limit) || PAGE_SIZE, PAGE_SIZE), 1000);
 
@@ -184,19 +191,35 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     filteredSessions = filteredSessions.filter(s => (stats[s.id]?.humanCount || 0) > 0);
   }
 
-  // "Nur unbeantwortet" Filter + Sortierung nach Kundin-Zeitstempel (neueste zuerst).
-  // Bei aktiver Suche wird der Filter übersprungen — Treffer sollen IMMER sichtbar
-  // sein, sonst wirkt's so als gäbe es keine Treffer obwohl welche da sind.
+  // "Nur unbeantwortet" Filter + Sortierung. Bei aktiver Suche wird der Filter
+  // übersprungen — Treffer sollen IMMER sichtbar sein.
   if (onlyUnread && !searchQuery) {
-    filteredSessions = filteredSessions
-      .filter(s => unreadMap[s.id])
-      .slice()
-      .sort((a, b) => {
-        const ta = a.last_customer_msg_at || a.last_message_at || "";
-        const tb = b.last_customer_msg_at || b.last_message_at || "";
-        return tb.localeCompare(ta);
-      });
+    filteredSessions = filteredSessions.filter(s => unreadMap[s.id]);
   }
+
+  // Sortierung — explizit per ?sort= überschreibbar.
+  // "longest_waiting" / "oldest" → ASC (älteste zuerst).
+  // "newest" → DESC nach last_customer_msg_at (im Unread-Modus) bzw.
+  //            last_message_at (in der Gesamtansicht — Default aus der DB).
+  if (sortMode === "longest_waiting" || sortMode === "oldest") {
+    filteredSessions = filteredSessions.slice().sort((a, b) => {
+      const ta = (sortMode === "longest_waiting"
+        ? a.last_customer_msg_at
+        : a.last_message_at) || "";
+      const tb = (sortMode === "longest_waiting"
+        ? b.last_customer_msg_at
+        : b.last_message_at) || "";
+      return ta.localeCompare(tb); // ASC = älteste zuerst
+    });
+  } else if (onlyUnread) {
+    // Default im Unread-Modus: neueste Kunden-Message oben
+    filteredSessions = filteredSessions.slice().sort((a, b) => {
+      const ta = a.last_customer_msg_at || a.last_message_at || "";
+      const tb = b.last_customer_msg_at || b.last_message_at || "";
+      return tb.localeCompare(ta);
+    });
+  }
+  // sonst: DB-Default-Sortierung bleibt (last_message_at DESC)
 
   // Pagination: total nach Filter merken, dann auf "limit" trimmen
   const totalAfterFilters = filteredSessions.length;
@@ -408,6 +431,32 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
             </Link>
           ))}
         </div>
+      </div>
+
+      {/* Sortierung */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-medium text-neutral-500 uppercase tracking-wide">Sortieren</span>
+        {Object.entries(SORT_OPTIONS).map(([key, meta]) => (
+          <Link
+            key={key}
+            href={`/chatbot/inbox?${new URLSearchParams({
+              ...(filter !== "all" ? { status: filter } : {}),
+              ...(mode !== "all" ? { mode } : {}),
+              ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
+              ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
+              ...(searchQuery ? { q: searchQuery } : {}),
+              ...(!onlyUnread ? { unread: "0" } : {}),
+              ...(key !== "newest" ? { sort: key } : {}),
+            }).toString()}`}
+            className={`text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1 ${
+              sortMode === key
+                ? "bg-neutral-900 text-white border-neutral-900"
+                : "bg-white text-neutral-600 border-neutral-300 hover:bg-neutral-50"
+            }`}
+          >
+            <span>{meta.emoji}</span> {meta.label}
+          </Link>
+        ))}
       </div>
 
       {/* Sessions Liste — im "Nur unbeantwortet"-Modus transparenter Container,

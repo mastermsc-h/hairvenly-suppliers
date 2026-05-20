@@ -114,6 +114,79 @@ export async function persistAlerts(sessionId: string, alerts: AlertOut[]): Prom
   return inserted;
 }
 
+/**
+ * Deterministischer Wait-Time-Check: findet Sessions wo die Kundin seit >12h
+ * geschrieben hat und niemand geantwortet hat. Filtert triviale Antworten
+ * (danke, ok, alles klar etc.) raus — die brauchen keine Antwort.
+ */
+async function scanLongWaitSessions(maxAgeHours: number = 12 * 7 * 24): Promise<number> {
+  const svc = createServiceClient();
+  const triggerAge = new Date(Date.now() - 12 * 3600 * 1000).toISOString();
+  const tooOld = new Date(Date.now() - maxAgeHours * 3600 * 1000).toISOString();
+
+  // Sessions wo last_customer_msg_at zwischen tooOld und triggerAge liegt
+  // UND last_seen_by_agent_at entweder null oder älter als last_customer_msg_at
+  // UND status nicht 'closed'
+  const { data: sessions } = await svc
+    .from("chat_sessions")
+    .select("id, last_customer_msg_at, last_seen_by_agent_at, customer_name, customer_full_name")
+    .lt("last_customer_msg_at", triggerAge)
+    .gt("last_customer_msg_at", tooOld)
+    .neq("status", "closed")
+    .limit(200);
+
+  if (!sessions || sessions.length === 0) return 0;
+
+  // Triviale-Nachrichten-Pattern: kurz und/oder reine Höflichkeitsfloskel
+  const TRIVIAL_PATTERNS = [
+    /^(danke|dankeschön|danke dir|vielen dank|dankee+|thx|merci)\b/i,
+    /^(ok|okay|kk|alles klar|alles gut|jo|ja)\b\s*[!.?]?\s*$/i,
+    /^(super|perfekt|toll|cool|nice|mega|genial)\b\s*[!.?]?\s*$/i,
+    /^👍$|^❤️$|^💕$|^🥰$|^🩷$|^🙏$|^🙏🏼$|^👌$/u,
+    /^\s*$/,
+  ];
+  const isTrivial = (text: string): boolean => {
+    const t = text.trim().slice(0, 100);
+    if (t.length < 4) return true;
+    return TRIVIAL_PATTERNS.some(p => p.test(t));
+  };
+
+  let inserted = 0;
+  for (const s of sessions) {
+    // Letzte Kundennachricht laden — wir brauchen den Text um Trivialität zu prüfen
+    const { data: lastUserMsg } = await svc
+      .from("chat_messages")
+      .select("content, created_at, role")
+      .eq("session_id", s.id)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(3);
+    if (!lastUserMsg || lastUserMsg.length === 0) continue;
+    // Letzte Message muss von user sein
+    if (lastUserMsg[0].role !== "user") continue;
+    if (isTrivial(lastUserMsg[0].content || "")) continue;
+
+    // last_seen_by_agent_at > last_customer_msg_at → schon abgehandelt
+    if (s.last_seen_by_agent_at && s.last_customer_msg_at &&
+        new Date(s.last_seen_by_agent_at) >= new Date(s.last_customer_msg_at)) {
+      continue;
+    }
+
+    const hoursWaiting = Math.round((Date.now() - new Date(s.last_customer_msg_at).getTime()) / 3600 / 1000);
+    const customerDisplay = s.customer_full_name || s.customer_name || "Kundin";
+    const { error } = await svc.from("chatbot_guardian_alerts").insert({
+      session_id: s.id,
+      severity: hoursWaiting > 48 ? "critical" : "warning",
+      alert_type: "long_wait_no_answer",
+      description: `${customerDisplay} wartet seit ${hoursWaiting}h auf eine Antwort: „${(lastUserMsg[0].content || "").slice(0, 120)}…"`,
+      suggestion: `Session öffnen und antworten — bei >48h ist's kritisch. Falls keine Antwort nötig (Höflichkeitsfloskel), als erledigt markieren.`,
+    });
+    if (!error) inserted++;
+    // Duplicate-Index dedupt automatisch (gleicher type + session + Tag)
+  }
+  return inserted;
+}
+
 /** Wächter-Lauf über Sessions die in den letzten 24h aktiv waren */
 export async function runGuardianScan(opts: { limit?: number; hours?: number } = {}): Promise<{
   scanned: number;
@@ -132,6 +205,17 @@ export async function runGuardianScan(opts: { limit?: number; hours?: number } =
 
   let scanned = 0;
   let totalAlerts = 0;
+
+  // Schritt 1: deterministischer Wait-Time-Check (kein LLM nötig)
+  try {
+    const longWaitAlerts = await scanLongWaitSessions();
+    totalAlerts += longWaitAlerts;
+    console.log(`[guardian] long-wait scan: ${longWaitAlerts} neue Alerts`);
+  } catch (e) {
+    console.error("[guardian] long-wait scan failed:", e);
+  }
+
+  // Schritt 2: Haiku-basierte Analyse der aktiven Sessions
   for (const s of sessions || []) {
     try {
       const alerts = await analyzeSession(s.id);
