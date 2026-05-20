@@ -216,6 +216,34 @@ async function handleInstagramOrMessenger(m: MessagingItem, source: "instagram" 
       return;
     }
 
+    // SPLIT-CHUNK-CHECK: Lange Bot-Antworten werden in mehrere IG-Messages
+    // gesplittet (siehe splitLongMessage). Jeder Chunk bekommt seine eigene Echo.
+    // Die erste Echo claimed die assistant-Zeile, die zweite Echo würde sonst
+    // als neue human_agent-Zeile gespeichert werden — das duplizierte die Antwort.
+    // Fix: prüfen ob der Echo-Inhalt als Substring in einer kürzlich gesendeten
+    // assistant/human_agent-Message vorkommt — wenn ja, ist's unser eigener Chunk.
+    if (text && text.trim().length > 10) {
+      const trimmed = text.trim();
+      const cleanText = trimmed.replace(/\s+/g, " ").toLowerCase();
+      const probeStart = cleanText.slice(0, 40);
+      const probeEnd = cleanText.length > 60 ? cleanText.slice(-30) : null;
+      const { data: recentOurs } = await svc.from("chat_messages")
+        .select("id, content")
+        .eq("session_id", session.id)
+        .in("role", ["assistant", "human_agent"])
+        .gte("created_at", cutoff)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      const isOwnChunk = (recentOurs || []).some(row => {
+        const haystack = (row.content || "").replace(/\s+/g, " ").toLowerCase();
+        return haystack.includes(probeStart) || (probeEnd ? haystack.includes(probeEnd) : false);
+      });
+      if (isOwnChunk) {
+        console.log(`[meta-webhook] echo: detected own split-chunk (mid=${m.message?.mid}) — skip duplicate`);
+        return;
+      }
+    }
+
     // Fallback: Echo kommt rein, ohne dass wir gerade selbst gesendet haben
     // → echte manuelle IG-App-Antwort von außerhalb. Als human_agent speichern.
     await svc.from("chat_messages").insert({

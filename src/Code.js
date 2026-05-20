@@ -3,7 +3,7 @@
 // ==========================================
 // CODE_VERSION: 2026-04-22_23-00_DoSA-days-of-stock-allocator
 // ==========================================
-const CODE_VERSION = "2026-05-20_12-30_SmartCollections-Mapping-Fix-Minitapes";
+const CODE_VERSION = "2026-05-20_13-00_debugCollections-Helper";
 
 // IDs der externen Bestellungs-Sheets
 const CHINA_SHEET_ID    = "1zqh50KeQsworvG5OivfxvECM7HUoArwUEGBTUGVB4ZM";
@@ -2505,6 +2505,44 @@ function debugClipInVariants(colorSubstring) {
   Logger.log("ANALYSE:");
   Logger.log("- titleParsed=—   → Regex schlug fehl, Parser nutzt shopify.grams (potentieller Fehler!)");
   Logger.log("- shopify.grams=150 bei einer 100g/225g-Variante → bekannter Shopify-Bug → Title-Parse soll greifen");
+}
+
+/**
+ * Debug-Funktion: Findet alle Shopify-Collections mit gegebenem Substring im Handle/Titel.
+ * Zeigt Handle, ID, Typ (custom/smart), Produkt-Anzahl + ob in COLL_MAP_VA bekannt.
+ *
+ * Aufruf: debugCollections("mini")  → listet alle Mini-Collections
+ */
+function debugCollections(substring) {
+  substring = (substring || "").toLowerCase();
+  const SHOP_NAME = "339520-3";
+  const ACCESS_TOKEN = "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";
+  const BASE_URL = "https://" + SHOP_NAME + ".myshopify.com/admin/api/2025-01";
+
+  // Bekannte COLL_MAP_VA-Handles
+  const known = ["tapes-45cm","tapes-55cm","tapes-65cm","tapes-85cm","bondings-65cm","bondings-85cm",
+    "tressen-usbekisch-classic","tressen-usbekisch-genius","ponytail-extensions",
+    "russische-normal-tapes","tapes-glatt","mini-tapes","invisible-mini-tapes","bondings-glatt",
+    "tressen-russisch-classic","tressen-russisch-genius","tressen-russisch-invisible","clip-extensions"];
+
+  for (const endpoint of ["custom_collections", "smart_collections"]) {
+    Utilities.sleep(200);
+    const cr = UrlFetchApp.fetch(BASE_URL + "/" + endpoint + ".json?limit=250&fields=id,handle,title,products_count", {
+      headers: { "X-Shopify-Access-Token": ACCESS_TOKEN }, muteHttpExceptions: true
+    });
+    const data = JSON.parse(cr.getContentText());
+    const colls = data[endpoint] || [];
+    Logger.log("══════ " + endpoint.toUpperCase() + " (" + colls.length + " gesamt) ══════");
+    for (const c of colls) {
+      const h = (c.handle || "").toLowerCase();
+      const t = (c.title || "").toLowerCase();
+      if (!h.includes(substring) && !t.includes(substring)) continue;
+      const inMap = known.includes(c.handle) ? "✓" : "✗ NICHT in COLL_MAP_VA";
+      Logger.log("  • '" + c.handle + "' | '" + c.title + "' | id=" + c.id + " | products=" + (c.products_count || "?") + " | " + inMap);
+    }
+  }
+  Logger.log("");
+  Logger.log("Bekannte Handles in COLL_MAP_VA mit 'mini': " + known.filter(h => h.includes("mini")).join(", "));
 }
 
 function fetchAllCollections(shopName, accessToken) {
