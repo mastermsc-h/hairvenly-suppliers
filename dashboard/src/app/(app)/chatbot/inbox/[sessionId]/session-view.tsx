@@ -50,6 +50,8 @@ interface Props {
     bot_mode: "auto" | "assisted" | "off";
     human_only?: boolean;
     team_notes?: string | null;
+    team_notes_updated_at?: string | null;
+    team_notes_author?: string | null;
     followup_due_at?: string | null;
     followup_reason?: string | null;
     category: null | "availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "general";
@@ -219,7 +221,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
   const isTakenOver = session.status === "awaiting_human";
 
   return (
-    <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden flex flex-col" style={{ height: "calc(100vh - 200px)" }}>
+    <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden flex flex-col" style={{ height: "calc(100vh - 110px)" }}>
       {/* Header */}
       <div className="px-5 py-4 border-b border-neutral-100 flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3 flex-wrap">
@@ -423,23 +425,27 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               disabled={isPending}
             />
           )}
-          {session.status !== "closed" && (
+          {/* Schließen + Löschen ins Overflow-Menü — selten genutzte
+              destruktive Aktionen, gehören nicht permanent sichtbar. */}
+          <OverflowMenu>
+            {session.status !== "closed" && (
+              <button
+                onClick={handleClose}
+                disabled={isPending}
+                className="w-full text-left text-xs px-3 py-2 rounded-md hover:bg-neutral-50 text-neutral-700 inline-flex items-center gap-2 disabled:opacity-50"
+              >
+                <X size={12} /> Session schließen
+              </button>
+            )}
             <button
-              onClick={handleClose}
+              onClick={handleDelete}
               disabled={isPending}
-              className="text-xs px-3 py-1.5 rounded-lg border border-neutral-300 text-neutral-600 hover:bg-neutral-50 inline-flex items-center gap-1 disabled:opacity-50"
+              title="Session komplett löschen"
+              className="w-full text-left text-xs px-3 py-2 rounded-md hover:bg-red-50 text-red-600 inline-flex items-center gap-2 disabled:opacity-50"
             >
-              <X size={12} /> Schließen
+              <Trash2 size={12} /> Session löschen
             </button>
-          )}
-          <button
-            onClick={handleDelete}
-            disabled={isPending}
-            title="Session komplett löschen"
-            className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 inline-flex items-center gap-1 disabled:opacity-50"
-          >
-            <Trash2 size={12} /> Löschen
-          </button>
+          </OverflowMenu>
         </div>
       </div>
 
@@ -462,7 +468,12 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
       {/* Team-Notiz — interner Klebezettel zwischen Header und Verlauf.
           Wenn Notiz vorhanden: amber-Box. Sonst: dezente Aufforderung. */}
       <div className="px-4 pt-3 bg-neutral-50">
-        <TeamNotes sessionId={session.id} initialNotes={session.team_notes ?? null} />
+        <TeamNotes
+          sessionId={session.id}
+          initialNotes={session.team_notes ?? null}
+          updatedAt={session.team_notes_updated_at ?? null}
+          author={session.team_notes_author ?? null}
+        />
       </div>
 
       {/* Messages */}
@@ -1001,6 +1012,34 @@ function DraftBox({
         </button>
       </div>
       </div>{/* End scrollbarer Inhalt */}
+    </div>
+  );
+}
+
+/**
+ * 3-Punkte-Menü für sekundäre/destruktive Aktionen — versteckt sich hinter
+ * einem "•••"-Button damit die Haupt-Action-Reihe schlanker bleibt.
+ */
+function OverflowMenu({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative inline-flex">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        title="Mehr Aktionen"
+        className="text-xs px-2 py-1.5 rounded-lg border border-neutral-300 text-neutral-500 hover:bg-neutral-50 inline-flex items-center"
+      >
+        •••
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 z-20 min-w-[200px] bg-white border border-neutral-200 rounded-lg shadow-lg p-1 space-y-0.5" onClick={() => setOpen(false)}>
+            {children}
+          </div>
+        </>
+      )}
     </div>
   );
 }

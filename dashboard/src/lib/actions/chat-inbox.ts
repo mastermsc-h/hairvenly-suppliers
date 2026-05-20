@@ -645,10 +645,18 @@ export async function setFollowupReminder(sessionId: string, daysFromNow: number
 
 /** Speichert interne Team-Notizen zu einer Session (für Mitarbeiter, nie an Kundin). */
 export async function updateTeamNotes(sessionId: string, notes: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
   const svc = createServiceClient();
   const trimmed = notes.trim();
   await svc.from("chat_sessions")
-    .update({ team_notes: trimmed || null })
+    .update({
+      team_notes: trimmed || null,
+      team_notes_updated_at: trimmed ? new Date().toISOString() : null,
+      team_notes_updated_by: trimmed ? user.id : null,
+    })
     .eq("id", sessionId);
   revalidatePath("/chatbot/inbox");
   revalidatePath(`/chatbot/inbox/${sessionId}`);

@@ -606,14 +606,6 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                             Nur Team
                           </span>
                         )}
-                        {((s as { team_notes?: string | null }).team_notes || "").trim().length > 0 && (
-                          <span
-                            className="bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
-                            title={(s as { team_notes?: string | null }).team_notes || ""}
-                          >
-                            <StickyNote size={9} /> Notiz
-                          </span>
-                        )}
                         {(() => {
                           const due = (s as { followup_due_at?: string | null }).followup_due_at;
                           const reason = (s as { followup_reason?: string | null }).followup_reason;
@@ -692,6 +684,14 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                           <span><Bot size={10} className="inline" /> {st.botCount}</span>
                           {st.humanCount > 0 && (
                             <span><UserCheck size={10} className="inline" /> {st.humanCount}</span>
+                          )}
+                          {((s as { team_notes?: string | null }).team_notes || "").trim().length > 0 && (
+                            <span
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-medium"
+                              title={(s as { team_notes?: string | null }).team_notes || ""}
+                            >
+                              <StickyNote size={9} /> Notiz
+                            </span>
                           )}
                           <span className="whitespace-nowrap">{formatRelative(s.last_message_at)}</span>
                         </span>

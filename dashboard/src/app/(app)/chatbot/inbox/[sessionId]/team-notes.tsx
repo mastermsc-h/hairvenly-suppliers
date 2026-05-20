@@ -13,9 +13,13 @@ import { updateTeamNotes } from "@/lib/actions/chat-inbox";
 export default function TeamNotes({
   sessionId,
   initialNotes,
+  updatedAt,
+  author,
 }: {
   sessionId: string;
   initialNotes: string | null;
+  updatedAt?: string | null;
+  author?: string | null;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -95,7 +99,23 @@ export default function TeamNotes({
           </div>
         </>
       ) : hasNotes ? (
-        <p className="text-sm text-amber-900 whitespace-pre-wrap leading-relaxed">{initialNotes}</p>
+        <>
+          <p className="text-sm text-amber-900 whitespace-pre-wrap leading-relaxed">{initialNotes}</p>
+          {(author || updatedAt) && (
+            <div className="flex items-center justify-end gap-1 text-[10px] text-amber-700/80 pt-1 border-t border-amber-200/60">
+              {author && <span className="font-medium">{author}</span>}
+              {author && updatedAt && <span className="text-amber-500">·</span>}
+              {updatedAt && (
+                <span>
+                  {new Date(updatedAt).toLocaleString("de-DE", {
+                    day: "2-digit", month: "2-digit", year: "2-digit",
+                    hour: "2-digit", minute: "2-digit",
+                  })}
+                </span>
+              )}
+            </div>
+          )}
+        </>
       ) : (
         <p className="text-xs text-neutral-500 italic">
           Noch keine Notiz. Hier kannst du intern festhalten, warum diese Session offen ist
