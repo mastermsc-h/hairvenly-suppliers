@@ -529,20 +529,22 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                             wartet auf Kundin
                           </span>
                         )}
-                        {s.category && CATEGORY_LABELS[s.category] && (
-                          <span className="bg-neutral-100 text-neutral-600 text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5">
-                            {CATEGORY_LABELS[s.category].emoji} {CATEGORY_LABELS[s.category].label}
-                          </span>
-                        )}
-                        {/* via IG-App Badge — ganz rechts wegen "ml-auto" */}
-                        {lastReplyViaIgApp && (
-                          <span
-                            title="Diese Antwort wurde direkt über die Instagram-App geschickt, nicht aus dem Dashboard."
-                            className="ml-auto bg-purple-100 text-purple-700 text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
-                          >
-                            📱 via IG-App
-                          </span>
-                        )}
+                        {/* Rechts: Kategorie + IG-App-Hinweis — getrennt von Name/Status links */}
+                        <div className="ml-auto flex items-center gap-1.5">
+                          {s.category && CATEGORY_LABELS[s.category] && (
+                            <span className="bg-neutral-100 text-neutral-600 text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5">
+                              {CATEGORY_LABELS[s.category].emoji} {CATEGORY_LABELS[s.category].label}
+                            </span>
+                          )}
+                          {lastReplyViaIgApp && (
+                            <span
+                              title="Diese Antwort wurde direkt über die Instagram-App geschickt, nicht aus dem Dashboard."
+                              className="bg-purple-100 text-purple-700 text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
+                            >
+                              📱 via IG-App
+                            </span>
+                          )}
+                        </div>
                       </div>
                       {/* Top row: badges + zeit */}
                       <div className={`flex items-center gap-2 flex-wrap text-xs ${onlyUnread ? "mb-3" : "mb-2"}`}>
