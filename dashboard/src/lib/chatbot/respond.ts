@@ -554,6 +554,27 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
   // sichere "weiß-noch-nicht"-Antwort statt zu crashen — Mitarbeiter sieht den
   // Entwurf und kann selbst editieren.
   if (!finalText) {
+    // GUARD: Race-Condition-Schutz. Wenn parallel schon eine Antwort durch ist
+    // (z.B. Kundin schickt schnell zwei Messages und beide triggern den Bot),
+    // soll der Empty-Fallback NICHT als zweite Nachricht raus. Sonst kriegt die
+    // Kundin "Lass mich das mit einer Kollegin abklären" direkt nach einer
+    // sauberen Antwort.
+    const { data: recentOurs } = await svc
+      .from("chat_messages")
+      .select("created_at, content")
+      .eq("session_id", sessionId)
+      .in("role", ["assistant", "human_agent"])
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const lastOurMsg = recentOurs?.[0];
+    if (lastOurMsg) {
+      const ageSec = (Date.now() - new Date(lastOurMsg.created_at).getTime()) / 1000;
+      if (ageSec < 60 && (lastOurMsg.content || "").trim().length > 30) {
+        console.warn(`[respond] empty result but parallel response ${Math.round(ageSec)}s ago — suppressing fallback to avoid duplicate "Kollegin abklären"`);
+        return { success: true, error: "suppressed_parallel_response" };
+      }
+    }
     console.error(`[respond] EMPTY response even after fallback — session=${sessionId}, toolsUsed=${toolsUsed.join(",")}, msgCount=${msgs.length}`);
     const toolsHint = toolsUsed.length > 0
       ? ` Ich habe folgende Infos gesammelt: ${toolsUsed.join(", ")}.`
