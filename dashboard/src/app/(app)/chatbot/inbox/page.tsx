@@ -486,7 +486,13 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 // wird der linke Balken neutral grau — die Kategorie-Farbe steht
                 // dann nur noch im Badge. So sieht man auf einen Blick: erledigt-
                 // schauen vs. noch ungelesen.
-                const boxBorder = !isUnseen ? "border-l-neutral-200" : visual!.box;
+                // Bei deaktiviertem Unread-Modus ist visual=null — dann irrelevant,
+                // aber boxBorder wird trotzdem ausgewertet → Fallback nötig.
+                const boxBorder = !visual
+                  ? "border-l-transparent"
+                  : !isUnseen
+                  ? "border-l-neutral-200"
+                  : visual.box;
                 const baseLi = onlyUnread
                   ? `rounded-xl border border-neutral-200 hover:border-emerald-300 hover:shadow-sm transition-all border-l-4 ${boxBorder}`
                   : `border-b border-neutral-100 hover:bg-blue-100/40 transition-colors ${
