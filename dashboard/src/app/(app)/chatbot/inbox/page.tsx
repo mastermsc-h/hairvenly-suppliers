@@ -324,32 +324,6 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      {/* Filter — Status */}
-      <div className="space-y-2">
-        <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">Status</div>
-        <div className="flex gap-2 flex-wrap">
-          {["all", "awaiting_human", "active", "closed"].map(s => (
-            <Link
-              key={s}
-              href={`/chatbot/inbox?${new URLSearchParams({
-                ...(s !== "all" ? { status: s } : {}),
-                ...(mode !== "all" ? { mode } : {}),
-                ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
-                ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
-                ...(searchQuery ? { q: searchQuery } : {}),
-                ...(!onlyUnread ? { unread: "0" } : {}),
-              }).toString()}`}
-              className={`text-xs px-3 py-1.5 rounded-full border ${
-                filter === s
-                  ? "bg-neutral-900 text-white border-neutral-900"
-                  : "bg-white text-neutral-600 border-neutral-300 hover:bg-neutral-50"
-              }`}
-            >
-              {s === "all" ? "Alle" : STATUS_LABELS[s]?.label || s}
-            </Link>
-          ))}
-        </div>
-      </div>
 
       {/* Filter — Kategorie (Auto-klassifiziert) */}
       <div className="space-y-2">
