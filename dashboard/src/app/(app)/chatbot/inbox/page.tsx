@@ -206,9 +206,14 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   const pureBotCount   = combinedSessions.filter(s => (stats[s.id]?.humanCount || 0) === 0).length;
   const withHumanCount = combinedSessions.filter(s => (stats[s.id]?.humanCount || 0) > 0).length;
 
-  // Kategorie-Counts für die Filter-Chips (basierend auf aktuell sichtbarer Liste)
+  // Kategorie-Counts für die Filter-Chips — passen sich dem Modus an:
+  // - Unread-Modus: zählt nur die unbeantworteten Sessions pro Kategorie
+  // - Alle-Modus: zählt alle sichtbaren Sessions pro Kategorie
   const categoryCounts: Record<string, number> = {};
-  for (const s of combinedSessions) {
+  const baseForCounts = onlyUnread
+    ? combinedSessions.filter(s => unreadMap[s.id])
+    : combinedSessions;
+  for (const s of baseForCounts) {
     const c = s.category || "general";
     categoryCounts[c] = (categoryCounts[c] || 0) + 1;
   }
