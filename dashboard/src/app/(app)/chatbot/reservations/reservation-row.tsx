@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Send, Trash2, MessageSquare, X, Edit3, Save, Bot, User } from "lucide-react";
@@ -43,6 +43,22 @@ export default function ReservationRow({
   const [showNotify, setShowNotify] = useState(false);
   const [editingNotes, setEditingNotes] = useState(false);
   const [notes, setNotes] = useState(r.notes ?? "");
+  // Stock-Scan-Ergebnis pro Reservierung — wird via Custom Event vom
+  // StockCheckButton broadcasted, jede Row pickt sich nur ihren Eintrag.
+  const [scanStatus, setScanStatus] = useState<"in_stock" | "unterwegs" | "out_of_stock" | "unknown" | null>(null);
+  const [scanEta, setScanEta] = useState<string | null>(null);
+  useEffect(() => {
+    function onResults(e: Event) {
+      const ce = e as CustomEvent<Array<{ reservationId: string; status: string; eta?: string }>>;
+      const mine = ce.detail?.find(x => x.reservationId === r.id);
+      if (mine) {
+        setScanStatus(mine.status as typeof scanStatus);
+        setScanEta(mine.eta || null);
+      }
+    }
+    window.addEventListener("stock-scan-results", onResults);
+    return () => window.removeEventListener("stock-scan-results", onResults);
+  }, [r.id]);
 
   function handleDelete() {
     if (!confirm("Reservierung löschen?")) return;
@@ -73,7 +89,23 @@ export default function ReservationRow({
 
   return (
     <>
-      <li className="p-4 hover:bg-neutral-50 transition-colors">
+      <li className={`p-4 transition-colors ${scanStatus === "in_stock" ? "bg-green-50/60 hover:bg-green-50" : "hover:bg-neutral-50"}`}>
+        {/* Stock-Scan-Badge — nur wenn der letzte Lager-Check ein Treffer war */}
+        {scanStatus === "in_stock" && (
+          <div className="mb-2 flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-green-600 text-white shadow-sm animate-pulse">
+              ✅ Ware vorrätig!
+            </span>
+            <span className="text-[11px] text-green-700">→ jetzt benachrichtigen</span>
+          </div>
+        )}
+        {scanStatus === "unterwegs" && (
+          <div className="mb-2 flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800">
+              🚚 Unterwegs{scanEta ? ` · ETA ${scanEta}` : ""}
+            </span>
+          </div>
+        )}
         <div className="flex items-start gap-3 flex-wrap">
           <div className="flex-1 min-w-0">
             {/* Top: customer + channel + status */}

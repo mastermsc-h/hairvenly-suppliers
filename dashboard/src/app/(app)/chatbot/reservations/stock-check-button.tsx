@@ -22,6 +22,13 @@ export default function StockCheckButton() {
       try {
         const r = await scanReservationsAgainstStock();
         setResults(r);
+        // Pro Reservierung das Ergebnis als Custom-Event broadcasten —
+        // jeder ReservationRow lauscht und zeigt sein eigenes Badge.
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("stock-scan-results", { detail: r })
+          );
+        }
         router.refresh();
       } catch (e) {
         alert((e as Error).message);
