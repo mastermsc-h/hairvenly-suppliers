@@ -204,33 +204,112 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     systemPrompt += `\n\n## DEINE PERSÖNLICHKEIT (als ${avatarRow.name})\n${avatarRow.personality}`;
   }
 
+  // WISSENSDATENBANK (chatbot_faq) — statische Fakten die IMMER gelten.
+  // Vorher gar nicht im Prompt — die 46 Einträge waren ungenutzt. Jetzt alle
+  // aktiven werden geladen und kommen als feste Wissensbasis in den Prompt.
+  // Hier rein gehören keine situativen Korrekturen, sondern dauerhafte Wahrheiten:
+  // Methoden-Specs, Längen, Pflege-Tipps, Service-Infos, Preisstrukturen.
+  const { data: faqs } = await svc
+    .from("chatbot_faq")
+    .select("topic, question, answer")
+    .eq("active", true)
+    .order("topic")
+    .order("order_idx");
+  if (faqs && faqs.length > 0) {
+    systemPrompt += "\n\n## 📚 WISSENSDATENBANK — feste Fakten und FAQ\n";
+    systemPrompt += "Diese Fakten sind IMMER wahr und gelten unabhängig vom konkreten Gespräch. Bei Widerspruch zwischen einem Trainings-Beispiel und der Wissensdatenbank: die Wissensdatenbank gewinnt.\n\n";
+    // gruppiert nach topic für bessere Lesbarkeit
+    const byTopic = new Map<string, { question: string; answer: string }[]>();
+    for (const f of faqs) {
+      const t = f.topic || "allgemein";
+      if (!byTopic.has(t)) byTopic.set(t, []);
+      byTopic.get(t)!.push({ question: f.question, answer: f.answer });
+    }
+    for (const [topic, items] of byTopic) {
+      systemPrompt += `### ${topic}\n`;
+      for (const it of items) {
+        systemPrompt += `**F:** ${it.question}\n**A:** ${it.answer}\n\n`;
+      }
+    }
+  }
+
   // Trainings-Beispiele:
   // 1. ALLE angepinnten (pinned=true) — bleiben dauerhaft im Bot-Sichtfeld
-  // 2. Plus die 20 NEUESTEN nicht-gepinnten (vorher waren's nur 8 → wichtige
-  //    Korrekturen fielen aus dem Sichtfeld sobald 8 neuere kamen)
-  const [{ data: pinnedTraining }, { data: recentTraining }] = await Promise.all([
+  // 2. Plus die 20 RELEVANTESTEN nicht-gepinnten — Auswahl nach Themen-Match
+  //    mit der aktuellen Kunden-Message, nicht nur Datum.
+  //    So fallen wichtige Korrekturen nicht mehr aus dem Sichtfeld nur weil sie
+  //    alt sind — sie kommen zurück sobald die Kundin nach dem Thema fragt.
+  // Keywords aus der letzten Kunden-Message extrahieren für themen-bezogenes
+  // Trainings-Retrieval. Stop-Wörter raus, Mindest-Länge 3, max 6 Keywords.
+  const STOPWORDS = new Set([
+    "der", "die", "das", "und", "oder", "ich", "mir", "mich", "du", "dir", "dich",
+    "ist", "war", "sind", "wäre", "wären", "habe", "hab", "hat", "hatte", "haben",
+    "nicht", "kein", "keine", "auch", "noch", "schon", "mal", "ein", "eine", "einen",
+    "mit", "von", "zu", "auf", "in", "an", "für", "bei", "über", "unter", "aus",
+    "was", "wie", "wo", "wann", "warum", "wer", "ob", "denn", "nur", "sehr", "ganz",
+    "kann", "können", "möchte", "möchten", "will", "willst", "wollen", "soll", "sollte",
+    "mein", "meine", "dein", "deine", "ihr", "ihre", "euer", "eure",
+    "danke", "hey", "hallo", "hi", "ja", "nein", "ok", "gut", "super",
+    "bitte", "gerne", "vielleicht", "etwa", "etwas", "ungefähr",
+  ]);
+  const { data: lastUserMsgRow } = await svc
+    .from("chat_messages")
+    .select("content")
+    .eq("session_id", sessionId)
+    .eq("role", "user")
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  let keywords: string[] = [];
+  if (lastUserMsgRow?.content) {
+    keywords = (lastUserMsgRow.content as string)
+      .toLowerCase()
+      .replace(/[^a-z0-9äöüß\s]/g, " ")
+      .split(/\s+/)
+      .filter((w: string) => w.length >= 3 && !STOPWORDS.has(w))
+      .slice(0, 6);
+  }
+
+  const [{ data: pinnedTraining }, { data: relevantTraining }, { data: recentTraining }] = await Promise.all([
+    // 1) Alle gepinnten Trainings — immer dabei
     svc.from("chatbot_training")
       .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
       .eq("active", true)
       .eq("pinned", true)
       .or(`avatar_name.is.null,avatar_name.eq.${signatureName}`)
       .order("created_at", { ascending: false }),
+    // 2) Themenbezogen: Trainings deren user_message ODER feedback ein Keyword
+    //    aus der aktuellen Kunden-Message enthält. Egal wie alt.
+    keywords.length > 0
+      ? svc.from("chatbot_training")
+          .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
+          .eq("active", true)
+          .or(`avatar_name.is.null,avatar_name.eq.${signatureName}`)
+          .or(keywords.map(k => `user_message.ilike.%${k}%,feedback.ilike.%${k}%`).join(","))
+          .order("created_at", { ascending: false })
+          .limit(15)
+      : Promise.resolve({ data: [] }),
+    // 3) Plus die 10 absolut neuesten als Recency-Backstop
     svc.from("chatbot_training")
       .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
       .eq("active", true)
-      .eq("pinned", false)
       .or(`avatar_name.is.null,avatar_name.eq.${signatureName}`)
       .order("created_at", { ascending: false })
-      .limit(20),
+      .limit(10),
   ]);
   const trainingIds = new Set<string>();
-  const training: NonNullable<typeof recentTraining> = [];
-  for (const t of [...(pinnedTraining || []), ...(recentTraining || [])]) {
+  type TrainingRow = NonNullable<typeof pinnedTraining>[number];
+  const training: TrainingRow[] = [];
+  for (const t of [...(pinnedTraining || []), ...(relevantTraining || []), ...(recentTraining || [])]) {
     if (!trainingIds.has(t.id)) {
       trainingIds.add(t.id);
       training.push(t);
     }
   }
+  // Cap auf 25 damit Prompt nicht explodiert — Pin + Relevant haben Vorrang
+  // weil sie zuerst hinzugefügt wurden.
+  training.splice(25);
   if (training.length > 0) {
     systemPrompt += "\n\n## DEINE TRAININGS-BEISPIELE\n";
     systemPrompt += "Diese Beispiele zeigen dir den GANZEN Gesprächsverlauf — nicht nur die Einzelfrage. ";

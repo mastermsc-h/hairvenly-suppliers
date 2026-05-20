@@ -337,7 +337,7 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
       if (hasRefineFeedback) tags.push("refined");
       if (hasNote) tags.push("with_strategy_note");
 
-      const { error: trainErr } = await svc.from("chatbot_training").insert({
+      const { data: insertedTraining, error: trainErr } = await svc.from("chatbot_training").insert({
         user_message:    trigger.content,
         good_answer:     final,
         bad_answer:      hasRefineFeedback ? (refineHistory[0] as { prev_text?: string })?.prev_text || (wasEdited ? original : null) : (wasEdited ? original : null),
@@ -353,11 +353,24 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
         // sonst schlägt der Insert silently fehl und es entsteht KEIN Trainings-Eintrag.
         // Bei brandneuen Sessions (Trigger ist die erste Nachricht) ist contextMessages [].
         context_messages: contextMessages,
-      });
+      }).select("id").single();
       if (trainErr) {
         console.error("[approveDraft] chatbot_training INSERT FAILED:", trainErr.code, trainErr.message);
       } else {
         console.log("[approveDraft] training row created", { wasEdited, hasNote, hasRefineFeedback, ctxLen: contextMessages.length });
+        // Auto-Konsolidierung: prüfen ob die Korrektur ein statischer Fakt ist
+        // und automatisch in die Wissensdatenbank konsolidieren. Fire-and-forget,
+        // soll den Approval nicht blockieren.
+        if (insertedTraining?.id) {
+          (async () => {
+            try {
+              const { consolidateCorrection } = await import("@/lib/chatbot/auto-consolidate");
+              await consolidateCorrection(insertedTraining.id);
+            } catch (e) {
+              console.warn("[approveDraft] auto-consolidate failed:", (e as Error).message);
+            }
+          })();
+        }
       }
     }
   }
