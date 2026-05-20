@@ -471,9 +471,11 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                   availability:  { box: "border-l-sky-200",   tint: "bg-sky-50/30",   badge: "bg-sky-50 text-sky-700 border-sky-200" },
                   color_advice:  { box: "border-l-pink-200",  tint: "bg-pink-50/30",  badge: "bg-pink-50 text-pink-700 border-pink-200" },
                 };
+                // Default-Visual = sehr blasses Mint-Grün, leichter als das
+                // emerald-300 Hover-Highlight. Sorgt für sichtbaren Hover-Wechsel.
                 const DEFAULT_VISUAL: CatVis = {
-                  box: "border-l-neutral-200", tint: "bg-neutral-50/50",
-                  badge: "bg-neutral-50 text-neutral-600 border-neutral-200",
+                  box: "border-l-emerald-100", tint: "bg-emerald-50/40",
+                  badge: "bg-emerald-50 text-emerald-700 border-emerald-100",
                 };
                 const visual = onlyUnread
                   ? (s.category && CATEGORY_VISUAL[s.category]) || DEFAULT_VISUAL
