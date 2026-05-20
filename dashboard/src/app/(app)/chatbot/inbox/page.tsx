@@ -79,7 +79,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     .from("chat_sessions")
     .select(`
       id, channel, customer_name, customer_full_name, status, assigned_to, bot_signature_name,
-      bot_mode, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
+      bot_mode, human_only, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
       assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
     `)
     .order("last_message_at", { ascending: false })
@@ -595,6 +595,11 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         {!isUnread && ourTurn && (
                           <span className="bg-blue-100 text-blue-700 text-[10px] font-medium px-1.5 py-0.5 rounded-full">
                             wartet auf Kundin
+                          </span>
+                        )}
+                        {(s as { human_only?: boolean }).human_only && (
+                          <span className="bg-rose-100 text-rose-700 border border-rose-200 text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5" title="Nur für Team — Bot greift hier nicht ein">
+                            🙋 Nur Team
                           </span>
                         )}
                         {/* Rechts: Kategorie + IG-App-Hinweis — getrennt von Name/Status links */}

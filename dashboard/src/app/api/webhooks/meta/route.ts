@@ -390,6 +390,13 @@ async function routeIncoming(opts: {
 
   // Bot-Modus auswerten — 'auto' = senden, 'assisted' = Entwurf, 'off' = nichts
   const botMode = session.bot_mode || (session.bot_auto_reply ? "auto" : "off");
+  // ── HUMAN-ONLY-GUARD ──
+  // Mitarbeiterin hat die Session explizit als "Nur für Team" markiert →
+  // Bot überspringt ALLES (auch Auto-Respond-Override, auch Drafts).
+  if ((session as { human_only?: boolean }).human_only) {
+    console.log(`[meta-webhook] session ${session.id} marked human_only — bot skipped completely`);
+    return;
+  }
   // ── SELF-DM-GUARD ──
   // Wenn die Session-Customer-ID identisch mit unserer eigenen IG-User-ID ist,
   // ist das ein Self-DM-Loop (Bot würde sich selbst antworten). Bot NIE triggern.

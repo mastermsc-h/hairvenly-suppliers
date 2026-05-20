@@ -21,6 +21,7 @@ import {
   markSessionAsSeen,
   markSessionAsNotDone,
   markSessionAsRead,
+  toggleHumanOnly,
   deleteMessage,
 } from "@/lib/actions/chat-inbox";
 
@@ -45,6 +46,7 @@ interface Props {
     customer_full_name: string | null;
     bot_auto_reply: boolean;
     bot_mode: "auto" | "assisted" | "off";
+    human_only?: boolean;
     category: null | "availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "general";
     assigned_name: string | null;
   };
@@ -378,6 +380,25 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
           )}
           {session.status !== "closed" && (
             <AddToWaitlistButton sessionId={session.id} />
+          )}
+          {session.status !== "closed" && (
+            <button
+              onClick={() => startTransition(async () => {
+                await toggleHumanOnly(session.id, !session.human_only);
+                router.refresh();
+              })}
+              disabled={isPending}
+              title={session.human_only
+                ? "Bot wieder zulassen"
+                : "Diese Session ist 'Nur für Team' — Bot antwortet nicht mehr selbstständig"}
+              className={`text-xs px-3 py-1.5 rounded-lg border inline-flex items-center gap-1 disabled:opacity-50 ${
+                session.human_only
+                  ? "bg-rose-600 text-white border-rose-600 hover:bg-rose-700"
+                  : "border-rose-200 text-rose-700 hover:bg-rose-50 hover:border-rose-300"
+              }`}
+            >
+              🙋 {session.human_only ? "Nur Team aktiv" : "Nur für Team"}
+            </button>
           )}
           {session.status !== "closed" && (
             <SplitButton

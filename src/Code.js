@@ -3,7 +3,7 @@
 // ==========================================
 // CODE_VERSION: 2026-04-22_23-00_DoSA-days-of-stock-allocator
 // ==========================================
-const CODE_VERSION = "2026-05-20_13-00_debugCollections-Helper";
+const CODE_VERSION = "2026-05-20_15-30_debugCollectionMapping-Helper";
 
 // IDs der externen Bestellungs-Sheets
 const CHINA_SHEET_ID    = "1zqh50KeQsworvG5OivfxvECM7HUoArwUEGBTUGVB4ZM";
@@ -2543,6 +2543,53 @@ function debugCollections(substring) {
   }
   Logger.log("");
   Logger.log("Bekannte Handles in COLL_MAP_VA mit 'mini': " + known.filter(h => h.includes("mini")).join(", "));
+}
+
+/**
+ * Debug: Zeigt ob Produkte einer bestimmten Collection im aktuellen prodToCollIds-Cache sind.
+ * Aufruf: debugCollectionMapping("mini-tapes")
+ */
+function debugCollectionMapping(collHandle) {
+  const props = PropertiesService.getScriptProperties();
+  const cm = loadChunked_(props, "VA_COLLMAP");
+  if (!cm) { Logger.log("⚠️ VA_COLLMAP leer — Verkaufsanalyse läuft noch oder wurde nie ausgeführt"); return; }
+  const collId = cm.collHandleToId ? cm.collHandleToId[collHandle] : null;
+  if (!collId) {
+    Logger.log("❌ Collection-Handle '" + collHandle + "' nicht in collHandleToId gefunden.");
+    Logger.log("Verfügbare Handles: " + Object.keys(cm.collHandleToId || {}).filter(h => h.includes(collHandle.substring(0, 4))).join(", "));
+    return;
+  }
+  Logger.log("✓ Collection '" + collHandle + "' = id " + collId);
+  // Zähle alle product_ids die zu dieser Collection gemappt sind
+  const mappedProdIds = [];
+  for (const pid in (cm.prodToCollIds || {})) {
+    if ((cm.prodToCollIds[pid] || []).indexOf(collId) >= 0) {
+      mappedProdIds.push(pid);
+    }
+  }
+  Logger.log("📦 " + mappedProdIds.length + " Produkte im Cache-Mapping für '" + collHandle + "'");
+  if (mappedProdIds.length === 0) {
+    Logger.log("❌ KEINE Produkte gemappt → das ist der Bug. Schritt C lädt die Collection nicht.");
+  } else {
+    Logger.log("Beispiel-pids: " + mappedProdIds.slice(0, 10).join(", "));
+  }
+  // Vergleich: wie viele Produkte hat die Collection laut Shopify?
+  const SHOP_NAME = "339520-3";
+  const ACCESS_TOKEN = "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";
+  const BASE_URL = "https://" + SHOP_NAME + ".myshopify.com/admin/api/2025-01";
+  try {
+    Utilities.sleep(200);
+    const cr = UrlFetchApp.fetch(BASE_URL + "/collections/" + collId + "/products.json?limit=250&fields=id,title", {
+      headers: { "X-Shopify-Access-Token": ACCESS_TOKEN }, muteHttpExceptions: true
+    });
+    const data = JSON.parse(cr.getContentText());
+    const shopifyProds = data.products || [];
+    Logger.log("🌐 Shopify sagt: " + shopifyProds.length + " Produkte in dieser Collection");
+    if (shopifyProds.length > 0 && mappedProdIds.length === 0) {
+      Logger.log("→ Schritt C läuft nicht für diese Collection. Beispiel-Produkte:");
+      for (const p of shopifyProds.slice(0, 5)) Logger.log("  • " + p.id + " | " + p.title);
+    }
+  } catch(e) { Logger.log("⚠️ Shopify-Fetch fehlgeschlagen: " + e.message); }
 }
 
 function fetchAllCollections(shopName, accessToken) {

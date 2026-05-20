@@ -612,6 +612,21 @@ export async function markSessionAsRead(sessionId: string) {
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
 
+/**
+ * Markiert eine Session als "Nur für Team" — Bot antwortet ab sofort nicht
+ * mehr selbstständig auf neue Kundennachrichten. Setzt zusätzlich bot_mode='off'
+ * damit auch assisted/auto-Generierung gestoppt wird.
+ */
+export async function toggleHumanOnly(sessionId: string, value: boolean) {
+  const svc = createServiceClient();
+  await svc.from("chat_sessions").update({
+    human_only: value,
+    ...(value ? { bot_mode: "off", bot_auto_reply: false } : {}),
+  }).eq("id", sessionId);
+  revalidatePath("/chatbot/inbox");
+  revalidatePath(`/chatbot/inbox/${sessionId}`);
+}
+
 /** Schließt eine Session */
 export async function closeSession(sessionId: string) {
   const svc = createServiceClient();
