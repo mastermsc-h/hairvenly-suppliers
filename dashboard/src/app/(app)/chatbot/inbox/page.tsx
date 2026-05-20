@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
-import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User, Mail } from "lucide-react";
+import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User } from "lucide-react";
 import SyncInstagramButton from "./sync-instagram-button";
 import MarkUnreadButton from "./mark-unread-button";
 import MarkSeenButton from "./mark-seen-button";
@@ -117,15 +117,6 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   }
   const combinedSessions = [...(sessions || []), ...messageMatchedSessions];
 
-  // Stats für Follow-Up-Indikator
-  const followUpCutoff = new Date(Date.now() - 3 * 86400 * 1000).toISOString();
-  const { count: dueFollowUps } = await svc
-    .from("chat_sessions")
-    .select("id", { count: "exact", head: true })
-    .eq("status", "active")
-    .is("follow_up_sent_at", null)
-    .lt("last_message_at", followUpCutoff);
-
   // Globaler Default-Bot-Modus für neue Sessions
   const { data: globalSettings } = await svc
     .from("chatbot_settings")
@@ -222,9 +213,8 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     categoryCounts[c] = (categoryCounts[c] || 0) + 1;
   }
 
-  // KPIs
+  // KPIs (awaiting_human wird nicht mehr genutzt — siehe KPI-Block unten)
   const { count: cntActive } = await svc.from("chat_sessions").select("id", { count: "exact", head: true }).eq("status", "active");
-  const { count: cntWaiting } = await svc.from("chat_sessions").select("id", { count: "exact", head: true }).eq("status", "awaiting_human");
   const { count: cntClosed } = await svc.from("chat_sessions").select("id", { count: "exact", head: true }).eq("status", "closed");
 
   return (
@@ -271,22 +261,28 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
               {totalUnreadCount}
             </span>
           </Link>
-          {(dueFollowUps ?? 0) > 0 && (
-            <a
-              href="/chatbot/follow-ups"
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs font-medium hover:bg-purple-700"
+          {onlyUnread && (
+            <Link
+              href="/chatbot/inbox?unread=0"
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50"
+              title="Auch beantwortete und abgeschlossene Sessions anzeigen"
             >
-              <Mail size={12} /> {dueFollowUps} Follow-Ups fällig →
-            </a>
+              📥 Alle Nachrichten anzeigen
+            </Link>
           )}
         </div>
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-3 gap-4">
-        <KPI label="Bot aktiv"        count={cntActive ?? 0}  color="text-green-700"  />
-        <KPI label="Warten auf Team"  count={cntWaiting ?? 0} color="text-amber-700"  />
-        <KPI label="Abgeschlossen"    count={cntClosed ?? 0}  color="text-neutral-500"/>
+      {/* KPIs — passen sich dem aktuellen Modus an.
+          "Warten auf Team" raus (status='awaiting_human' wird kaum genutzt seit
+          dem neuen Inbox-Workflow mit dem "Erledigt"/"Nicht erledigt"-Toggle). */}
+      <div className="grid grid-cols-2 gap-4">
+        <KPI
+          label={onlyUnread ? "Aktuell unbeantwortet" : "Aktive Sessions"}
+          count={onlyUnread ? totalUnreadCount : (cntActive ?? 0)}
+          color={onlyUnread ? "text-pink-700" : "text-green-700"}
+        />
+        <KPI label="Abgeschlossen" count={cntClosed ?? 0} color="text-neutral-500" />
       </div>
 
       {/* Suche */}
