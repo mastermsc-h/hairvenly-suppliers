@@ -461,19 +461,25 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                   : ourTurn
                   ? "bg-blue-50/40"
                   : (idx % 2 === 0 ? "bg-white" : "bg-neutral-50/60");
-                // Kategorie-Akzent NUR im Unread-Modus + nur für die drei wichtigsten
-                // Kategorien — damit's nicht zu bunt wird, aber jede Box einen
-                // dezenten Farbklecks hat. Für andere Kategorien bleibt's neutral.
-                const CATEGORY_ACCENT: Record<string, { border: string; bg: string }> = {
-                  gewerbe:       { border: "border-l-amber-400",  bg: "bg-amber-50/40" },
-                  availability:  { border: "border-l-sky-400",    bg: "bg-sky-50/40" },
-                  color_advice:  { border: "border-l-pink-400",   bg: "bg-pink-50/30" },
+                // Kategorie-Akzent im Unread-Modus: drei Top-Kategorien bekommen
+                // dezente Pastell-Töne, alle anderen ein einheitliches Grau.
+                // Dadurch hat JEDE Box einen sanften Farbklecks, ohne dass es bunt
+                // wird. Badge-Border greift dieselbe Farbfamilie auf (visuelle Klammer).
+                interface CatVis { box: string; tint: string; badge: string; }
+                const CATEGORY_VISUAL: Record<string, CatVis> = {
+                  gewerbe:       { box: "border-l-amber-200", tint: "bg-amber-50/30", badge: "bg-amber-50 text-amber-700 border-amber-200" },
+                  availability:  { box: "border-l-sky-200",   tint: "bg-sky-50/30",   badge: "bg-sky-50 text-sky-700 border-sky-200" },
+                  color_advice:  { box: "border-l-pink-200",  tint: "bg-pink-50/30",  badge: "bg-pink-50 text-pink-700 border-pink-200" },
                 };
-                const accent = onlyUnread && s.category ? CATEGORY_ACCENT[s.category] : null;
+                const DEFAULT_VISUAL: CatVis = {
+                  box: "border-l-neutral-200", tint: "bg-neutral-50/50",
+                  badge: "bg-neutral-50 text-neutral-600 border-neutral-200",
+                };
+                const visual = onlyUnread
+                  ? (s.category && CATEGORY_VISUAL[s.category]) || DEFAULT_VISUAL
+                  : null;
                 const baseLi = onlyUnread
-                  ? `rounded-xl border border-neutral-200 hover:border-emerald-300 hover:shadow-sm transition-all ${
-                      accent ? `border-l-4 ${accent.border}` : ""
-                    }`
+                  ? `rounded-xl border border-neutral-200 hover:border-emerald-300 hover:shadow-sm transition-all border-l-4 ${visual!.box}`
                   : `border-b border-neutral-100 hover:bg-blue-100/40 transition-colors ${
                       isUnread
                         ? "border-l-4 border-l-pink-500"
@@ -481,8 +487,8 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         ? "border-l-4 border-l-blue-300"
                         : "border-l-4 border-l-transparent"
                     }`;
-                // Im Unread-Modus mit Kategorie-Akzent: dezenter Background-Tint statt weiß
-                const effectiveBg = onlyUnread && accent ? accent.bg : rowBg;
+                const effectiveBg = onlyUnread && visual ? visual.tint : rowBg;
+                const badgeClass = visual?.badge ?? "bg-neutral-100 text-neutral-600 border-transparent";
                 return (
                   <li
                     key={s.id}
@@ -529,7 +535,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         {/* Rechts: Kategorie + IG-App-Hinweis — getrennt von Name/Status links */}
                         <div className="ml-auto flex items-center gap-1.5">
                           {s.category && CATEGORY_LABELS[s.category] && (
-                            <span className="bg-neutral-100 text-neutral-600 text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5">
+                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5 border ${badgeClass}`}>
                               {CATEGORY_LABELS[s.category].emoji} {CATEGORY_LABELS[s.category].label}
                             </span>
                           )}
