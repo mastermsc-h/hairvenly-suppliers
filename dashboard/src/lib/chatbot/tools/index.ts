@@ -793,62 +793,94 @@ const createReservationTool: ToolDef = {
   schema: {
     name: "create_reservation",
     description:
-      "Legt eine WARTELISTEN-RESERVIERUNG an: Kunde möchte benachrichtigt werden, sobald ein " +
-      "aktuell nicht verfügbares Produkt (unterwegs/ausverkauft) wieder da ist. " +
+      "Legt eine ODER MEHRERE Warteliste-Reservierung(en) an: Kundin möchte benachrichtigt " +
+      "werden, sobald nicht verfügbare Produkte wieder da sind. " +
       "Nutze NUR wenn die Kundin EXPLIZIT 'ja' sagt zu deinem Angebot 'magst du dass wir dich " +
       "benachrichtigen?' — niemals ungefragt anlegen. " +
-      "Bestätige der Kundin nach dem Anlegen kurz: 'Hab ich notiert — wir melden uns sobald die da ist 💕'",
+      "WICHTIG: Bei mehreren Farben/Produkten alle in EINEM Tool-Call über das 'products'-Array " +
+      "eintragen — niemals einzelne Aufrufe. Das ist atomar und vermeidet Lücken. " +
+      "Beispiel: Kundin will über Viking Blond UND Norvegian in Tape 65cm benachrichtigt werden → " +
+      "products: [{product_name:'Viking Blond Tape 65cm', color:'Viking Blond', method:'Standard Tapes'}, " +
+      "{product_name:'Norvegian Tape 65cm', color:'Norvegian', method:'Standard Tapes'}]. " +
+      "Bestätige der Kundin nach dem Anlegen kurz: 'Hab ich notiert — wir melden uns sobald die da sind 💕'.",
     input_schema: {
       type: "object",
       properties: {
-        product_name: {
-          type: "string",
-          description: "Konkretes Produkt, möglichst genau (z.B. 'EBONY Russisch Standard Tapes' oder 'Smoky Brown Bondings').",
+        products: {
+          type: "array",
+          description: "Liste der Produkte für die Warteliste-Eintrag erstellt werden soll. Bei einer einzelnen Farbe → Array mit einem Element. Bei mehreren Farben → mehrere Elemente. NIEMALS einzelne Tool-Calls für mehrere Produkte machen.",
+          items: {
+            type: "object",
+            properties: {
+              product_name: { type: "string", description: "Konkretes Produkt (z.B. 'EBONY Russisch Standard Tapes 60cm')" },
+              color:        { type: "string", description: "Farb-Name (z.B. 'RAW', '#2A', 'EBONY')" },
+              method:       { type: "string", description: "Methode (z.B. 'Standard Tapes', 'Mini Tapes', 'Bondings', 'Tressen')" },
+              eta_hint:     { type: "string", description: "ETA-Hinweis falls aus get_stock_eta bekannt" },
+              product_url:  { type: "string", description: "Shopify-URL falls bekannt" },
+            },
+            required: ["product_name"],
+          },
         },
-        color: {
-          type: "string",
-          description: "Farb-Name (z.B. 'RAW', '#2A', 'EBONY')",
-        },
-        method: {
-          type: "string",
-          description: "Methode (z.B. 'Standard Tapes', 'Mini Tapes', 'Bondings', 'Tressen')",
-        },
-        eta_hint: {
-          type: "string",
-          description: "ETA-Hinweis falls bekannt (z.B. 'Anfang Juni' oder 'ca. 04.06.2026'). Aus get_stock_eta wenn vorhanden.",
-        },
-        product_url: {
-          type: "string",
-          description: "Shopify-URL des Produkts falls bekannt.",
-        },
-        notes: {
-          type: "string",
-          description: "Optionale Notiz für die Mitarbeiterin, z.B. 'Kundin braucht es bis 15.06 für Hochzeit'.",
-        },
+        // Backward-compat: einzelnes Produkt direkt am Root
+        product_name: { type: "string", description: "DEPRECATED — nutze 'products' Array. Nur für einzelne Reservierung als Schnellweg." },
+        color:        { type: "string", description: "DEPRECATED — nutze 'products' Array." },
+        method:       { type: "string", description: "DEPRECATED — nutze 'products' Array." },
+        eta_hint:     { type: "string", description: "DEPRECATED — nutze 'products' Array." },
+        product_url:  { type: "string", description: "DEPRECATED — nutze 'products' Array." },
+        notes:        { type: "string", description: "Gemeinsame interne Notiz für alle Produkte dieses Calls (z.B. 'Kundin braucht es für Hochzeit 15.06')" },
       },
-      required: ["product_name"],
     },
   },
   async execute(input, ctx) {
     const { createReservation } = await import("@/lib/actions/chat-reservations");
     try {
-      const r = await createReservation({
-        sessionId:   ctx.sessionId,
-        productName: input.product_name as string,
-        color:       input.color as string | undefined,
-        method:      input.method as string | undefined,
-        etaHint:     input.eta_hint as string | undefined,
-        productUrl:  input.product_url as string | undefined,
-        notes:       input.notes as string | undefined,
-      });
+      // Normalisiere Input: entweder products-Array oder Einzel-Form
+      type ProductInput = { product_name: string; color?: string; method?: string; eta_hint?: string; product_url?: string };
+      let list: ProductInput[] = [];
+      const productsRaw = input.products as ProductInput[] | undefined;
+      if (Array.isArray(productsRaw) && productsRaw.length > 0) {
+        list = productsRaw.filter(p => p?.product_name?.trim());
+      } else if (input.product_name) {
+        list = [{
+          product_name: input.product_name as string,
+          color:        input.color as string | undefined,
+          method:       input.method as string | undefined,
+          eta_hint:     input.eta_hint as string | undefined,
+          product_url:  input.product_url as string | undefined,
+        }];
+      }
+      if (list.length === 0) {
+        return { output: JSON.stringify({ status: "error", message: "Kein Produkt übergeben — products-Array muss mindestens einen Eintrag haben." }) };
+      }
+      const sharedNotes = input.notes as string | undefined;
+      const created: { id: string; product_name: string }[] = [];
+      const failed: string[] = [];
+      for (const p of list) {
+        try {
+          const r = await createReservation({
+            sessionId:   ctx.sessionId,
+            productName: p.product_name,
+            color:       p.color,
+            method:      p.method,
+            etaHint:     p.eta_hint,
+            productUrl:  p.product_url,
+            notes:       sharedNotes,
+          });
+          created.push({ id: r.id, product_name: p.product_name });
+        } catch (e) {
+          failed.push(`${p.product_name}: ${(e as Error).message}`);
+        }
+      }
       return {
         output: JSON.stringify({
-          status: "ok",
-          reservation_id: r.id,
+          status: failed.length > 0 ? "partial" : "ok",
+          created_count: created.length,
+          created,
+          failed,
           message:
-            "Reservierung angelegt. Bestätige der Kundin jetzt kurz: 'Hab ich notiert — wir melden uns sobald die da ist 💕'. " +
-            "Eine Mitarbeiterin sieht die Reservierung im Dashboard und meldet sich aktiv wenn die Ware da ist. " +
-            "VERSPRICH KEIN exaktes Datum, außer eta_hint ist klar bekannt.",
+            created.length === 1
+              ? `1 Reservierung angelegt. Bestätige der Kundin kurz: 'Hab ich notiert — wir melden uns sobald die da ist 💕'.`
+              : `${created.length} Reservierungen angelegt (${created.map(c => c.product_name).join(", ")}). Bestätige der Kundin kurz: 'Hab ich notiert — wir melden uns sobald die da sind 💕'.`,
         }),
       };
     } catch (e) {
