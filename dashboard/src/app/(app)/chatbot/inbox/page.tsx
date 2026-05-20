@@ -114,7 +114,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         .from("chat_sessions")
         .select(`
           id, channel, customer_name, customer_full_name, status, assigned_to, bot_signature_name,
-          bot_mode, human_only, team_notes, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
+          bot_mode, human_only, team_notes, followup_due_at, followup_reason, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
           assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
         `)
         .in("id", onlyNew)
