@@ -359,6 +359,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               wechsle…
             </span>
           )}
+          <div className="divider" />
           {!isTakenOver && session.status !== "closed" && (
             <button
               onClick={handleTakeover}
@@ -391,9 +392,11 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               disabled={isPending}
             />
           )}
+          <div className="divider" />
           {session.status !== "closed" && (
             <AddToWaitlistButton sessionId={session.id} />
           )}
+          <div className="divider" />
           {session.status !== "closed" && (
             <FollowupButton
               sessionId={session.id}
@@ -420,6 +423,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               <AlertTriangle size={13} /> {session.human_only ? "Nur Team aktiv" : "Nur Team"}
             </button>
           )}
+          <div className="divider" />
           {session.status !== "closed" && (
             <SplitButton
               primaryLabel="Ungelesen"
