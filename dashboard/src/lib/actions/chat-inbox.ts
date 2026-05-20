@@ -617,6 +617,17 @@ export async function markSessionAsRead(sessionId: string) {
  * mehr selbstständig auf neue Kundennachrichten. Setzt zusätzlich bot_mode='off'
  * damit auch assisted/auto-Generierung gestoppt wird.
  */
+/** Speichert interne Team-Notizen zu einer Session (für Mitarbeiter, nie an Kundin). */
+export async function updateTeamNotes(sessionId: string, notes: string) {
+  const svc = createServiceClient();
+  const trimmed = notes.trim();
+  await svc.from("chat_sessions")
+    .update({ team_notes: trimmed || null })
+    .eq("id", sessionId);
+  revalidatePath("/chatbot/inbox");
+  revalidatePath(`/chatbot/inbox/${sessionId}`);
+}
+
 export async function toggleHumanOnly(sessionId: string, value: boolean) {
   const svc = createServiceClient();
   await svc.from("chat_sessions").update({

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown } from "lucide-react";
 import CategorySelector from "./category-selector";
 import AddToWaitlistButton from "./add-to-waitlist-button";
+import TeamNotes from "./team-notes";
 import {
   takeoverSession,
   sendHumanMessage,
@@ -47,6 +48,7 @@ interface Props {
     bot_auto_reply: boolean;
     bot_mode: "auto" | "assisted" | "off";
     human_only?: boolean;
+    team_notes?: string | null;
     category: null | "availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "general";
     assigned_name: string | null;
   };
@@ -447,6 +449,12 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
           </div>
         </div>
       )}
+
+      {/* Team-Notiz — interner Klebezettel zwischen Header und Verlauf.
+          Wenn Notiz vorhanden: amber-Box. Sonst: dezente Aufforderung. */}
+      <div className="px-4 pt-3 bg-neutral-50">
+        <TeamNotes sessionId={session.id} initialNotes={session.team_notes ?? null} />
+      </div>
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-neutral-50">
