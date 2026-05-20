@@ -95,7 +95,7 @@ Antworte AUSSCHLIESSLICH mit dem Kategorie-Key in Kleinbuchstaben (z.B. "availab
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
       .map(b => b.text).join("").trim().toLowerCase();
 
-    const valid: Category[] = ["availability","pricing","color_advice","appointment","complaint","order_status","partnership","general"];
+    const valid: Category[] = ["availability","pricing","color_advice","appointment","complaint","order_status","gewerbe","partnership","general"];
     const cat = valid.find(v => out.includes(v)) || "general";
     await svc.from("chat_sessions").update({ category: cat }).eq("id", sessionId);
     return cat;
