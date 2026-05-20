@@ -61,7 +61,7 @@ export default function CategorySelector({
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-20 w-56 bg-white border border-neutral-200 rounded-xl shadow-xl p-1.5">
+          <div className="absolute left-0 top-full mt-1 z-20 w-56 bg-white border border-neutral-200 rounded-xl shadow-xl p-1.5">
             {ORDER.map(key => {
               const isActive = cat === key;
               return (
