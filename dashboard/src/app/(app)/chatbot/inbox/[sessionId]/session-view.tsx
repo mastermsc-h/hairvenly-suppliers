@@ -295,7 +295,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
                 <>
                   {/* Click-outside-overlay */}
                   <div className="fixed inset-0 z-10" onClick={() => setShowModeSettings(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-20 w-80 bg-white border border-neutral-200 rounded-xl shadow-xl p-2 space-y-1">
+                  <div className="absolute left-0 top-full mt-1 z-20 w-80 bg-white border border-neutral-200 rounded-xl shadow-xl p-2 space-y-1">
                     <div className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wide px-2 pt-1">
                       Was passiert bei neuer Kundennachricht?
                     </div>
