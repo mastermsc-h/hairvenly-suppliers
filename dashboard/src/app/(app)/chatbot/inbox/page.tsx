@@ -487,8 +487,19 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                   : ourTurn
                   ? "bg-blue-50/40"
                   : (idx % 2 === 0 ? "bg-white" : "bg-neutral-50/60");
+                // Kategorie-Akzent NUR im Unread-Modus + nur für die drei wichtigsten
+                // Kategorien — damit's nicht zu bunt wird, aber jede Box einen
+                // dezenten Farbklecks hat. Für andere Kategorien bleibt's neutral.
+                const CATEGORY_ACCENT: Record<string, { border: string; bg: string }> = {
+                  gewerbe:       { border: "border-l-amber-400",  bg: "bg-amber-50/40" },
+                  availability:  { border: "border-l-sky-400",    bg: "bg-sky-50/40" },
+                  color_advice:  { border: "border-l-pink-400",   bg: "bg-pink-50/30" },
+                };
+                const accent = onlyUnread && s.category ? CATEGORY_ACCENT[s.category] : null;
                 const baseLi = onlyUnread
-                  ? "rounded-xl border border-neutral-200 hover:border-emerald-300 hover:shadow-sm transition-all"
+                  ? `rounded-xl border border-neutral-200 hover:border-emerald-300 hover:shadow-sm transition-all ${
+                      accent ? `border-l-4 ${accent.border}` : ""
+                    }`
                   : `border-b border-neutral-100 hover:bg-blue-100/40 transition-colors ${
                       isUnread
                         ? "border-l-4 border-l-pink-500"
@@ -496,10 +507,12 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         ? "border-l-4 border-l-blue-300"
                         : "border-l-4 border-l-transparent"
                     }`;
+                // Im Unread-Modus mit Kategorie-Akzent: dezenter Background-Tint statt weiß
+                const effectiveBg = onlyUnread && accent ? accent.bg : rowBg;
                 return (
                   <li
                     key={s.id}
-                    className={`group relative ${baseLi} ${rowBg}`}
+                    className={`group relative ${baseLi} ${effectiveBg}`}
                   >
                     {/* Hover-Buttons rechts oben — alle drei je nach Status:
                         - Grüner Haken (Erledigt): wenn Session im Unread-Filter
