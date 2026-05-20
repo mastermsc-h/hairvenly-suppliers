@@ -449,20 +449,26 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 const isHybrid = st.humanCount > 0;
                 // Wir-zuletzt-geantwortet (Kundin dran): leichter blauer Touch
                 const ourTurn = st.lastMsgRole === "assistant" || st.lastMsgRole === "human_agent";
-                // "unread" für den Filter: Kundin schrieb zuletzt UND wurde
-                // nicht aktiv abgehandelt (Antworten / "Als erledigt"-Klick).
-                const isUnread = !ourTurn && !!(s.last_customer_msg_at && (
-                  !s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at
-                ));
-                // "unseen" für die Bold/Normal-Optik (Instagram-Style):
-                // Name+@ fett, solange der Mitarbeiter die Session seit der letzten
-                // Kunden-Message NICHT geöffnet hat. Beim Reinklicken wird
-                // last_opened_by_agent_at gesetzt → Name normal beim nächsten Reload.
+                // Sentinel-Check: explizit vom Mitarbeiter via "Als ungelesen" /
+                // "Nicht erledigt" geflaggt? Dann override die "wer schrieb zuletzt"-Logik.
                 const sessRaw = s as { last_opened_by_agent_at?: string | null };
-                const isUnseen = !ourTurn && !!(s.last_customer_msg_at && (
+                const isExplicitlyNotDone = !!s.last_seen_by_agent_at &&
+                  new Date(s.last_seen_by_agent_at).getFullYear() < 2000;
+                const isExplicitlyUnseen  = !!sessRaw.last_opened_by_agent_at &&
+                  new Date(sessRaw.last_opened_by_agent_at).getFullYear() < 2000;
+
+                // "unread" für den Filter: explizit geflaggt ODER Kundin schrieb zuletzt
+                // ohne dass wir aktiv abgehandelt haben.
+                const isUnread = isExplicitlyNotDone || (!ourTurn && !!(s.last_customer_msg_at && (
+                  !s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at
+                )));
+                // "unseen" für die Bold/Normal-Optik (Instagram-Style):
+                // explizit geflaggt ODER Mitarbeiter hat die Session seit der letzten
+                // Kunden-Message nicht geöffnet.
+                const isUnseen = isExplicitlyUnseen || (!ourTurn && !!(s.last_customer_msg_at && (
                   !sessRaw.last_opened_by_agent_at ||
                   s.last_customer_msg_at > sessRaw.last_opened_by_agent_at
-                ));
+                )));
                 // Antwort kam via Instagram-App (nicht aus Dashboard): human_agent OHNE agent_id
                 // → entstand durch Echo-Webhook von einer externen Mitarbeiter-Antwort
                 const lastReplyViaIgApp = st.lastMsgRole === "human_agent" && !st.lastMsgAgentId;

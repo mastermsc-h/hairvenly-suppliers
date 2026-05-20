@@ -534,14 +534,20 @@ export async function discardDraft(draftId: string) {
  * Markiert eine Session als ungelesen — setzt last_seen_by_agent_at zurück.
  * In der Inbox erscheint dann der pinke Strich + "NEU"-Badge wieder.
  */
+/**
+ * SENTINEL-Zeitstempel = explizit vom Mitarbeiter geflaggt.
+ * Wird im Filter-Code erkannt und überschreibt die "wer schrieb zuletzt"-Heuristik.
+ * Eine echte ältere Antwort hätte nie ein Datum vor 1990.
+ */
+const FLAG_SENTINEL = "1970-01-01T00:00:00Z";
+
 export async function markSessionUnread(sessionId: string) {
   const svc = createServiceClient();
-  // BEIDE Spalten zurücksetzen:
-  // - last_seen_by_agent_at = null → Session erscheint wieder im "Nur unbeantwortet"-Filter
-  // - last_opened_by_agent_at = null → Name wird in der Liste wieder fett (Bold-Optik)
+  // Beide auf Sentinel setzen → Filter + Bold-Optik feuern, unabhängig davon
+  // wer zuletzt geschrieben hat (z.B. wir via IG-App).
   await svc.from("chat_sessions").update({
-    last_seen_by_agent_at: null,
-    last_opened_by_agent_at: null,
+    last_seen_by_agent_at: FLAG_SENTINEL,
+    last_opened_by_agent_at: FLAG_SENTINEL,
   }).eq("id", sessionId);
   revalidatePath("/chatbot/inbox");
   revalidatePath(`/chatbot/inbox/${sessionId}`);
@@ -570,8 +576,10 @@ export async function markSessionAsSeen(sessionId: string) {
  */
 export async function markSessionAsNotDone(sessionId: string) {
   const svc = createServiceClient();
+  // Sentinel statt null → Filter berücksichtigt explizite Flagge auch wenn
+  // wir zuletzt geschrieben haben. last_opened bleibt unberührt.
   await svc.from("chat_sessions")
-    .update({ last_seen_by_agent_at: null })
+    .update({ last_seen_by_agent_at: FLAG_SENTINEL })
     .eq("id", sessionId);
   revalidatePath("/chatbot/inbox");
   revalidatePath(`/chatbot/inbox/${sessionId}`);
