@@ -562,6 +562,35 @@ export async function markSessionAsSeen(sessionId: string) {
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
 
+/**
+ * Gegenstück zu markSessionAsSeen — "Nicht erledigt":
+ * Session erscheint wieder im "Nur unbeantwortet"-Filter, aber die
+ * Bold/Normal-Optik (last_opened_by_agent_at) bleibt unberührt — du hast die
+ * Session ja schon gesehen, du willst sie nur wieder als "noch zu tun" markieren.
+ */
+export async function markSessionAsNotDone(sessionId: string) {
+  const svc = createServiceClient();
+  await svc.from("chat_sessions")
+    .update({ last_seen_by_agent_at: null })
+    .eq("id", sessionId);
+  revalidatePath("/chatbot/inbox");
+  revalidatePath(`/chatbot/inbox/${sessionId}`);
+}
+
+/**
+ * Gegenstück zu markSessionUnread — "Gelesen":
+ * Setzt last_opened_by_agent_at = jetzt → Name wird in der Inbox normal/nicht-fett.
+ * last_seen_by_agent_at bleibt unberührt (Filter-Status wird nicht geändert).
+ */
+export async function markSessionAsRead(sessionId: string) {
+  const svc = createServiceClient();
+  await svc.from("chat_sessions")
+    .update({ last_opened_by_agent_at: new Date().toISOString() })
+    .eq("id", sessionId);
+  revalidatePath("/chatbot/inbox");
+  revalidatePath(`/chatbot/inbox/${sessionId}`);
+}
+
 /** Schließt eine Session */
 export async function closeSession(sessionId: string) {
   const svc = createServiceClient();

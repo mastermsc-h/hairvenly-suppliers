@@ -19,6 +19,8 @@ import {
   generateDraftOnDemand,
   markSessionUnread,
   markSessionAsSeen,
+  markSessionAsNotDone,
+  markSessionAsRead,
   deleteMessage,
 } from "@/lib/actions/chat-inbox";
 
@@ -363,33 +365,31 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             </button>
           )}
           {session.status !== "closed" && (
-            <button
-              onClick={() => startTransition(async () => {
-                await markSessionAsSeen(session.id);
-                router.refresh();
-              })}
+            <SplitButton
+              primaryLabel="✓ Als erledigt"
+              primaryTitle="Markiert die Session als erledigt — sie verschwindet aus 'Nur unbeantwortet'"
+              primaryClass="border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300"
+              onPrimary={() => startTransition(async () => { await markSessionAsSeen(session.id); router.refresh(); })}
+              menuLabel="✗ Nicht erledigt"
+              menuTitle="Session wieder als 'noch zu tun' markieren (taucht wieder im Filter auf)"
+              onMenu={() => startTransition(async () => { await markSessionAsNotDone(session.id); router.refresh(); })}
               disabled={isPending}
-              title="Markiert diese Session als erledigt — sie verschwindet aus 'Nur unbeantwortet'"
-              className="text-xs px-3 py-1.5 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300 inline-flex items-center gap-1 disabled:opacity-50"
-            >
-              ✓ Als erledigt
-            </button>
+            />
           )}
           {session.status !== "closed" && (
             <AddToWaitlistButton sessionId={session.id} />
           )}
           {session.status !== "closed" && (
-            <button
-              onClick={() => startTransition(async () => {
-                await markSessionUnread(session.id);
-                router.refresh();
-              })}
+            <SplitButton
+              primaryLabel="📨 Als ungelesen"
+              primaryTitle="Setzt die Session wieder auf 'ungelesen' (Name wird in der Inbox fett)"
+              primaryClass="border-neutral-300 text-neutral-600 hover:bg-pink-50 hover:text-pink-700 hover:border-pink-300"
+              onPrimary={() => startTransition(async () => { await markSessionUnread(session.id); router.refresh(); })}
+              menuLabel="✓ Gelesen"
+              menuTitle="Name in der Inbox wieder normal (nicht fett) machen, ohne Filter-Status zu ändern"
+              onMenu={() => startTransition(async () => { await markSessionAsRead(session.id); router.refresh(); })}
               disabled={isPending}
-              title="Setzt diese Session wieder auf 'ungelesen' (pinker Strich in der Inbox)"
-              className="text-xs px-3 py-1.5 rounded-lg border border-neutral-300 text-neutral-600 hover:bg-pink-50 hover:text-pink-700 hover:border-pink-300 inline-flex items-center gap-1 disabled:opacity-50"
-            >
-              📨 Als ungelesen
-            </button>
+            />
           )}
           {session.status !== "closed" && (
             <button
@@ -963,6 +963,65 @@ function DraftBox({
         </button>
       </div>
       </div>{/* End scrollbarer Inhalt */}
+    </div>
+  );
+}
+
+/**
+ * Split-Button: linker Teil führt die Primär-Aktion aus, rechter Chevron
+ * öffnet ein Mini-Menü mit der Gegen-Aktion. Beide Hälften teilen denselben
+ * Outline-Style, sind aber per Linie getrennt.
+ */
+function SplitButton({
+  primaryLabel, primaryTitle, primaryClass, onPrimary,
+  menuLabel, menuTitle, onMenu,
+  disabled,
+}: {
+  primaryLabel: string;
+  primaryTitle: string;
+  primaryClass: string;
+  onPrimary: () => void;
+  menuLabel: string;
+  menuTitle: string;
+  onMenu: () => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative inline-flex">
+      <button
+        type="button"
+        onClick={onPrimary}
+        disabled={disabled}
+        title={primaryTitle}
+        className={`text-xs pl-3 pr-2 py-1.5 rounded-l-lg border border-r-0 inline-flex items-center gap-1 disabled:opacity-50 ${primaryClass}`}
+      >
+        {primaryLabel}
+      </button>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        disabled={disabled}
+        aria-label="Weitere Optionen"
+        className={`text-xs px-1.5 py-1.5 rounded-r-lg border inline-flex items-center disabled:opacity-50 ${primaryClass}`}
+      >
+        <ChevronDown size={12} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full mt-1 z-20 min-w-[180px] bg-white border border-neutral-200 rounded-lg shadow-lg p-1">
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onMenu(); }}
+              title={menuTitle}
+              className="w-full text-left text-xs px-2.5 py-1.5 rounded-md hover:bg-neutral-50 text-neutral-700"
+            >
+              {menuLabel}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
