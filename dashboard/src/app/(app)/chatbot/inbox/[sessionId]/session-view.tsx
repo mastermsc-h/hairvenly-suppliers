@@ -225,27 +225,31 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
       {/* Header */}
       <div className="px-5 py-4 border-b border-neutral-100 flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3 flex-wrap">
-          <div className={`text-xs px-2 py-1 rounded-full font-medium ${statusBadge.color}`}>
-            {statusBadge.label}
+          {/* Avatar-Kreis mit Channel-Icon */}
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-neutral-100 to-neutral-200 flex-shrink-0 flex items-center justify-center text-base">
+            {session.channel === "instagram" ? "📷" : session.channel === "whatsapp" ? "💬" : "🌐"}
           </div>
-          <div className="text-sm text-neutral-700">
-            <span className="text-neutral-400">
-              {session.channel === "instagram" ? "📷" : session.channel === "whatsapp" ? "💬" : "🌐"} Kunde:
-            </span>{" "}
-            {session.customer_full_name ? (
-              <>
-                <span className="font-medium">{session.customer_full_name}</span>
-                {session.customer_name && (
-                  <span className="ml-1.5 text-xs text-neutral-500">{session.customer_name}</span>
-                )}
-              </>
-            ) : (
-              <span className="font-medium">{session.customer_name || "—"}</span>
-            )}
+          <div className="flex flex-col gap-0.5">
+            <div className="text-sm font-semibold text-neutral-900 leading-tight">
+              {session.customer_full_name || session.customer_name || "Unbekannt"}
+            </div>
+            <div className="text-[11px] text-neutral-500 leading-tight">
+              {session.customer_full_name && session.customer_name ? session.customer_name : null}
+              {session.customer_full_name && session.customer_name && <span className="mx-1">·</span>}
+              <span className={`inline-flex items-center gap-1 ${statusBadge.color.replace("bg-", "text-").split(" ")[0].replace("100", "700")}`}>
+                {statusBadge.label}
+              </span>
+              {session.assigned_name && (
+                <>
+                  <span className="mx-1">·</span>
+                  <span>übernommen von <span className="text-neutral-700">{session.assigned_name}</span></span>
+                </>
+              )}
+            </div>
           </div>
-          <div className="text-sm text-neutral-700 inline-flex items-center gap-1">
-            <span className="text-neutral-400">Bot:</span>
-            <span className="font-medium">Ava von</span>
+          <div className="h-6 w-px bg-neutral-200 mx-1" />
+          <div className="text-xs text-neutral-600 inline-flex items-center gap-1.5">
+            <span className="text-neutral-400">Ava von</span>
             <select
               value={session.bot_signature_name || ""}
               onChange={(e) => {
@@ -670,7 +674,7 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
             const isJustFotoPlaceholder = hasImage && (msg.content || "").trim() === "[Foto]";
             if (isJustFotoPlaceholder || !msg.content) return null;
             return (
-              <div className="bg-white border border-neutral-200 rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">{msg.content}</div>
+              <div className="bg-white border border-neutral-200 rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap shadow-sm">{msg.content}</div>
             );
           })()}
           {msg.attachments?.length > 0 && (
@@ -705,7 +709,7 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
       <div className="group flex gap-2 justify-end items-start">
         <div className="self-start order-first">{DeleteBtn}</div>
         <div className="max-w-[70%]">
-          <div className="bg-pink-100 rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">{msg.content}</div>
+          <div className="bg-rose-50 border border-rose-100/80 rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap shadow-sm">{msg.content}</div>
           {msg.tool_calls && msg.tool_calls.length > 0 && (
             <div className="mt-1 text-[10px] text-neutral-500 inline-flex items-center gap-1">
               <Wrench size={10} />
@@ -716,8 +720,8 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
             Ava von {signatureName || "—"} · {time}
           </div>
         </div>
-        <div className="w-7 h-7 rounded-full bg-pink-200 flex-shrink-0 flex items-center justify-center">
-          <Bot size={12} className="text-pink-700" />
+        <div className="w-7 h-7 rounded-full bg-rose-100 flex-shrink-0 flex items-center justify-center">
+          <Bot size={12} className="text-rose-600" />
         </div>
       </div>
     );
@@ -728,13 +732,13 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
       <div className="group flex gap-2 justify-end items-start">
         <div className="self-start order-first">{DeleteBtn}</div>
         <div className="max-w-[70%]">
-          <div className="bg-amber-100 border border-amber-200 rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">{msg.content}</div>
+          <div className="bg-orange-50 border border-orange-100/80 rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap shadow-sm">{msg.content}</div>
           <div className="text-[10px] text-neutral-400 mt-0.5 text-right">
             {msg.agent_name || "Mitarbeiterin"} · {time}
           </div>
         </div>
-        <div className="w-7 h-7 rounded-full bg-amber-200 flex-shrink-0 flex items-center justify-center">
-          <UserCheck size={12} className="text-amber-700" />
+        <div className="w-7 h-7 rounded-full bg-orange-100 flex-shrink-0 flex items-center justify-center">
+          <UserCheck size={12} className="text-orange-600" />
         </div>
       </div>
     );

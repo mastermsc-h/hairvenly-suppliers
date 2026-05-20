@@ -49,16 +49,19 @@ export default function TeamNotes({
   const hasNotes = (initialNotes || "").trim().length > 0;
 
   return (
-    <div className={`rounded-xl border ${
-      hasNotes ? "border-amber-200 bg-amber-50/50" : "border-neutral-200 bg-neutral-50/50"
-    } p-3 space-y-2`}>
+    <div className={`rounded-xl border-l-4 ${
+      hasNotes
+        ? "border-l-amber-400 bg-amber-50/40 border-y border-r border-y-amber-100 border-r-amber-100"
+        : "border-l-neutral-300 bg-neutral-50/50 border-y border-r border-y-neutral-100 border-r-neutral-100"
+    } px-4 py-3 space-y-2`}>
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <StickyNote size={14} className={hasNotes ? "text-amber-700" : "text-neutral-500"} />
-          <span className={`text-xs font-semibold uppercase tracking-wide ${
-            hasNotes ? "text-amber-800" : "text-neutral-600"
+        <div className="flex items-center gap-2">
+          <StickyNote size={13} className={hasNotes ? "text-amber-600" : "text-neutral-400"} />
+          <span className={`text-xs font-medium ${
+            hasNotes ? "text-amber-900" : "text-neutral-500"
           }`}>
-            Team-Notiz (intern)
+            Team-Notiz
+            <span className="ml-1 text-neutral-400 font-normal">· intern</span>
           </span>
         </div>
         {!editing && (
@@ -66,7 +69,7 @@ export default function TeamNotes({
             onClick={() => setEditing(true)}
             className="text-[11px] text-neutral-500 hover:text-neutral-900 inline-flex items-center gap-1"
           >
-            <Edit3 size={11} /> {hasNotes ? "Bearbeiten" : "Notiz hinzufügen"}
+            <Edit3 size={10} /> {hasNotes ? "Bearbeiten" : "Hinzufügen"}
           </button>
         )}
       </div>
