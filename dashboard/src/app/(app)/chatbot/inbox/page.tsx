@@ -501,7 +501,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                       {isUnread && <MarkSeenButton sessionId={s.id} />}
                       {!isUnseen && <MarkUnreadButton sessionId={s.id} variant="icon" />}
                     </div>
-                    <Link href={`/chatbot/inbox/${s.id}`} className={`block ${onlyUnread ? "p-5" : "p-4"}`}>
+                    <Link href={`/chatbot/inbox/${s.id}`} className={`block ${onlyUnread ? "p-5" : "p-4"} pr-14`}>
                       {/* Customer-Name oben + Status-Badges links / IG-App-Hinweis rechts */}
                       <div className={`flex items-center gap-2 ${onlyUnread ? "mb-2.5" : "mb-1.5"}`}>
                         <User size={14} className="text-neutral-400" />
