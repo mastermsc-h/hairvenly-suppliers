@@ -246,20 +246,31 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   const { count: cntClosed } = await svc.from("chat_sessions").select("id", { count: "exact", head: true }).eq("status", "closed");
 
   return (
-    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
-      {/* Header */}
+    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-4">
+      {/* Kompakter Header — Titel, Live-Counter, Aktionen in EINER Zeile */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <MessageSquare size={20} className="text-neutral-700" />
-          <h1 className="text-xl font-semibold text-neutral-900">Chat-Inbox</h1>
-          <span className="text-sm text-neutral-500 ml-2">Live-Gespräche aller Kanäle</span>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <MessageSquare size={18} className="text-neutral-700" />
+            <h1 className="text-lg font-semibold text-neutral-900">Chat-Inbox</h1>
+          </div>
+          {/* Counter inline statt riesige KPI-Karten */}
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-pink-50 text-pink-700 border border-pink-200 font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-pink-500 animate-pulse" />
+              {totalUnreadCount} unbeantwortet
+            </span>
+            {(cntActive ?? 0) > totalUnreadCount && (
+              <span className="text-neutral-400">·</span>
+            )}
+            <span className="text-neutral-500">{cntActive ?? 0} aktiv</span>
+            <span className="text-neutral-400">·</span>
+            <span className="text-neutral-500">{cntClosed ?? 0} erledigt</span>
+          </div>
         </div>
-        <div className="flex items-end gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           <DefaultBotModeToggle currentMode={defaultBotMode} />
           <SyncInstagramButton />
-          {/* Toggle: Nur unbeantwortet zeigen (Kundin schrieb zuletzt, wir noch nicht reagiert).
-              Beim Aktivieren werden alle anderen Filter beibehalten und die Liste nach
-              last_customer_msg_at DESC sortiert — neueste Kunden-Nachricht oben. */}
           <Link
             href={(() => {
               const next = new URLSearchParams();
@@ -268,65 +279,38 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
               if (channelFilter !== "all") next.set("channel",  channelFilter);
               if (categoryFilter !== "all") next.set("category", categoryFilter);
               if (searchQuery)             next.set("q",        searchQuery);
-              // Default ist jetzt "nur unbeantwortet" — zum Aufheben explizit unread=0 setzen
               if (onlyUnread) next.set("unread", "0");
               const qs = next.toString();
               return `/chatbot/inbox${qs ? "?" + qs : ""}`;
             })()}
-            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
               onlyUnread
-                ? "bg-pink-600 text-white border-pink-600 hover:bg-pink-700"
-                : "bg-white text-pink-700 border-pink-300 hover:bg-pink-50"
+                ? "bg-pink-600 text-white hover:bg-pink-700"
+                : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
             }`}
             title={onlyUnread
-              ? "Filter aktiv — Klick zeigt ALLE Sessions (auch beantwortete)"
+              ? "Filter aktiv — Klick zeigt ALLE Sessions"
               : "Nur Sessions zeigen, bei denen die Kundin zuletzt geschrieben hat"}
           >
-            🔔 {onlyUnread ? "Nur unbeantwortet" : "Alle Sessions"}
-            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-              onlyUnread ? "bg-white/25 text-white" : "bg-pink-100 text-pink-700"
-            }`}>
-              {totalUnreadCount}
-            </span>
+            🔔 {onlyUnread ? "Nur unbeantwortet" : "Alle anzeigen"}
           </Link>
-          {onlyUnread && (
-            <Link
-              href="/chatbot/inbox?unread=0"
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50"
-              title="Auch beantwortete und abgeschlossene Sessions anzeigen"
-            >
-              📥 Alle Nachrichten anzeigen
-            </Link>
-          )}
         </div>
       </div>
 
-      {/* KPIs — passen sich dem aktuellen Modus an.
-          "Warten auf Team" raus (status='awaiting_human' wird kaum genutzt seit
-          dem neuen Inbox-Workflow mit dem "Erledigt"/"Nicht erledigt"-Toggle). */}
-      <div className="grid grid-cols-2 gap-4">
-        <KPI
-          label={onlyUnread ? "Aktuell unbeantwortet" : "Aktive Sessions"}
-          count={onlyUnread ? totalUnreadCount : (cntActive ?? 0)}
-          color={onlyUnread ? "text-pink-700" : "text-green-700"}
-        />
-        <KPI label="Abgeschlossen" count={cntClosed ?? 0} color="text-neutral-500" />
-      </div>
-
-      {/* Suche */}
+      {/* Suche — schlank, mit Treffer-Inline-Info */}
       <div className="flex items-center gap-3">
         <InboxSearchBar />
         {searchQuery && (
-          <span className="text-xs text-neutral-500">
-            {combinedSessions.length} Treffer für &ldquo;<strong className="text-neutral-700">{searchQuery}</strong>&rdquo;
+          <span className="text-xs text-neutral-500 whitespace-nowrap">
+            {combinedSessions.length} Treffer
           </span>
         )}
       </div>
 
-      {/* Filter — Kanal */}
-      <div className="space-y-2">
-        <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">Kanal</div>
-        <div className="flex gap-2 flex-wrap">
+      {/* Filter — kompakte Reihen mit Inline-Labels statt großer Section-Headers */}
+      <div className="flex items-center gap-x-3 gap-y-2 flex-wrap text-xs">
+        <span className="text-neutral-500 font-medium shrink-0">Kanal</span>
+        <div className="flex gap-1.5 flex-wrap">
           {["all", "instagram", "whatsapp", "web"].map(c => (
             <Link
               key={c}
@@ -338,10 +322,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 ...(searchQuery ? { q: searchQuery } : {}),
                 ...(!onlyUnread ? { unread: "0" } : {}),
               }).toString()}`}
-              className={`text-xs px-3 py-1.5 rounded-full border ${
+              className={`px-2.5 py-1 rounded-full transition ${
                 channelFilter === c
-                  ? "bg-neutral-900 text-white border-neutral-900"
-                  : "bg-white text-neutral-600 border-neutral-300 hover:bg-neutral-50"
+                  ? "bg-neutral-900 text-white"
+                  : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
               }`}
             >
               {c === "all" ? "Alle" : CHANNEL_LABELS[c] || c}
@@ -350,14 +334,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-
-      {/* Filter — Kategorie (Auto-klassifiziert) */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">Kategorie</div>
+      <div className="flex items-center gap-x-3 gap-y-2 flex-wrap text-xs">
+        <span className="text-neutral-500 font-medium shrink-0">Kategorie</span>
+        <div className="flex gap-1.5 flex-wrap items-center">
           <ClassifyBackfillButton />
-        </div>
-        <div className="flex gap-2 flex-wrap">
           <Link
             href={`/chatbot/inbox?${new URLSearchParams({
               ...(filter !== "all" ? { status: filter } : {}),
@@ -366,13 +346,13 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
               ...(searchQuery ? { q: searchQuery } : {}),
               ...(!onlyUnread ? { unread: "0" } : {}),
             }).toString()}`}
-            className={`text-xs px-3 py-1.5 rounded-full border ${
+            className={`px-2.5 py-1 rounded-full transition ${
               categoryFilter === "all"
-                ? "bg-neutral-900 text-white border-neutral-900"
-                : "bg-white text-neutral-600 border-neutral-300 hover:bg-neutral-50"
+                ? "bg-neutral-900 text-white"
+                : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
             }`}
           >
-            Alle Kategorien
+            Alle
           </Link>
           {Object.entries(CATEGORY_LABELS).map(([key, meta]) => {
             const cnt = categoryCounts[key] || 0;
@@ -387,10 +367,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                   ...(!onlyUnread ? { unread: "0" } : {}),
                   category: key,
                 }).toString()}`}
-                className={`text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1 ${
+                className={`px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition ${
                   categoryFilter === key
-                    ? "bg-neutral-900 text-white border-neutral-900"
-                    : "bg-white text-neutral-600 border-neutral-300 hover:bg-neutral-50"
+                    ? "bg-neutral-900 text-white"
+                    : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
                 }`}
               >
                 <span>{meta.emoji}</span>
@@ -402,10 +382,9 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      {/* Filter — Mode (Bot vs Mensch) */}
-      <div className="space-y-2">
-        <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">Bot/Mensch</div>
-        <div className="flex gap-2 flex-wrap">
+      <div className="flex items-center gap-x-3 gap-y-2 flex-wrap text-xs">
+        <span className="text-neutral-500 font-medium shrink-0">Bot/Mensch</span>
+        <div className="flex gap-1.5 flex-wrap">
           {[
             { key: "all",        label: `Alle (${(sessions ?? []).length})`,                  icon: null },
             { key: "pure_bot",   label: `Reine Bot-Chats (${pureBotCount})`,                  icon: <Bot size={11} className="text-pink-600" /> },
@@ -421,10 +400,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 ...(searchQuery ? { q: searchQuery } : {}),
                 ...(!onlyUnread ? { unread: "0" } : {}),
               }).toString()}`}
-              className={`text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1 ${
+              className={`px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition ${
                 mode === opt.key
-                  ? "bg-neutral-900 text-white border-neutral-900"
-                  : "bg-white text-neutral-600 border-neutral-300 hover:bg-neutral-50"
+                  ? "bg-neutral-900 text-white"
+                  : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
               }`}
             >
               {opt.icon} {opt.label}
@@ -433,30 +412,31 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      {/* Sortierung */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs font-medium text-neutral-500 uppercase tracking-wide">Sortieren</span>
-        {Object.entries(SORT_OPTIONS).map(([key, meta]) => (
-          <Link
-            key={key}
-            href={`/chatbot/inbox?${new URLSearchParams({
-              ...(filter !== "all" ? { status: filter } : {}),
-              ...(mode !== "all" ? { mode } : {}),
-              ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
-              ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
-              ...(searchQuery ? { q: searchQuery } : {}),
-              ...(!onlyUnread ? { unread: "0" } : {}),
-              ...(key !== "newest" ? { sort: key } : {}),
-            }).toString()}`}
-            className={`text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1 ${
-              sortMode === key
-                ? "bg-neutral-900 text-white border-neutral-900"
-                : "bg-white text-neutral-600 border-neutral-300 hover:bg-neutral-50"
-            }`}
-          >
-            <span>{meta.emoji}</span> {meta.label}
-          </Link>
-        ))}
+      <div className="flex items-center gap-x-3 gap-y-2 flex-wrap text-xs">
+        <span className="text-neutral-500 font-medium shrink-0">Sortieren</span>
+        <div className="flex gap-1.5 flex-wrap">
+          {Object.entries(SORT_OPTIONS).map(([key, meta]) => (
+            <Link
+              key={key}
+              href={`/chatbot/inbox?${new URLSearchParams({
+                ...(filter !== "all" ? { status: filter } : {}),
+                ...(mode !== "all" ? { mode } : {}),
+                ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
+                ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
+                ...(searchQuery ? { q: searchQuery } : {}),
+                ...(!onlyUnread ? { unread: "0" } : {}),
+                ...(key !== "newest" ? { sort: key } : {}),
+              }).toString()}`}
+              className={`px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition ${
+                sortMode === key
+                  ? "bg-neutral-900 text-white"
+                  : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+              }`}
+            >
+              <span>{meta.emoji}</span> {meta.label}
+            </Link>
+          ))}
+        </div>
       </div>
 
       {/* Sessions Liste — im "Nur unbeantwortet"-Modus transparenter Container,
