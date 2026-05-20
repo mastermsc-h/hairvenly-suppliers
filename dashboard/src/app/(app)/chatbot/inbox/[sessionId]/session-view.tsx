@@ -471,9 +471,10 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
         </div>
       )}
 
-      {/* Team-Notiz — interner Klebezettel zwischen Header und Verlauf.
-          Wenn Notiz vorhanden: amber-Box. Sonst: dezente Aufforderung. */}
-      <div className="px-4 pt-3 bg-neutral-50">
+      {/* Team-Notiz — schlanker Chip im Header-Bereich, NICHT im Chat-Verlauf.
+          Default: 1-Zeilen-Preview oder dezenter "+ Notiz"-Link. Klick öffnet
+          den Editor inline. So nervt's nicht beim Lesen der Konversation. */}
+      <div className="px-5 py-2 border-b border-neutral-100 bg-white">
         <TeamNotes
           sessionId={session.id}
           initialNotes={session.team_notes ?? null}
