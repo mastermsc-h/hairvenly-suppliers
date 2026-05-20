@@ -6,6 +6,7 @@ import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User, Mail } from "
 import SyncInstagramButton from "./sync-instagram-button";
 import MarkUnreadButton from "./mark-unread-button";
 import MarkSeenButton from "./mark-seen-button";
+import MarkNotDoneButton from "./mark-not-done-button";
 import InboxSearchBar from "./search-bar";
 import DefaultBotModeToggle from "./default-bot-mode-toggle";
 import ClassifyBackfillButton from "./classify-backfill-button";
@@ -170,14 +171,17 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   }
 
   // Pro Session: ist sie "unbeantwortet"? = Kundin zuletzt geschrieben + nicht gesehen
+  // ODER vom Mitarbeiter explizit als "nicht erledigt" geflaggt (Sentinel < 2000).
   const unreadMap: Record<string, boolean> = {};
   for (const s of combinedSessions) {
     const st = stats[s.id];
     const lastRole = st?.lastMsgRole;
     const ourTurn = lastRole === "assistant" || lastRole === "human_agent";
-    unreadMap[s.id] = !ourTurn && !!(s.last_customer_msg_at && (
+    const isExplicitlyNotDone = !!s.last_seen_by_agent_at &&
+      new Date(s.last_seen_by_agent_at).getFullYear() < 2000;
+    unreadMap[s.id] = isExplicitlyNotDone || (!ourTurn && !!(s.last_customer_msg_at && (
       !s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at
-    ));
+    )));
   }
   const totalUnreadCount = combinedSessions.filter(s => unreadMap[s.id]).length;
 
@@ -497,14 +501,14 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                     key={s.id}
                     className={`group relative ${baseLi} ${rowBg}`}
                   >
-                    {/* Hover-Buttons rechts oben (beide unabhängig sichtbar):
-                        - Grüner Haken — wenn die Session noch im "Nur unbeantwortet" steckt
-                          (= aus dem Filter rausnehmen / als erledigt markieren)
-                        - Pinke Mail — wenn der Name nicht mehr fett ist (du hast schon
-                          reingeschaut), und du sie wieder als ungelesen markieren willst
-                        Beide gleichzeitig: du hast reingeschaut UND noch nicht reagiert. */}
+                    {/* Hover-Buttons rechts oben — alle drei je nach Status:
+                        - Grüner Haken (Erledigt): wenn Session im Unread-Filter
+                        - Amber Undo (Nicht erledigt): wenn NICHT im Unread-Filter
+                        - Pinke Mail (Als ungelesen): wenn Name normal (= schon gesehen) */}
                     <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition flex items-center gap-0.5">
-                      {isUnread && <MarkSeenButton sessionId={s.id} />}
+                      {isUnread
+                        ? <MarkSeenButton sessionId={s.id} />
+                        : <MarkNotDoneButton sessionId={s.id} />}
                       {!isUnseen && <MarkUnreadButton sessionId={s.id} variant="icon" />}
                     </div>
                     <Link href={`/chatbot/inbox/${s.id}`} className={`block ${onlyUnread ? "p-5" : "p-4"} pr-14`}>
