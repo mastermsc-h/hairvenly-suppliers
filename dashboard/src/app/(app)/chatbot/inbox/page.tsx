@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
-import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User } from "lucide-react";
+import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User, AlertTriangle } from "lucide-react";
 import SyncInstagramButton from "./sync-instagram-button";
 import MarkUnreadButton from "./mark-unread-button";
 import MarkSeenButton from "./mark-seen-button";
@@ -552,13 +552,25 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         ? "border-l-4 border-l-blue-300"
                         : "border-l-4 border-l-transparent"
                     }`;
-                const effectiveBg = onlyUnread && visual ? visual.tint : rowBg;
+                const humanOnly = !!(s as { human_only?: boolean }).human_only;
+                const effectiveBg = humanOnly
+                  ? "bg-amber-50/60"
+                  : onlyUnread && visual ? visual.tint : rowBg;
                 const badgeClass = visual?.badge ?? "bg-neutral-100 text-neutral-600 border-transparent";
                 return (
                   <li
                     key={s.id}
                     className={`group relative ${baseLi} ${effectiveBg}`}
                   >
+                    {/* "Nur für Team"-Warn-Marker — prominent in der Mitte rechts.
+                        Gelbes Warndreieck mit ! + kurzer Label. Soll auf einen Blick
+                        klar machen: hier nicht antworten lassen, Mitarbeiter erledigt. */}
+                    {(s as { human_only?: boolean }).human_only && (
+                      <div className="absolute top-1/2 right-3 -translate-y-1/2 z-[5] pointer-events-none flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-100 border-2 border-amber-400 shadow-sm">
+                        <AlertTriangle size={18} className="text-amber-700 fill-amber-200" />
+                        <span className="text-xs font-bold text-amber-900 uppercase tracking-wide">Nur Team</span>
+                      </div>
+                    )}
                     {/* Hover-Buttons rechts oben — alle drei je nach Status:
                         - Grüner Haken (Erledigt): wenn Session im Unread-Filter
                         - Amber Undo (Nicht erledigt): wenn NICHT im Unread-Filter
@@ -595,11 +607,6 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         {!isUnread && ourTurn && (
                           <span className="bg-blue-100 text-blue-700 text-[10px] font-medium px-1.5 py-0.5 rounded-full">
                             wartet auf Kundin
-                          </span>
-                        )}
-                        {(s as { human_only?: boolean }).human_only && (
-                          <span className="bg-rose-100 text-rose-700 border border-rose-200 text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5" title="Nur für Team — Bot greift hier nicht ein">
-                            🙋 Nur Team
                           </span>
                         )}
                         {/* Rechts: Kategorie + IG-App-Hinweis — getrennt von Name/Status links */}
