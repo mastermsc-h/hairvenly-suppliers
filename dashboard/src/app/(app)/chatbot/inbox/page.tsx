@@ -294,6 +294,15 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
           >
             🔔 {onlyUnread ? "Nur unbeantwortet" : "Alle anzeigen"}
           </Link>
+          {onlyUnread && (
+            <Link
+              href="/chatbot/inbox?unread=0"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-100 text-neutral-700 hover:bg-neutral-200 transition"
+              title="Auch beantwortete und abgeschlossene Sessions anzeigen"
+            >
+              📥 Alle Nachrichten
+            </Link>
+          )}
         </div>
       </div>
 

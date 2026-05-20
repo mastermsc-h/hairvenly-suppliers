@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown } from "lucide-react";
+import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown, AlertTriangle, Mail } from "lucide-react";
 import CategorySelector from "./category-selector";
 import AddToWaitlistButton from "./add-to-waitlist-button";
 import TeamNotes from "./team-notes";
@@ -363,28 +363,29 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             <button
               onClick={handleTakeover}
               disabled={isPending}
-              className="text-xs px-3 py-1.5 rounded-lg bg-amber-100 text-amber-800 hover:bg-amber-200 inline-flex items-center gap-1 disabled:opacity-50"
+              className="h-8 px-3 rounded-lg bg-amber-500 text-white text-xs font-medium hover:bg-amber-600 inline-flex items-center gap-1.5 disabled:opacity-50 shadow-sm"
             >
-              <Hand size={12} /> Übernehmen
+              <Hand size={13} /> Übernehmen
             </button>
           )}
           {isTakenOver && (
             <button
               onClick={handleResume}
               disabled={isPending}
-              className="text-xs px-3 py-1.5 rounded-lg bg-green-100 text-green-800 hover:bg-green-200 inline-flex items-center gap-1 disabled:opacity-50"
+              className="h-8 px-3 rounded-lg bg-green-500 text-white text-xs font-medium hover:bg-green-600 inline-flex items-center gap-1.5 disabled:opacity-50 shadow-sm"
             >
-              <RotateCcw size={12} /> Zurück an Bot
+              <RotateCcw size={13} /> Zurück an Bot
             </button>
           )}
           {session.status !== "closed" && (
             <SplitButton
-              primaryLabel="✓ Als erledigt"
+              primaryLabel="Erledigt"
+              primaryIcon={<Check size={13} />}
               primaryTitle="Markiert die Session als erledigt — sie verschwindet aus 'Nur unbeantwortet'"
-              primaryClass="border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300"
+              primaryClass="text-emerald-700 hover:bg-emerald-50"
               onPrimary={() => startTransition(async () => { await markSessionAsSeen(session.id); router.refresh(); })}
               menuLabel="✗ Nicht erledigt"
-              menuTitle="Session wieder als 'noch zu tun' markieren (taucht wieder im Filter auf)"
+              menuTitle="Session wieder als 'noch zu tun' markieren"
               onMenu={() => startTransition(async () => { await markSessionAsNotDone(session.id); router.refresh(); })}
               disabled={isPending}
             />
@@ -408,23 +409,24 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               title={session.human_only
                 ? "Bot wieder zulassen"
                 : "Diese Session ist 'Nur für Team' — Bot antwortet nicht mehr selbstständig"}
-              className={`text-xs px-3 py-1.5 rounded-lg border inline-flex items-center gap-1 disabled:opacity-50 ${
+              className={`h-8 px-3 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 disabled:opacity-50 transition ${
                 session.human_only
-                  ? "bg-rose-600 text-white border-rose-600 hover:bg-rose-700"
-                  : "border-rose-200 text-rose-700 hover:bg-rose-50 hover:border-rose-300"
+                  ? "bg-rose-500 text-white hover:bg-rose-600 shadow-sm"
+                  : "text-rose-700 hover:bg-rose-50"
               }`}
             >
-              🙋 {session.human_only ? "Nur Team aktiv" : "Nur für Team"}
+              <AlertTriangle size={13} /> {session.human_only ? "Nur Team aktiv" : "Nur Team"}
             </button>
           )}
           {session.status !== "closed" && (
             <SplitButton
-              primaryLabel="📨 Als ungelesen"
+              primaryLabel="Ungelesen"
+              primaryIcon={<Mail size={13} />}
               primaryTitle="Setzt die Session wieder auf 'ungelesen' (Name wird in der Inbox fett)"
-              primaryClass="border-neutral-300 text-neutral-600 hover:bg-pink-50 hover:text-pink-700 hover:border-pink-300"
+              primaryClass="text-neutral-600 hover:bg-neutral-100"
               onPrimary={() => startTransition(async () => { await markSessionUnread(session.id); router.refresh(); })}
               menuLabel="✓ Gelesen"
-              menuTitle="Name in der Inbox wieder normal (nicht fett) machen, ohne Filter-Status zu ändern"
+              menuTitle="Name in der Inbox wieder normal (nicht fett) machen"
               onMenu={() => startTransition(async () => { await markSessionAsRead(session.id); router.refresh(); })}
               disabled={isPending}
             />
@@ -1032,7 +1034,7 @@ function OverflowMenu({ children }: { children: React.ReactNode }) {
         type="button"
         onClick={() => setOpen(v => !v)}
         title="Mehr Aktionen"
-        className="text-xs px-2 py-1.5 rounded-lg border border-neutral-300 text-neutral-500 hover:bg-neutral-50 inline-flex items-center"
+        className="h-8 w-8 rounded-lg text-neutral-500 hover:bg-neutral-100 inline-flex items-center justify-center transition"
       >
         •••
       </button>
@@ -1054,11 +1056,12 @@ function OverflowMenu({ children }: { children: React.ReactNode }) {
  * Outline-Style, sind aber per Linie getrennt.
  */
 function SplitButton({
-  primaryLabel, primaryTitle, primaryClass, onPrimary,
+  primaryLabel, primaryIcon, primaryTitle, primaryClass, onPrimary,
   menuLabel, menuTitle, onMenu,
   disabled,
 }: {
   primaryLabel: string;
+  primaryIcon?: React.ReactNode;
   primaryTitle: string;
   primaryClass: string;
   onPrimary: () => void;
@@ -1075,8 +1078,9 @@ function SplitButton({
         onClick={onPrimary}
         disabled={disabled}
         title={primaryTitle}
-        className={`text-xs pl-3 pr-2 py-1.5 rounded-l-lg border border-r-0 inline-flex items-center gap-1 disabled:opacity-50 ${primaryClass}`}
+        className={`h-8 pl-3 pr-2 rounded-l-lg text-xs font-medium inline-flex items-center gap-1.5 disabled:opacity-50 transition ${primaryClass}`}
       >
+        {primaryIcon}
         {primaryLabel}
       </button>
       <button
@@ -1084,7 +1088,7 @@ function SplitButton({
         onClick={() => setOpen(v => !v)}
         disabled={disabled}
         aria-label="Weitere Optionen"
-        className={`text-xs px-1.5 py-1.5 rounded-r-lg border inline-flex items-center disabled:opacity-50 ${primaryClass}`}
+        className={`h-8 px-1.5 rounded-r-lg text-xs inline-flex items-center disabled:opacity-50 border-l border-current/10 transition ${primaryClass}`}
       >
         <ChevronDown size={12} />
       </button>

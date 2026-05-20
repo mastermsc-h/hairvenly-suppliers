@@ -80,13 +80,13 @@ export default function AddToWaitlistButton({ sessionId }: { sessionId: string }
         type="button"
         onClick={() => setOpen(o => !o)}
         title="Kundin auf Warteliste setzen — wird bei Wareneingang per 1-Klick benachrichtigt"
-        className={`text-xs px-3 py-1.5 rounded-lg border inline-flex items-center gap-1 ${
+        className={`h-8 px-3 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition ${
           open
-            ? "bg-purple-600 text-white border-purple-600"
-            : "border-purple-200 text-purple-700 hover:bg-purple-50 hover:border-purple-300"
+            ? "bg-purple-500 text-white shadow-sm"
+            : "text-purple-700 hover:bg-purple-50"
         }`}
       >
-        <Bell size={12} /> Auf Warteliste
+        <Bell size={13} /> Warteliste
       </button>
 
       {open && (

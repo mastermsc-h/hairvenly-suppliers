@@ -57,14 +57,14 @@ export default function FollowupButton({
         title={isFlagged
           ? `Follow-Up fällig am ${dueDate?.toLocaleDateString("de-DE")}`
           : "Session zur späteren Wiedervorlage markieren"}
-        className={`text-xs px-3 py-1.5 rounded-lg border inline-flex items-center gap-1 disabled:opacity-50 ${
+        className={`h-8 px-3 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 disabled:opacity-50 transition ${
           isFlagged
-            ? "bg-violet-600 text-white border-violet-600 hover:bg-violet-700"
-            : "border-violet-200 text-violet-700 hover:bg-violet-50 hover:border-violet-300"
+            ? "bg-violet-500 text-white hover:bg-violet-600 shadow-sm"
+            : "text-violet-700 hover:bg-violet-50"
         }`}
       >
-        <Bell size={12} />
-        {isFlagged ? `Follow-Up: ${dueDate?.toLocaleDateString("de-DE")}` : "Follow-Up"}
+        <Bell size={13} />
+        {isFlagged ? dueDate?.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }) : "Follow-Up"}
         <ChevronDown size={11} className={open ? "rotate-180" : ""} />
       </button>
 
