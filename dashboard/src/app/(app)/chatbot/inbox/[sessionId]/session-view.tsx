@@ -278,7 +278,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
           )}
           <CategorySelector sessionId={session.id} currentCategory={session.category} />
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-1 items-center [&>div.divider]:mx-1 [&>div.divider]:h-5 [&>div.divider]:w-px [&>div.divider]:bg-neutral-200">
           {/* Bot-Modus — klarer Dropdown-Button mit Pfeil, deutlich klickbar */}
           {session.status === "active" && (
             <div className="relative">
@@ -377,6 +377,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               <RotateCcw size={13} /> Zurück an Bot
             </button>
           )}
+          <div className="divider" />
           {session.status !== "closed" && (
             <SplitButton
               primaryLabel="Erledigt"
@@ -399,6 +400,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               initialDueAt={session.followup_due_at ?? null}
             />
           )}
+          <div className="divider" />
           {session.status !== "closed" && (
             <button
               onClick={() => startTransition(async () => {
@@ -431,6 +433,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               disabled={isPending}
             />
           )}
+          <div className="divider" />
           {/* Schließen + Löschen ins Overflow-Menü — selten genutzte
               destruktive Aktionen, gehören nicht permanent sichtbar. */}
           <OverflowMenu>

@@ -3,7 +3,7 @@
 // ==========================================
 // CODE_VERSION: 2026-04-22_23-00_DoSA-days-of-stock-allocator
 // ==========================================
-const CODE_VERSION = "2026-05-20_15-30_debugCollectionMapping-Helper";
+const CODE_VERSION = "2026-05-20_18-30_debugVAEntries-Helper";
 
 // IDs der externen Bestellungs-Sheets
 const CHINA_SHEET_ID    = "1zqh50KeQsworvG5OivfxvECM7HUoArwUEGBTUGVB4ZM";
@@ -2590,6 +2590,46 @@ function debugCollectionMapping(collHandle) {
       for (const p of shopifyProds.slice(0, 5)) Logger.log("  • " + p.id + " | " + p.title);
     }
   } catch(e) { Logger.log("⚠️ Shopify-Fetch fehlgeschlagen: " + e.message); }
+}
+
+/**
+ * Debug: Zeigt alle VA_PRODUCT_DATA-Einträge für einen bestimmten Handle.
+ * Aufruf: debugVAEntries("mini-tapes")
+ */
+function debugVAEntries(handle) {
+  const props = PropertiesService.getScriptProperties();
+  const data = loadChunked_(props, "VA_PRODUCT_DATA");
+  if (!data) { Logger.log("⚠️ VA_PRODUCT_DATA leer"); return; }
+  let totalEntries = 0, salesEntries = 0, lagerEntries = 0, anyWithSales = 0;
+  let totalG30 = 0, totalG90 = 0, totalQty90 = 0;
+  const examples = [];
+  for (const key in data) {
+    const p = data[key];
+    if (p.handle !== handle) continue;
+    totalEntries++;
+    const isLager = String(key).startsWith("lager|");
+    if (isLager) lagerEntries++; else salesEntries++;
+    const g30 = p.g30d || 0;
+    const g90 = p.g90d || 0;
+    const qty = p.qty90d || 0;
+    totalG30 += g30; totalG90 += g90; totalQty90 += qty;
+    if (g30 > 0 || g90 > 0) anyWithSales++;
+    if (examples.length < 15) {
+      examples.push("  [" + (isLager ? "L" : "S") + "] key=" + key + " | " + (p.name || "?") + " | g30=" + g30 + " g90=" + g90 + " qty90=" + qty);
+    }
+  }
+  Logger.log("══ VA_PRODUCT_DATA Einträge für '" + handle + "' ══");
+  Logger.log("Gesamt: " + totalEntries + " | Sales-Keys: " + salesEntries + " | Lager-Keys: " + lagerEntries);
+  Logger.log("Mit Verkäufen (>0): " + anyWithSales);
+  Logger.log("Summen: g30=" + totalG30 + " | g90=" + totalG90 + " | qty90=" + totalQty90);
+  Logger.log("");
+  for (const ex of examples) Logger.log(ex);
+  if (salesEntries === 0) {
+    Logger.log("");
+    Logger.log("❌ KEINE Sales-Einträge (key=Produkt-ID) für diesen Handle.");
+    Logger.log("→ Order-Loop hat KEINE Order mit diesen Produkten verarbeitet.");
+    Logger.log("→ Mögliche Ursache: Order-ID-Dedup blockt sie, oder getCollMapping returnt anderen Handle.");
+  }
 }
 
 function fetchAllCollections(shopName, accessToken) {
