@@ -85,11 +85,29 @@ export function findRemovedBigrams(original: string, final: string): string[] {
 }
 
 /**
- * Vergleicht Original-Bot-Entwurf mit dem finalen (vom Mitarbeiter gesendeten) Text.
- * Trägt entfernte Wörter und Phrasen in chatbot_word_filters ein.
- * Nach N Vorkommen wird der Filter automatisch aktiviert.
+ * DEAKTIVIERT (2026-05-20): Auto-Lern-Wortfilter waren zu aggressiv und haben
+ * harmlose Wörter wie "Bescheid", "fragen", "kundinnen", "richtige entscheidung"
+ * vorgemerkt. Manuelle Filter (über die UI) bleiben aktiv — die werden in
+ * loadActiveWordFilters() weiter geladen und applyWordFilters() angewendet.
+ *
+ * Bestehende auto-aktivierte Filter wurden deaktiviert (außer "Grammatur").
+ *
+ * Wenn das System irgendwann zurückkommen soll: alten Code aus git history holen.
  */
 export async function recordEditDiff(
+  _originalBotText: string,
+  _finalText: string,
+  _sessionId: string,
+): Promise<{ tracked: number; auto_activated: number }> {
+  // No-op. Auto-Lernung aus Edit-Diffs ist deaktiviert.
+  return { tracked: 0, auto_activated: 0 };
+}
+
+/**
+ * Original-Implementation als Backup behalten — wird aktuell nicht aufgerufen.
+ * Falls man irgendwann wieder einschalten will, recordEditDiff wieder hierauf umstellen.
+ */
+async function _legacyRecordEditDiff(
   originalBotText: string,
   finalText: string,
   sessionId: string,
