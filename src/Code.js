@@ -3,7 +3,7 @@
 // ==========================================
 // CODE_VERSION: 2026-04-22_23-00_DoSA-days-of-stock-allocator
 // ==========================================
-const CODE_VERSION = "2026-05-20_10-30_FreshStart-OrderDedup-Set-leeren";
+const CODE_VERSION = "2026-05-20_12-30_SmartCollections-Mapping-Fix-Minitapes";
 
 // IDs der externen Bestellungs-Sheets
 const CHINA_SHEET_ID    = "1zqh50KeQsworvG5OivfxvECM7HUoArwUEGBTUGVB4ZM";
@@ -9286,12 +9286,18 @@ function refreshVerkaufsanalyse() {
     }
 
     // Schritt C: Varianten-Gewichte für Clip-ins UND Ponytails laden
-    // Gleichzeitig: Alle Clip-In Produkte zu prodToCollIds hinzufügen (auch wenn nicht in /collects.json)
+    // Gleichzeitig: ALLE Produkte aller COLL_MAP_VA-Handles zu prodToCollIds hinzufügen
+    // (Schritt B = /collects.json liefert NUR Custom-Collection-Memberships, KEINE Smart Collections!
+    //  Mini-Tapes z.B. sind Smart Collections → ohne diesen Schritt fehlen die Mappings komplett.)
     if (!prep.variantsDone) {
       if (!prep.variantWeightsVA) prep.variantWeightsVA = {};
-      for (const varHandle of ["clip-extensions", "ponytail-extensions"]) {
+      // Alle bekannten Collection-Handles durchgehen (inkl. Mini-Tapes & andere Smart Collections)
+      const allHandlesForMapping = Object.keys(COLL_MAP_VA);
+      for (const varHandle of allHandlesForMapping) {
         const collId = prep.collHandleToId[varHandle];
         if (!collId) continue;
+        // Nur Clip-ins & Ponytails brauchen Varianten-Gewichte; für andere reicht Produkt→Collection Mapping
+        const needsVariantWeights = (varHandle === "clip-extensions" || varHandle === "ponytail-extensions");
         // Alle Produkte der Collection laden (seitenweise)
         let prodUrl = BASE_URL_VA + "/collections/" + collId + "/products.json?limit=250&fields=id,title";
         while (prodUrl) {
@@ -9309,12 +9315,12 @@ function refreshVerkaufsanalyse() {
               return;
             }
             const pid = String(prod.id);
-            // Sicherstellen dass dieses Produkt in prodToCollIds als clip-extensions bekannt ist
-            // (manche Produkte fehlen in /collects.json wenn sie nur in Smart Collections sind)
-            if (varHandle === "clip-extensions") {
-              if (!prep.prodToCollIds[pid]) prep.prodToCollIds[pid] = [];
-              if (!prep.prodToCollIds[pid].includes(collId)) prep.prodToCollIds[pid].push(collId);
-            }
+            // Produkt → Collection-Mapping IMMER ergänzen (auch für Smart Collections wie Mini-Tapes,
+            // die nicht über /collects.json erscheinen)
+            if (!prep.prodToCollIds[pid]) prep.prodToCollIds[pid] = [];
+            if (!prep.prodToCollIds[pid].includes(collId)) prep.prodToCollIds[pid].push(collId);
+            // Varianten-Gewichte nur für Clip-ins/Ponytails laden (fester gPerUnit reicht sonst)
+            if (!needsVariantWeights) continue;
             const vr = fetchShopifyWithRetry_(BASE_URL_VA + "/products/" + prod.id + "/variants.json", {
               headers: { "X-Shopify-Access-Token": ACCESS_TOKEN_VA }, muteHttpExceptions: true
             });
@@ -9347,7 +9353,7 @@ function refreshVerkaufsanalyse() {
         }
       }
       prep.variantsDone = true;
-      Logger.log("✅ Varianten-Gewichte geladen (Clip-ins + Ponytails): " + Object.keys(prep.variantWeightsVA).length + " Varianten");
+      Logger.log("✅ Varianten-Gewichte geladen (Clip-ins + Ponytails): " + Object.keys(prep.variantWeightsVA).length + " Varianten | Produkt-Mappings: " + Object.keys(prep.prodToCollIds).length);
     }
     // Schritt D: Clip-Ins über Produkttitel erkennen (Fallback für Produkte nicht in Collection)
     // Sucht alle Produkte mit "CLIP" im Titel und ordnet sie clip-extensions zu

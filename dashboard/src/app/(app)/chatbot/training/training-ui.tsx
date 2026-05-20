@@ -29,6 +29,7 @@ interface TrainingEntry {
   bad_answer: string | null;
   feedback: string | null;
   active: boolean;
+  pinned?: boolean;
   avatar_name: string | null;
   created_at: string;
 }
@@ -188,6 +189,15 @@ export default function TrainingUI() {
   async function deleteTrainingEntry(id: string) {
     if (!confirm("Wirklich löschen?")) return;
     await fetch(`/api/chat/training?id=${id}`, { method: "DELETE" });
+    loadLibrary();
+  }
+
+  async function togglePinTraining(id: string, pinned: boolean) {
+    await fetch(`/api/chat/training?id=${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned }),
+    });
     loadLibrary();
   }
 
@@ -368,7 +378,7 @@ export default function TrainingUI() {
                   <X size={14} />
                 </button>
               </div>
-              <LibraryView library={library} avatars={avatars} onDelete={deleteTrainingEntry} />
+              <LibraryView library={library} avatars={avatars} onDelete={deleteTrainingEntry} onPin={togglePinTraining} />
             </div>
           )}
         </div>
@@ -388,11 +398,12 @@ export default function TrainingUI() {
 }
 
 function LibraryView({
-  library, avatars, onDelete,
+  library, avatars, onDelete, onPin,
 }: {
   library: TrainingEntry[];
   avatars: AvatarOption[];
   onDelete: (id: string) => void;
+  onPin: (id: string, pinned: boolean) => void;
 }) {
   const [filter, setFilter] = useState<string>("all");
   const filtered = library.filter(e => {
@@ -437,11 +448,25 @@ function LibraryView({
                   <span className={`px-1.5 py-0.5 rounded ${e.avatar_name ? "bg-pink-100 text-pink-700" : "bg-neutral-200 text-neutral-700"}`}>
                     {e.avatar_name || "🌐 Global"}
                   </span>
+                  {e.pinned && (
+                    <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium" title="Angepinnt — wird immer geladen">
+                      📌 Pin
+                    </span>
+                  )}
                   <span>{new Date(e.created_at).toLocaleString("de-DE")}</span>
                 </div>
-                <button onClick={() => onDelete(e.id)} className="text-red-500 hover:text-red-700">
-                  <Trash2 size={11} />
-                </button>
+                <div className="inline-flex items-center gap-1.5">
+                  <button
+                    onClick={() => onPin(e.id, !e.pinned)}
+                    title={e.pinned ? "Pin entfernen" : "Anpinnen — landet immer im Bot-Prompt"}
+                    className={`hover:text-amber-700 ${e.pinned ? "text-amber-700" : "text-neutral-400"}`}
+                  >
+                    {e.pinned ? "📌" : "📍"}
+                  </button>
+                  <button onClick={() => onDelete(e.id)} className="text-red-500 hover:text-red-700">
+                    <Trash2 size={11} />
+                  </button>
+                </div>
               </div>
               <div className="text-xs text-neutral-500 mb-1">
                 <strong>Kunde:</strong> {e.user_message.slice(0, 100)}

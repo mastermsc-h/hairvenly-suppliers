@@ -106,7 +106,8 @@ export async function GET(req: NextRequest) {
   const avatarFilter = req.nextUrl.searchParams.get("avatar"); // 'Larissa' | 'global' | null (alle)
   let q = svc
     .from("chatbot_training")
-    .select("id, user_message, good_answer, bad_answer, feedback, tags, active, avatar_name, created_at")
+    .select("id, user_message, good_answer, bad_answer, feedback, tags, active, avatar_name, pinned, created_at")
+    .order("pinned", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(200);
   if (avatarFilter === "global") {
@@ -116,6 +117,25 @@ export async function GET(req: NextRequest) {
   }
   const { data } = await q;
   return NextResponse.json({ training: data || [] });
+}
+
+export async function PATCH(req: NextRequest) {
+  // Pin/Unpin-Toggle für Trainings-Beispiele
+  const id = req.nextUrl.searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "auth required" }, { status: 401 });
+  const body = await req.json().catch(() => ({}));
+  const updates: Record<string, unknown> = {};
+  if (typeof body.pinned === "boolean") updates.pinned = body.pinned;
+  if (typeof body.active === "boolean") updates.active = body.active;
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: "no valid fields to update" }, { status: 400 });
+  }
+  const svc = createServiceClient();
+  await svc.from("chatbot_training").update(updates).eq("id", id);
+  return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(req: NextRequest) {

@@ -204,22 +204,43 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     systemPrompt += `\n\n## DEINE PERSÖNLICHKEIT (als ${avatarRow.name})\n${avatarRow.personality}`;
   }
 
-  // Trainings-Beispiele (inkl. Gesprächskontext + Strategie-Hinweise aus Bot-Begleitung)
-  const { data: training } = await svc
-    .from("chatbot_training")
-    .select("user_message, good_answer, bad_answer, feedback, avatar_name, context_messages")
-    .eq("active", true)
-    .or(`avatar_name.is.null,avatar_name.eq.${signatureName}`)
-    .order("created_at", { ascending: false })
-    .limit(8);
-  if (training && training.length > 0) {
+  // Trainings-Beispiele:
+  // 1. ALLE angepinnten (pinned=true) — bleiben dauerhaft im Bot-Sichtfeld
+  // 2. Plus die 20 NEUESTEN nicht-gepinnten (vorher waren's nur 8 → wichtige
+  //    Korrekturen fielen aus dem Sichtfeld sobald 8 neuere kamen)
+  const [{ data: pinnedTraining }, { data: recentTraining }] = await Promise.all([
+    svc.from("chatbot_training")
+      .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
+      .eq("active", true)
+      .eq("pinned", true)
+      .or(`avatar_name.is.null,avatar_name.eq.${signatureName}`)
+      .order("created_at", { ascending: false }),
+    svc.from("chatbot_training")
+      .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
+      .eq("active", true)
+      .eq("pinned", false)
+      .or(`avatar_name.is.null,avatar_name.eq.${signatureName}`)
+      .order("created_at", { ascending: false })
+      .limit(20),
+  ]);
+  const trainingIds = new Set<string>();
+  const training: NonNullable<typeof recentTraining> = [];
+  for (const t of [...(pinnedTraining || []), ...(recentTraining || [])]) {
+    if (!trainingIds.has(t.id)) {
+      trainingIds.add(t.id);
+      training.push(t);
+    }
+  }
+  if (training.length > 0) {
     systemPrompt += "\n\n## DEINE TRAININGS-BEISPIELE\n";
     systemPrompt += "Diese Beispiele zeigen dir den GANZEN Gesprächsverlauf — nicht nur die Einzelfrage. ";
-    systemPrompt += "Achte besonders auf STRATEGIE-HINWEISE: sie sagen dir WIE du in ähnlichen Situationen vorgehen sollst.\n\n";
+    systemPrompt += "Achte besonders auf STRATEGIE-HINWEISE: sie sagen dir WIE du in ähnlichen Situationen vorgehen sollst. ";
+    systemPrompt += "📌-Beispiele sind ANGEPINNT — die musst du IMMER befolgen, sie sind besonders wichtig.\n\n";
     for (let i = 0; i < training.length; i++) {
       const t = training[i];
       const scope = t.avatar_name ? `nur für ${t.avatar_name}` : "für alle Avatare";
-      systemPrompt += `### Beispiel ${i + 1} (${scope})\n`;
+      const pin = t.pinned ? "📌 ANGEPINNT — " : "";
+      systemPrompt += `### Beispiel ${i + 1} (${pin}${scope})\n`;
       const ctx = (t.context_messages as { role: string; content: string }[] | null) || [];
       if (ctx.length > 0) {
         systemPrompt += "Vorheriger Gesprächsverlauf:\n";
