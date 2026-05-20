@@ -6,6 +6,7 @@ import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash
 import CategorySelector from "./category-selector";
 import AddToWaitlistButton from "./add-to-waitlist-button";
 import TeamNotes from "./team-notes";
+import FollowupButton from "./followup-button";
 import {
   takeoverSession,
   sendHumanMessage,
@@ -49,6 +50,8 @@ interface Props {
     bot_mode: "auto" | "assisted" | "off";
     human_only?: boolean;
     team_notes?: string | null;
+    followup_due_at?: string | null;
+    followup_reason?: string | null;
     category: null | "availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "general";
     assigned_name: string | null;
   };
@@ -382,6 +385,12 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
           )}
           {session.status !== "closed" && (
             <AddToWaitlistButton sessionId={session.id} />
+          )}
+          {session.status !== "closed" && (
+            <FollowupButton
+              sessionId={session.id}
+              initialDueAt={session.followup_due_at ?? null}
+            />
           )}
           {session.status !== "closed" && (
             <button

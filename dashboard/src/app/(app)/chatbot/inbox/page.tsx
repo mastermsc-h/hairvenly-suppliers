@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
-import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User, AlertTriangle, StickyNote } from "lucide-react";
+import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User, AlertTriangle, StickyNote, Bell } from "lucide-react";
 import SyncInstagramButton from "./sync-instagram-button";
 import MarkUnreadButton from "./mark-unread-button";
 import MarkSeenButton from "./mark-seen-button";
@@ -79,7 +79,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     .from("chat_sessions")
     .select(`
       id, channel, customer_name, customer_full_name, status, assigned_to, bot_signature_name,
-      bot_mode, human_only, team_notes, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
+      bot_mode, human_only, team_notes, followup_due_at, followup_reason, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
       assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
     `)
     .order("last_message_at", { ascending: false })
@@ -614,6 +614,25 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                             <StickyNote size={9} /> Notiz
                           </span>
                         )}
+                        {(() => {
+                          const due = (s as { followup_due_at?: string | null }).followup_due_at;
+                          const reason = (s as { followup_reason?: string | null }).followup_reason;
+                          if (!due) return null;
+                          const dueDate = new Date(due);
+                          const overdue = dueDate.getTime() < Date.now();
+                          return (
+                            <span
+                              className={`border text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5 ${
+                                overdue
+                                  ? "bg-violet-200 text-violet-900 border-violet-400"
+                                  : "bg-violet-100 text-violet-700 border-violet-200"
+                              }`}
+                              title={`Follow-Up ${overdue ? "fällig" : ""} am ${dueDate.toLocaleDateString("de-DE")}${reason ? ` — ${reason}` : ""}`}
+                            >
+                              <Bell size={9} /> {overdue ? "Follow-Up fällig" : `→ ${dueDate.toLocaleDateString("de-DE")}`}
+                            </span>
+                          );
+                        })()}
                         {/* Rechts: Kategorie + IG-App-Hinweis — getrennt von Name/Status links */}
                         <div className="ml-auto flex items-center gap-1.5">
                           {s.category && CATEGORY_LABELS[s.category] && (

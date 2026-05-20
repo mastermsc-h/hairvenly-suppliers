@@ -617,6 +617,32 @@ export async function markSessionAsRead(sessionId: string) {
  * mehr selbstständig auf neue Kundennachrichten. Setzt zusätzlich bot_mode='off'
  * damit auch assisted/auto-Generierung gestoppt wird.
  */
+/**
+ * Markiert eine Session für manuelles Follow-Up — z.B. wenn eine Konversation
+ * unklar endet ("danke!") und wir später nochmal nachfragen wollen ob die
+ * Kundin gekauft hat oder Bedenken hat. Setzt followup_due_at = jetzt+N Tage.
+ * Übergib daysFromNow=0 um die Markierung zu entfernen.
+ */
+export async function setFollowupReminder(sessionId: string, daysFromNow: number, reason?: string) {
+  const svc = createServiceClient();
+  if (daysFromNow <= 0) {
+    await svc.from("chat_sessions")
+      .update({ followup_due_at: null, followup_reason: null })
+      .eq("id", sessionId);
+  } else {
+    const due = new Date(Date.now() + daysFromNow * 86400 * 1000).toISOString();
+    await svc.from("chat_sessions")
+      .update({
+        followup_due_at: due,
+        followup_reason: reason?.trim() || null,
+      })
+      .eq("id", sessionId);
+  }
+  revalidatePath("/chatbot/inbox");
+  revalidatePath(`/chatbot/inbox/${sessionId}`);
+  revalidatePath("/chatbot/follow-ups");
+}
+
 /** Speichert interne Team-Notizen zu einer Session (für Mitarbeiter, nie an Kundin). */
 export async function updateTeamNotes(sessionId: string, notes: string) {
   const svc = createServiceClient();
