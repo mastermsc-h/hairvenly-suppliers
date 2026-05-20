@@ -3,7 +3,7 @@
 // ==========================================
 // CODE_VERSION: 2026-04-22_23-00_DoSA-days-of-stock-allocator
 // ==========================================
-const CODE_VERSION = "2026-05-13_18-45_OrderID-Dedup-fix-Doppelzaehlung";
+const CODE_VERSION = "2026-05-20_10-30_FreshStart-OrderDedup-Set-leeren";
 
 // IDs der externen Bestellungs-Sheets
 const CHINA_SHEET_ID    = "1zqh50KeQsworvG5OivfxvECM7HUoArwUEGBTUGVB4ZM";
@@ -9422,6 +9422,10 @@ function refreshVerkaufsanalyse() {
     productData = {};
     props.setProperty(SALES_KEY, JSON.stringify(sales));
     saveChunked_(props, "VA_PRODUCT_DATA", productData);
+    // WICHTIG: Order-Dedup-Set bei Fresh-Start auch leeren, sonst werden Orders aus
+    // einem vorherigen (abgebrochenen) Lauf fälschlich als "bereits verarbeitet" geskipped
+    saveChunked_(props, "VA_PROCESSED_ORDER_IDS", []);
+    Logger.log("🧹 Fresh-Start: productData + Order-Dedup-Set geleert");
 
     // Checkpoint auf "loading" setzen
     const firstUrl = BASE_URL_VA + "/orders.json"

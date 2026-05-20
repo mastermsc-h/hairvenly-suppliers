@@ -193,8 +193,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     filteredSessions = filteredSessions.filter(s => (stats[s.id]?.humanCount || 0) > 0);
   }
 
-  // "Nur unbeantwortet" Filter + Sortierung nach Kundin-Zeitstempel (neueste zuerst)
-  if (onlyUnread) {
+  // "Nur unbeantwortet" Filter + Sortierung nach Kundin-Zeitstempel (neueste zuerst).
+  // Bei aktiver Suche wird der Filter übersprungen — Treffer sollen IMMER sichtbar
+  // sein, sonst wirkt's so als gäbe es keine Treffer obwohl welche da sind.
+  if (onlyUnread && !searchQuery) {
     filteredSessions = filteredSessions
       .filter(s => unreadMap[s.id])
       .slice()
