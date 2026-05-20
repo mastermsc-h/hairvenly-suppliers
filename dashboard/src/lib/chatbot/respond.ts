@@ -470,6 +470,24 @@ Statt jeder Antwort mit Gedankenstrich:
 
 Bleib trotzdem locker und einfach. Kurze Sätze, normale Sprache.`;
 
+  // PRODUKT-EXISTENZ-REGEL: niemals Produkt-Variante bestätigen die nicht
+  // 100% sicher aus FAQ / Tool-Output kommt. Halluzination = Vertrauens-Bruch.
+  const existenceRule = `\n\n## 🚫 PRODUKT-EXISTENZ-REGEL — KOMPROMISSLOS
+Bevor du eine Methode-Länge-Kombi bestätigst ("ja, gibt es in 85cm"), MUSS dies erfüllt sein:
+• Du hast die Wissensdatenbank-FAQ "Längen pro Methode" gelesen UND die Kombi steht dort, ODER
+• Du hast get_stock_eta / get_available_colors aufgerufen UND einen Treffer für diese exakte Kombi bekommen.
+
+Wenn weder noch: NIEMALS bestätigen. Stattdessen ehrlich:
+"In [Methode] haben wir leider keine [Länge]. Vorhanden wären [echte Längen]. Magst du eine davon?"
+
+NIEMALS:
+❌ "Tressen in 85cm" — gibt es nicht
+❌ "Mini Tapes Usbekisch wellig" — gibt es nicht (Mini Tapes nur russisch glatt)
+❌ Erfundene Preise ohne Tool-Aufruf
+❌ Aus einer Methode (z.B. Tapes 85cm gibt's) schließen dass andere (Tressen 85cm) auch existiert
+
+NIE Phantasie-Daten ausgeben. Lieber ehrlich "haben wir nicht" + Alternative.`;
+
   // URL-REGEL: niemals URLs raten oder zusammenbauen. Nur shopify_url aus Tool-Outputs.
   const urlRule = `\n\n## 🔗 URL-REGEL — KOMPROMISSLOS
 Wenn du einen Produkt-Link schickst, kopiere die URL AUSSCHLIESSLICH aus dem Feld \`shopify_url\` eines Tool-Outputs (z.B. get_stock_eta, get_available_colors).
@@ -484,7 +502,7 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
   // (openTurnsHint, sorry-hint, greetingHint, urlRule) gehen in einen separaten Block —
   // werden nicht gecacht, sind aber pro Call eh klein.
   const systemPromptStable = systemPrompt;
-  const systemPromptVariable = openTurnsHint + greetingHint + urlRule + styleRule;
+  const systemPromptVariable = openTurnsHint + greetingHint + existenceRule + urlRule + styleRule;
 
   const messages: Anthropic.MessageParam[] = [];
   for (const m of msgs) {
