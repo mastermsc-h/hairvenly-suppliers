@@ -540,6 +540,11 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
   ];
   if (forbiddenOffers.some(p => p.test(botReply))) return false;
 
+  // 2c. INVISIBLE TAPES sind ein heikles Thema (Launch August 2026, eigenständiges
+  //     Produkt, NICHT Mini Tapes). Antworten dazu sollen IMMER von Stylistin
+  //     gegengecheckt werden → kein autonomous send.
+  if (/\binvisible[ -]?tape/i.test(botReply)) return false;
+
   // 3. Kategorie-spezifische Confidence
   if (category === "color_advice") {
     // color_advice darf autonom NUR wenn Antwort PREFLIGHT-CHARAKTER hat:
