@@ -129,15 +129,19 @@ async function loadProductCatalog(): Promise<{
   const supName = new Map<string, string>();
   for (const s of suppliers || []) supName.set(s.id, (s.name || "").toLowerCase());
 
-  // Method-ID → { name, supplier_label, supplier_id }
+  // Method-ID → { name, qualityLabel (KUNDENSICHTBAR — NIE Lieferantenname!), lengths }
+  // Lieferanten-Namen (Amanda, Eyfel, China) sind INTERN und dürfen NIE im Bot-Output landen.
+  // Mapping passiert auf die kundenfreundliche Haarqualität:
+  //   Amanda  → "Russisch glatt"
+  //   Eyfel   → "Usbekisch wellig"
   const methodMap = new Map<string, { name: string; supplier: string; lengths: string[] }>();
   for (const m of methods || []) {
-    const sup = supName.get(m.supplier_id) || "?";
-    // Amanda → "russisch glatt", Eyfel → "usbekisch wellig"
-    const supplierLabel = sup.includes("amanda") ? "Russisch glatt (Amanda)"
-                        : sup.includes("eyfel")  ? "Usbekisch wellig (Eyfel)"
-                        : sup;
-    methodMap.set(m.id, { name: m.name, supplier: supplierLabel, lengths: [] });
+    const sup = supName.get(m.supplier_id) || "";
+    const qualityLabel = sup.includes("amanda") ? "Russisch glatt"
+                       : sup.includes("eyfel")  ? "Usbekisch wellig"
+                       : sup.includes("china")  ? "China-Linie"
+                       : "Sonstige";
+    methodMap.set(m.id, { name: m.name, supplier: qualityLabel, lengths: [] });
   }
   for (const l of lengths || []) {
     const mm = methodMap.get(l.method_id);
@@ -164,9 +168,12 @@ async function loadProductCatalog(): Promise<{
     txt += "\n";
   }
   txt += "💡 Beispiele für UNMÖGLICHE Kombis (NIE bestätigen):\n";
-  txt += "- 55cm Standard Tapes Russisch glatt → 55cm gibt's NUR bei Eyfel-Tapes (usbekisch wellig)\n";
+  txt += "- 55cm Standard Tapes in Russisch glatt → 55cm gibt's NUR bei Tapes in Usbekisch wellig\n";
   txt += "- 65cm Mini Tapes → Mini Tapes nur in 60cm\n";
-  txt += "- 45cm Bondings Russisch → Amanda Bondings nur in 60cm\n";
+  txt += "- 45cm Bondings in Russisch glatt → nur 60cm verfügbar\n\n";
+  txt += "🔒 NIEMALS Lieferanten-Namen erwähnen (Amanda, Eyfel, Ebru, China etc.). ";
+  txt += "Das sind INTERNE Bezeichnungen. Kundin spricht IMMER von der Haarqualität: ";
+  txt += "'Russisch glatt' oder 'Usbekisch wellig'.\n";
 
   // validCombos: methodNameLower|length
   const valid = new Set<string>();
@@ -348,8 +355,9 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += "\n## 🚨 PFLICHTREGEL FÜR PRODUKTANGABEN\n";
   systemPrompt += "- Nenne NIEMALS eine Länge zu einer Methode, die NICHT in der Matrix oben steht.\n";
   systemPrompt += "- Wenn die Kundin selbst eine Länge nennt: prüfe gegen die Matrix. Wenn sie zu der Methode nicht existiert → freundlich klären, NICHT übernehmen.\n";
-  systemPrompt += "- Beispiel: Kundin schreibt 'Standard Tapes in 55cm' → Antwort: 'In Russisch glatt haben wir Standard Tapes nur in 60cm. 55cm gibt es bei uns nur bei den Eyfel-Tapes (Usbekisch wellig). Was passt besser?'\n";
+  systemPrompt += "- Beispiel: Kundin schreibt 'Standard Tapes in 55cm' → Antwort: 'In Russisch glatt haben wir Standard Tapes nur in 60cm. 55cm gibt es bei uns nur bei den Tapes in Usbekisch wellig. Was passt besser zu dir?'\n";
   systemPrompt += "- NIE Längen erfinden, runden oder annehmen.\n";
+  systemPrompt += "- 🔒 NIEMALS Lieferanten-Namen erwähnen: Amanda, Eyfel, Ebru, China, etc. Das sind INTERNE Codes. Kundin spricht IMMER von der Haarqualität (Russisch glatt / Usbekisch wellig).\n";
 
   // WISSENSDATENBANK (chatbot_faq) — statische Fakten die IMMER gelten.
   // Vorher gar nicht im Prompt — die 46 Einträge waren ungenutzt. Jetzt alle
@@ -961,6 +969,40 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
     }
   } catch (e) {
     console.warn("[respond] URL-sanitizer failed:", (e as Error).message);
+  }
+
+  // SAFETY-NET 1d: LIEFERANTEN-NAMEN ENTFERNEN
+  // Amanda, Eyfel, Ebru, China — alles intern. Niemals zur Kundin raus.
+  // Mappt automatisch auf die kundensichtbare Haarqualität.
+  {
+    const beforeSupplier = finalText;
+    const supplierReplacements: Array<[RegExp, string]> = [
+      // "Eyfel Ebru" / "Eyfel-Ebru" Kombination
+      [/\bEyfel[ -]?Ebru\b/gi, "Usbekisch wellig"],
+      // "Eyfel-Tapes", "Eyfel Bondings" etc → "Usbekisch wellige Tapes/Bondings"
+      [/\bEyfel[ -]?(Tapes?|Bondings?|Tressen|Clip[ -]?Ins?|Genius[ -]?Weft|Ponytails?)\b/gi, "Usbekisch wellige $1"],
+      // "Amanda-Tapes", "Amanda Bondings" → "Russisch glatte Tapes/..."
+      [/\bAmanda[ -]?(Tapes?|Bondings?|Tressen|Clip[ -]?Ins?|Genius[ -]?Weft|Ponytails?|Mini[ -]?Tapes?|Standard[ -]?Tapes?)\b/gi, "Russisch glatte $1"],
+      // "China-Tapes" → "China-Linie" verstecken
+      [/\bChina[ -]?(Tapes?|Bondings?|Tressen|Clip[ -]?Ins?|Linie)\b/gi, "$1"],
+      // Standalone-Erwähnungen — vorsichtig, nur als ganzes Wort
+      // "bei Amanda" / "von Amanda" / "(Amanda)"
+      [/\b(bei|von|aus|unsere?n?)\s+Amanda\b/gi, "$1 Russisch glatt"],
+      [/\b(bei|von|aus|unsere?n?)\s+Eyfel\b/gi, "$1 Usbekisch wellig"],
+      [/\(Amanda\)/g, "(Russisch glatt)"],
+      [/\(Eyfel(?:[ -]?Ebru)?\)/gi, "(Usbekisch wellig)"],
+      // Letzter Backstop: nackte Erwähnungen — durch generischen Begriff ersetzen
+      [/\bAmanda\b/g, "unsere Russisch-glatt-Linie"],
+      [/\bEyfel(?:[ -]?Ebru)?\b/gi, "unsere Usbekisch-wellig-Linie"],
+      [/\bEbru\b/g, ""],
+    ];
+    for (const [re, repl] of supplierReplacements) {
+      finalText = finalText.replace(re, repl);
+    }
+    if (beforeSupplier !== finalText) {
+      console.warn("[respond] SCRUBBED Lieferanten-Namen aus Bot-Output");
+      finalText = finalText.replace(/  +/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+    }
   }
 
   // SAFETY-NET 1c: METHODEN×LÄNGEN-VALIDIERUNG gegen echte DB-Matrix
