@@ -34,6 +34,7 @@ interface Message {
   attachments: { type: string; url: string }[];
   tool_calls: { name: string }[] | null;
   agent_name: string | null;
+  auto_sent?: boolean;
   created_at: string;
 }
 
@@ -47,7 +48,7 @@ interface Props {
     customer_name: string | null;
     customer_full_name: string | null;
     bot_auto_reply: boolean;
-    bot_mode: "auto" | "assisted" | "off";
+    bot_mode: "auto" | "selective_auto" | "assisted" | "off";
     human_only?: boolean;
     team_notes?: string | null;
     team_notes_updated_at?: string | null;
@@ -69,7 +70,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
   const [isPending, startTransition] = useTransition();
   const [suggesting, setSuggesting] = useState(false);
   const [andResume, setAndResume] = useState(false);
-  const [modeSwitching, setModeSwitching] = useState<null | "auto" | "assisted" | "off">(null);
+  const [modeSwitching, setModeSwitching] = useState<null | "auto" | "selective_auto" | "assisted" | "off">(null);
   const [generating, setGenerating] = useState(false);
   const [showModeSettings, setShowModeSettings] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
@@ -287,20 +288,26 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
                 type="button"
                 onClick={() => setShowModeSettings(v => !v)}
                 disabled={modeSwitching !== null}
-                title="Klick zum Ändern: Manuell · Auto-Entwurf · Auto-Antwort"
+                title="Klick zum Ändern: Manuell · Auto-Entwurf · Smart-Auto · Auto-Antwort"
                 className={`inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border-2 shadow-sm hover:shadow transition ${
                   session.bot_mode === "auto"
                     ? "bg-green-50 text-green-800 border-green-400 hover:bg-green-100"
+                    : session.bot_mode === "selective_auto"
+                    ? "bg-violet-50 text-violet-800 border-violet-400 hover:bg-violet-100"
                     : session.bot_mode === "assisted"
                     ? "bg-blue-50 text-blue-800 border-blue-400 hover:bg-blue-100"
                     : "bg-white text-neutral-800 border-neutral-400 hover:bg-neutral-50"
                 } ${modeSwitching ? "opacity-50 cursor-wait" : "cursor-pointer"}`}
               >
-                {session.bot_mode === "auto" ? "🤖" : session.bot_mode === "assisted" ? "🧑‍🏫" : "⏸"}
+                {session.bot_mode === "auto" ? "🤖"
+                 : session.bot_mode === "selective_auto" ? "🧠"
+                 : session.bot_mode === "assisted" ? "🧑‍🏫"
+                 : "⏸"}
                 <span>
-                  {session.bot_mode === "auto"     ? "Auto-Antwort" :
-                   session.bot_mode === "assisted" ? "Auto-Entwurf" :
-                                                     "Manuell"}
+                  {session.bot_mode === "auto"           ? "Auto-Antwort" :
+                   session.bot_mode === "selective_auto" ? "Smart-Auto" :
+                   session.bot_mode === "assisted"       ? "Auto-Entwurf" :
+                                                           "Manuell"}
                 </span>
                 <ChevronDown size={14} className={`transition-transform ${showModeSettings ? "rotate-180" : ""}`} />
               </button>
@@ -313,9 +320,10 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
                       Was passiert bei neuer Kundennachricht?
                     </div>
                     {([
-                      { v: "off",      icon: "⏸",   color: "neutral", label: "Manuell",         desc: "Bot tut nichts. Du klickst pro Antwort auf „Antwort generieren\"." },
-                      { v: "assisted", icon: "🧑‍🏫", color: "blue",    label: "Auto-Entwurf",    desc: "Bot generiert sofort einen Entwurf, du bestätigst vor dem Senden." },
-                      { v: "auto",     icon: "🤖",   color: "green",   label: "Auto-Antwort",    desc: "Bot sendet selbst ohne Rückfrage. Nur für eingespielte Avatare." },
+                      { v: "off",            icon: "⏸",    color: "neutral", label: "Manuell",       desc: "Bot tut nichts. Du klickst pro Antwort auf „Antwort generieren\"." },
+                      { v: "assisted",       icon: "🧑‍🏫", color: "blue",    label: "Auto-Entwurf",  desc: "Bot generiert IMMER einen Entwurf, du bestätigst vor dem Senden." },
+                      { v: "selective_auto", icon: "🧠",   color: "violet",  label: "Smart-Auto",    desc: "Bot prüft selbst: bei einfachen Fragen (Verfügbarkeit, Info) antwortet er autonom, sonst Entwurf." },
+                      { v: "auto",           icon: "🤖",   color: "green",   label: "Auto-Antwort",  desc: "Bot sendet IMMER selbst ohne Rückfrage. Nur für eingespielte Avatare." },
                     ] as const).map(opt => {
                       const isActive = session.bot_mode === opt.v;
                       return (
@@ -334,6 +342,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
                           className={`w-full text-left p-2.5 rounded-lg border-2 transition ${
                             isActive
                               ? opt.color === "green"   ? "border-green-400 bg-green-50"
+                              : opt.color === "violet"  ? "border-violet-400 bg-violet-50"
                               : opt.color === "blue"    ? "border-blue-400 bg-blue-50"
                               :                            "border-neutral-400 bg-neutral-50"
                               : "border-transparent hover:bg-neutral-50"
@@ -726,8 +735,17 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
               Tools: {msg.tool_calls.map(t => t.name).join(", ")}
             </div>
           )}
-          <div className="text-[10px] text-neutral-400 mt-0.5 text-right">
-            Ava von {signatureName || "—"} · {time}
+          <div className="text-[10px] text-neutral-400 mt-0.5 text-right inline-flex items-center justify-end gap-1.5 w-full">
+            {msg.auto_sent ? (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 font-medium" title="Autonom vom Bot gesendet, ohne Mitarbeiter-Approve">
+                🤖 autobot
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-medium" title="Vom Mitarbeiter via Auto-Entwurf approved">
+                🧑‍🏫 manueller autobot
+              </span>
+            )}
+            <span>Ava von {signatureName || "—"} · {time}</span>
           </div>
         </div>
         <div className="w-7 h-7 rounded-full bg-rose-100 flex-shrink-0 flex items-center justify-center">

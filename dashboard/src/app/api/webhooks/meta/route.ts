@@ -421,7 +421,7 @@ async function routeIncoming(opts: {
     }
   }
 
-  if ((effectiveBotMode === "auto" || effectiveBotMode === "assisted") && session.status === "active") {
+  if ((effectiveBotMode === "auto" || effectiveBotMode === "assisted" || effectiveBotMode === "selective_auto") && session.status === "active") {
     try {
       // ── SMART DEBOUNCE ──
       // Default 6s. Aber: wenn die letzte Bot-/Mitarbeiter-Nachricht mehrere
@@ -457,7 +457,7 @@ async function routeIncoming(opts: {
       const curMode = refreshed?.bot_mode || (refreshed?.bot_auto_reply ? "auto" : "off");
       // Bei Auto-Respond-Override darf curMode auch 'off' sein — wir antworten trotzdem.
       const effectiveCurMode = autoOverrideType && curMode === "off" ? "auto" : curMode;
-      if (refreshed?.status !== "active" || (effectiveCurMode !== "auto" && effectiveCurMode !== "assisted")) {
+      if (refreshed?.status !== "active" || (effectiveCurMode !== "auto" && effectiveCurMode !== "assisted" && effectiveCurMode !== "selective_auto")) {
         console.log(`[meta-webhook] debounce: session no longer active+bot, skipping`);
         return;
       }
@@ -505,6 +505,41 @@ function detectAutoRespondType(text: string, attachments: { type: string; url: s
   return null;
 }
 
+/**
+ * Konservativer Confidence-Check für selective_auto-Modus.
+ * Antwort wird NUR autonom gesendet wenn ALLE Kriterien erfüllt sind.
+ * Lieber zu vorsichtig (Draft) als false-positive (autonom gesendet aber falsch).
+ */
+function isHighConfidence(category: string | null, botReply: string): boolean {
+  // 1. Nur unkritische Kategorien dürfen autonom raus
+  const safeCategories = new Set(["availability", "general", "pricing"]);
+  if (!category || !safeCategories.has(category)) return false;
+
+  // 2. Unsicherheits-Phrasen im Reply → NICHT autonom senden
+  const uncertaintyPatterns = [
+    /\bkläre? das (eben|gerade|kurz) (mit|ab)/i,
+    /\bleider weiß ich (das )?nicht\b/i,
+    /\blass uns das (im salon|persönlich)\b/i,
+    /\b(eine )?kollegin (meldet|wird|schaut|kümmert)/i,
+    /\bich (überprüfe|prüfe|checke|frage) das (kurz |eben |gerade )?(noch )?/i,
+    /\bbin mir (nicht )?(ganz )?sicher\b/i,
+    /\bda müsste ich (kurz |eben )?(rücksprache|nachfragen|abklären)/i,
+    /\bmelde mich (gleich|später|kurz) wieder/i,
+  ];
+  if (uncertaintyPatterns.some(p => p.test(botReply))) return false;
+
+  // 3. Reply muss konkrete Daten enthalten — URL ODER Stock-Status ODER spezifische Zahl
+  const hasUrl = /hairvenly\.de\/products\//i.test(botReply);
+  const hasStockStatus = /(auf lager|sofort verfügbar|gerade unterwegs|ausverkauft|nicht (mehr|auf)? lager)/i.test(botReply);
+  const hasSpecificAnswer = /\b(150g|200g|225g|125g|100g|60cm|65cm|55cm|45cm|85cm|5[-–]8\s*wochen|6[-–]8\s*wochen|6\s*monate)\b/i.test(botReply);
+  if (!hasUrl && !hasStockStatus && !hasSpecificAnswer) return false;
+
+  // 4. Reply darf nicht zu lang sein (komplexe Beratung ist meist >800 Zeichen)
+  if (botReply.length > 1200) return false;
+
+  return true;
+}
+
 // Bot-Antwort generieren + an Channel senden ODER als Entwurf speichern (assisted mode)
 async function triggerBotResponse(
   sessionId: string,
@@ -514,14 +549,30 @@ async function triggerBotResponse(
   triggerMessageId?: string,
 ) {
   const { respondAsBot } = await import("@/lib/chatbot/respond");
-  // assisted=true → respondAsBot soll NICHT in chat_messages speichern, sondern nur Text+Tools zurückgeben
-  const result = await respondAsBot(sessionId, { assisted: mode === "assisted" });
+  // Für assisted UND selective_auto erstmal als assisted laufen lassen (also
+  // KEIN auto-insert in chat_messages) — wir entscheiden danach was wir damit tun.
+  const willDecideAfter = mode === "assisted" || mode === "selective_auto";
+  const result = await respondAsBot(sessionId, { assisted: willDecideAfter });
   if (!result.success || !result.text) {
     console.error("[meta-webhook] bot response failed:", result.error);
     return;
   }
 
-  if (mode === "assisted") {
+  // SELECTIVE_AUTO: Confidence-Check entscheidet ob senden oder Draft
+  let finalMode = mode;
+  if (mode === "selective_auto") {
+    const svc = createServiceClient();
+    const { data: sessForCheck } = await svc
+      .from("chat_sessions")
+      .select("category")
+      .eq("id", sessionId)
+      .maybeSingle();
+    const confident = isHighConfidence(sessForCheck?.category || null, result.text);
+    finalMode = confident ? "auto" : "assisted";
+    console.log(`[meta-webhook] selective_auto → ${finalMode} (category=${sessForCheck?.category}, confident=${confident})`);
+  }
+
+  if (finalMode === "assisted") {
     // Entwurf in chat_drafts speichern — NICHT senden
     const svc = createServiceClient();
     await svc.from("chat_drafts").insert({
@@ -534,6 +585,29 @@ async function triggerBotResponse(
     });
     console.log(`[meta-webhook] draft created for session ${sessionId}`);
     return;
+  }
+
+  // finalMode === "auto": Wenn selective_auto vorher confident war, müssen wir die
+  // assistant-Message JETZT in chat_messages einfügen (war ja assisted-Run, also
+  // hat respond.ts nichts gespeichert). Bei reinem "auto"-Mode ist sie schon drin.
+  if (mode === "selective_auto" && finalMode === "auto") {
+    const svc = createServiceClient();
+    const { data: inserted } = await svc.from("chat_messages").insert({
+      session_id:   sessionId,
+      role:         "assistant",
+      content:      result.text,
+      tool_calls:   result.toolCalls && result.toolCalls.length > 0 ? result.toolCalls : null,
+      tool_results: result.toolResults && result.toolResults.length > 0 ? result.toolResults : null,
+      auto_sent:    true,
+    }).select("id").single();
+    result.insertedMessageId = inserted?.id;
+    await svc.from("chat_sessions").update({ last_message_at: new Date().toISOString() }).eq("id", sessionId);
+  } else if (mode === "auto") {
+    // Bei reinem "auto" hat respond.ts schon gespeichert — wir markieren als auto_sent
+    if (result.insertedMessageId) {
+      const svc = createServiceClient();
+      await svc.from("chat_messages").update({ auto_sent: true }).eq("id", result.insertedMessageId);
+    }
   }
 
   // mode = 'auto' → senden, ggf. in mehrere IG-Messages splitten wenn > 700 Zeichen

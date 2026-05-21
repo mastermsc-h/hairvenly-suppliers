@@ -63,7 +63,7 @@ export default async function ChatSessionPage({ params }: PageProps) {
   const { data: messages } = await svc
     .from("chat_messages")
     .select(`
-      id, role, content, attachments, tool_calls, agent_id, created_at,
+      id, role, content, attachments, tool_calls, agent_id, auto_sent, created_at,
       agent:profiles!chat_messages_agent_id_fkey(display_name,email)
     `)
     .eq("session_id", sessionId)
@@ -99,7 +99,7 @@ export default async function ChatSessionPage({ params }: PageProps) {
           followup_due_at: (session as { followup_due_at?: string | null }).followup_due_at ?? null,
           followup_reason: (session as { followup_reason?: string | null }).followup_reason ?? null,
           bot_auto_reply: session.bot_auto_reply ?? false,
-          bot_mode: (session.bot_mode ?? (session.bot_auto_reply ? "auto" : "off")) as "auto" | "assisted" | "off",
+          bot_mode: (session.bot_mode ?? (session.bot_auto_reply ? "auto" : "off")) as "auto" | "selective_auto" | "assisted" | "off",
           category: session.category as null | "availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "general",
           assigned_name: (() => {
             const p = session.assigned_profile as unknown as { display_name?: string; email?: string } | null;
@@ -122,6 +122,7 @@ export default async function ChatSessionPage({ params }: PageProps) {
             const p = m.agent as unknown as { display_name?: string; email?: string } | null;
             return p?.display_name || p?.email || null;
           })(),
+          auto_sent: (m as { auto_sent?: boolean }).auto_sent ?? false,
           created_at: m.created_at,
         }))}
       />

@@ -121,7 +121,7 @@ export async function toggleBotAutoReply(sessionId: string, enabled: boolean) {
  * Kundennachricht (falls noch keine Antwort/Entwurf darauf existiert), damit
  * man nicht auf eine neue DM warten muss.
  */
-export async function setBotMode(sessionId: string, mode: "auto" | "assisted" | "off") {
+export async function setBotMode(sessionId: string, mode: "auto" | "selective_auto" | "assisted" | "off") {
   const svc = createServiceClient();
 
   // Self-DM-Guard — Bot darf in Self-DM-Sessions nie aktiviert werden
@@ -253,12 +253,15 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
   if (!session) throw new Error("Session nicht gefunden");
 
   // Final-Message als assistant in chat_messages speichern (ID merken für MID-Update nach Versand)
+  // auto_sent=false explizit → diese Message wurde via assisted-Modus + Mitarbeiter-Approve
+  // gesendet (= "manueller autobot"), nicht autonom vom Bot.
   const { data: insertedMsg } = await svc.from("chat_messages").insert({
     session_id:   draft.session_id,
     role:         "assistant",
     content:      final,
     tool_calls:   draft.tool_calls,
     tool_results: draft.tool_results,
+    auto_sent:    false,
   }).select("id").single();
   await svc.from("chat_sessions")
     .update({
