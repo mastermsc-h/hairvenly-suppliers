@@ -108,6 +108,142 @@ export function splitLongMessage(text: string, maxLen = 700): string[] {
  * Wenn Claude trotz System-Prompt mal "850g auf Lager" schreibt, fangen wir
  * das hier ab und ersetzen mit kunden-sicheren Phrasen.
  */
+/**
+ * Lädt die echte Methoden×Längen-Matrix aus product_methods + product_lengths.
+ * Wird in den System-Prompt eingebaut (cacheable) UND vom Sanitizer benutzt,
+ * um halluzinierte Kombinationen ("55cm Standard Russisch Tapes" — gibt's nicht!)
+ * zu erkennen und zu korrigieren.
+ */
+async function loadProductCatalog(): Promise<{
+  promptText: string;
+  validCombos: Set<string>;          // "methodKey|lengthKey", normalisiert lowercase
+  methodLengths: Map<string, Set<string>>; // method (lower) → set of lengths (e.g. "55cm","60cm")
+  methodSupplier: Map<string, string>;     // method (lower) → "amanda"/"eyfel"
+}> {
+  const svc = createServiceClient();
+  const [{ data: methods }, { data: lengths }, { data: suppliers }] = await Promise.all([
+    svc.from("product_methods").select("id, name, supplier_id, sort_order").order("sort_order"),
+    svc.from("product_lengths").select("id, method_id, value").order("sort_order"),
+    svc.from("suppliers").select("id, name"),
+  ]);
+  const supName = new Map<string, string>();
+  for (const s of suppliers || []) supName.set(s.id, (s.name || "").toLowerCase());
+
+  // Method-ID → { name, supplier_label, supplier_id }
+  const methodMap = new Map<string, { name: string; supplier: string; lengths: string[] }>();
+  for (const m of methods || []) {
+    const sup = supName.get(m.supplier_id) || "?";
+    // Amanda → "russisch glatt", Eyfel → "usbekisch wellig"
+    const supplierLabel = sup.includes("amanda") ? "Russisch glatt (Amanda)"
+                        : sup.includes("eyfel")  ? "Usbekisch wellig (Eyfel)"
+                        : sup;
+    methodMap.set(m.id, { name: m.name, supplier: supplierLabel, lengths: [] });
+  }
+  for (const l of lengths || []) {
+    const mm = methodMap.get(l.method_id);
+    if (mm) mm.lengths.push(l.value);
+  }
+
+  // promptText
+  let txt = "## 🏭 ECHTER PRODUKTKATALOG — METHODEN × LÄNGEN MATRIX (verbindlich aus der DB)\n\n";
+  txt += "Dies ist die EINZIGE Quelle der Wahrheit für welche Längen es pro Methode gibt. ";
+  txt += "Wenn eine Kundin nach einer Methode+Länge-Kombi fragt, die hier NICHT steht: ";
+  txt += "sofort klären, nicht ungeprüft übernehmen. NIEMALS Längen erfinden oder annehmen.\n\n";
+  // Gruppiert nach Supplier
+  const grouped = new Map<string, Array<{ name: string; lengths: string[] }>>();
+  for (const m of methodMap.values()) {
+    if (!grouped.has(m.supplier)) grouped.set(m.supplier, []);
+    grouped.get(m.supplier)!.push({ name: m.name, lengths: m.lengths });
+  }
+  for (const [supLabel, items] of grouped.entries()) {
+    txt += `### ${supLabel}\n`;
+    for (const it of items) {
+      const lens = it.lengths.length > 0 ? it.lengths.join(", ") : "(keine Länge hinterlegt)";
+      txt += `- **${it.name}**: ${lens}\n`;
+    }
+    txt += "\n";
+  }
+  txt += "💡 Beispiele für UNMÖGLICHE Kombis (NIE bestätigen):\n";
+  txt += "- 55cm Standard Tapes Russisch glatt → 55cm gibt's NUR bei Eyfel-Tapes (usbekisch wellig)\n";
+  txt += "- 65cm Mini Tapes → Mini Tapes nur in 60cm\n";
+  txt += "- 45cm Bondings Russisch → Amanda Bondings nur in 60cm\n";
+
+  // validCombos: methodNameLower|length
+  const valid = new Set<string>();
+  const ml = new Map<string, Set<string>>();
+  const msup = new Map<string, string>();
+  for (const m of methodMap.values()) {
+    const key = m.name.toLowerCase();
+    if (!ml.has(key)) ml.set(key, new Set());
+    for (const len of m.lengths) {
+      const lenKey = len.toLowerCase().replace(/\s+/g, "");
+      valid.add(`${key}|${lenKey}`);
+      ml.get(key)!.add(lenKey);
+    }
+    // Supplier-Label vereinfachen
+    msup.set(key, m.supplier.toLowerCase().includes("amanda") ? "amanda" :
+                  m.supplier.toLowerCase().includes("eyfel") ? "eyfel" : "");
+  }
+  return { promptText: txt, validCombos: valid, methodLengths: ml, methodSupplier: msup };
+}
+
+/**
+ * Sanitizer für halluzinierte Methode×Länge-Kombis.
+ * Findet Patterns wie "55cm Standard Tapes", "Standard Tapes in 55cm",
+ * "60cm Mini Tapes (Russisch glatt)" — und prüft gegen die echte DB-Matrix.
+ * Bei ungültiger Kombi: korrigierende Klammer einfügen + zugehörige URL strippen.
+ */
+function validateMethodLengthCombos(
+  text: string,
+  validCombos: Set<string>,
+  methodLengths: Map<string, Set<string>>,
+): { text: string; corrections: string[] } {
+  const corrections: string[] = [];
+  // Alias → kanonischer Method-Key (lowercase) wie in product_methods.name
+  const methodAliases: Array<{ pattern: RegExp; canonical: string }> = [
+    { pattern: /\bstandard[ -]?tapes?\b/gi,                  canonical: "standard tapes" },
+    { pattern: /\bmini[ -]?tapes?\b/gi,                      canonical: "minitapes" },
+    { pattern: /\bbondings?\b/gi,                            canonical: "bondings" },
+    { pattern: /\bclassic[ -]?weft\b/gi,                     canonical: "classic weft" },
+    { pattern: /\binvisible[ -]?weft\b/gi,                   canonical: "invisible weft" },
+    { pattern: /\bgenius[ -]?(?:weft|tresse)\b/gi,           canonical: "genius weft" },
+    { pattern: /\bclip[ -]?ins?\b/gi,                        canonical: "clip-ins" },
+    { pattern: /\bclassic[ -]?tressen?\b/gi,                 canonical: "classic tressen" },
+    { pattern: /\bponytails?\b/gi,                           canonical: "ponytail" },
+  ];
+
+  // Pattern: "XXcm [...] Methode" oder "Methode [...] XXcm" innerhalb 0-25 Zeichen
+  // Wir nehmen jeden Method-Treffer und schauen ob in der Umgebung eine cm-Angabe steht
+  const lengthRe = /(\d{2,3})\s*(?:cm)\b/gi;
+
+  for (const alias of methodAliases) {
+    const matches = Array.from(text.matchAll(alias.pattern));
+    for (const m of matches) {
+      const idx = m.index || 0;
+      const around = text.slice(Math.max(0, idx - 25), Math.min(text.length, idx + m[0].length + 25));
+      const lenMatches = Array.from(around.matchAll(lengthRe));
+      for (const lm of lenMatches) {
+        const lenStr = `${lm[1]}cm`;
+        const combo = `${alias.canonical}|${lenStr}`;
+        if (!validCombos.has(combo)) {
+          const validForMethod = methodLengths.get(alias.canonical);
+          const allowed = validForMethod ? [...validForMethod].join(", ") : "?";
+          corrections.push(`${lenStr} ${alias.canonical} → existiert nicht (verfügbar: ${allowed})`);
+        }
+      }
+    }
+  }
+  if (corrections.length === 0) return { text, corrections };
+
+  // Wenn ungültige Kombi gefunden: alle hairvenly.de/products-URLs entfernen,
+  // weil die wahrscheinlich auch falsch verlinkt sind. Plus Hinweis-Notiz unten.
+  let cleaned = text;
+  const urlRe = /https?:\/\/(?:www\.)?hairvenly\.de\/products\/[A-Za-z0-9_\-/]+/gi;
+  cleaned = cleaned.replace(urlRe, "");
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trim();
+  return { text: cleaned, corrections };
+}
+
 function sanitizeStockLeaks(text: string): string {
   let t = text;
   // Verbotene Fachwörter ersetzen — Persona-Regel "Einfache Sprache" hart durchsetzen
@@ -203,6 +339,17 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   if (avatarRow) {
     systemPrompt += `\n\n## DEINE PERSÖNLICHKEIT (als ${avatarRow.name})\n${avatarRow.personality}`;
   }
+
+  // PRODUKTKATALOG-MATRIX — verbindliche Methoden×Längen aus der DB
+  // Das verhindert Halluzinationen wie "55cm Standard Russisch Tapes" (gibt's nicht!).
+  // 55cm gibt's nur bei Eyfel-Tapes (usbekisch wellig).
+  const catalog = await loadProductCatalog();
+  systemPrompt += "\n\n" + catalog.promptText;
+  systemPrompt += "\n## 🚨 PFLICHTREGEL FÜR PRODUKTANGABEN\n";
+  systemPrompt += "- Nenne NIEMALS eine Länge zu einer Methode, die NICHT in der Matrix oben steht.\n";
+  systemPrompt += "- Wenn die Kundin selbst eine Länge nennt: prüfe gegen die Matrix. Wenn sie zu der Methode nicht existiert → freundlich klären, NICHT übernehmen.\n";
+  systemPrompt += "- Beispiel: Kundin schreibt 'Standard Tapes in 55cm' → Antwort: 'In Russisch glatt haben wir Standard Tapes nur in 60cm. 55cm gibt es bei uns nur bei den Eyfel-Tapes (Usbekisch wellig). Was passt besser?'\n";
+  systemPrompt += "- NIE Längen erfinden, runden oder annehmen.\n";
 
   // WISSENSDATENBANK (chatbot_faq) — statische Fakten die IMMER gelten.
   // Vorher gar nicht im Prompt — die 46 Einträge waren ungenutzt. Jetzt alle
@@ -814,6 +961,26 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
     }
   } catch (e) {
     console.warn("[respond] URL-sanitizer failed:", (e as Error).message);
+  }
+
+  // SAFETY-NET 1c: METHODEN×LÄNGEN-VALIDIERUNG gegen echte DB-Matrix
+  // Wenn der Bot z.B. "55cm Standard Tapes Russisch glatt" schreibt — das gibt's
+  // nicht (Standard Tapes nur in 60cm). Hier korrigieren wir das, strippen
+  // Produkt-URLs und hängen eine Klarstellung an.
+  try {
+    const { text: validatedText, corrections } = validateMethodLengthCombos(
+      finalText,
+      catalog.validCombos,
+      catalog.methodLengths,
+    );
+    if (corrections.length > 0) {
+      console.warn("[respond] METHOD×LENGTH mismatch detected:", corrections.join("; "));
+      finalText = validatedText;
+      // Korrektive Notiz freundlich anhängen — Bot soll bewusst klären statt blind weiter
+      finalText += "\n\n_(Kurz: die exakte Längen-Methoden-Kombi muss ich dir nochmal sauber benennen — schreibe dir die Optionen gleich mit der Kollegin durch.)_";
+    }
+  } catch (e) {
+    console.warn("[respond] method×length validation failed:", (e as Error).message);
   }
 
   // SAFETY-NET 1b: Auto-Lern-Wortfilter aus DB anwenden
