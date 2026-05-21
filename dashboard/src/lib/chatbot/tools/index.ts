@@ -696,11 +696,15 @@ const getAvailableColors: ToolDef = {
     }
     const nullbestandSet = new Set(nullbestand.map(p => normN(p.product)));
 
-    // Eindeutige Farbnamen — sammle Methoden, Längen, URLs UND Stock-Status
+    // Eindeutige Farbnamen — sammle Methoden, Längen, URLs UND Stock-Status.
+    // WICHTIG: variants[] enthält URL PRO Methode+Länge — der Bot soll daraus
+    // den richtigen Link wählen, nicht "shopify_url" der nur die erste Variante ist.
+    type ColorVariant = { method: string; length: string; shopify_url: string | null };
     type ColorEntry = {
       lengths: Set<string>;
       methods: Set<string>;
-      shopify_url: string | null;
+      variants: ColorVariant[];
+      shopify_url: string | null; // BACKWARD-COMPAT: erste URL als Quick-Fallback
       description: string | null;
       equivalent_in_other_line: string | null;
       in_stock: boolean;
@@ -710,13 +714,20 @@ const getAvailableColors: ToolDef = {
     for (const r of rows) {
       if (!r.name_hairvenly) continue;
       const entry = colorMap.get(r.name_hairvenly) || {
-        lengths: new Set(), methods: new Set(), shopify_url: null,
+        lengths: new Set(), methods: new Set(), variants: [], shopify_url: null,
         description: null, equivalent_in_other_line: null, in_stock: false, eta: null,
       };
       if (r.description && !entry.description) entry.description = r.description;
       if (r.equivalent_in_other_line && !entry.equivalent_in_other_line) entry.equivalent_in_other_line = r.equivalent_in_other_line;
-      if (r.length?.value) entry.lengths.add(`${r.length.value}${r.length.unit || "cm"}`);
-      if (r.length?.method?.name) entry.methods.add(r.length.method.name);
+      const lenStr = r.length?.value ? `${r.length.value}${r.length.unit || "cm"}` : "";
+      const methodName = r.length?.method?.name || "";
+      if (lenStr) entry.lengths.add(lenStr);
+      if (methodName) entry.methods.add(methodName);
+      // Pro Methode+Länge eine Variante mit der KORREKTEN URL
+      if (methodName && r.shopify_url) {
+        const dup = entry.variants.some(v => v.method === methodName && v.length === lenStr && v.shopify_url === r.shopify_url);
+        if (!dup) entry.variants.push({ method: methodName, length: lenStr, shopify_url: r.shopify_url });
+      }
       if (r.shopify_url && !entry.shopify_url) entry.shopify_url = r.shopify_url;
 
       // Stock-Status: schaue ob dieser Catalog-Eintrag im Sheet vorrätig ist
@@ -754,6 +765,12 @@ const getAvailableColors: ToolDef = {
       equivalent_in_other_line: info.equivalent_in_other_line,  // direkte Cross-Linie-Matches (gepflegt im Katalog)
       methods: Array.from(info.methods),
       lengths: Array.from(info.lengths),
+      // variants enthält PRO METHODE+LÄNGE die EXAKTE URL — Bot muss aus dieser
+      // Liste die richtige wählen wenn er einer Kundin eine spezifische Methode
+      // empfiehlt (z.B. Mini Tapes → Variante mit method="Minitapes" nehmen,
+      // NICHT die mit method="Standard Tapes").
+      variants: info.variants,
+      // shopify_url bleibt als Quick-Fallback für Cases ohne spezifische Methode
       shopify_url: info.shopify_url,
       in_stock: info.in_stock,
       eta: info.eta,
@@ -778,8 +795,12 @@ const getAvailableColors: ToolDef = {
               `Wenn du eine spezifische Farbe wie RAW empfehlen willst, ruf get_stock_eta für genau diese ` +
               `Methode auf um die echte Verfügbarkeit zu prüfen. ` : "") +
           `${colors.length} ECHTE Farben gefunden — NUR diese darfst du dem Kunden nennen. ` +
-          "Bei kuratierten Empfehlungen (3-5 passende statt alle): wenn shopify_url da ist, " +
-          "füge sie als Link mit dem Kurznamen ein (z.B. [Pearl White](https://...)). " +
+          "Bei kuratierten Empfehlungen (3-5 passende statt alle): " +
+          "WICHTIG bei URL-Wahl: variants[] enthält pro Methode+Länge die KORREKTE shopify_url. " +
+          "Wenn du eine spezifische Methode empfiehlst (z.B. Mini Tapes), nimm aus variants[] " +
+          "die Variante mit dem passenden method-Wert — NICHT pauschal das oberste shopify_url. " +
+          "Standard Tapes haben URLs mit 'standard-tape', Mini Tapes mit 'mini-tape', " +
+          "Bondings mit 'bondings', Genius Weft mit 'genius-weft', Clip-Ins mit 'clip-extensions'. " +
           "Wenn null: nur den Namen nennen.",
         filters: { method, supplier_line: supplierLine, search },
         colors,
