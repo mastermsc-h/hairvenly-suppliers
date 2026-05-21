@@ -728,11 +728,12 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
       .replace(/ ,/g, ",");
   }
 
-  // SAFETY-NET 1a: HALLUZINIERTE URLs eliminieren
-  // Jede hairvenly.de/products-URL in der finalen Antwort wird gegen die echte
-  // product_colors-Tabelle verifiziert. Unbekannte URLs (vom LLM erfunden) werden
-  // entfernt — der Produktname bleibt stehen, der Link verschwindet.
-  // Deterministisch, kein LLM-Vertrauen nötig.
+  // SAFETY-NET 1a: HALLUZINIERTE URLs eliminieren + Methoden-Mismatch-Check
+  // (1) Jede hairvenly.de/products-URL wird gegen product_colors verifiziert.
+  // (2) Wenn die Bot-Antwort eine bestimmte Methode erwähnt ("Mini Tapes",
+  //     "Standard Tapes", "Bondings", "Tressen", "Clip-Ins"), muss der URL-Slug
+  //     dazu passen. Wenn z.B. "Mini Tapes" steht aber URL contains "standard-tape",
+  //     ist die URL falsch (Methode-Mismatch) und wird entfernt.
   try {
     const urlPattern = /https?:\/\/(?:www\.)?hairvenly\.de\/(?:products|collections)\/[A-Za-z0-9_\-/]+/gi;
     const foundUrls = Array.from(new Set(finalText.match(urlPattern) || []));
@@ -742,10 +743,40 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
         .select("shopify_url")
         .in("shopify_url", foundUrls);
       const validSet = new Set((valid || []).map(r => r.shopify_url));
+
+      // Methoden-Hinweise im Text suchen — was hat der Bot der Kundin versprochen?
+      const lowerText = finalText.toLowerCase();
+      const mentionedMethods: Array<{ method: string; mustContain: string[]; mustNotContain: string[] }> = [];
+      if (/\bmini[ -]?tape/i.test(finalText)) {
+        mentionedMethods.push({ method: "Mini Tapes", mustContain: ["mini-tape"], mustNotContain: ["standard-russische-tape", "standard-usbekische-tape", "standard-tape"] });
+      } else if (/\bstandard[ -]?tape/i.test(finalText) || (lowerText.includes("tape") && !/\bmini\b/i.test(finalText))) {
+        mentionedMethods.push({ method: "Standard Tapes", mustContain: ["tape"], mustNotContain: ["mini-tape", "genius-weft", "invisible-tressen", "bondings", "clip-extensions"] });
+      }
+      if (/\bbondings?\b/i.test(finalText)) {
+        mentionedMethods.push({ method: "Bondings", mustContain: ["bondings"], mustNotContain: ["tape-extensions", "tressen", "clip-extensions"] });
+      }
+      if (/\bgenius[ -]?(?:weft|tresse)/i.test(finalText)) {
+        mentionedMethods.push({ method: "Genius Weft", mustContain: ["genius-weft"], mustNotContain: ["tape-extensions", "bondings", "invisible-tressen", "clip-extensions"] });
+      }
+      if (/\bclip[ -]?ins?\b/i.test(finalText)) {
+        mentionedMethods.push({ method: "Clip-Ins", mustContain: ["clip-extensions"], mustNotContain: ["tape-extensions", "tressen", "bondings", "genius-weft"] });
+      }
+
       for (const url of foundUrls) {
-        if (validSet.has(url)) continue;
-        console.warn(`[respond] DROPPED hallucinated URL: ${url}`);
-        // Markdown-Link [Text](url) → Text   ·   nackte URL → leer
+        if (!validSet.has(url)) {
+          console.warn(`[respond] DROPPED hallucinated URL: ${url}`);
+        } else if (mentionedMethods.length > 0) {
+          const lowerUrl = url.toLowerCase();
+          const mismatch = mentionedMethods.find(m =>
+            !m.mustContain.some(c => lowerUrl.includes(c)) ||
+            m.mustNotContain.some(c => lowerUrl.includes(c))
+          );
+          if (!mismatch) continue;
+          console.warn(`[respond] DROPPED method-mismatch URL: ${url} — Text erwähnt "${mismatch.method}", URL-Slug passt nicht`);
+        } else {
+          continue;
+        }
+        // URL entfernen — Markdown + nackt
         const escUrl = url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         finalText = finalText.replace(new RegExp(`\\[([^\\]]+)\\]\\(${escUrl}\\)`, "g"), "$1");
         finalText = finalText.replace(new RegExp(escUrl, "g"), "");
