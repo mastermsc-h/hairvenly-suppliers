@@ -705,6 +705,31 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
   // SAFETY-NET 1: konkrete Lagerzahlen rausfiltern
   finalText = sanitizeStockLeaks(finalText);
 
+  // SAFETY-NET 1y: NIEMALS proaktiv extra Fotos/Videos der Tressen anbieten.
+  // Wenn der Bot diesen Satz trotz FAQ erzeugt → ersatzlos streichen.
+  // (Reaktiv auf direkte Kundenfrage wäre auch riskant, aber das macht im
+  // Zweifel die Stylistin via Draft. Hier filtern wir den proaktiven Pitch.)
+  {
+    const extraPhotoOfferPatterns: RegExp[] = [
+      // "Wir können dir auch gerne extra Fotos oder Videos von ... machen"
+      /(^|\n)[^\n]*\b(wir|ich)\b[^\n]{0,40}\b(können|kann|könnten|machen|mache|schicken|sende|filmen)\b[^\n]{0,80}\b(extra |zusätzliche? )?(fotos? (oder|und) videos?|videos? (oder|und) fotos?|extra fotos?|extra videos?)\b[^\n]*(\n|$)/gi,
+      // "Ich kann dir ein Video von der Farbe schicken/machen"
+      /(^|\n)[^\n]*\bich (kann|könnte) dir (ein |noch ein )?(video|extra foto)[^\n]*(\n|$)/gi,
+      // "Wir filmen die Farbe"
+      /(^|\n)[^\n]*\bwir filmen (dir |die )[^\n]*(\n|$)/gi,
+    ];
+    let dropped = false;
+    for (const pat of extraPhotoOfferPatterns) {
+      const before = finalText;
+      finalText = finalText.replace(pat, "\n");
+      if (before !== finalText) dropped = true;
+    }
+    if (dropped) {
+      console.warn("[respond] DROPPED proaktives Extra-Foto/Video-Angebot (siehe FAQ color-advice-no-proactive-extra-photos)");
+      finalText = finalText.replace(/\n{3,}/g, "\n\n").trim();
+    }
+  }
+
   // SAFETY-NET 1z: Em-Dash-Bremse — erster bleibt, ab dem zweiten ersetzen.
   // Em-Dash an sich ist nicht falsch. Nur das KI-typische Hyperaufkommen
   // (in jeder Nachricht mehrere) wirkt unnatürlich. Wir lassen den ersten

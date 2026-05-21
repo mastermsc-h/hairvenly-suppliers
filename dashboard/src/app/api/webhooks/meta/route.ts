@@ -512,7 +512,9 @@ function detectAutoRespondType(text: string, attachments: { type: string; url: s
  */
 function isHighConfidence(category: string | null, botReply: string): boolean {
   // 1. Nur unkritische Kategorien dürfen autonom raus
-  const safeCategories = new Set(["availability", "general", "pricing"]);
+  //    color_advice ist hier SONDERFALL: autonom NUR im Preflight-Modus
+  //    (Foto-Briefing/Rückfragen sammeln), niemals bei konkreten Farbempfehlungen.
+  const safeCategories = new Set(["availability", "general", "pricing", "color_advice"]);
   if (!category || !safeCategories.has(category)) return false;
 
   // 2. Unsicherheits-Phrasen im Reply → NICHT autonom senden
@@ -528,13 +530,43 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
   ];
   if (uncertaintyPatterns.some(p => p.test(botReply))) return false;
 
-  // 3. Reply muss konkrete Daten enthalten — URL ODER Stock-Status ODER spezifische Zahl
+  // 2b. ABSOLUTE NO-GOs (alle Kategorien): proaktives Anbieten von extra Fotos/Videos
+  //     der Tressen — siehe FAQ color-advice-no-proactive-extra-photos
+  const forbiddenOffers = [
+    /\b(extra |zusätzliche? )?(fotos? oder videos?|videos? oder fotos?|videos?)\b.{0,40}\b(machen|schicken|senden|aufnehmen|filmen)/i,
+    /\bich (kann|könnte) dir (ein |noch ein )?(video|extra foto)\b/i,
+    /\bwir filmen (dir |die )/i,
+    /\b(wir|ich) (machen|mache) dir (extra |gerne extra )?(fotos|videos)\b/i,
+  ];
+  if (forbiddenOffers.some(p => p.test(botReply))) return false;
+
+  // 3. Kategorie-spezifische Confidence
+  if (category === "color_advice") {
+    // color_advice darf autonom NUR wenn Antwort PREFLIGHT-CHARAKTER hat:
+    // Foto-Briefing, Rückfragen, KEINE konkrete Farbempfehlung.
+    // Heuristik: muss "Foto" + "Tageslicht"/"Winkel"/"Ansatz" o.ä. enthalten
+    // und darf KEINE konkrete Farbe als Empfehlung nennen.
+    const isPhotoBriefing = /\bfoto\b/i.test(botReply) &&
+      /(tageslicht|mehrere winkel|ansatz|verschiedene winkel|natürlich(em)? licht)/i.test(botReply);
+    if (!isPhotoBriefing) return false;
+
+    // Falls Bot konkret eine Farbe + Produkt-URL empfiehlt → NICHT autonom
+    const recommendsConcreteColor = /hairvenly\.de\/products\//i.test(botReply) &&
+      /\b(empfehl|passt? perfekt|meine empfehlung|würde.*passen|optimal für dich)/i.test(botReply);
+    if (recommendsConcreteColor) return false;
+
+    // Länge: Briefing ist eher kurz
+    if (botReply.length > 800) return false;
+    return true;
+  }
+
+  // 4. availability / general / pricing: Reply muss konkrete Daten enthalten
   const hasUrl = /hairvenly\.de\/products\//i.test(botReply);
   const hasStockStatus = /(auf lager|sofort verfügbar|gerade unterwegs|ausverkauft|nicht (mehr|auf)? lager)/i.test(botReply);
   const hasSpecificAnswer = /\b(150g|200g|225g|125g|100g|60cm|65cm|55cm|45cm|85cm|5[-–]8\s*wochen|6[-–]8\s*wochen|6\s*monate)\b/i.test(botReply);
   if (!hasUrl && !hasStockStatus && !hasSpecificAnswer) return false;
 
-  // 4. Reply darf nicht zu lang sein (komplexe Beratung ist meist >800 Zeichen)
+  // 5. Reply darf nicht zu lang sein (komplexe Beratung ist meist >800 Zeichen)
   if (botReply.length > 1200) return false;
 
   return true;
