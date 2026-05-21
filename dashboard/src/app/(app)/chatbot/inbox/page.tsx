@@ -79,7 +79,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     .from("chat_sessions")
     .select(`
       id, channel, customer_name, customer_full_name, status, assigned_to, bot_signature_name,
-      bot_mode, human_only, team_notes, followup_due_at, followup_reason, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
+      bot_mode, human_only, team_notes, followup_due_at, followup_reason, ig_unread_count, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
       assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
     `)
     .order("last_message_at", { ascending: false })
@@ -680,6 +680,14 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                               title={(s as { team_notes?: string | null }).team_notes || ""}
                             >
                               <StickyNote size={9} /> Notiz
+                            </span>
+                          )}
+                          {((s as { ig_unread_count?: number }).ig_unread_count ?? 0) > 0 && (
+                            <span
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-fuchsia-100 text-fuchsia-800 border border-fuchsia-200 text-[10px] font-medium"
+                              title={`Auf Instagram noch ${(s as { ig_unread_count?: number }).ig_unread_count} ungelesen — in der IG-App noch nicht geöffnet`}
+                            >
+                              📷 Insta-ungelesen · {(s as { ig_unread_count?: number }).ig_unread_count}
                             </span>
                           )}
                           <span className="whitespace-nowrap">{formatRelative(s.last_message_at)}</span>

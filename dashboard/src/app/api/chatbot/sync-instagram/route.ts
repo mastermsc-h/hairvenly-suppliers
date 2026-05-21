@@ -31,6 +31,7 @@ interface GraphMessage {
 interface GraphConversation {
   id: string;
   updated_time?: string;
+  unread_count?: number;
   participants?: { data?: { id: string; username?: string; name?: string }[] };
   messages?: { data?: GraphMessage[]; paging?: { next?: string } };
 }
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest) {
     // 1. Conversations holen
     console.log(`[sync-instagram] fetching conversations from ${host}, limit=${convoLimit}`);
     const convoUrl = `${host}/${GRAPH_VERSION}/${igUserId}/conversations?platform=instagram` +
-      `&fields=id,updated_time,participants,messages.limit(100){id,created_time,from,to,message,attachments}` +
+      `&fields=id,updated_time,unread_count,participants,messages.limit(100){id,created_time,from,to,message,attachments}` +
       `&limit=${convoLimit}&access_token=${encodeURIComponent(token)}`;
     let convoRes: Response;
     try {
@@ -114,9 +115,12 @@ export async function POST(req: NextRequest) {
         .eq("external_id", customer.id)
         .maybeSingle();
 
+      const igUnread = typeof convo.unread_count === "number" ? convo.unread_count : 0;
       let sessionId: string;
       if (existing) {
         sessionId = existing.id;
+        // unread_count immer aktualisieren — verändert sich oft
+        await svc.from("chat_sessions").update({ ig_unread_count: igUnread }).eq("id", sessionId);
         // Wenn die Session schon existiert aber Name fehlt: nachträglich befüllen
         const { getInstagramUserInfo } = await import("@/lib/messaging/meta");
         const exData = await svc.from("chat_sessions")
@@ -164,6 +168,7 @@ export async function POST(req: NextRequest) {
           status: "active",
           bot_mode: "off",           // wichtig: kein Auto-Reply auf Historie
           bot_auto_reply: false,
+          ig_unread_count: igUnread,
         }).select().single();
         if (!created) {
           errors.push(`convo ${convo.id}: Session-Insert fehlgeschlagen`);
