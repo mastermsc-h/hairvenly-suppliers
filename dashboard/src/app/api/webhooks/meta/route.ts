@@ -537,7 +537,12 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
   // 1. Nur unkritische Kategorien dürfen autonom raus
   //    color_advice ist hier SONDERFALL: autonom NUR im Preflight-Modus
   //    (Foto-Briefing/Rückfragen sammeln), niemals bei konkreten Farbempfehlungen.
-  const safeCategories = new Set(["availability", "general", "pricing", "color_advice"]);
+  // color_advice ist BEWUSST nicht in safeCategories: Farbberatung ist heikel
+  // (subjektiv, Foto-Interpretation, Folge-Empfehlungen), kann schiefgehen.
+  // → IMMER Draft, auch wenn der Bot nur Foto-Briefing macht. Die Stylistin
+  // klickt 'Senden' in 5 Sekunden, das Risiko einer falschen autonomen
+  // Farbempfehlung ist nicht wert.
+  const safeCategories = new Set(["availability", "general", "pricing"]);
   if (!category || !safeCategories.has(category)) return false;
 
   // 2. Unsicherheits-Phrasen im Reply → NICHT autonom senden
@@ -573,25 +578,9 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
   //     gegengecheckt werden → kein autonomous send.
   if (/\binvisible[ -]?tape/i.test(botReply)) return false;
 
-  // 3. Kategorie-spezifische Confidence
-  if (category === "color_advice") {
-    // color_advice darf autonom NUR wenn Antwort PREFLIGHT-CHARAKTER hat:
-    // Foto-Briefing, Rückfragen, KEINE konkrete Farbempfehlung.
-    // Heuristik: muss "Foto" + "Tageslicht"/"Winkel"/"Ansatz" o.ä. enthalten
-    // und darf KEINE konkrete Farbe als Empfehlung nennen.
-    const isPhotoBriefing = /\bfoto\b/i.test(botReply) &&
-      /(tageslicht|mehrere winkel|ansatz|verschiedene winkel|natürlich(em)? licht)/i.test(botReply);
-    if (!isPhotoBriefing) return false;
-
-    // Falls Bot konkret eine Farbe + Produkt-URL empfiehlt → NICHT autonom
-    const recommendsConcreteColor = /hairvenly\.de\/products\//i.test(botReply) &&
-      /\b(empfehl|passt? perfekt|meine empfehlung|würde.*passen|optimal für dich)/i.test(botReply);
-    if (recommendsConcreteColor) return false;
-
-    // Länge: Briefing ist eher kurz
-    if (botReply.length > 800) return false;
-    return true;
-  }
+  // 3. (Früher gab es hier einen color_advice-Sonderpfad. Entfernt — color_advice
+  //    ist nicht mehr in safeCategories und kommt deshalb nie hier an.
+  //    Farbberatung läuft IMMER über Draft, weil sie zu fehleranfällig ist.)
 
   // 4. availability / general / pricing: Reply muss konkrete Daten enthalten
   const hasUrl = /hairvenly\.de\/products\//i.test(botReply);
