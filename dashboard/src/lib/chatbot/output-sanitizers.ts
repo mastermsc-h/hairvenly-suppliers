@@ -145,6 +145,43 @@ export function autoAddColorUrls(text: string, colorUrlMap: Map<string, string>)
 }
 
 /**
+ * URL-Color-Mismatch erkennen und strippen.
+ * Beispiel: Bot schreibt **TAUPE** aber hängt URL mit "smoky-taupe" Slug an.
+ * Das sind zwei verschiedene Farben. URL-Slug MUSS zum Farb-Namen passen.
+ */
+export function stripColorUrlMismatch(text: string): string {
+  return text.replace(
+    /(\*\*([A-ZÄÖÜ][A-ZÄÖÜ\s/+\-_0-9]{2,40})\*\*[^\n]*(?:\n[^\n]*){0,3}?)(https?:\/\/hairvenly\.de\/products\/([a-z0-9\-_/]+))/gi,
+    (match, prefix, colorName, _fullUrl, slug) => {
+      const cn = String(colorName).toUpperCase().trim();
+      const s = String(slug).toLowerCase();
+      // Bekannte Mismatch-Paare
+      const rules: Array<{ when: (cn: string) => boolean; mustContain?: string[]; mustNotContain?: string[]; label: string }> = [
+        // "TAUPE" alleine → URL darf nicht "smoky-taupe" enthalten
+        { when: c => c === "TAUPE", mustNotContain: ["smoky-taupe"], label: "TAUPE vs SMOKY TAUPE" },
+        // "SMOKY TAUPE" → URL muss "smoky-taupe" enthalten
+        { when: c => c.includes("SMOKY TAUPE") || c === "SMOKY", mustContain: ["smoky-taupe"], label: "SMOKY TAUPE" },
+        // Generisch: COLOR-Wort muss im URL-Slug irgendwo vorkommen (Mehrwort: erster Teil)
+        // Beispiel: COLDNESS → slug muss "coldness" enthalten
+        // Lass das raus weil viele Farben dynamisch sind und falsche Positiv-Treffer geben
+      ];
+      for (const r of rules) {
+        if (!r.when(cn)) continue;
+        if (r.mustContain && !r.mustContain.some(req => s.includes(req))) {
+          console.warn(`[sanitizer] URL-COLOR-MISMATCH (${r.label}): "${cn}" + slug "${s}" — fehlt "${r.mustContain.join('/')}"`);
+          return String(prefix);
+        }
+        if (r.mustNotContain && r.mustNotContain.some(f => s.includes(f))) {
+          console.warn(`[sanitizer] URL-COLOR-MISMATCH (${r.label}): "${cn}" + slug "${s}" — darf nicht "${r.mustNotContain.join('/')}" enthalten`);
+          return String(prefix);
+        }
+      }
+      return match;
+    }
+  );
+}
+
+/**
  * Em-Dash-Bremse — erster bleibt, ab dem zweiten ersetzen mit ", ".
  * Verhindert das KI-typische Über-Verwenden von Em-Dashes.
  */
@@ -188,6 +225,7 @@ export function applyAllOutputSanitizers(
   out = scrubWeekendTrap(out);
   out = scrubClosedHandover(out);
   out = scrubSupplierNames(out);
+  out = stripColorUrlMismatch(out);
   if (opts.colorUrlMap) out = autoAddColorUrls(out, opts.colorUrlMap);
   out = emDashBrake(out);
   return out;
