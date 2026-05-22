@@ -227,7 +227,12 @@ export async function setBotMode(sessionId: string, mode: "auto" | "selective_au
  * - Sendet finalen Text an Channel
  * - Speichert als assistant-Message in chat_messages
  */
-export async function approveDraft(draftId: string, finalText: string, note?: string) {
+export async function approveDraft(
+  draftId: string,
+  finalText: string,
+  note?: string,
+  saveAsTraining = true, // Default = ja, Mitarbeiterin kann via Checkbox abwählen
+) {
   if (!finalText?.trim()) throw new Error("Leerer Text");
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -288,7 +293,9 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
   const hasRefineFeedback = refineFeedbacks.length > 0;
   // AUTO-LERN-SANITIZER: aus dem Edit-Diff erkennen welche Wörter/Phrasen der
   // Mitarbeiter entfernt hat. Ab 3 Vorkommen → automatisch im Sanitizer aktiv.
-  if (wasEdited) {
+  // Nur ausführen wenn saveAsTraining=true — sonst lernt der Bot ungewollt
+  // aus einmaligen situativen Edits.
+  if (saveAsTraining && wasEdited) {
     try {
       const { recordEditDiff } = await import("@/lib/chatbot/word-filter-learning");
       const stats = await recordEditDiff(original, final, draft.session_id);
@@ -300,7 +307,7 @@ export async function approveDraft(draftId: string, finalText: string, note?: st
     }
   }
 
-  if ((wasEdited || hasNote || hasRefineFeedback) && draft.trigger_message_id) {
+  if (saveAsTraining && (wasEdited || hasNote || hasRefineFeedback) && draft.trigger_message_id) {
     const { data: trigger } = await svc
       .from("chat_messages")
       .select("content, created_at")

@@ -819,6 +819,9 @@ function DraftBox({
   // Aktueller Stand vs Original: zeigt ob editiert
   const wasEdited = text.trim() !== draft.original_text.trim();
   const hasNote = note.trim().length > 0;
+  // Trainings-Speicherung: Default an, Mitarbeiterin kann abklicken (z.B. bei
+  // situativen Einzelfällen, die das Bot-Verhalten nicht trainieren sollen).
+  const [saveAsTraining, setSaveAsTraining] = useState(true);
 
   // Resize-State: Höhe der Draft-Box (verschiebbar via Drag-Handle oben)
   const [height, setHeight] = useState<number>(() => {
@@ -861,7 +864,7 @@ function DraftBox({
     if (!text.trim() || busy) return;
     setBusy("send");
     try {
-      await approveDraft(draft.id, text.trim(), note.trim() || undefined);
+      await approveDraft(draft.id, text.trim(), note.trim() || undefined, saveAsTraining);
       onDone();
     } catch (e) {
       alert(`Senden fehlgeschlagen: ${(e as Error).message}`);
@@ -935,13 +938,29 @@ function DraftBox({
         <Bot size={12} className="text-blue-600" />
         <span className="font-semibold">Bot-Entwurf wartet auf Freigabe</span>
         {(wasEdited || hasNote || refineLog.length > 0) && (
-          <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-medium">
+          <label
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium cursor-pointer select-none transition ${
+              saveAsTraining
+                ? "bg-amber-100 text-amber-800 hover:bg-amber-200"
+                : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
+            }`}
+            title={saveAsTraining
+              ? "Klick zum Abwählen: für situative Einzelfälle, die das Bot-Training nicht beeinflussen sollen"
+              : "Klick zum Anklicken: diese Korrektur wird als Training gespeichert, der Bot lernt für ähnliche Fälle"}
+          >
+            <input
+              type="checkbox"
+              checked={saveAsTraining}
+              onChange={(e) => setSaveAsTraining(e.target.checked)}
+              className="w-3 h-3 accent-amber-700"
+            />
             {[
               refineLog.length > 0 ? `${refineLog.length}× neu generiert` : null,
               wasEdited ? "editiert" : null,
               hasNote ? "Notiz" : null,
-            ].filter(Boolean).join(" + ")} — wird als Training gespeichert
-          </span>
+            ].filter(Boolean).join(" + ")}{" "}
+            {saveAsTraining ? "— als Training speichern" : "— NICHT als Training (situativ)"}
+          </label>
         )}
         <span className="text-blue-500 ml-auto inline-flex items-center gap-2">
           {formatMsgTime(draft.created_at)}
