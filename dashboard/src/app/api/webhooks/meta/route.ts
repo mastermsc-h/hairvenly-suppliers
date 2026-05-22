@@ -582,6 +582,26 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
   //    ist nicht mehr in safeCategories und kommt deshalb nie hier an.
   //    Farbberatung läuft IMMER über Draft, weil sie zu fehleranfällig ist.)
 
+  // 3b. KLÄRUNGS-EÖFFNUNG: reine Rückfragen ohne konkrete Behauptung sind
+  //     immer sicher autonom — Bot fragt was die Kundin braucht, kann nichts
+  //     falsch sagen. Beispiel: "Hi, ich hätte eine Frage" →
+  //     "Klar, was möchtest du wissen? Tapes/Bondings/Farbe/...?"
+  //     Kriterien:
+  //     - kurz (< 500 Zeichen)
+  //     - enthält Fragezeichen
+  //     - Klärungs-Verben drin (suchst/brauchst/möchtest/welche/magst...)
+  //     - KEINE Produkt-URL
+  //     - KEINE Stock-Aussage (auf Lager / ausverkauft / kommt am ...)
+  //     - KEINE konkrete Längen-/Gramm-Angabe
+  const looksLikeClarifyingQuestion =
+    botReply.length < 500 &&
+    /\?/.test(botReply) &&
+    /\b(suchst|brauchst|möchtest|welche|welches|hast\s+du|magst\s+du|was\s+möchtest|wonach|worum|interessiert|wonach\s+suchst)\b/i.test(botReply) &&
+    !/hairvenly\.de\/products\//i.test(botReply) &&
+    !/\b(auf\s+lager|sofort\s+verfügbar|ausverkauft|kommt\s+(am|ca|voraussichtlich)|wieder\s+rein|unterwegs)\b/i.test(botReply) &&
+    !/\b\d+\s*(cm|g|gramm|gr)\b/i.test(botReply);
+  if (looksLikeClarifyingQuestion) return true;
+
   // 4. availability / general / pricing: Reply muss konkrete Daten enthalten
   const hasUrl = /hairvenly\.de\/products\//i.test(botReply);
   const hasStockStatus = /(auf lager|sofort verfügbar|gerade unterwegs|ausverkauft|nicht (mehr|auf)? lager)/i.test(botReply);
