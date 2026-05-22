@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown, AlertTriangle, Mail } from "lucide-react";
+import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown, AlertTriangle, Mail, CornerUpLeft } from "lucide-react";
 import CategorySelector from "./category-selector";
 import AddToWaitlistButton from "./add-to-waitlist-button";
 import TeamNotes from "./team-notes";
@@ -35,6 +35,7 @@ interface Message {
   tool_calls: { name: string }[] | null;
   agent_name: string | null;
   auto_sent?: boolean;
+  reply_to?: { role: string; content_preview: string } | null;
   created_at: string;
 }
 
@@ -680,6 +681,25 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
     </button>
   );
 
+  // Reply-Threading: wenn diese Nachricht eine direkte Antwort auf eine
+  // frühere Nachricht ist (Instagram-Reply-Feature), zeigen wir wie auf
+  // Instagram darüber einen kleinen "Antwort auf"-Snippet mit Vorschau.
+  const ReplyPreview = msg.reply_to ? (
+    <div className="mb-1 text-[11px] text-neutral-500 flex items-start gap-1 border-l-2 border-neutral-300 pl-2 max-w-full">
+      <CornerUpLeft size={11} className="mt-0.5 flex-shrink-0 text-neutral-400" />
+      <div className="min-w-0">
+        <span className="font-medium text-neutral-600">
+          {msg.reply_to.role === "user" ? "Kunde" : msg.reply_to.role === "assistant" ? "Ava" : "Mitarbeiterin"}:
+        </span>{" "}
+        <span className="italic">
+          {msg.reply_to.content_preview.length >= 140
+            ? msg.reply_to.content_preview + "…"
+            : msg.reply_to.content_preview}
+        </span>
+      </div>
+    </div>
+  ) : null;
+
   if (msg.role === "user") {
     return (
       <div className="group flex gap-2 justify-start items-start">
@@ -687,6 +707,7 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
           <User size={12} className="text-neutral-600" />
         </div>
         <div className="max-w-[70%]">
+          {ReplyPreview}
           {/* Text nur anzeigen wenn nicht reiner [Foto]-Platzhalter mit Image-Attachment */}
           {(() => {
             const hasImage = msg.attachments?.some(a => a.type === "image" && a.url);
@@ -728,6 +749,7 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
       <div className="group flex gap-2 justify-end items-start">
         <div className="self-start order-first">{DeleteBtn}</div>
         <div className="max-w-[70%]">
+          {ReplyPreview}
           <div className="bg-rose-50 border border-rose-100/80 rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap shadow-sm">{msg.content}</div>
           {msg.tool_calls && msg.tool_calls.length > 0 && (
             <div className="mt-1 text-[10px] text-neutral-500 inline-flex items-center gap-1">
@@ -760,6 +782,7 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
       <div className="group flex gap-2 justify-end items-start">
         <div className="self-start order-first">{DeleteBtn}</div>
         <div className="max-w-[70%]">
+          {ReplyPreview}
           <div className="bg-orange-50 border border-orange-100/80 rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap shadow-sm">{msg.content}</div>
           <div className="text-[10px] text-neutral-400 mt-0.5 text-right">
             {msg.agent_name || "Mitarbeiterin"} · {time}

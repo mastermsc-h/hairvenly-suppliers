@@ -268,6 +268,12 @@ async function handleInstagramOrMessenger(m: MessagingItem, source: "instagram" 
     if (info?.name) customerFullName = info.name;
   }
 
+  // Reply-Threading: Instagram-DM-Reply-Funktion füllt message.reply_to.mid
+  // mit der referenzierten Nachricht. Speichern wir, damit die UI über jeder
+  // Bubble den "Antwort auf: …" Hinweis wie auf Instagram zeigen kann.
+  const replyToMid =
+    (m.message as { reply_to?: { mid?: string } } | undefined)?.reply_to?.mid;
+
   await routeIncoming({
     channel,
     externalId: senderId,
@@ -276,18 +282,22 @@ async function handleInstagramOrMessenger(m: MessagingItem, source: "instagram" 
     customerFullName,
     attachments,
     messageMid: m.message?.mid,
+    replyToMid,
   });
 }
 
 async function handleWhatsApp(m: NonNullable<WhatsAppValue["messages"]>[number], value: WhatsAppValue) {
   if (!m.from) return;
   const text = m.text?.body || `[${m.type || "Nachricht"}]`;
+  // WhatsApp füllt context.id mit der referenzierten Message-ID bei Replies.
+  const replyToMid = (m as { context?: { id?: string } }).context?.id;
   await routeIncoming({
     channel: "whatsapp",
     externalId: m.from,
     text,
     customerName: value.contacts?.[0]?.profile?.name,
     messageMid: m.id,
+    replyToMid,
   });
 }
 
@@ -301,6 +311,7 @@ async function routeIncoming(opts: {
   customerName?: string;
   customerFullName?: string;
   messageMid?: string;
+  replyToMid?: string;
 }) {
   const svc = createServiceClient();
 
@@ -364,6 +375,7 @@ async function routeIncoming(opts: {
     content: opts.text,
     attachments: opts.attachments || [],
     external_id: opts.messageMid || null,
+    reply_to_external_id: opts.replyToMid || null,
   });
 
   // Session updaten

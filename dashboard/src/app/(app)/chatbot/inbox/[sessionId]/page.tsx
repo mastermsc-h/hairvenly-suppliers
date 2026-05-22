@@ -63,7 +63,7 @@ export default async function ChatSessionPage({ params }: PageProps) {
   const { data: messages } = await svc
     .from("chat_messages")
     .select(`
-      id, role, content, attachments, tool_calls, agent_id, auto_sent, created_at,
+      id, role, content, attachments, tool_calls, agent_id, auto_sent, external_id, reply_to_external_id, created_at,
       agent:profiles!chat_messages_agent_id_fkey(display_name,email)
     `)
     .eq("session_id", sessionId)
@@ -112,19 +112,36 @@ export default async function ChatSessionPage({ params }: PageProps) {
           original_text: pendingDraft.original_text,
           created_at: pendingDraft.created_at,
         } : null}
-        initialMessages={(messages ?? []).map(m => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          attachments: (m.attachments as { type: string; url: string }[] | null) || [],
-          tool_calls: m.tool_calls as { name: string }[] | null,
-          agent_name: (() => {
-            const p = m.agent as unknown as { display_name?: string; email?: string } | null;
-            return p?.display_name || p?.email || null;
-          })(),
-          auto_sent: (m as { auto_sent?: boolean }).auto_sent ?? false,
-          created_at: m.created_at,
-        }))}
+        initialMessages={(() => {
+          const msgs = messages ?? [];
+          // Lookup-Map external_id → { role, content } für Reply-Threading
+          const byExt = new Map<string, { role: string; content: string | null }>();
+          for (const m of msgs) {
+            const ext = (m as { external_id?: string | null }).external_id;
+            if (ext) byExt.set(ext, { role: m.role, content: m.content });
+          }
+          return msgs.map(m => {
+            const replyToExt = (m as { reply_to_external_id?: string | null }).reply_to_external_id;
+            const repliedTo = replyToExt ? byExt.get(replyToExt) : null;
+            return {
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              attachments: (m.attachments as { type: string; url: string }[] | null) || [],
+              tool_calls: m.tool_calls as { name: string }[] | null,
+              agent_name: (() => {
+                const p = m.agent as unknown as { display_name?: string; email?: string } | null;
+                return p?.display_name || p?.email || null;
+              })(),
+              auto_sent: (m as { auto_sent?: boolean }).auto_sent ?? false,
+              reply_to: repliedTo ? {
+                role: repliedTo.role,
+                content_preview: (repliedTo.content || "").slice(0, 140),
+              } : null,
+              created_at: m.created_at,
+            };
+          });
+        })()}
       />
     </div>
   );

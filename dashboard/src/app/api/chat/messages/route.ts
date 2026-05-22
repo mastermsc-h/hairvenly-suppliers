@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   let q = svc
     .from("chat_messages")
     .select(`
-      id, role, content, attachments, tool_calls, agent_id, auto_sent, created_at,
+      id, role, content, attachments, tool_calls, agent_id, auto_sent, external_id, reply_to_external_id, created_at,
       agent:profiles!chat_messages_agent_id_fkey(display_name,email)
     `)
     .eq("session_id", sessionId)
@@ -31,19 +31,43 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const messages = (data ?? []).map(m => ({
-    id: m.id,
-    role: m.role,
-    content: m.content,
-    attachments: (m.attachments as unknown) || [],
-    tool_calls: m.tool_calls,
-    agent_name: (() => {
-      const p = m.agent as unknown as { display_name?: string; email?: string } | null;
-      return p?.display_name || p?.email || null;
-    })(),
-    auto_sent: (m as { auto_sent?: boolean }).auto_sent ?? false,
-    created_at: m.created_at,
-  }));
+  // Reply-Threading: für referenzierte Messages müssen wir auch die ältere
+  // Vorgänger-Message holen (für Preview), da das polling-since-Filter sie
+  // sonst ausschließt. Wir holen die referenzierten external_ids separat.
+  const replyMids = Array.from(new Set(
+    (data ?? [])
+      .map(m => (m as { reply_to_external_id?: string | null }).reply_to_external_id)
+      .filter((v): v is string => !!v)
+  ));
+  const replyPreviewByExt = new Map<string, { role: string; content: string | null }>();
+  if (replyMids.length > 0) {
+    const { data: refs } = await svc.from("chat_messages")
+      .select("external_id, role, content")
+      .eq("session_id", sessionId)
+      .in("external_id", replyMids);
+    for (const r of refs || []) {
+      if (r.external_id) replyPreviewByExt.set(r.external_id, { role: r.role, content: r.content });
+    }
+  }
+
+  const messages = (data ?? []).map(m => {
+    const replyToExt = (m as { reply_to_external_id?: string | null }).reply_to_external_id;
+    const replied = replyToExt ? replyPreviewByExt.get(replyToExt) : null;
+    return {
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      attachments: (m.attachments as unknown) || [],
+      tool_calls: m.tool_calls,
+      agent_name: (() => {
+        const p = m.agent as unknown as { display_name?: string; email?: string } | null;
+        return p?.display_name || p?.email || null;
+      })(),
+      auto_sent: (m as { auto_sent?: boolean }).auto_sent ?? false,
+      reply_to: replied ? { role: replied.role, content_preview: (replied.content || "").slice(0, 140) } : null,
+      created_at: m.created_at,
+    };
+  });
 
   // Auch Session-Status mitliefern damit Widget weiß ob Bot oder Mensch antwortet
   const { data: session } = await svc
