@@ -4,6 +4,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { createServiceClient } from "@/lib/supabase/server";
+import { applyAllOutputSanitizers } from "./output-sanitizers";
 
 const MODEL = "claude-sonnet-4-5";
 
@@ -124,6 +125,57 @@ WICHTIG:
     } catch (e) {
       console.warn("[refine] word-filter apply failed:", (e as Error).message);
     }
+
+    // Shared Output-Sanitizer anwenden — gleiche Regeln wie initialer Bot-Call:
+    // Klammer-Disclaimer, proaktive Foto-Angebote, Lieferanten-Namen,
+    // Wochenende-Falle, Closed-Handover, Em-Dash-Bremse.
+    // customerAskedForPhotos: aus den letzten 3 Customer-Messages bestimmen.
+    const recentCustomerMsgs = (msgs || []).filter(m => m.role === "user").slice(-3);
+    const customerAskedForPhotos = recentCustomerMsgs.some(m => {
+      const txt = (m.content || "").toLowerCase();
+      const hasMediaWord = /\b(fotos?|videos?|bilder|aufnahmen|aufnahme)\b/.test(txt);
+      const hasQuestion = /\?/.test(txt) ||
+        /\b(habt\s+ihr|hättet\s+ihr|hättest|könnt\s+ihr|könntet\s+ihr|magst|wäre.{0,20}möglich|gibt['e\s]+es|schickt\s+(mir|ihr))\b/i.test(txt);
+      return hasMediaWord && hasQuestion;
+    });
+
+    // Auto-URL für Farben: tool_results aus dem aktuellen Draft auslesen.
+    const colorUrlMap = new Map<string, string>();
+    try {
+      const { data: draft } = await svc.from("chat_drafts")
+        .select("tool_results")
+        .eq("session_id", sessionId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(1).maybeSingle();
+      const toolResults = (draft?.tool_results as Array<{ content?: string }> | null) || [];
+      for (const r of toolResults) {
+        try {
+          const parsed = JSON.parse(r.content || "{}") as Record<string, unknown>;
+          const lists: Array<Record<string, unknown>[]> = [];
+          for (const k of ["coming_soon", "still_coming", "sold_out_or_coming", "inventory_available", "variants", "colors"]) {
+            const v = parsed[k];
+            if (Array.isArray(v)) lists.push(v as Record<string, unknown>[]);
+          }
+          for (const list of lists) {
+            for (const item of list) {
+              const url = String(item.shopify_url || "");
+              if (!url) continue;
+              const colorName = String(item.color_name || item.name_hairvenly || "");
+              const product = String(item.product || item.name_shopify || "");
+              if (colorName) colorUrlMap.set(colorName.toUpperCase().trim(), url);
+              const m = product.match(/^#?([A-ZÄÖÜ][A-ZÄÖÜ\s/+\-_0-9]{1,40})\s+[-–—]/);
+              if (m) colorUrlMap.set(m[1].toUpperCase().trim(), url);
+            }
+          }
+        } catch { /* skip */ }
+      }
+    } catch (e) {
+      console.warn("[refine] tool_results lookup failed:", (e as Error).message);
+    }
+
+    newText = applyAllOutputSanitizers(newText, { customerAskedForPhotos, colorUrlMap });
+
     return { success: true, text: newText };
   } catch (e) {
     return { success: false, error: (e as Error).message };
