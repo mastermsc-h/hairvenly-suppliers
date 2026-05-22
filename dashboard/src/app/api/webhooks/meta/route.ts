@@ -447,10 +447,18 @@ async function routeIncoming(opts: {
   if ((effectiveBotMode === "auto" || effectiveBotMode === "assisted" || effectiveBotMode === "selective_auto") && session.status === "active") {
     try {
       // ── SMART DEBOUNCE ──
-      // Default 6s. Aber: wenn die letzte Bot-/Mitarbeiter-Nachricht mehrere
-      // Fragen enthielt (mind. 2 "?"), erwartet sie ein längeren Tipp-Vorgang
-      // von der Kundin → wir warten länger (bis 45s), damit Bursts erfasst
-      // werden und Bot nicht halb-Antworten generiert.
+      // Default ~2:30 Min Wartezeit, damit (a) die Kundin Zeit hat noch
+      // mehrere Nachrichten zu schicken bevor der Bot antwortet, und (b) die
+      // Antwort nicht nach billigem 0-Sekunden-Bot aussieht.
+      // Bei jeder neuen Customer-Message wird der Timer eh resettet (siehe
+      // refreshed?.last_customer_msg_at-Check unten).
+      //
+      // Adaptiv:
+      //   - Default                            → 150s (2:30 Min)
+      //   - Letzte Bot-Nachricht hatte 2+ Fragen,
+      //     Customer-Reply ist nicht trivial    → 180s (3 Min)
+      //   - Customer-Reply ist sehr kurz
+      //     ("ok", "ja", "?")                   →  90s (1:30 Min)
       const { data: lastBot } = await svc.from("chat_messages")
         .select("content, role").eq("session_id", session.id)
         .in("role", ["assistant", "human_agent"])
@@ -458,10 +466,11 @@ async function routeIncoming(opts: {
         .order("created_at", { ascending: false })
         .limit(1).maybeSingle();
       const questionCount = (lastBot?.content || "").match(/\?/g)?.length || 0;
-      // Kurze Customer-Messages (z.B. "?", "ja", "ok") brauchen KEINEN langen
-      // Tipp-Puffer — der Bot soll schnell antworten.
       const customerMsgShort = (opts.text || "").trim().length <= 30;
-      const DEBOUNCE_MS = (questionCount >= 2 && !customerMsgShort) ? 45_000 : 6_000;
+      const DEBOUNCE_MS =
+        (questionCount >= 2 && !customerMsgShort) ? 180_000 :
+        customerMsgShort                           ?  90_000 :
+                                                     150_000;
       console.log(`[meta-webhook] debounce ${DEBOUNCE_MS}ms (last bot ?-count=${questionCount}, customer-len=${(opts.text || "").length})`);
       await new Promise(r => setTimeout(r, DEBOUNCE_MS));
 
