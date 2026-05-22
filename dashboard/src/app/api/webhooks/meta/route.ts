@@ -169,8 +169,16 @@ async function handleInstagramOrMessenger(m: MessagingItem, source: "instagram" 
   if (!hasText && !hasAttachments) return;
 
   const senderId = m.sender.id;
-  // Wenn nur Foto ohne Text: synthetischen Platzhalter — Vision-LLM erkennt Bild selbst
-  const text = m.message?.text || (hasAttachments ? "[Foto]" : "");
+  // Audio-/Video-/Foto-Typen unterscheiden für korrekten Synthese-Text.
+  // Vision-LLM kann Bilder lesen (→ "[Foto]"), aber NICHT Audios/Videos abhören.
+  const allAudio = hasAttachments && attachments.every(a => a.type === "audio");
+  const allVideo = hasAttachments && attachments.every(a => a.type === "video");
+  const text = m.message?.text || (
+    allAudio ? "[Audio]" :
+    allVideo ? "[Video]" :
+    hasAttachments ? "[Foto]" :
+    ""
+  );
   const channel = source === "instagram" ? "instagram" : "web";
 
   // ── ECHO: wir selbst haben über die IG-App eine Nachricht gesendet ──
@@ -427,6 +435,57 @@ async function routeIncoming(opts: {
   if (ourIgId && session.external_id === ourIgId) {
     console.log(`[meta-webhook] SELF-DM detected (session ${session.id}) — bot triggers skipped`);
     return;
+  }
+
+  // ── AUDIO-/VOICE-BYPASS ──
+  // Bot kann Audios/Videos nicht abhören. Statt das LLM zu bemühen (das
+  // ohnehin nur einen Platzhalter "[Audio]" zu sehen bekäme), schickt er
+  // direkt eine süße ehrliche Antwort mit Optionen: aufschreiben oder
+  // auf Mitarbeiterin warten.
+  const customerSentAudio = (opts.attachments || []).some(a => a.type === "audio");
+  const customerSentVideo = (opts.attachments || []).some(a => a.type === "video");
+  const noTextWithAudio = customerSentAudio && (!opts.text || /^\[Audio\]$/i.test(opts.text.trim()));
+  const noTextWithVideo = customerSentVideo && (!opts.text || /^\[Video\]$/i.test(opts.text.trim()));
+  if ((noTextWithAudio || noTextWithVideo) && (botMode === "auto" || botMode === "selective_auto") && session.status === "active") {
+    try {
+      // Wartezeit-Wording je nach Geschäftszeit (importieren dynamisch um Cycle zu vermeiden)
+      const { getBusinessHoursContext } = await import("@/lib/chatbot/business-hours");
+      const biz = getBusinessHoursContext();
+      const handoffTime = biz.status === "open_wide"
+        ? "Sonst meldet sich gleich eine Kollegin bei dir"
+        : biz.status === "open_closing_soon"
+          ? `Sonst meldet sich noch heute oder spätestens ${biz.nextOpenLabel} eine Kollegin`
+          : `Sonst meldet sich ${biz.nextOpenLabel} eine Kollegin bei dir`;
+      const mediaWord = noTextWithAudio ? "Audios" : "Videos";
+      const reply = `Hallöchen 💕\n\nBin nur ein süßer kleiner Bot 🤖 und noch am Lernen — ${mediaWord} kann ich leider noch nicht abhören 🥲\n\nMagst du mir kurz aufschreiben worum's geht? Dann helfe ich dir sofort weiter ✨\n\n${handoffTime} 💌`;
+
+      const { data: inserted } = await svc.from("chat_messages").insert({
+        session_id: session.id,
+        role: "assistant",
+        content: reply,
+        auto_sent: true,
+      }).select("id").single();
+
+      // An den echten Channel zurücksenden
+      if (opts.channel === "instagram" && opts.externalId) {
+        const { sendInstagramMessage } = await import("@/lib/messaging/meta");
+        const r = await sendInstagramMessage(opts.externalId, reply);
+        if (r.success && r.message_id && inserted?.id) {
+          await svc.from("chat_messages").update({ external_id: r.message_id }).eq("id", inserted.id);
+        }
+      } else if (opts.channel === "whatsapp" && opts.externalId) {
+        const { sendWhatsAppMessage } = await import("@/lib/messaging/meta");
+        const r = await sendWhatsAppMessage(opts.externalId, reply);
+        if (r.success && r.message_id && inserted?.id) {
+          await svc.from("chat_messages").update({ external_id: r.message_id }).eq("id", inserted.id);
+        }
+      }
+      console.log(`[meta-webhook] Audio/Video-Bypass-Antwort gesendet für session ${session.id}`);
+      return;
+    } catch (e) {
+      console.error("[meta-webhook] Audio-Bypass fehlgeschlagen:", e);
+      // Fall through: normales Bot-Handling
+    }
   }
 
   // ── AUTO-RESPOND-OVERRIDE für Standard-Eröffnungen ──
