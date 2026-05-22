@@ -104,6 +104,75 @@ export function splitLongMessage(text: string, maxLen = 700): string[] {
 }
 
 /**
+ * Liefert den aktuellen Geschäftszeit-Status in Europe/Berlin.
+ * Öffnungszeit: Mo-Fr 10:00-18:00 Uhr, ohne Bremen-Feiertage.
+ *
+ * Wichtig fürs Bot-Wording: "gleich"/"in Kürze"/"meine Kollegin schreibt dir
+ * gleich" sind nur OK während Geschäftszeit. Außerhalb muss der Bot die
+ * nächste Öffnung kommunizieren, damit die Kundin nicht vergebens wartet.
+ */
+function getBusinessHoursContext(): {
+  isOpen: boolean;
+  nowLabel: string;          // "Freitag 20:15"
+  reason: string;            // "Wochenende" | "Feierabend" | "vor Öffnung" | "Feiertag (Heilige Drei Könige)"
+  nextOpenLabel: string;     // "Montag ab 10:00 Uhr" / "morgen früh ab 10:00 Uhr"
+} {
+  const now = new Date();
+  const berlinFmt = new Intl.DateTimeFormat("de-DE", {
+    timeZone: "Europe/Berlin",
+    weekday: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = Object.fromEntries(berlinFmt.formatToParts(now).map(p => [p.type, p.value]));
+  const weekday = parts.weekday || "";
+  const hour = Number(parts.hour || "0");
+  const isoDate = `${parts.year}-${parts.month}-${parts.day}`;
+
+  // Bremen-Feiertage 2026 (bundesweite + Reformationstag seit 2018)
+  const bremenHolidays2026 = new Set([
+    "2026-01-01", "2026-04-03", "2026-04-06", "2026-05-01",
+    "2026-05-14", "2026-05-25", "2026-10-03", "2026-10-31",
+    "2026-12-25", "2026-12-26",
+  ]);
+  const isHoliday = bremenHolidays2026.has(isoDate);
+
+  const weekendDays = new Set(["Samstag", "Sonntag"]);
+  const isWeekend = weekendDays.has(weekday);
+  const inWorkHours = hour >= 10 && hour < 18;
+  const isOpen = !isWeekend && !isHoliday && inWorkHours;
+
+  const nowLabel = `${weekday} ${parts.hour}:${parts.minute}`;
+  let reason = "geöffnet";
+  if (isHoliday) reason = "Feiertag";
+  else if (isWeekend) reason = "Wochenende";
+  else if (hour < 10) reason = "vor Öffnung";
+  else if (hour >= 18) reason = "Feierabend";
+
+  // Nächste Öffnung berechnen
+  let nextOpenLabel = "Mo-Fr 10:00-18:00 Uhr";
+  if (!isOpen) {
+    if (weekday === "Freitag" && hour >= 18) {
+      nextOpenLabel = "Montag ab 10:00 Uhr";
+    } else if (weekday === "Samstag") {
+      nextOpenLabel = "Montag ab 10:00 Uhr";
+    } else if (weekday === "Sonntag") {
+      nextOpenLabel = "morgen früh ab 10:00 Uhr";
+    } else if (hour < 10) {
+      nextOpenLabel = "heute ab 10:00 Uhr";
+    } else if (hour >= 18) {
+      nextOpenLabel = "morgen früh ab 10:00 Uhr";
+    } else if (isHoliday) {
+      nextOpenLabel = "am nächsten Werktag ab 10:00 Uhr";
+    }
+  }
+  return { isOpen, nowLabel, reason, nextOpenLabel };
+}
+
+/**
  * Entfernt / ersetzt interne Lagerzahlen aus dem Bot-Output.
  * Wenn Claude trotz System-Prompt mal "850g auf Lager" schreibt, fangen wir
  * das hier ab und ersetzen mit kunden-sicheren Phrasen.
@@ -358,6 +427,23 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += "- Beispiel: Kundin schreibt 'Standard Tapes in 55cm' → Antwort: 'In Russisch glatt haben wir Standard Tapes nur in 60cm. 55cm gibt es bei uns nur bei den Tapes in Usbekisch wellig. Was passt besser zu dir?'\n";
   systemPrompt += "- NIE Längen erfinden, runden oder annehmen.\n";
   systemPrompt += "- 🔒 NIEMALS Lieferanten-Namen erwähnen: Amanda, Eyfel, Ebru, China, etc. Das sind INTERNE Codes. Kundin spricht IMMER von der Haarqualität (Russisch glatt / Usbekisch wellig).\n";
+
+  // GESCHÄFTSZEIT-KONTEXT
+  // Bot muss wissen ob aktuell Öffnungszeit ist, sonst kann er versprechen
+  // dass "die Kollegin sich gleich meldet" während eigentlich Samstagabend ist —
+  // die Kundin wartet dann vergebens bis Montag.
+  const biz = getBusinessHoursContext();
+  systemPrompt += "\n## 🕒 AKTUELLE GESCHÄFTSZEIT\n";
+  systemPrompt += `- Jetzt ist: **${biz.nowLabel} (Europe/Berlin)** — Status: ${biz.isOpen ? "✅ GEÖFFNET" : `❌ GESCHLOSSEN (${biz.reason})`}\n`;
+  systemPrompt += `- Öffnungszeiten: Mo-Fr 10:00-18:00 Uhr (ohne Feiertage in Bremen)\n`;
+  if (biz.isOpen) {
+    systemPrompt += `- Wenn du etwas an die Kollegin übergibst, darfst du Phrasen wie 'meldet sich gleich', 'schreibt dir in Kürze' o.ä. nutzen — die Mitarbeiterinnen sind JETZT da.\n`;
+  } else {
+    systemPrompt += `- 🚨 NICHT 'gleich' / 'in Kürze' / 'sofort' / 'schreibt dir durch' verwenden, wenn die Antwort von einer Mitarbeiterin kommt — wir sind aktuell ${biz.reason.toLowerCase()}.\n`;
+    systemPrompt += `- Stattdessen ehrlich kommunizieren: '${biz.nextOpenLabel} meldet sich eine Kollegin mit den Details bei dir 💌' o.ä.\n`;
+    systemPrompt += `- Sachfragen (Verfügbarkeit, Preise, allgemeine Infos) darfst du natürlich trotzdem direkt beantworten — die Einschränkung gilt nur für Übergaben an Mitarbeiterinnen.\n`;
+  }
+
 
   // WISSENSDATENBANK (chatbot_faq) — statische Fakten die IMMER gelten.
   // Vorher gar nicht im Prompt — die 46 Einträge waren ungenutzt. Jetzt alle
@@ -969,6 +1055,38 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
     }
   } catch (e) {
     console.warn("[respond] URL-sanitizer failed:", (e as Error).message);
+  }
+
+  // SAFETY-NET 1c2: "gleich"-Phrasen außerhalb der Geschäftszeit ersetzen.
+  // Wenn aktuell geschlossen ist und der Bot trotzdem etwas wie "Kollegin
+  // meldet sich gleich" schreibt, wartet die Kundin vergebens bis Montag.
+  // Wir ersetzen die Wartezeit-Angabe durch die echte nächste Öffnung.
+  {
+    const biz2 = getBusinessHoursContext();
+    if (!biz2.isOpen) {
+      const beforeBiz = finalText;
+      const nextOpen = biz2.nextOpenLabel;
+      const replacements: Array<[RegExp, string]> = [
+        // "Kollegin meldet sich gleich" / "schreibt dir gleich" / "schreibt dir kurz durch"
+        [/\b(meine\s+|eine\s+|unsere\s+)?(kollegin|farb-?expertin|stylistin|mitarbeiterin)\s+(meldet|schreibt|kommt|antwortet|kümmert)\s+sich\s+(gleich|in\s+kürze|sofort|kurz\s+(durch|gleich)|gleich\s+(durch|bei\s+dir))/gi,
+         `$1$2 meldet sich ${nextOpen}`],
+        // "schreibe dir gleich" / "schreibe dir gleich mit der Kollegin durch"
+        [/\b(schreibe|melde|sage)\s+(dir|euch)\s+gleich(\s+mit\s+der\s+kollegin\s+durch)?/gi,
+         `melde mich ${nextOpen} bei dir`],
+        // "kommt gleich bei dir an" / "in Kürze"
+        [/\b(meldet\s+sich\s+(gleich|in\s+kürze|kurz)\s+bei\s+dir)/gi,
+         `meldet sich ${nextOpen} bei dir`],
+        // Generisches "gleich" → "morgen/Montag" wenn Übergabe-Kontext
+        [/\bschreibe?\s+dir\s+(die\s+\w+\s+)?gleich(\s+durch)?/gi,
+         `schreibe dir ${biz2.reason === "Wochenende" ? "Montag" : "morgen"} die Details`],
+      ];
+      for (const [re, repl] of replacements) {
+        finalText = finalText.replace(re, repl);
+      }
+      if (beforeBiz !== finalText) {
+        console.warn(`[respond] SCRUBBED "gleich"-Phrasen → "${nextOpen}" (außerhalb der Geschäftszeit)`);
+      }
+    }
   }
 
   // SAFETY-NET 1d: LIEFERANTEN-NAMEN ENTFERNEN
