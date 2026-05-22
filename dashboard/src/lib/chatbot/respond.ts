@@ -553,7 +553,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   // Verlauf der letzten Tage/Stunden bleibt aber vollständig erhalten.
   const { data: msgsDesc } = await svc
     .from("chat_messages")
-    .select("role, content, tool_calls, tool_results, attachments, created_at")
+    .select("role, content, tool_calls, tool_results, attachments, external_id, reply_to_external_id, created_at")
     .eq("session_id", sessionId)
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
@@ -701,9 +701,24 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
   const systemPromptStable = systemPrompt;
   const systemPromptVariable = openTurnsHint + greetingHint + existenceRule + urlRule + styleRule;
 
+  // Set aller external_ids in dieser Session — für Reply-Lookup. Wenn eine
+  // Customer-Message eine reply_to_external_id hat, die NICHT in diesem Set
+  // ist, dann referenziert sie eine Nachricht außerhalb unseres Verlaufs
+  // (zu alt, Story-Reply, vor Webhook-Onboarding). Der Bot bekommt dann
+  // einen klaren Hint, damit er nicht erraten muss worum's geht.
+  const knownExternalIds = new Set(
+    (msgs || [])
+      .map(m => (m as { external_id?: string | null }).external_id)
+      .filter((v): v is string => !!v)
+  );
+
   const messages: Anthropic.MessageParam[] = [];
   for (const m of msgs) {
     if (m.role === "user") {
+      // External-Reply-Hint: Customer hat auf eine Nachricht geantwortet, die
+      // wir nicht im Verlauf haben → Bot muss freundlich um Klärung bitten.
+      const replyToExt = (m as { reply_to_external_id?: string | null }).reply_to_external_id;
+      const isExternalReply = !!replyToExt && !knownExternalIds.has(replyToExt);
       // Foto-Anhänge als Image-Blocks an Claude weitergeben (Vision)
       // WICHTIG: wir holen das Bild SELBST und übergeben Base64 — Anthropic
       // Vision API respektiert robots.txt und IG CDN blockt externe Fetcher.
@@ -738,6 +753,12 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
         } else {
           messages.push({ role: "user", content: hint });
         }
+      } else if (isExternalReply) {
+        // Customer-Message ist eine Reply auf eine Nachricht, die wir nicht
+        // im Verlauf haben. Bot muss freundlich um Klärung bitten statt zu
+        // raten worum es geht.
+        const externalHint = "[SYSTEM-HINWEIS — NICHT VOM KUNDEN]\nDiese Kundennachricht ist eine direkte Antwort auf eine FRÜHERE Nachricht, die NICHT in unserem Gesprächsverlauf ist (zu alt, Story-Reply oder vor unserer Aufzeichnung). Du weißt also NICHT auf welche konkrete vorherige Nachricht/Produkt/Frage sich die Kundin bezieht. NIEMALS raten oder annehmen.\n\nWenn die aktuelle Nachricht für sich allein verständlich ist (z.B. konkrete Bestellanfrage mit Farbnamen + Mengen), darfst du normal antworten. Wenn unklar bleibt worauf sie sich bezieht, frage freundlich nach — z.B.: 'Hi 💕 du beziehst dich auf eine ältere Nachricht — magst du mir kurz auf die Sprünge helfen, worum's konkret geht?'";
+        messages.push({ role: "user", content: externalHint + "\n\nKunden-Nachricht: " + (m.content || "") });
       } else {
         messages.push({ role: "user", content: m.content || "" });
       }
