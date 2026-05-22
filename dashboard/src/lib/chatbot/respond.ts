@@ -1088,12 +1088,16 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
   // Das ist unnötiges Meta-Geschwätz und verwirrt die Kundin. Strippen.
   {
     const selfReferentialDisclaimerPatterns: RegExp[] = [
-      // "_(Kurz: ... muss ich ... mit der Kollegin durch.)_"
-      /\n+_?\(\s*kurz:?[^()]{0,300}\)\s*_?/gi,
-      // "(Hinweis: ich muss das nochmal mit der Kollegin abklären)"
-      /\n+\(\s*hinweis:?[^()]{0,200}(kolleg|stylistin|abklären|abstimmen|durchsprechen)[^()]{0,100}\)\s*/gi,
-      // ohne Klammern: "Kurz: die exakte X muss ich noch mit der Kollegin abklären."
-      /\n+kurz:?\s+die\s+(exakte|genauen?|richtige[rn]?)[^.\n]{0,200}\b(kolleg|stylistin|abklären|abstimmen|durchsprechen)\b[^.\n]{0,100}\.?/gi,
+      // Markdown-Italic-Klammer: "_(Kurz: ...)_" — auch ohne führende Newline
+      /_\(\s*(kurz|hinweis|p\.?s\.?|nb)[:\s][^()]{0,400}\)_/gi,
+      // Klammer ohne Italic-Marker: "(Kurz: ...)"
+      /(?:^|\n)\s*\(\s*(kurz|hinweis|p\.?s\.?|nb)[:\s][^()]{0,400}\)\s*/gi,
+      // ohne Klammern, mit "Kurz: die exakte X muss ich noch mit der Kollegin abklären"
+      /(?:^|\n)\s*kurz:?\s+die\s+(exakte|genauen?|richtige[rn]?|finalen?)[^.\n]{0,250}\b(kolleg|stylistin|abklären|abstimmen|durchsprechen|nachfragen|nochmal|noch\s+mal)\b[^.\n]{0,150}\.?/gi,
+      // "PS: ich muss das nochmal mit der Kollegin durchsprechen"
+      /(?:^|\n)\s*p\.?\s*s\.?:?\s+[^.\n]{0,200}\b(kolleg|stylistin|abklären|abstimmen|durchsprechen)\b[^.\n]{0,150}\.?/gi,
+      // Italic ohne Klammer: "_Kurz: ich muss das mit der Kollegin abklären._"
+      /(?:^|\n)\s*_kurz:?\s+[^_\n]{0,300}\b(kolleg|stylistin|abklären|abstimmen|durchsprechen|nochmal|noch\s+mal)\b[^_\n]{0,150}_/gi,
     ];
     let strippedDisclaimer = false;
     for (const pat of selfReferentialDisclaimerPatterns) {
@@ -1105,6 +1109,84 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
       console.warn("[respond] STRIPPED selbstreferenziellen Klammer-Disclaimer am Ende");
       finalText = finalText.replace(/\n{3,}/g, "\n\n").trim();
     }
+  }
+
+  // SAFETY-NET 1url: Farbnamen ohne URL → URL aus Tool-Results nachschlagen
+  // und automatisch anhängen. Sonst muss die Kundin selbst suchen.
+  try {
+    // Sammle alle Color-Name → URL Paare aus den Tool-Results
+    const colorUrlMap = new Map<string, string>();
+    for (const result of allToolResults) {
+      try {
+        const parsed = JSON.parse(result.content) as Record<string, unknown>;
+        // get_stock_eta liefert verschiedene Listen mit product+shopify_url
+        const lists: Array<Record<string, unknown>[]> = [];
+        for (const key of ["coming_soon", "still_coming", "sold_out_or_coming", "inventory_available", "variants"]) {
+          const v = parsed[key];
+          if (Array.isArray(v)) lists.push(v as Record<string, unknown>[]);
+        }
+        // get_available_colors liefert colors[]
+        const colors = parsed.colors;
+        if (Array.isArray(colors)) lists.push(colors as Record<string, unknown>[]);
+        for (const list of lists) {
+          for (const item of list) {
+            const url = String(item.shopify_url || "");
+            const product = String(item.product || item.name_shopify || "");
+            const colorName = String(item.color_name || item.name_hairvenly || "");
+            if (!url) continue;
+            // Extrahiere Farbnamen aus Produkt- oder Color-Name (in Großbuchstaben)
+            const candidates: string[] = [];
+            if (colorName) candidates.push(colorName);
+            // Aus product_shopify_name: "#COLDNESS - HELLBLOND ..." → "COLDNESS"
+            const m = product.match(/^#?([A-ZÄÖÜ][A-ZÄÖÜ\s/+\-_0-9]{1,40})\s+[-–—]/);
+            if (m) candidates.push(m[1].trim());
+            // Auch nested variants[] mit eigenen URLs (get_available_colors)
+            const variants = item.variants;
+            if (Array.isArray(variants)) {
+              for (const v of variants as Record<string, unknown>[]) {
+                if (v.shopify_url) {
+                  // Verwende selbe colorName für variant-URLs falls vorhanden
+                  if (colorName) colorUrlMap.set(colorName.toUpperCase().trim(), String(v.shopify_url));
+                }
+              }
+            }
+            for (const c of candidates) {
+              const key = c.toUpperCase().trim();
+              if (key.length >= 3 && !colorUrlMap.has(key)) {
+                colorUrlMap.set(key, url);
+              }
+            }
+          }
+        }
+      } catch { /* skip */ }
+    }
+
+    if (colorUrlMap.size > 0) {
+      let addedUrls = 0;
+      // Pattern für hervorgehobene Farbnamen: **COLDNESS**, **ASH MELT**, *FROSTY* etc.
+      // Match: Markdown-bold-Farbname am Anfang einer Liste-Zeile, ohne URL danach
+      finalText = finalText.replace(
+        /(^|\n)([•\-*]\s*)\*\*([A-ZÄÖÜ][A-ZÄÖÜ\s/+\-_0-9]{2,40})\*\*([^\n]*)/g,
+        (match, prefix, bullet, colorName, rest) => {
+          const key = colorName.toUpperCase().trim();
+          const url = colorUrlMap.get(key);
+          if (!url) return match;
+          // Schon eine URL in rest? → unverändert lassen
+          if (/https?:\/\//.test(rest)) return match;
+          // Auch in den nächsten 2 Zeilen prüfen ob URL kommt
+          const afterIdx = (match as string).length;
+          const tail = finalText.slice(finalText.indexOf(match) + afterIdx, finalText.indexOf(match) + afterIdx + 200);
+          if (/^\s*\n\s*https?:\/\//.test(tail)) return match;
+          addedUrls++;
+          return `${prefix}${bullet}**${colorName}**${rest}\n  ${url}`;
+        }
+      );
+      if (addedUrls > 0) {
+        console.warn(`[respond] AUTO-ADDED ${addedUrls} URL(s) zu Farb-Empfehlungen die der Bot ohne Link genannt hatte`);
+      }
+    }
+  } catch (e) {
+    console.warn("[respond] Farb-URL-Auto-Nachschlag fehlgeschlagen:", (e as Error).message);
   }
 
   // SAFETY-NET 1z: Em-Dash-Bremse — erster bleibt, ab dem zweiten ersetzen.
