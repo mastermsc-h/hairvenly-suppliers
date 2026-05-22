@@ -709,6 +709,7 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
       // Vision API respektiert robots.txt und IG CDN blockt externe Fetcher.
       const attachments = (m.attachments as { type: string; url: string }[] | null) || [];
       const images = attachments.filter(a => a.type === "image" && a.url);
+      const hasEphemeral = attachments.some(a => a.type === "ephemeral");
       if (images.length > 0) {
         const blocks: Anthropic.ContentBlockParam[] = [];
         for (const img of images) {
@@ -723,6 +724,20 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
         // Wenn alle Bilder skipped + kein Content → trotzdem leeren Text-Hinweis
         if (blocks.length === 0) blocks.push({ type: "text", text: "[Foto konnte nicht geladen werden — bitte Kundin um Neusendung]" });
         messages.push({ role: "user", content: blocks });
+      } else if (hasEphemeral) {
+        // Ephemeral-Foto (View-Once) — Bild ist NICHT sichtbar, weder für uns
+        // noch für die Stylistin. Bot muss ehrlich kommunizieren, NICHT raten.
+        const customerText = (m.content || "").trim();
+        // Wenn die Customer-Message NUR aus [Einmal-Foto …] besteht, ist das
+        // Mitteilung an den Bot. Ansonsten ist Text dabei — den separat
+        // beibehalten, aber klar markieren dass das Foto unsichtbar ist.
+        const customerTextWithoutMarker = customerText.replace(/^\[Einmal-Foto[^\]]*\]\s*/i, "").replace(/^\[Foto\]\s*/i, "").trim();
+        const hint = "[SYSTEM-HINWEIS — NICHT VOM KUNDEN]\nDie Kundin hat hier ein Foto als EINMAL-ANSICHT (View-Once) geschickt. Du KANNST dieses Bild NICHT sehen — die URL ist leer und auch die Stylistin kann es später nicht öffnen. NIEMALS so tun, als hättest du das Bild gesehen oder die Farbe einschätzen können. Bitte die Kundin freundlich, das Bild als normales Foto noch mal zu schicken.";
+        if (customerTextWithoutMarker) {
+          messages.push({ role: "user", content: hint + "\n\nKunden-Text (separat zum Foto): " + customerTextWithoutMarker });
+        } else {
+          messages.push({ role: "user", content: hint });
+        }
       } else {
         messages.push({ role: "user", content: m.content || "" });
       }
@@ -1209,6 +1224,44 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
     }
   } catch (e) {
     console.warn("[respond] Methode-Linie-Validator fehlgeschlagen:", (e as Error).message);
+  }
+
+  // SAFETY-NET 1eph: EPHEMERAL-HALLUZINATION
+  // Wenn die letzten Customer-Messages ephemeral-Fotos (View-Once) enthielten,
+  // darf der Bot NIE so tun, als hätte er das Bild gesehen. "Danke für deine
+  // Fotos" / "Deine Haarfarbe schaut..." sind direkte Halluzinationen — wir
+  // ersetzen den Eröffnungssatz durch eine ehrliche Variante.
+  try {
+    // Prüfe ob in den letzten 5 Customer-Messages eine ephemeral war
+    const recentCustomerMsgs = (msgs || []).filter(m => m.role === "user").slice(-5);
+    const sawEphemeralRecently = recentCustomerMsgs.some(m => {
+      const att = (m.attachments as { type: string }[] | null) || [];
+      return att.some(a => a.type === "ephemeral");
+    });
+    if (sawEphemeralRecently) {
+      const hallucinationPatterns = [
+        // "Danke für deine Fotos 💕" / "Danke für dein Bild 💕" am Anfang
+        /^\s*(danke|vielen\s+dank)[^.\n]{0,30}\b(foto|fotos|bild|bilder)[^.\n]{0,20}[💕💌🤍✨🌸]*\s*\n+/i,
+        // "Auf deinem Foto sehe ich" / "Deine Haarfarbe schaut" / "ich sehe ein wunderschönes ..."
+        /\b(auf\s+deinem\s+foto\s+sehe\s+ich|ich\s+sehe[^.\n]{0,30}(haarfarbe|haar|farbe|braun|blond)|deine\s+haarfarbe\s+(schaut|sieht|ist)|dein\s+haar\s+(ist|sieht|schaut)|ich\s+kann\s+sehen)\b[^.\n]*\.?\s*\n?/gi,
+      ];
+      let stripped = false;
+      for (const pat of hallucinationPatterns) {
+        const before = finalText;
+        finalText = finalText.replace(pat, "");
+        if (before !== finalText) stripped = true;
+      }
+      if (stripped) {
+        console.warn("[respond] STRIPPED ephemeral-Halluzination: Bot tat so als hätte er View-Once-Foto gesehen");
+        // Einen ehrlichen Hinweis ans Anfang setzen
+        const honestPrefix = "Dein Foto ist als Einmal-Ansicht geschickt — leider können wir das nicht sehen 🥲 Magst du es nochmal als normales Foto schicken? Dann kann unsere Farb-Expertin dir eine passende Empfehlung geben ✨\n\n";
+        // Nur einfügen wenn der Reply noch substantiell ist (sonst kompletter Replace)
+        finalText = honestPrefix + finalText.trim();
+        finalText = finalText.replace(/\n{3,}/g, "\n\n").trim();
+      }
+    }
+  } catch (e) {
+    console.warn("[respond] ephemeral-Halluzinations-Sanitizer fehlgeschlagen:", (e as Error).message);
   }
 
   // SAFETY-NET 1c1: WOCHENENDE-FALLE — "morgen früh" am Freitag/Samstag.
