@@ -979,6 +979,100 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
   // SAFETY-NET 1: konkrete Lagerzahlen rausfiltern
   finalText = sanitizeStockLeaks(finalText);
 
+  // SAFETY-NET 1eta: ETA-LINIEN-KONSISTENZ
+  // Häufiger Halluzinationsfehler: Bot bekommt vom get_stock_eta-Tool ETAs
+  // für beide Linien (Russisch glatt + Usbekisch wellig) zurück, und labelt
+  // dann ein Usbekisch-Datum als "Russisch glatt"-Datum (oder umgekehrt).
+  // Wir parsen die Tool-Results und prüfen, ob jedes erwähnte Datum wirklich
+  // zur erwähnten Linie passt. Bei Mismatch: Datum strippen + ehrlich machen.
+  try {
+    type EtaEntry = { collection: string; eta: string; product: string };
+    const etaEntries: EtaEntry[] = [];
+    for (let i = 0; i < allToolCalls.length; i++) {
+      const call = allToolCalls[i];
+      if (call.name !== "get_stock_eta") continue;
+      const result = allToolResults.find(r => r.tool_use_id === call.id);
+      if (!result) continue;
+      try {
+        const parsed = JSON.parse(result.content) as Record<string, unknown>;
+        // Format aus tools/index.ts: status + verschiedene Felder
+        const lists: Array<Record<string, unknown>[]> = [];
+        for (const key of ["coming_soon", "still_coming", "sold_out_or_coming", "inventory_available"]) {
+          const v = parsed[key];
+          if (Array.isArray(v)) lists.push(v as Record<string, unknown>[]);
+        }
+        for (const list of lists) {
+          for (const item of list) {
+            const coll = String(item.collection || "");
+            const eta  = String(item.earliest_eta || item.eta || "");
+            const prod = String(item.product || "");
+            if (coll && eta) etaEntries.push({ collection: coll, eta, product: prod });
+          }
+        }
+      } catch { /* malformed tool result — skip */ }
+    }
+
+    if (etaEntries.length > 0) {
+      // Map ETA-Datum (normalisiert) → Set<linie>
+      const normalizeDate = (s: string): string | null => {
+        // "15.06.2026" / "15.06.26" / "15.06." / "15.6.26" alle auf "15.06"
+        const m = s.match(/(\d{1,2})[.\/](\d{1,2})/);
+        if (!m) return null;
+        return `${m[1].padStart(2, "0")}.${m[2].padStart(2, "0")}`;
+      };
+      const lineOf = (collection: string): "russisch" | "usbekisch" | "unknown" => {
+        const c = collection.toLowerCase();
+        if (c.includes("russ") || c.includes("glatt")) return "russisch";
+        if (c.includes("usbek") || c.includes("wellig")) return "usbekisch";
+        return "unknown";
+      };
+      const etaLineMap = new Map<string, Set<"russisch" | "usbekisch" | "unknown">>();
+      for (const e of etaEntries) {
+        const norm = normalizeDate(e.eta);
+        if (!norm) continue;
+        if (!etaLineMap.has(norm)) etaLineMap.set(norm, new Set());
+        etaLineMap.get(norm)!.add(lineOf(e.collection));
+      }
+
+      // Suche im Bot-Text alle Datums-Erwähnungen (DD.MM.) mit ihrem Kontext
+      // (~120 Zeichen davor → suche nach Linien-Stichwort)
+      const datePattern = /\((\d{1,2})[.\/](\d{1,2})\.?\)/g;
+      let mismatchFound = false;
+      finalText = finalText.replace(datePattern, (match, d1, d2, offset) => {
+        const norm = `${String(d1).padStart(2, "0")}.${String(d2).padStart(2, "0")}`;
+        const linesForDate = etaLineMap.get(norm);
+        if (!linesForDate) return match; // Datum nicht aus Tool — lassen
+
+        const before = finalText.slice(Math.max(0, (offset as number) - 200), offset as number).toLowerCase();
+        const mentionsRuss = /\b(russisch\s+glatt|russ\.\s*glatt|glatt)\b/.test(before);
+        const mentionsUsbek = /\b(usbekisch\s+wellig|wellig|usbek)\b/.test(before);
+
+        // Mismatch: Text sagt "russisch glatt" aber Datum ist NUR in usbekisch
+        if (mentionsRuss && !linesForDate.has("russisch") && linesForDate.has("usbekisch")) {
+          mismatchFound = true;
+          console.warn(`[respond] ETA-LINIEN-MISMATCH gestrippt: "${match}" — Text sagt "Russisch glatt", Datum ist aber nur in Usbekisch-Sheet`);
+          return "(genaues Datum klärt dir die Kollegin)";
+        }
+        if (mentionsUsbek && !linesForDate.has("usbekisch") && linesForDate.has("russisch")) {
+          mismatchFound = true;
+          console.warn(`[respond] ETA-LINIEN-MISMATCH gestrippt: "${match}" — Text sagt "Usbekisch wellig", Datum ist aber nur in Russisch-Sheet`);
+          return "(genaues Datum klärt dir die Kollegin)";
+        }
+        return match;
+      });
+      if (mismatchFound) {
+        // Aufräumen: doppelte Leerzeichen / "ca. (genaues Datum klärt..."
+        finalText = finalText
+          .replace(/\bca\.\s*\(genaues Datum/gi, "(genaues Datum")
+          .replace(/  +/g, " ")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim();
+      }
+    }
+  } catch (e) {
+    console.warn("[respond] ETA-Linien-Validator fehlgeschlagen:", (e as Error).message);
+  }
+
   // SAFETY-NET 1y: NIEMALS proaktiv extra Fotos/Videos der Tressen anbieten.
   // ABER: Wenn die Kundin selbst nach extra Bildern/Videos gefragt hat, darf der
   // Bot reaktiv zustimmen — mit Verweis dass die Stylistin sich darum kümmert
