@@ -1012,38 +1012,42 @@ function DraftBox({
           <Sparkles size={10} /> Strategie-Hinweis fürs Training hinzufügen
         </button>
       )}
-      <div className="flex gap-2 flex-wrap">
-        <button
-          onClick={handleSend}
-          disabled={busy !== null || !text.trim()}
-          className="bg-green-600 text-white rounded-xl px-4 py-2 hover:bg-green-700 disabled:opacity-40 inline-flex items-center gap-1 text-xs font-medium"
-        >
-          <Check size={12} /> {busy === "send" ? "Sende…" : "Senden ✓"}
-        </button>
-        <button
-          onClick={handleGrammar}
-          disabled={busy !== null || !text.trim()}
-          className="bg-purple-600 text-white rounded-xl px-3 py-2 hover:bg-purple-700 disabled:opacity-40 inline-flex items-center gap-1 text-xs font-medium"
-          title="KI korrigiert nur Grammatik/Rechtschreibung — Inhalt + Tonalität bleiben"
-        >
-          <Wand2 size={12} /> {busy === "grammar" ? "Prüfe…" : "Grammatik per KI"}
-        </button>
-        <button
-          onClick={() => setText(draft.original_text)}
-          disabled={busy !== null || text === draft.original_text}
-          className="text-xs px-3 py-2 rounded-xl border border-neutral-300 text-neutral-600 hover:bg-neutral-50 disabled:opacity-40 inline-flex items-center gap-1"
-        >
-          <RotateCcw size={11} /> Original
-        </button>
-        <button
-          onClick={handleDiscard}
-          disabled={busy !== null}
-          className="text-xs px-3 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 inline-flex items-center gap-1 ml-auto"
-        >
-          <X size={11} /> Verwerfen
-        </button>
-      </div>
       </div>{/* End scrollbarer Inhalt */}
+
+      {/* Fixe Action-Bar — immer sichtbar, egal wie lang der Entwurf ist */}
+      <div className={`shrink-0 border-t border-blue-200 px-3 py-2 bg-gradient-to-b from-blue-50/60 to-blue-50/30 ${collapsed ? "hidden" : ""}`}>
+        <div className="flex gap-2 flex-wrap items-center">
+          <button
+            onClick={handleSend}
+            disabled={busy !== null || !text.trim()}
+            className="bg-green-600 text-white rounded-xl px-4 py-2 hover:bg-green-700 disabled:opacity-40 inline-flex items-center gap-1 text-xs font-medium shadow-sm"
+          >
+            <Check size={12} /> {busy === "send" ? "Sende…" : "Senden ✓"}
+          </button>
+          <button
+            onClick={handleGrammar}
+            disabled={busy !== null || !text.trim()}
+            className="bg-purple-600 text-white rounded-xl px-3 py-2 hover:bg-purple-700 disabled:opacity-40 inline-flex items-center gap-1 text-xs font-medium shadow-sm"
+            title="KI korrigiert nur Grammatik/Rechtschreibung — Inhalt + Tonalität bleiben"
+          >
+            <Wand2 size={12} /> {busy === "grammar" ? "Prüfe…" : "Grammatik per KI"}
+          </button>
+          <button
+            onClick={() => setText(draft.original_text)}
+            disabled={busy !== null || text === draft.original_text}
+            className="text-xs px-3 py-2 rounded-xl border border-neutral-300 text-neutral-600 hover:bg-neutral-50 disabled:opacity-40 inline-flex items-center gap-1"
+          >
+            <RotateCcw size={11} /> Original
+          </button>
+          <button
+            onClick={handleDiscard}
+            disabled={busy !== null}
+            className="text-xs px-3 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 inline-flex items-center gap-1 ml-auto"
+          >
+            <X size={11} /> Verwerfen
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
