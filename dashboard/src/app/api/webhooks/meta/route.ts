@@ -367,11 +367,22 @@ async function routeIncoming(opts: {
   });
 
   // Session updaten
+  // ── REAKTIVIERUNG ──
+  // Wenn die Session als "Erledigt" (closed) oder anders nicht-aktiv markiert war
+  // und die Kundin schreibt erneut, wird sie automatisch wieder auf "active"
+  // gesetzt. So triggert der Bot (sofern Mode != off & nicht human_only) wieder
+  // und die Inbox zeigt sie wieder prominent.
+  const wasInactive = session.status && session.status !== "active";
   await svc.from("chat_sessions").update({
     last_message_at: myMsgTimestamp,
     last_customer_msg_at: myMsgTimestamp,
     customer_name: session.customer_name || opts.customerName || null,
+    ...(wasInactive ? { status: "active" } : {}),
   }).eq("id", session.id);
+  if (wasInactive) {
+    console.log(`[meta-webhook] Session ${session.id} REAKTIVIERT (war status=${session.status}) — Kundin hat erneut geschrieben`);
+    session.status = "active";
+  }
 
   // Auto-Klassifikation der Session (fire-and-forget) — bei jedem Eingang erneut
   // damit sich die Kategorie an aktuelle Themen anpasst.
