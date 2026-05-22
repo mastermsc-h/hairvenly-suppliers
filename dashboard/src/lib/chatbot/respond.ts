@@ -106,6 +106,7 @@ export function splitLongMessage(text: string, maxLen = 700): string[] {
 // getBusinessHoursContext: extrahiert nach @/lib/chatbot/business-hours
 // damit auch der Webhook (Audio-Bypass) sie nutzen kann.
 import { getBusinessHoursContext } from "./business-hours";
+import { stripColorUrlMismatch } from "./output-sanitizers";
 
 /**
  * Entfernt / ersetzt interne Lagerzahlen aus dem Bot-Output.
@@ -941,6 +942,10 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
 
   // SAFETY-NET 1: konkrete Lagerzahlen rausfiltern
   finalText = sanitizeStockLeaks(finalText);
+
+  // SAFETY-NET 1tcm: URL-Color-Mismatch (TAUPE vs SMOKY TAUPE etc.)
+  // Wenn Bot **TAUPE** sagt aber URL "smoky-taupe" enthält → URL strippen.
+  finalText = stripColorUrlMismatch(finalText);
 
   // SAFETY-NET 1eta: ETA-LINIEN-KONSISTENZ
   // Häufiger Halluzinationsfehler: Bot bekommt vom get_stock_eta-Tool ETAs
