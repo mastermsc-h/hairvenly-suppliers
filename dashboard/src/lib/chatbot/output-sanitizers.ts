@@ -182,6 +182,39 @@ export function stripColorUrlMismatch(text: string): string {
 }
 
 /**
+ * Maximum N URLs pro Antwort. Wenn mehr → überzählige strippen.
+ * Default: max 3 (eine Nachricht mit zu vielen Links wirkt überladen).
+ *
+ * Strategie:
+ * - Findet alle hairvenly.de/products-URLs in Reihenfolge
+ * - Behält die ersten N
+ * - Strippt alle weiteren (mit optionaler Klammern/Bullets davor wenn
+ *   sie auf eigener Zeile sind)
+ */
+export function limitUrls(text: string, maxUrls = 3): string {
+  const urlRe = /https?:\/\/(?:www\.)?hairvenly\.de\/(?:products|collections)\/[A-Za-z0-9_\-/]+/g;
+  const urls = Array.from(text.matchAll(urlRe));
+  if (urls.length <= maxUrls) return text;
+
+  // Welche URLs sollen weg? Alle ab Index maxUrls
+  const toRemove = urls.slice(maxUrls).map(m => m[0]);
+  let out = text;
+  for (const u of toRemove) {
+    const esc = u.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Falls in Markdown-Link-Form: ganzen [Label](URL) entfernen
+    out = out.replace(new RegExp(`\\[[^\\]]+\\]\\(${esc}\\)`, "g"), "");
+    // Falls als nackte URL auf eigener Zeile: ganze Zeile entfernen
+    out = out.replace(new RegExp(`(^|\\n)[ \\t]*${esc}[ \\t]*(\\n|$)`, "g"), "$1");
+    // Sonst: nur URL entfernen (lassen Text drumrum)
+    out = out.replace(new RegExp(esc, "g"), "");
+  }
+  if (toRemove.length > 0) {
+    console.warn(`[sanitizer] limitUrls: ${toRemove.length} überzählige URL(s) gestrippt (hatten ${urls.length}, max=${maxUrls})`);
+  }
+  return out.replace(/\n{3,}/g, "\n\n").replace(/[ \t]+\n/g, "\n").trim();
+}
+
+/**
  * Em-Dash-Bremse — erster bleibt, ab dem zweiten ersetzen mit ", ".
  * Verhindert das KI-typische Über-Verwenden von Em-Dashes.
  */
@@ -227,6 +260,9 @@ export function applyAllOutputSanitizers(
   out = scrubSupplierNames(out);
   out = stripColorUrlMismatch(out);
   if (opts.colorUrlMap) out = autoAddColorUrls(out, opts.colorUrlMap);
+  // URL-Limit ZULETZT — falls autoAddColorUrls noch welche hinzugefügt hat,
+  // werden die zusammen mit den bot-eigenen auf max 3 begrenzt.
+  out = limitUrls(out, 3);
   out = emDashBrake(out);
   return out;
 }

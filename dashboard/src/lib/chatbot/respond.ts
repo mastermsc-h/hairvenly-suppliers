@@ -106,7 +106,7 @@ export function splitLongMessage(text: string, maxLen = 700): string[] {
 // getBusinessHoursContext: extrahiert nach @/lib/chatbot/business-hours
 // damit auch der Webhook (Audio-Bypass) sie nutzen kann.
 import { getBusinessHoursContext } from "./business-hours";
-import { stripColorUrlMismatch } from "./output-sanitizers";
+import { stripColorUrlMismatch, limitUrls } from "./output-sanitizers";
 
 /**
  * Entfernt / ersetzt interne Lagerzahlen aus dem Bot-Output.
@@ -698,6 +698,27 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
 
 ❌ FALSCH: "hairvenly.de/products/usbekisch-soft-blond-balayage-65cm-tapes" (selbst gebaut)
 ✅ RICHTIG: exakt der String aus shopify_url, sonst kein Link.`;
+
+  // ── CRITICAL_RULES: ans absolute Prompt-Ende.
+  // LLMs gewichten Anweisungen am Ende des System-Prompts am stärksten.
+  // Diese Top-5 sind harte Pflichtregeln die der Bot historisch ignoriert hat.
+  systemPrompt += `
+
+## 🚨🚨🚨 KRITISCHE REGELN — MUSST DU IMMER BEFOLGEN 🚨🚨🚨
+
+Diese 5 Regeln werden auch NACH deiner Antwort vom System gecheckt und ggf. korrigiert. Aber besser: halte sie direkt ein, damit deine Antwort authentisch wirkt.
+
+1. **MAX 3 LINKS PRO ANTWORT.** Egal wie viele Farben/Produkte du nennst, NIEMALS mehr als 3 \`hairvenly.de\`-URLs in einer Antwort. Wenn du mehr Produkte erwähnen willst — nur den Namen ohne Link.
+
+2. **PROAKTIV KEINE EXTRA-FOTOS/VIDEOS ANBIETEN.** NIE schreiben "Magst du, dass unsere Farb-Expertin/Stylistin dir extra Fotos oder Videos schickt?" — auch nicht via Übergabe. Nur reaktiv, wenn die Kundin EXPLIZIT nach Fotos/Videos GEFRAGT hat (mit Fragezeichen + "habt ihr"/"könnt ihr"/"magst du"/"hättet ihr").
+
+3. **KEIN KLAMMER-DISCLAIMER AM ENDE.** NIEMALS sowas wie "_(Kurz: die exakte Längen-Methoden-Kombi muss ich dir noch sauber benennen — Kollegin durchsprechen.)_" oder "(PS: ...)" oder "Kurz: ich muss das nochmal abklären." Wenn du etwas wirklich abklären musst → SAG ES KLAR IM HAUPTTEIL, nicht als nachträgliche Klammer.
+
+4. **FARBNAMEN IMMER MIT URL.** Wenn du eine konkrete Farbe (**COLDNESS**, **ASH MELT**, **CAPPUCCINO** etc.) empfiehlst, IMMER die passende Shopify-URL direkt darunter. Wenn dir aus dem Tool keine URL bekannt ist → NICHT die Farbe nennen.
+
+5. **NIEMALS LIEFERANTEN-NAMEN.** Amanda, Eyfel, Ebru, China sind INTERNE Codes. Sprich IMMER von der Haarqualität: "Russisch glatt" / "Usbekisch wellig".
+
+🔁 Halte dich an diese 5 Regeln BEIM ERSTEN MAL. Sonst korrigiert das System und die Antwort wirkt holpriger.`;
 
   // Wichtig: systemPrompt (= persona + avatar + training + strategies) bleibt STABIL
   // pro Avatar und wird via Prompt-Caching wiederverwendet. Variable Teile
@@ -1543,6 +1564,10 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
   // SAFETY-NET 2: Dedup wenn ganze Antwort sich wiederholt (Claude-Stutter)
   // Heuristik: wenn finalText aus zwei identischen Hälften besteht, halbieren
   finalText = dedupRepeatedHalf(finalText);
+
+  // SAFETY-NET 3: Max 3 URLs pro Antwort. Mehr wirkt überladen und macht
+  // Mitarbeiterin/Kundin nervös. Überzählige werden gestrippt.
+  finalText = limitUrls(finalText, 3);
 
   // Im assisted-Modus: NICHT in chat_messages speichern — der Caller speichert
   // erst nach Mitarbeiter-Approval ggf. die korrigierte Version.
