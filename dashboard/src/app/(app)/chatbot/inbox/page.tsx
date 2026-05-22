@@ -12,7 +12,7 @@ import DefaultBotModeToggle from "./default-bot-mode-toggle";
 import ClassifyBackfillButton from "./classify-backfill-button";
 
 interface PageProps {
-  searchParams: Promise<{ status?: string; mode?: string; channel?: string; category?: string; q?: string; unread?: string; limit?: string; sort?: string }>;
+  searchParams: Promise<{ status?: string; mode?: string; channel?: string; category?: string; q?: string; unread?: string; limit?: string; sort?: string; show?: string }>;
 }
 
 const SORT_OPTIONS: Record<string, { label: string; emoji: string }> = {
@@ -70,8 +70,13 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   const channelFilter = params.channel  || "all"; // 'all' | 'web' | 'instagram' | 'whatsapp'
   const categoryFilter = params.category || "all";
   const searchQuery    = (params.q || "").trim();
-  // Default = nur unbeantwortet. User kann via "unread=0" alles anzeigen.
-  const onlyUnread     = params.unread !== "0";
+  // Default-View: "In Bearbeitung" = alle nicht-erledigten Sessions.
+  // Sessions verschwinden also erst, wenn die Mitarbeiterin manuell auf "Erledigt"
+  // klickt — auch nach erster Antwort bleibt die Konversation sichtbar.
+  // User kann via ?unread=1 nochmals einschränken auf "Nur unbeantwortet"
+  // oder via ?show=closed auch geschlossene anzeigen.
+  const onlyUnread     = params.unread === "1";
+  const showClosed     = params.show === "closed" || filter === "closed";
   const sortMode       = params.sort && SORT_OPTIONS[params.sort] ? params.sort : "newest";
   // Pagination: max 50 pro "Klick", über "Weitere laden" wird der Limit erhöht
   const limit = Math.min(Math.max(Number(params.limit) || PAGE_SIZE, PAGE_SIZE), 1000);
@@ -90,6 +95,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     .limit(500);
 
   if (filter !== "all")        query = query.eq("status", filter);
+  else if (!showClosed)        query = query.neq("status", "closed"); // erledigte standardmäßig ausblenden
   if (channelFilter !== "all") query = query.eq("channel", channelFilter);
   if (categoryFilter !== "all") query = query.eq("category", categoryFilter);
   if (searchQuery) query = query.ilike("customer_name", `%${searchQuery}%`);
@@ -291,7 +297,8 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
               if (channelFilter !== "all") next.set("channel",  channelFilter);
               if (categoryFilter !== "all") next.set("category", categoryFilter);
               if (searchQuery)             next.set("q",        searchQuery);
-              if (onlyUnread) next.set("unread", "0");
+              if (showClosed)              next.set("show",     "closed");
+              if (!onlyUnread) next.set("unread", "1"); else next.delete("unread");
               const qs = next.toString();
               return `/chatbot/inbox${qs ? "?" + qs : ""}`;
             })()}
@@ -301,10 +308,32 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
             }`}
             title={onlyUnread
-              ? "Filter aktiv — Klick zeigt ALLE Sessions"
-              : "Nur Sessions zeigen, bei denen die Kundin zuletzt geschrieben hat"}
+              ? "Filter aktiv — Klick zeigt alle Sessions die noch nicht erledigt sind"
+              : "Strenger filtern: Nur Sessions wo die Kundin zuletzt geschrieben hat"}
           >
-            🔔 {onlyUnread ? "Nur unbeantwortet" : "Alle anzeigen"}
+            🔔 {onlyUnread ? "Nur unbeantwortet" : "In Bearbeitung"}
+          </Link>
+          <Link
+            href={(() => {
+              const next = new URLSearchParams();
+              if (filter !== "all")        next.set("status",   filter);
+              if (mode !== "all")          next.set("mode",     mode);
+              if (channelFilter !== "all") next.set("channel",  channelFilter);
+              if (categoryFilter !== "all") next.set("category", categoryFilter);
+              if (searchQuery)             next.set("q",        searchQuery);
+              if (onlyUnread)              next.set("unread",   "1");
+              if (!showClosed) next.set("show", "closed"); else next.delete("show");
+              const qs = next.toString();
+              return `/chatbot/inbox${qs ? "?" + qs : ""}`;
+            })()}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+              showClosed
+                ? "bg-neutral-700 text-white hover:bg-neutral-800"
+                : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
+            }`}
+            title={showClosed ? "Klick: Erledigte wieder ausblenden" : "Klick: Auch erledigte Sessions anzeigen"}
+          >
+            {showClosed ? "✓ Erledigte gezeigt" : "Erledigte zeigen"}
           </Link>
           {onlyUnread && (
             <Link

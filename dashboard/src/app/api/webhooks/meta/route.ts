@@ -582,24 +582,35 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
   //    ist nicht mehr in safeCategories und kommt deshalb nie hier an.
   //    Farbberatung läuft IMMER über Draft, weil sie zu fehleranfällig ist.)
 
-  // 3b. KLÄRUNGS-EÖFFNUNG: reine Rückfragen ohne konkrete Behauptung sind
-  //     immer sicher autonom — Bot fragt was die Kundin braucht, kann nichts
-  //     falsch sagen. Beispiel: "Hi, ich hätte eine Frage" →
-  //     "Klar, was möchtest du wissen? Tapes/Bondings/Farbe/...?"
-  //     Kriterien:
-  //     - kurz (< 500 Zeichen)
-  //     - enthält Fragezeichen
-  //     - Klärungs-Verben drin (suchst/brauchst/möchtest/welche/magst...)
+  // 3b. KLÄRUNGS-ANTWORT: Rückfragen + harmlose Allgemeininfo ohne konkrete
+  //     Produktaussage sind sicher autonom — Bot fragt was die Kundin braucht
+  //     oder gibt sehr allgemeine Hinweise. Beispiele:
+  //     - "Hi, hätte eine Frage" → "Klar, was möchtest du wissen?"
+  //     - "Habt ihr was für Zopf?" → "Ja, mit Extensions geht Zopf —
+  //        kurze Frage: hast du eher welliges oder glattes Haar?"
+  //     Kriterien (auch bei längerer Antwort OK, solange keine Produkt-
+  //     Behauptung getroffen wird):
+  //     - < 1000 Zeichen
+  //     - enthält Fragezeichen (= Bot fragt zurück)
+  //     - Klärungs-Verben drin
   //     - KEINE Produkt-URL
-  //     - KEINE Stock-Aussage (auf Lager / ausverkauft / kommt am ...)
-  //     - KEINE konkrete Längen-/Gramm-Angabe
+  //     - KEINE Stock-Aussage
+  //     - KEINE Maßangabe (60cm, 200g etc.)
+  //     - KEINE konkrete Farb-Empfehlung (Farbnamen-Codes wie 6A, 3A,
+  //       Cappuccino, Toffee, Dubai, Mocha, Pearl White, RAW, Honey etc.)
+  //     - KEIN konkreter Preis (€-Angaben)
   const looksLikeClarifyingQuestion =
-    botReply.length < 500 &&
+    botReply.length < 1000 &&
     /\?/.test(botReply) &&
-    /\b(suchst|brauchst|möchtest|welche|welches|hast\s+du|magst\s+du|was\s+möchtest|wonach|worum|interessiert|wonach\s+suchst)\b/i.test(botReply) &&
+    /\b(suchst|brauchst|möchtest|welche|welches|hast\s+du|magst\s+du|was\s+möchtest|wonach|worum|interessiert|hättest\s+du|trägst\s+du|hast\s+du\s+(von\s+natur\s+aus|natürlich))\b/i.test(botReply) &&
     !/hairvenly\.de\/products\//i.test(botReply) &&
     !/\b(auf\s+lager|sofort\s+verfügbar|ausverkauft|kommt\s+(am|ca|voraussichtlich)|wieder\s+rein|unterwegs)\b/i.test(botReply) &&
-    !/\b\d+\s*(cm|g|gramm|gr)\b/i.test(botReply);
+    !/\b\d+\s*(cm|g|gramm|gr)\b/i.test(botReply) &&
+    // Bekannte Farbnamen / Farbcodes — sobald die im Bot-Reply auftauchen,
+    // ist es keine reine Klärung mehr, sondern eine Empfehlung
+    !/\b(cappuccino|toffee|dubai|mocha|pearl\s+white|raw|honey|ebony|caramel|cool\s+toned|warm\s+toned|taupe|chestnut|hazelnut|platin|blond|aschbraun|mittelbraun|rehbraun|balayage|cool\s+blonde)\b/i.test(botReply) &&
+    !/\b#?\d+[A-Z]\b/.test(botReply) && // Farb-Codes wie 5A, 6A, 4/27T24
+    !/\b\d+[.,]?\d*\s*€/i.test(botReply); // keine konkreten Preise
   if (looksLikeClarifyingQuestion) return true;
 
   // 4. availability / general / pricing: Reply muss konkrete Daten enthalten
