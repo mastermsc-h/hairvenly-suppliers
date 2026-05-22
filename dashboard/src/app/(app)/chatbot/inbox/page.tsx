@@ -43,6 +43,8 @@ interface SessionStats {
   lastMsgAgentId?: string | null;
   botCount: number;
   humanCount: number;
+  autobotCount: number;            // assistant-Messages mit auto_sent=true
+  lastAutobotAt?: string;          // wann zuletzt eine autonome Bot-Antwort raus ging
 }
 
 export const dynamic = "force-dynamic";
@@ -145,15 +147,21 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     const cutoff = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString();
     const { data: msgs } = await svc
       .from("chat_messages")
-      .select("session_id, role, content, created_at, agent_id")
+      .select("session_id, role, content, created_at, agent_id, auto_sent")
       .in("session_id", sessionIds)
       .is("deleted_at", null)
       .gte("created_at", cutoff)
       .order("created_at", { ascending: false })
       .limit(20000);
     for (const m of msgs ?? []) {
-      const s = stats[m.session_id] ??= { botCount: 0, humanCount: 0 };
-      if (m.role === "assistant") s.botCount++;
+      const s = stats[m.session_id] ??= { botCount: 0, humanCount: 0, autobotCount: 0 };
+      if (m.role === "assistant") {
+        s.botCount++;
+        if ((m as { auto_sent?: boolean }).auto_sent) {
+          s.autobotCount++;
+          if (!s.lastAutobotAt) s.lastAutobotAt = m.created_at;
+        }
+      }
       if (m.role === "human_agent") s.humanCount++;
       // first-seen wins = aktuell neuestes Vorkommen
       if (!s.lastMsgRole) {
@@ -183,13 +191,17 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   }
   const totalUnreadCount = combinedSessions.filter(s => unreadMap[s.id]).length;
 
-  // Filter nach Mode: pure_bot = nur Bot hat geantwortet, with_human = Mensch hat reingeschrieben
+  // Filter nach Mode: pure_bot = nur Bot hat geantwortet, with_human = Mensch hat reingeschrieben,
+  // autobot_active = mindestens eine autonom-vom-Bot-gesendete Nachricht (auto_sent=true)
   let filteredSessions = combinedSessions;
   if (mode === "pure_bot") {
     filteredSessions = filteredSessions.filter(s => (stats[s.id]?.humanCount || 0) === 0);
   } else if (mode === "with_human") {
     filteredSessions = filteredSessions.filter(s => (stats[s.id]?.humanCount || 0) > 0);
+  } else if (mode === "autobot_active") {
+    filteredSessions = filteredSessions.filter(s => (stats[s.id]?.autobotCount || 0) > 0);
   }
+  const autobotActiveCount = combinedSessions.filter(s => (stats[s.id]?.autobotCount || 0) > 0).length;
 
   // "Nur unbeantwortet" Filter + Sortierung. Bei aktiver Suche wird der Filter
   // übersprungen — Treffer sollen IMMER sichtbar sein.
@@ -395,9 +407,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         <span className="text-neutral-500 font-medium shrink-0">Bot/Mensch</span>
         <div className="flex gap-1.5 flex-wrap">
           {[
-            { key: "all",        label: `Alle (${(sessions ?? []).length})`,                  icon: null },
-            { key: "pure_bot",   label: `Reine Bot-Chats (${pureBotCount})`,                  icon: <Bot size={11} className="text-pink-600" /> },
-            { key: "with_human", label: `Mit Mitarbeiter-Eingriff (${withHumanCount})`,        icon: <UserCheck size={11} className="text-amber-700" /> },
+            { key: "all",            label: `Alle (${(sessions ?? []).length})`,                  icon: null },
+            { key: "pure_bot",       label: `Reine Bot-Chats (${pureBotCount})`,                  icon: <Bot size={11} className="text-pink-600" /> },
+            { key: "with_human",     label: `Mit Mitarbeiter-Eingriff (${withHumanCount})`,        icon: <UserCheck size={11} className="text-amber-700" /> },
+            { key: "autobot_active", label: `🤖 Autobot war aktiv (${autobotActiveCount})`,        icon: null },
           ].map(opt => (
             <Link
               key={opt.key}
@@ -673,6 +686,14 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                           <span><Bot size={10} className="inline" /> {st.botCount}</span>
                           {st.humanCount > 0 && (
                             <span><UserCheck size={10} className="inline" /> {st.humanCount}</span>
+                          )}
+                          {(st.autobotCount || 0) > 0 && (
+                            <span
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 text-[10px] font-medium"
+                              title={`Bot hat ${st.autobotCount}× autonom geantwortet — bitte gegenchecken und ggf. Training-Hinweis geben`}
+                            >
+                              🤖 autobot · {st.autobotCount}
+                            </span>
                           )}
                           {((s as { team_notes?: string | null }).team_notes || "").trim().length > 0 && (
                             <span

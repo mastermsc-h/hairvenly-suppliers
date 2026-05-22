@@ -112,10 +112,12 @@ export function splitLongMessage(text: string, maxLen = 700): string[] {
  * nächste Öffnung kommunizieren, damit die Kundin nicht vergebens wartet.
  */
 function getBusinessHoursContext(): {
-  isOpen: boolean;
-  nowLabel: string;          // "Freitag 20:15"
-  reason: string;            // "Wochenende" | "Feierabend" | "vor Öffnung" | "Feiertag (Heilige Drei Könige)"
-  nextOpenLabel: string;     // "Montag ab 10:00 Uhr" / "morgen früh ab 10:00 Uhr"
+  status: "open_wide" | "open_closing_soon" | "closed";
+  isOpen: boolean;                  // open_wide ODER open_closing_soon
+  nowLabel: string;                 // "Freitag 20:15"
+  reason: string;                   // "Wochenende" / "Feierabend" / "vor Öffnung" / "Feiertag" / "kurz vor Feierabend"
+  nextOpenLabel: string;            // "Montag ab 10:00 Uhr" / "morgen früh ab 10:00 Uhr"
+  realisticHandoverLabel: string;   // "gleich" (open_wide) / "noch heute oder spätestens morgen früh" (closing_soon) / nextOpen (closed)
 } {
   const now = new Date();
   const berlinFmt = new Intl.DateTimeFormat("de-DE", {
@@ -130,6 +132,7 @@ function getBusinessHoursContext(): {
   const parts = Object.fromEntries(berlinFmt.formatToParts(now).map(p => [p.type, p.value]));
   const weekday = parts.weekday || "";
   const hour = Number(parts.hour || "0");
+  const minute = Number(parts.minute || "0");
   const isoDate = `${parts.year}-${parts.month}-${parts.day}`;
 
   // Bremen-Feiertage 2026 (bundesweite + Reformationstag seit 2018)
@@ -143,33 +146,56 @@ function getBusinessHoursContext(): {
   const weekendDays = new Set(["Samstag", "Sonntag"]);
   const isWeekend = weekendDays.has(weekday);
   const inWorkHours = hour >= 10 && hour < 18;
-  const isOpen = !isWeekend && !isHoliday && inWorkHours;
+  const isOpenAtAll = !isWeekend && !isHoliday && inWorkHours;
 
+  // CLOSING-SOON: weniger als 60 Min vor 18:00 — Anfragen können realistisch
+  // nicht mehr "gleich" abgearbeitet werden. Erwartung muss runtergeschraubt
+  // werden auf "noch heute, sonst morgen früh".
+  const minutesUntilClose = (18 - hour) * 60 - minute;
+  const isClosingSoon = isOpenAtAll && minutesUntilClose <= 60 && minutesUntilClose > 0;
+
+  let status: "open_wide" | "open_closing_soon" | "closed" = "closed";
+  if (isOpenAtAll && !isClosingSoon) status = "open_wide";
+  else if (isClosingSoon) status = "open_closing_soon";
+
+  const isOpen = isOpenAtAll;
   const nowLabel = `${weekday} ${parts.hour}:${parts.minute}`;
   let reason = "geöffnet";
   if (isHoliday) reason = "Feiertag";
   else if (isWeekend) reason = "Wochenende";
   else if (hour < 10) reason = "vor Öffnung";
   else if (hour >= 18) reason = "Feierabend";
+  else if (isClosingSoon) reason = `kurz vor Feierabend (noch ${minutesUntilClose} Min bis 18:00)`;
 
-  // Nächste Öffnung berechnen
+  // Nächste Öffnung berechnen — auch bei closing_soon nützlich
   let nextOpenLabel = "Mo-Fr 10:00-18:00 Uhr";
-  if (!isOpen) {
-    if (weekday === "Freitag" && hour >= 18) {
-      nextOpenLabel = "Montag ab 10:00 Uhr";
-    } else if (weekday === "Samstag") {
-      nextOpenLabel = "Montag ab 10:00 Uhr";
-    } else if (weekday === "Sonntag") {
-      nextOpenLabel = "morgen früh ab 10:00 Uhr";
-    } else if (hour < 10) {
-      nextOpenLabel = "heute ab 10:00 Uhr";
-    } else if (hour >= 18) {
-      nextOpenLabel = "morgen früh ab 10:00 Uhr";
-    } else if (isHoliday) {
-      nextOpenLabel = "am nächsten Werktag ab 10:00 Uhr";
-    }
+  if (weekday === "Freitag" && (hour >= 18 || isClosingSoon)) {
+    nextOpenLabel = "Montag ab 10:00 Uhr";
+  } else if (weekday === "Samstag") {
+    nextOpenLabel = "Montag ab 10:00 Uhr";
+  } else if (weekday === "Sonntag") {
+    nextOpenLabel = "morgen früh ab 10:00 Uhr";
+  } else if (!isOpenAtAll && hour < 10) {
+    nextOpenLabel = "heute ab 10:00 Uhr";
+  } else if (!isOpenAtAll && hour >= 18) {
+    nextOpenLabel = "morgen früh ab 10:00 Uhr";
+  } else if (isHoliday) {
+    nextOpenLabel = "am nächsten Werktag ab 10:00 Uhr";
+  } else if (isClosingSoon && weekday !== "Freitag") {
+    nextOpenLabel = "morgen früh ab 10:00 Uhr";
   }
-  return { isOpen, nowLabel, reason, nextOpenLabel };
+
+  // realisticHandoverLabel: was kann der Bot REALISTISCH versprechen?
+  let realisticHandoverLabel: string;
+  if (status === "open_wide") {
+    realisticHandoverLabel = "gleich (Mitarbeiterinnen sind jetzt im Salon)";
+  } else if (status === "open_closing_soon") {
+    realisticHandoverLabel = `noch heute, spätestens aber ${nextOpenLabel}`;
+  } else {
+    realisticHandoverLabel = nextOpenLabel;
+  }
+
+  return { status, isOpen, nowLabel, reason, nextOpenLabel, realisticHandoverLabel };
 }
 
 /**
@@ -429,20 +455,27 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += "- 🔒 NIEMALS Lieferanten-Namen erwähnen: Amanda, Eyfel, Ebru, China, etc. Das sind INTERNE Codes. Kundin spricht IMMER von der Haarqualität (Russisch glatt / Usbekisch wellig).\n";
 
   // GESCHÄFTSZEIT-KONTEXT
-  // Bot muss wissen ob aktuell Öffnungszeit ist, sonst kann er versprechen
-  // dass "die Kollegin sich gleich meldet" während eigentlich Samstagabend ist —
-  // die Kundin wartet dann vergebens bis Montag.
+  // Bot muss wissen ob aktuell Öffnungszeit ist UND wie viel Zeit noch übrig ist.
+  // Drei Stufen: open_wide ("gleich" OK), open_closing_soon (kurz vor Feierabend,
+  // realistisch "noch heute oder morgen früh"), closed (nächste Öffnung).
   const biz = getBusinessHoursContext();
   systemPrompt += "\n## 🕒 AKTUELLE GESCHÄFTSZEIT\n";
-  systemPrompt += `- Jetzt ist: **${biz.nowLabel} (Europe/Berlin)** — Status: ${biz.isOpen ? "✅ GEÖFFNET" : `❌ GESCHLOSSEN (${biz.reason})`}\n`;
+  systemPrompt += `- Jetzt ist: **${biz.nowLabel} (Europe/Berlin)**\n`;
+  systemPrompt += `- Status: **${biz.status === "open_wide" ? "✅ GEÖFFNET" : biz.status === "open_closing_soon" ? "⚠️ KURZ VOR FEIERABEND" : "❌ GESCHLOSSEN"}** (${biz.reason})\n`;
   systemPrompt += `- Öffnungszeiten: Mo-Fr 10:00-18:00 Uhr (ohne Feiertage in Bremen)\n`;
-  if (biz.isOpen) {
-    systemPrompt += `- Wenn du etwas an die Kollegin übergibst, darfst du Phrasen wie 'meldet sich gleich', 'schreibt dir in Kürze' o.ä. nutzen — die Mitarbeiterinnen sind JETZT da.\n`;
+  systemPrompt += `- Realistische Wartezeit-Erwartung für Übergaben an Mitarbeiterinnen: **${biz.realisticHandoverLabel}**\n`;
+
+  if (biz.status === "open_wide") {
+    systemPrompt += `- Bei Übergaben darfst du 'meldet sich gleich', 'schreibt dir in Kürze' o.ä. nutzen — die Mitarbeiterinnen sind JETZT da und haben noch Zeit.\n`;
+  } else if (biz.status === "open_closing_soon") {
+    systemPrompt += `- 🚨 NICHT 'gleich' versprechen — die Mitarbeiterinnen haben nur noch wenig Zeit bis Feierabend.\n`;
+    systemPrompt += `- Realistisch kommunizieren: 'Wir versuchen noch heute, spätestens aber ${biz.nextOpenLabel} schreibt dir die Kollegin' o.ä.\n`;
+    systemPrompt += `- Bei komplexeren Themen direkt 'spätestens ${biz.nextOpenLabel}' sagen — nicht falsche Hoffnung machen.\n`;
   } else {
-    systemPrompt += `- 🚨 NICHT 'gleich' / 'in Kürze' / 'sofort' / 'schreibt dir durch' verwenden, wenn die Antwort von einer Mitarbeiterin kommt — wir sind aktuell ${biz.reason.toLowerCase()}.\n`;
+    systemPrompt += `- 🚨 NICHT 'gleich' / 'in Kürze' / 'sofort' / 'schreibt dir durch' verwenden — wir sind aktuell ${biz.reason.toLowerCase()}.\n`;
     systemPrompt += `- Stattdessen ehrlich kommunizieren: '${biz.nextOpenLabel} meldet sich eine Kollegin mit den Details bei dir 💌' o.ä.\n`;
-    systemPrompt += `- Sachfragen (Verfügbarkeit, Preise, allgemeine Infos) darfst du natürlich trotzdem direkt beantworten — die Einschränkung gilt nur für Übergaben an Mitarbeiterinnen.\n`;
   }
+  systemPrompt += `- Sachfragen (Verfügbarkeit, Preise, allgemeine Infos) darfst du immer direkt beantworten — die Einschränkung gilt nur für Übergaben an Mitarbeiterinnen.\n`;
 
 
   // WISSENSDATENBANK (chatbot_faq) — statische Fakten die IMMER gelten.
@@ -1071,34 +1104,38 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
     console.warn("[respond] URL-sanitizer failed:", (e as Error).message);
   }
 
-  // SAFETY-NET 1c2: "gleich"-Phrasen außerhalb der Geschäftszeit ersetzen.
-  // Wenn aktuell geschlossen ist und der Bot trotzdem etwas wie "Kollegin
-  // meldet sich gleich" schreibt, wartet die Kundin vergebens bis Montag.
-  // Wir ersetzen die Wartezeit-Angabe durch die echte nächste Öffnung.
+  // SAFETY-NET 1c2: "gleich"-Phrasen wenn closed ODER closing_soon ersetzen.
+  // Bei closed → nächste Öffnung. Bei closing_soon → realistische Variante
+  // "noch heute, sonst morgen früh".
+  // Verhindert dass die Kundin am Freitag 17:35 "gleich" liest und dann
+  // bis Montag wartet.
   {
     const biz2 = getBusinessHoursContext();
-    if (!biz2.isOpen) {
+    if (biz2.status !== "open_wide") {
       const beforeBiz = finalText;
-      const nextOpen = biz2.nextOpenLabel;
+      // Wording-Ziel je Status:
+      const replacementLabel =
+        biz2.status === "closed"
+          ? biz2.nextOpenLabel
+          : `noch heute, spätestens ${biz2.nextOpenLabel}`;
+
       const replacements: Array<[RegExp, string]> = [
-        // "Kollegin meldet sich gleich" / "schreibt dir gleich" / "schreibt dir kurz durch"
         [/\b(meine\s+|eine\s+|unsere\s+)?(kollegin|farb-?expertin|stylistin|mitarbeiterin)\s+(meldet|schreibt|kommt|antwortet|kümmert)\s+sich\s+(gleich|in\s+kürze|sofort|kurz\s+(durch|gleich)|gleich\s+(durch|bei\s+dir))/gi,
-         `$1$2 meldet sich ${nextOpen}`],
-        // "schreibe dir gleich" / "schreibe dir gleich mit der Kollegin durch"
+         `$1$2 meldet sich ${replacementLabel}`],
         [/\b(schreibe|melde|sage)\s+(dir|euch)\s+gleich(\s+mit\s+der\s+kollegin\s+durch)?/gi,
-         `melde mich ${nextOpen} bei dir`],
-        // "kommt gleich bei dir an" / "in Kürze"
+         `melde mich ${replacementLabel} bei dir`],
         [/\b(meldet\s+sich\s+(gleich|in\s+kürze|kurz)\s+bei\s+dir)/gi,
-         `meldet sich ${nextOpen} bei dir`],
-        // Generisches "gleich" → "morgen/Montag" wenn Übergabe-Kontext
+         `meldet sich ${replacementLabel} bei dir`],
         [/\bschreibe?\s+dir\s+(die\s+\w+\s+)?gleich(\s+durch)?/gi,
-         `schreibe dir ${biz2.reason === "Wochenende" ? "Montag" : "morgen"} die Details`],
+         biz2.status === "closed"
+           ? `schreibe dir ${biz2.reason === "Wochenende" ? "Montag" : "morgen"} die Details`
+           : `schreibe dir die Details noch heute oder spätestens ${biz2.nextOpenLabel}`],
       ];
       for (const [re, repl] of replacements) {
         finalText = finalText.replace(re, repl);
       }
       if (beforeBiz !== finalText) {
-        console.warn(`[respond] SCRUBBED "gleich"-Phrasen → "${nextOpen}" (außerhalb der Geschäftszeit)`);
+        console.warn(`[respond] SCRUBBED "gleich"-Phrasen → "${replacementLabel}" (Status: ${biz2.status})`);
       }
     }
   }

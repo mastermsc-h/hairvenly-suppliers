@@ -35,6 +35,7 @@ interface Message {
   tool_calls: { name: string }[] | null;
   agent_name: string | null;
   auto_sent?: boolean;
+  teach_feedback_at?: string | null;
   reply_to?: { role: string; content_preview: string } | null;
   created_at: string;
 }
@@ -769,6 +770,10 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
             )}
             <span>Ava von {signatureName || "—"} · {time}</span>
           </div>
+          {/* Nachtraining-Box für Autobot-Antworten */}
+          {msg.auto_sent && (
+            <AutobotTeachBox messageId={msg.id} originalText={msg.content || ""} alreadyTaught={!!msg.teach_feedback_at} />
+          )}
         </div>
         <div className="w-7 h-7 rounded-full bg-rose-100 flex-shrink-0 flex items-center justify-center">
           <Bot size={12} className="text-rose-600" />
@@ -1160,6 +1165,115 @@ function SplitButton({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * Inline-Nachtraining-Box für autonom-gesendete Bot-Antworten.
+ * Klick auf "🎓 Für nächstes Mal trainieren" öffnet 2 Felder:
+ *   - korrigierte Variante (was der Bot besser gesagt hätte)
+ *   - Notiz (warum die Original-Antwort schlecht war)
+ * Submit schickt das via Server-Action teachFromAutobotMessage an chatbot_training
+ * — die ORIGINAL-Bot-Message bleibt unverändert im Chat, der Eintrag dient nur
+ * dem zukünftigen Bot-Lernen.
+ */
+function AutobotTeachBox({
+  messageId,
+  originalText,
+  alreadyTaught,
+}: { messageId: string; originalText: string; alreadyTaught: boolean }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(originalText);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(alreadyTaught);
+
+  if (done) {
+    return (
+      <div className="mt-1 inline-flex items-center gap-1 text-[10px] text-emerald-700">
+        <Check size={10} /> Nachtrainiert — Bot lernt fürs nächste Mal
+      </div>
+    );
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-1 inline-flex items-center gap-1 text-[10px] text-purple-600 hover:text-purple-900 underline-offset-2 hover:underline"
+        title="Bot-Antwort war nicht optimal? Sag dem Bot wie es besser wäre — er lernt für ähnliche Fälle"
+      >
+        <Sparkles size={10} /> Für nächstes Mal trainieren
+      </button>
+    );
+  }
+
+  async function submit() {
+    if (!text.trim() || !note.trim()) return;
+    setBusy(true);
+    try {
+      const { teachFromAutobotMessage } = await import("@/lib/actions/chat-inbox");
+      await teachFromAutobotMessage(messageId, text.trim(), note.trim());
+      setDone(true);
+      setOpen(false);
+      router.refresh();
+    } catch (e) {
+      alert(`Training fehlgeschlagen: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 rounded-xl border border-purple-200 bg-purple-50/40 p-2.5 space-y-2 text-left">
+      <div className="text-[11px] font-medium text-purple-700 flex items-center gap-1">
+        <Sparkles size={11} /> Nachtraining für diese Autobot-Antwort
+      </div>
+      <div className="space-y-1">
+        <label className="text-[10px] font-medium text-purple-700">Wie hätte der Bot besser geantwortet?</label>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={5}
+          className="w-full rounded-lg border border-purple-200 bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 resize-none"
+          disabled={busy}
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="text-[10px] font-medium text-purple-700">Was war an der Original-Antwort falsch / nicht gut? (wird als Lern-Hinweis gespeichert)</label>
+        <input
+          type="text"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder='z.B. "ETA-Datum war aus falscher Linie" / "Soll erst nach Foto fragen statt direkt Empfehlung"'
+          className="w-full rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400"
+          disabled={busy}
+        />
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={submit}
+          disabled={busy || !text.trim() || !note.trim()}
+          className="bg-purple-600 text-white rounded-lg px-3 py-1.5 hover:bg-purple-700 disabled:opacity-40 inline-flex items-center gap-1 text-xs font-medium"
+        >
+          <Check size={11} /> {busy ? "Speichere…" : "Als Training speichern"}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setOpen(false); setText(originalText); setNote(""); }}
+          disabled={busy}
+          className="text-xs px-3 py-1.5 rounded-lg border border-neutral-300 text-neutral-600 hover:bg-neutral-50"
+        >
+          Abbrechen
+        </button>
+      </div>
+      <div className="text-[10px] text-purple-600">
+        💡 Die Original-Nachricht bleibt unverändert im Chat — wir speichern die Korrektur nur als Lern-Beispiel für ähnliche zukünftige Fälle.
+      </div>
     </div>
   );
 }

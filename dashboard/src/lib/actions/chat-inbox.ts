@@ -766,3 +766,84 @@ export async function deleteSession(sessionId: string) {
   await svc.from("chat_sessions").delete().eq("id", sessionId);
   revalidatePath("/chatbot/inbox");
 }
+
+/**
+ * Erfasst Mitarbeiter-Feedback zu einer autonom-vom-Bot-gesendeten Nachricht.
+ * Wird als chatbot_training-Entry gespeichert: bad_answer = der ursprüngliche
+ * Autobot-Text, good_answer = die Mitarbeiter-Korrektur, feedback = die Notiz.
+ * Damit lernt der Bot beim nächsten ähnlichen Fall, was er anders machen soll.
+ *
+ * WICHTIG: Diese Funktion sendet NICHTS an die Kundin — sie ist rein für die
+ * interne Trainingsbasis. Die Original-Bot-Message bleibt unverändert im Chat.
+ */
+export async function teachFromAutobotMessage(
+  messageId: string,
+  correctedText: string,
+  feedback: string
+) {
+  if (!correctedText?.trim()) throw new Error("Korrigierte Antwort fehlt");
+  if (!feedback?.trim())      throw new Error("Feedback-Notiz fehlt");
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const svc = createServiceClient();
+
+  // 1) Original-Bot-Message holen (für bad_answer + Kontext)
+  const { data: msg } = await svc.from("chat_messages")
+    .select("id, session_id, content, role, auto_sent, created_at")
+    .eq("id", messageId)
+    .single();
+  if (!msg) throw new Error("Bot-Message nicht gefunden");
+  if (msg.role !== "assistant") throw new Error("Nur Bot-Antworten können nachtrainiert werden");
+
+  // 2) Letzte User-Message vor der Bot-Message holen (= Trigger)
+  const { data: triggerMsg } = await svc.from("chat_messages")
+    .select("content")
+    .eq("session_id", msg.session_id)
+    .eq("role", "user")
+    .is("deleted_at", null)
+    .lt("created_at", msg.created_at)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // 3) Letzte ~6 Messages als Kontext für context_messages
+  const { data: contextMsgs } = await svc.from("chat_messages")
+    .select("role, content, created_at")
+    .eq("session_id", msg.session_id)
+    .is("deleted_at", null)
+    .lte("created_at", msg.created_at)
+    .order("created_at", { ascending: false })
+    .limit(8);
+  const context = (contextMsgs || []).reverse().map(m => ({ role: m.role, content: m.content }));
+
+  // 4) Mitarbeiter-Name aus profiles
+  const { data: profile } = await svc.from("profiles")
+    .select("display_name, email").eq("id", user.id).maybeSingle();
+  const authorLabel = profile?.display_name || profile?.email || "Mitarbeiterin";
+
+  // 5) Training-Entry speichern (pinned damit Bot ihn priorisiert)
+  const trainErr = await svc.from("chatbot_training").insert({
+    user_message:     triggerMsg?.content || "(keine direkte Kunden-Frage davor)",
+    bad_answer:       msg.content,
+    good_answer:      correctedText.trim(),
+    feedback:         `[Nachtraining von ${authorLabel}] ${feedback.trim()}`,
+    context_messages: context,
+    tags:             ["autobot-nachtraining", "manuelle-korrektur"],
+    pinned:           true,
+    active:           true,
+    created_by:       user.id,
+  });
+  if (trainErr.error) throw new Error("Training konnte nicht gespeichert werden: " + trainErr.error.message);
+
+  // 6) Auf der Bot-Message ein Flag setzen, damit UI weiß "diese wurde nachtrainiert"
+  //    — verhindert dass dieselbe Korrektur 5× landet.
+  await svc.from("chat_messages")
+    .update({ teach_feedback_at: new Date().toISOString(), teach_feedback_by: user.id })
+    .eq("id", messageId);
+
+  revalidatePath(`/chatbot/inbox/${msg.session_id}`);
+  return { ok: true as const };
+}
