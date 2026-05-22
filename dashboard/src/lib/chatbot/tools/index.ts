@@ -213,12 +213,39 @@ const getStockEta: ToolDef = {
       // Stufe 2 (loose): falls 0 Treffer, retry OHNE numerische Längen-/Gramm-Tokens
       //                  ("60cm", "225g") da Produktnamen diese nicht immer enthalten
       //                  (Clip-Ins haben [225g] aber kein "60cm" im Namen).
+      // WORD-BOUNDARY-MATCHING für reine Buchstaben-Token (= Farb-Namen).
+      // Beispiel: search="taupe" sollte NUR Produkte mit "TAUPE" als ganzes Wort
+      // matchen, NICHT "SMOKY TAUPE" wo "taupe" Teil eines zusammengesetzten
+      // Namens ist. Sonst lieferte das Tool fälschlich SMOKY TAUPE-Treffer für
+      // eine TAUPE-Suche.
+      //
+      // Numerische Token (60cm, 225g) und Methoden-Wörter (russisch, tape,
+      // bonding etc.) bleiben Substring-Match — da macht das Wort-Boundary
+      // mehr Probleme als es löst.
+      const NUMERIC_LENGTH_GRAM = /^\d+(cm|g|gramm|gr)$/i;
+      const METHOD_TOKENS = new Set([
+        "russisch", "usbekisch", "glatt", "wellig",
+        "tape", "tapes", "bonding", "bondings", "mini", "standard",
+        "tressen", "weft", "classic", "genius", "invisible", "butterfly",
+        "clip", "clips", "ponytail", "extension", "extensions",
+      ]);
+      const isColorToken = (t: string) =>
+        /^[a-zäöüß]+$/i.test(t) && !METHOD_TOKENS.has(t) && !NUMERIC_LENGTH_GRAM.test(t);
+
       const buildMatcher = (toks: string[]) => (text: string) => {
         const hay = text.toLowerCase();
-        return toks.every(t => hay.includes(t));
+        return toks.every(t => {
+          if (isColorToken(t)) {
+            // Word-Boundary für Color-Tokens: "taupe" matched nur "TAUPE" als
+            // ganzes Wort, NICHT "SMOKY TAUPE". Sonst halluziniert das Tool
+            // SMOKY-TAUPE-Treffer für eine TAUPE-Suche.
+            const re = new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+            return re.test(hay);
+          }
+          return hay.includes(t);
+        });
       };
       const matchTokens = buildMatcher(tokens);
-      const NUMERIC_LENGTH_GRAM = /^\d+(cm|g|gramm|gr)$/i;
       const looseTokens = tokens.filter(t => !NUMERIC_LENGTH_GRAM.test(t));
       const matchLoose = buildMatcher(looseTokens);
 
