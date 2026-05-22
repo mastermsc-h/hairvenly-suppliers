@@ -226,6 +226,7 @@ function getBusinessHoursContext(): {
 async function loadProductCatalog(): Promise<{
   promptText: string;
   validCombos: Set<string>;          // "methodKey|lengthKey", normalisiert lowercase
+  methodLines: Map<string, Set<"russisch" | "usbekisch" | "andere">>; // welche Linien je Methode
   methodLengths: Map<string, Set<string>>; // method (lower) → set of lengths (e.g. "55cm","60cm")
   methodSupplier: Map<string, string>;     // method (lower) → "amanda"/"eyfel"
 }> {
@@ -288,6 +289,10 @@ async function loadProductCatalog(): Promise<{
   const valid = new Set<string>();
   const ml = new Map<string, Set<string>>();
   const msup = new Map<string, string>();
+  // methodLines: für JEDEN Methodennamen die Set von Linien, in denen er
+  // existiert. WICHTIG: viele Methoden gibt's in BEIDEN Linien (Bondings,
+  // Genius Weft, Ponytail) — eine 1:1-Map wäre falsch.
+  const methodLines = new Map<string, Set<"russisch" | "usbekisch" | "andere">>();
   for (const m of methodMap.values()) {
     const key = m.name.toLowerCase();
     if (!ml.has(key)) ml.set(key, new Set());
@@ -296,11 +301,17 @@ async function loadProductCatalog(): Promise<{
       valid.add(`${key}|${lenKey}`);
       ml.get(key)!.add(lenKey);
     }
-    // Supplier-Label vereinfachen
+    const line: "russisch" | "usbekisch" | "andere" =
+      m.supplier.toLowerCase().includes("russisch") ? "russisch"
+      : m.supplier.toLowerCase().includes("usbekisch") ? "usbekisch"
+      : "andere";
+    if (!methodLines.has(key)) methodLines.set(key, new Set());
+    methodLines.get(key)!.add(line);
+    // Supplier-Label vereinfachen (Legacy — wird nur informativ benutzt)
     msup.set(key, m.supplier.toLowerCase().includes("amanda") ? "amanda" :
                   m.supplier.toLowerCase().includes("eyfel") ? "eyfel" : "");
   }
-  return { promptText: txt, validCombos: valid, methodLengths: ml, methodSupplier: msup };
+  return { promptText: txt, validCombos: valid, methodLengths: ml, methodSupplier: msup, methodLines };
 }
 
 /**
@@ -1213,6 +1224,96 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
     }
   } catch (e) {
     console.warn("[respond] URL-sanitizer failed:", (e as Error).message);
+  }
+
+  // SAFETY-NET 1m: FALSCHE NEGATIV-AUSSAGEN ÜBER METHODE × LINIE
+  // Häufige Halluzination: Bot sagt "Genius Weft gibt's nur in russisch glatt,
+  // nicht in usbekisch wellig" — aber Genius Weft existiert in BEIDEN Linien.
+  // Wir prüfen jede solche Behauptung gegen die echte methodLines-Map.
+  try {
+    const ml = catalog.methodLines;
+    // Methoden-Aliase (Wortform im Bot-Text → DB-Key)
+    const aliases: Array<[RegExp, string]> = [
+      [/\bgenius[\s-]?weft\b/gi, "genius weft"],
+      [/\bgenius[\s-]?tressen\b/gi, "genius weft"],
+      [/\bclassic[\s-]?tressen\b/gi, "classic tressen"],
+      [/\bclassic[\s-]?weft\b/gi, "classic weft"],
+      [/\binvisible[\s-]?weft\b/gi, "invisible weft"],
+      [/\binvisible[\s-]?butterfly\b/gi, "invisible weft"],
+      [/\bmini[\s-]?tapes?\b/gi, "minitapes"],
+      [/\bstandard[\s-]?tapes?\b/gi, "standard tapes"],
+      [/\btapes?\b/gi, "tapes"], // fallback (wird je nach Kontext gemappt)
+      [/\bbondings?\b/gi, "bondings"],
+      [/\bclip[\s-]?ins?\b/gi, "clip-ins"],
+      [/\bponytails?\b/gi, "ponytail"],
+    ];
+    // Negativ-Behauptungs-Patterns über Linien
+    // z.B. "Genius Weft gibt es leider nur in russisch glatt"
+    //      "Genius Weft haben wir nicht in usbekisch wellig"
+    //      "Genius Weft gibt's nur in der russisch-glatten Linie, nicht in usbekisch wellig"
+    const lineNegativePatterns = [
+      // "X gibt es leider nur in <line>"
+      /\b([A-ZÄÖÜa-zäöü][a-zäöü\s-]{2,30}?)\s+gibt\s+(es\s+)?(leider\s+)?nur\s+in\s+(?:der\s+)?(russisch[\s-]?glatte?[rn]?|usbekisch[\s-]?wellige?[rn]?|glatt(?:en|er|e)?|wellig(?:en|er|e)?)\s+linie?/gi,
+      // "X haben wir nur in <line>"
+      /\b([A-ZÄÖÜa-zäöü][a-zäöü\s-]{2,30}?)\s+haben\s+wir\s+(leider\s+)?nur\s+in\s+(?:der\s+)?(russisch[\s-]?glatte?[rn]?|usbekisch[\s-]?wellige?[rn]?|glatt(?:en|er|e)?|wellig(?:en|er|e)?)/gi,
+      // "X gibt es nicht in <line>"
+      /\b([A-ZÄÖÜa-zäöü][a-zäöü\s-]{2,30}?)\s+gibt\s+es\s+(?:leider\s+)?nicht\s+in\s+(?:der\s+)?(russisch[\s-]?glatte?[rn]?|usbekisch[\s-]?wellige?[rn]?|glatt(?:en|er|e)?|wellig(?:en|er|e)?)/gi,
+    ];
+
+    const resolveMethod = (snippet: string): string | null => {
+      // Aliase greifen lassen — nimm den ersten der matched
+      const s = snippet.trim();
+      for (const [re, key] of aliases) {
+        if (re.test(s)) return key;
+      }
+      return null;
+    };
+    const resolveLine = (snippet: string): "russisch" | "usbekisch" | null => {
+      const s = snippet.toLowerCase();
+      if (/russisch|glatt/.test(s)) return "russisch";
+      if (/usbekisch|wellig/.test(s)) return "usbekisch";
+      return null;
+    };
+
+    let correctionInfo: string | null = null;
+    for (const pat of lineNegativePatterns) {
+      finalText = finalText.replace(pat, (match, methodSnippet, _l2, _l3, lineSnippet) => {
+        // bei manchen Patterns gibt es ein leeres _l3 (das "leider")
+        const ls = typeof _l3 === "string" && /russisch|usbekisch|glatt|wellig/i.test(_l3)
+          ? _l3
+          : lineSnippet;
+        const methodKey = resolveMethod(methodSnippet);
+        const negatedLine = resolveLine(ls);
+        if (!methodKey || !negatedLine) return match;
+        const actualLines = ml.get(methodKey);
+        if (!actualLines) return match;
+
+        // "X gibt es nur in Russisch glatt" — behauptet, dass es NICHT in usbekisch existiert
+        // (oder umgekehrt)
+        const otherLine = negatedLine === "russisch" ? "usbekisch" : "russisch";
+
+        // Im "gibt es nicht in Y" Pattern ist negatedLine = Y (also die behauptet leere Linie)
+        // Im "gibt es nur in Y" Pattern ist negatedLine = Y, andere = otherLine ist behauptet leer
+        const isOnlyPattern = /\bnur\b/i.test(match);
+        const claimedEmptyLine = isOnlyPattern ? otherLine : negatedLine;
+
+        if (actualLines.has(claimedEmptyLine)) {
+          // FALSCH! Methode existiert in der angeblich leeren Linie.
+          const methodLabel = methodSnippet.trim();
+          const lineLabel = claimedEmptyLine === "russisch" ? "Russisch glatt" : "Usbekisch wellig";
+          correctionInfo = `${methodLabel} existiert auch in ${lineLabel}`;
+          console.warn(`[respond] FALSE NEGATIVE METHOD-LINE: "${match}" — ${methodKey} existiert in BEIDEN Linien (${Array.from(actualLines).join(", ")})`);
+          // Ersatz: Sicherheits-Variante
+          return `${methodLabel} hätten wir tatsächlich in beiden Linien — lass mich kurz die richtigen Längen und Verfügbarkeiten raussuchen`;
+        }
+        return match;
+      });
+    }
+    if (correctionInfo) {
+      finalText = finalText.replace(/\n{3,}/g, "\n\n").trim();
+    }
+  } catch (e) {
+    console.warn("[respond] Methode-Linie-Validator fehlgeschlagen:", (e as Error).message);
   }
 
   // SAFETY-NET 1c1: WOCHENENDE-FALLE — "morgen früh" am Freitag/Samstag.
