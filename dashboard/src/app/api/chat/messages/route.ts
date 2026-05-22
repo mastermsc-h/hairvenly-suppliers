@@ -55,6 +55,13 @@ export async function GET(req: NextRequest) {
   const messages = (data ?? []).map(m => {
     const replyToExt = (m as { reply_to_external_id?: string | null }).reply_to_external_id;
     const replied = replyToExt ? replyPreviewByExt.get(replyToExt) : null;
+    // Fallback: reply_to vorhanden aber Original nicht in DB → "external"-Marker
+    let replyTo: { id: string | null; role: string; content_preview: string } | null = null;
+    if (replied) {
+      replyTo = { id: replied.id, role: replied.role, content_preview: (replied.content || "").slice(0, 140) };
+    } else if (replyToExt) {
+      replyTo = { id: null, role: "external", content_preview: "" };
+    }
     return {
       id: m.id,
       role: m.role,
@@ -67,7 +74,7 @@ export async function GET(req: NextRequest) {
       })(),
       auto_sent: (m as { auto_sent?: boolean }).auto_sent ?? false,
       teach_feedback_at: (m as { teach_feedback_at?: string | null }).teach_feedback_at ?? null,
-      reply_to: replied ? { id: replied.id, role: replied.role, content_preview: (replied.content || "").slice(0, 140) } : null,
+      reply_to: replyTo,
       created_at: m.created_at,
     };
   });

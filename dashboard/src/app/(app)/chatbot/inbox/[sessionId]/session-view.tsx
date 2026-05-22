@@ -36,7 +36,7 @@ interface Message {
   agent_name: string | null;
   auto_sent?: boolean;
   teach_feedback_at?: string | null;
-  reply_to?: { id?: string; role: string; content_preview: string } | null;
+  reply_to?: { id?: string | null; role: string; content_preview: string } | null;
   created_at: string;
 }
 
@@ -702,14 +702,22 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
     <>
       <CornerUpLeft size={11} className="mt-0.5 flex-shrink-0 text-neutral-400" />
       <div className="min-w-0 text-left">
-        <span className="font-medium text-neutral-600">
-          {msg.reply_to.role === "user" ? "Kunde" : msg.reply_to.role === "assistant" ? "Ava" : "Mitarbeiterin"}:
-        </span>{" "}
-        <span className="italic">
-          {msg.reply_to.content_preview.length >= 140
-            ? msg.reply_to.content_preview + "…"
-            : msg.reply_to.content_preview}
-        </span>
+        {msg.reply_to.role === "external" ? (
+          <span className="italic text-neutral-500">
+            Antwort auf eine ältere Nachricht (nicht mehr im Verlauf)
+          </span>
+        ) : (
+          <>
+            <span className="font-medium text-neutral-600">
+              {msg.reply_to.role === "user" ? "Kunde" : msg.reply_to.role === "assistant" ? "Ava" : "Mitarbeiterin"}:
+            </span>{" "}
+            <span className="italic">
+              {msg.reply_to.content_preview.length >= 140
+                ? msg.reply_to.content_preview + "…"
+                : msg.reply_to.content_preview}
+            </span>
+          </>
+        )}
       </div>
     </>
   ) : null;

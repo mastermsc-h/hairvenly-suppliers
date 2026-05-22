@@ -125,6 +125,20 @@ export default async function ChatSessionPage({ params }: PageProps) {
           return msgs.map(m => {
             const replyToExt = (m as { reply_to_external_id?: string | null }).reply_to_external_id;
             const repliedTo = replyToExt ? byExt.get(replyToExt) : null;
+            // Wenn die Reply-Referenz da ist, aber das Original nicht in unserer
+            // DB ist (zu alt, Story-Reply, vor Webhook-Onboarding), trotzdem
+            // einen "external"-Hinweis-Snippet zeigen — sonst weiß die
+            // Mitarbeiterin gar nicht dass es eine Reply war.
+            let replyTo: { id: string | null; role: string; content_preview: string } | null = null;
+            if (repliedTo) {
+              replyTo = {
+                id: repliedTo.id,
+                role: repliedTo.role,
+                content_preview: (repliedTo.content || "").slice(0, 140),
+              };
+            } else if (replyToExt) {
+              replyTo = { id: null, role: "external", content_preview: "" };
+            }
             return {
               id: m.id,
               role: m.role,
@@ -137,11 +151,7 @@ export default async function ChatSessionPage({ params }: PageProps) {
               })(),
               auto_sent: (m as { auto_sent?: boolean }).auto_sent ?? false,
               teach_feedback_at: (m as { teach_feedback_at?: string | null }).teach_feedback_at ?? null,
-              reply_to: repliedTo ? {
-                id: repliedTo.id,
-                role: repliedTo.role,
-                content_preview: (repliedTo.content || "").slice(0, 140),
-              } : null,
+              reply_to: replyTo,
               created_at: m.created_at,
             };
           });
