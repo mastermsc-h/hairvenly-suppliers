@@ -169,11 +169,15 @@ async function handleInstagramOrMessenger(m: MessagingItem, source: "instagram" 
   if (!hasText && !hasAttachments) return;
 
   const senderId = m.sender.id;
-  // Audio-/Video-/Foto-Typen unterscheiden für korrekten Synthese-Text.
-  // Vision-LLM kann Bilder lesen (→ "[Foto]"), aber NICHT Audios/Videos abhören.
+  // Attachment-Typen unterscheiden für korrekten Synthese-Text.
+  // Vision-LLM kann normale Bilder lesen (→ "[Foto]"), aber NICHT Audios/Videos
+  // oder Einmal-Ansicht-Fotos (ephemeral, URL ist leer = Kundin hat View-Once
+  // verwendet und wir sehen das Bild gar nicht).
   const allAudio = hasAttachments && attachments.every(a => a.type === "audio");
   const allVideo = hasAttachments && attachments.every(a => a.type === "video");
+  const allEphemeral = hasAttachments && attachments.every(a => a.type === "ephemeral");
   const text = m.message?.text || (
+    allEphemeral ? "[Einmal-Foto — nicht sichtbar]" :
     allAudio ? "[Audio]" :
     allVideo ? "[Video]" :
     hasAttachments ? "[Foto]" :
@@ -437,16 +441,26 @@ async function routeIncoming(opts: {
     return;
   }
 
-  // ── AUDIO-/VOICE-BYPASS ──
-  // Bot kann Audios/Videos nicht abhören. Statt das LLM zu bemühen (das
-  // ohnehin nur einen Platzhalter "[Audio]" zu sehen bekäme), schickt er
-  // direkt eine süße ehrliche Antwort mit Optionen: aufschreiben oder
-  // auf Mitarbeiterin warten.
-  const customerSentAudio = (opts.attachments || []).some(a => a.type === "audio");
-  const customerSentVideo = (opts.attachments || []).some(a => a.type === "video");
+  // ── MEDIEN-BYPASS (Audio / Video / Einmal-Foto) ──
+  // Drei Medientypen kann der Bot nicht verarbeiten:
+  //   1) Audio  — kann nicht abgehört werden
+  //   2) Video  — kann nicht angesehen werden
+  //   3) Ephemeral / Einmal-Foto — Kundin hat View-Once gewählt, das Bild
+  //      ist nicht mehr aufrufbar (URL ist leer). Wir wollen sie freundlich
+  //      bitten das Bild normal zu schicken, damit die Stylistin Farbberatung
+  //      machen kann.
+  const customerAttachments = opts.attachments || [];
+  const customerSentAudio = customerAttachments.some(a => a.type === "audio");
+  const customerSentVideo = customerAttachments.some(a => a.type === "video");
+  const customerSentEphemeral = customerAttachments.some(a => a.type === "ephemeral");
   const noTextWithAudio = customerSentAudio && (!opts.text || /^\[Audio\]$/i.test(opts.text.trim()));
   const noTextWithVideo = customerSentVideo && (!opts.text || /^\[Video\]$/i.test(opts.text.trim()));
-  if ((noTextWithAudio || noTextWithVideo) && (botMode === "auto" || botMode === "selective_auto") && session.status === "active") {
+  const noTextWithEphemeral = customerSentEphemeral && (!opts.text || /^\[Einmal-Foto/i.test(opts.text.trim()));
+  if (
+    (noTextWithAudio || noTextWithVideo || noTextWithEphemeral) &&
+    (botMode === "auto" || botMode === "selective_auto") &&
+    session.status === "active"
+  ) {
     try {
       // Wartezeit-Wording je nach Geschäftszeit (importieren dynamisch um Cycle zu vermeiden)
       const { getBusinessHoursContext } = await import("@/lib/chatbot/business-hours");
@@ -456,8 +470,18 @@ async function routeIncoming(opts: {
         : biz.status === "open_closing_soon"
           ? `Sonst meldet sich noch heute oder spätestens ${biz.nextOpenLabel} eine Kollegin`
           : `Sonst meldet sich ${biz.nextOpenLabel} eine Kollegin bei dir`;
-      const mediaWord = noTextWithAudio ? "Audios" : "Videos";
-      const reply = `Hallöchen 💕\n\nBin nur ein süßer kleiner Bot 🤖 und noch am Lernen — ${mediaWord} kann ich leider noch nicht abhören 🥲\n\nMagst du mir kurz aufschreiben worum's geht? Dann helfe ich dir sofort weiter ✨\n\n${handoffTime} 💌`;
+
+      let reply: string;
+      let logType: string;
+      if (noTextWithEphemeral) {
+        // Einmal-Ansicht-Foto — wir können das Bild nicht sehen, weder Bot noch Stylistin
+        reply = `Hallöchen Liebes 💕\n\nDein Foto wurde als Einmal-Ansicht geschickt — ich kann es leider nicht sehen 🥲 Und unsere Stylistin später auch nicht, weil das Bild nach dem Versand verschwindet.\n\nMagst du es einfach als ganz normales Foto noch mal schicken? Dann kann unsere Farb-Expertin es sich in Ruhe anschauen und dir eine passende Empfehlung geben ✨\n\n${handoffTime} 💌`;
+        logType = "Einmal-Foto";
+      } else {
+        const mediaWord = noTextWithAudio ? "Audios" : "Videos";
+        reply = `Hallöchen 💕\n\nBin nur ein süßer kleiner Bot 🤖 und noch am Lernen — ${mediaWord} kann ich leider noch nicht abhören 🥲\n\nMagst du mir kurz aufschreiben worum's geht? Dann helfe ich dir sofort weiter ✨\n\n${handoffTime} 💌`;
+        logType = noTextWithAudio ? "Audio" : "Video";
+      }
 
       const { data: inserted } = await svc.from("chat_messages").insert({
         session_id: session.id,
@@ -480,10 +504,10 @@ async function routeIncoming(opts: {
           await svc.from("chat_messages").update({ external_id: r.message_id }).eq("id", inserted.id);
         }
       }
-      console.log(`[meta-webhook] Audio/Video-Bypass-Antwort gesendet für session ${session.id}`);
+      console.log(`[meta-webhook] ${logType}-Bypass-Antwort gesendet für session ${session.id}`);
       return;
     } catch (e) {
-      console.error("[meta-webhook] Audio-Bypass fehlgeschlagen:", e);
+      console.error("[meta-webhook] Medien-Bypass fehlgeschlagen:", e);
       // Fall through: normales Bot-Handling
     }
   }
