@@ -36,7 +36,7 @@ interface Message {
   agent_name: string | null;
   auto_sent?: boolean;
   teach_feedback_at?: string | null;
-  reply_to?: { role: string; content_preview: string } | null;
+  reply_to?: { id?: string; role: string; content_preview: string } | null;
   created_at: string;
 }
 
@@ -685,10 +685,23 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
   // Reply-Threading: wenn diese Nachricht eine direkte Antwort auf eine
   // frühere Nachricht ist (Instagram-Reply-Feature), zeigen wir wie auf
   // Instagram darüber einen kleinen "Antwort auf"-Snippet mit Vorschau.
-  const ReplyPreview = msg.reply_to ? (
-    <div className="mb-1 text-[11px] text-neutral-500 flex items-start gap-1 border-l-2 border-neutral-300 pl-2 max-w-full">
+  // Klick darauf → scrollt zur Original-Message + kurzes Highlight.
+  const jumpToRepliedMessage = msg.reply_to?.id ? () => {
+    const targetId = msg.reply_to!.id!;
+    const el = document.querySelector(`[data-msg-id="${targetId}"]`) as HTMLElement | null;
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Highlight kurz aufblitzen lassen
+    el.classList.add("ring-2", "ring-amber-400", "ring-offset-2", "transition-shadow");
+    setTimeout(() => {
+      el.classList.remove("ring-2", "ring-amber-400", "ring-offset-2");
+    }, 1600);
+  } : null;
+
+  const ReplyPreviewInner = msg.reply_to ? (
+    <>
       <CornerUpLeft size={11} className="mt-0.5 flex-shrink-0 text-neutral-400" />
-      <div className="min-w-0">
+      <div className="min-w-0 text-left">
         <span className="font-medium text-neutral-600">
           {msg.reply_to.role === "user" ? "Kunde" : msg.reply_to.role === "assistant" ? "Ava" : "Mitarbeiterin"}:
         </span>{" "}
@@ -698,12 +711,29 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
             : msg.reply_to.content_preview}
         </span>
       </div>
-    </div>
+    </>
+  ) : null;
+
+  const ReplyPreview = msg.reply_to ? (
+    jumpToRepliedMessage ? (
+      <button
+        type="button"
+        onClick={jumpToRepliedMessage}
+        title="Klick: zur Ursprungs-Nachricht springen"
+        className="mb-1 text-[11px] text-neutral-500 hover:text-neutral-900 hover:bg-neutral-50 flex items-start gap-1 border-l-2 border-neutral-300 hover:border-amber-400 pl-2 pr-1 py-0.5 rounded-r-md max-w-full transition cursor-pointer"
+      >
+        {ReplyPreviewInner}
+      </button>
+    ) : (
+      <div className="mb-1 text-[11px] text-neutral-500 flex items-start gap-1 border-l-2 border-neutral-300 pl-2 max-w-full">
+        {ReplyPreviewInner}
+      </div>
+    )
   ) : null;
 
   if (msg.role === "user") {
     return (
-      <div className="group flex gap-2 justify-start items-start">
+      <div className="group flex gap-2 justify-start items-start rounded-2xl" data-msg-id={msg.id}>
         <div className="w-7 h-7 rounded-full bg-neutral-200 flex-shrink-0 flex items-center justify-center">
           <User size={12} className="text-neutral-600" />
         </div>
@@ -747,7 +777,7 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
 
   if (msg.role === "assistant") {
     return (
-      <div className="group flex gap-2 justify-end items-start">
+      <div className="group flex gap-2 justify-end items-start rounded-2xl" data-msg-id={msg.id}>
         <div className="self-start order-first">{DeleteBtn}</div>
         <div className="max-w-[70%]">
           {ReplyPreview}
@@ -784,7 +814,7 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
 
   if (msg.role === "human_agent") {
     return (
-      <div className="group flex gap-2 justify-end items-start">
+      <div className="group flex gap-2 justify-end items-start rounded-2xl" data-msg-id={msg.id}>
         <div className="self-start order-first">{DeleteBtn}</div>
         <div className="max-w-[70%]">
           {ReplyPreview}

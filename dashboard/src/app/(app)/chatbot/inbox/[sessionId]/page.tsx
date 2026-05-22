@@ -114,11 +114,13 @@ export default async function ChatSessionPage({ params }: PageProps) {
         } : null}
         initialMessages={(() => {
           const msgs = messages ?? [];
-          // Lookup-Map external_id → { role, content } für Reply-Threading
-          const byExt = new Map<string, { role: string; content: string | null }>();
+          // Lookup-Map external_id → { id, role, content } für Reply-Threading.
+          // Die id brauchen wir, damit die UI per Klick zur referenzierten
+          // Original-Message scrollen kann (wie Instagram).
+          const byExt = new Map<string, { id: string; role: string; content: string | null }>();
           for (const m of msgs) {
             const ext = (m as { external_id?: string | null }).external_id;
-            if (ext) byExt.set(ext, { role: m.role, content: m.content });
+            if (ext) byExt.set(ext, { id: m.id, role: m.role, content: m.content });
           }
           return msgs.map(m => {
             const replyToExt = (m as { reply_to_external_id?: string | null }).reply_to_external_id;
@@ -136,6 +138,7 @@ export default async function ChatSessionPage({ params }: PageProps) {
               auto_sent: (m as { auto_sent?: boolean }).auto_sent ?? false,
               teach_feedback_at: (m as { teach_feedback_at?: string | null }).teach_feedback_at ?? null,
               reply_to: repliedTo ? {
+                id: repliedTo.id,
                 role: repliedTo.role,
                 content_preview: (repliedTo.content || "").slice(0, 140),
               } : null,

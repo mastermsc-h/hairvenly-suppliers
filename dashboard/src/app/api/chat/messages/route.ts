@@ -34,19 +34,21 @@ export async function GET(req: NextRequest) {
   // Reply-Threading: für referenzierte Messages müssen wir auch die ältere
   // Vorgänger-Message holen (für Preview), da das polling-since-Filter sie
   // sonst ausschließt. Wir holen die referenzierten external_ids separat.
+  // id wird mitgeliefert, damit die UI per Klick zur Ursprungs-Message
+  // scrollen kann.
   const replyMids = Array.from(new Set(
     (data ?? [])
       .map(m => (m as { reply_to_external_id?: string | null }).reply_to_external_id)
       .filter((v): v is string => !!v)
   ));
-  const replyPreviewByExt = new Map<string, { role: string; content: string | null }>();
+  const replyPreviewByExt = new Map<string, { id: string; role: string; content: string | null }>();
   if (replyMids.length > 0) {
     const { data: refs } = await svc.from("chat_messages")
-      .select("external_id, role, content")
+      .select("id, external_id, role, content")
       .eq("session_id", sessionId)
       .in("external_id", replyMids);
     for (const r of refs || []) {
-      if (r.external_id) replyPreviewByExt.set(r.external_id, { role: r.role, content: r.content });
+      if (r.external_id) replyPreviewByExt.set(r.external_id, { id: r.id, role: r.role, content: r.content });
     }
   }
 
@@ -65,7 +67,7 @@ export async function GET(req: NextRequest) {
       })(),
       auto_sent: (m as { auto_sent?: boolean }).auto_sent ?? false,
       teach_feedback_at: (m as { teach_feedback_at?: string | null }).teach_feedback_at ?? null,
-      reply_to: replied ? { role: replied.role, content_preview: (replied.content || "").slice(0, 140) } : null,
+      reply_to: replied ? { id: replied.id, role: replied.role, content_preview: (replied.content || "").slice(0, 140) } : null,
       created_at: m.created_at,
     };
   });
