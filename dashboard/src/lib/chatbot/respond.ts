@@ -118,6 +118,8 @@ function getBusinessHoursContext(): {
   reason: string;                   // "Wochenende" / "Feierabend" / "vor Öffnung" / "Feiertag" / "kurz vor Feierabend"
   nextOpenLabel: string;            // "Montag ab 10:00 Uhr" / "morgen früh ab 10:00 Uhr"
   realisticHandoverLabel: string;   // "gleich" (open_wide) / "noch heute oder spätestens morgen früh" (closing_soon) / nextOpen (closed)
+  nextWorkdayLabel: string;         // "morgen früh" wenn Mo-Do, "Montag früh" wenn Freitag/Wochenende — immer der nächste ECHTE Werktag
+  todayWeekday: string;             // "Freitag"
 } {
   const now = new Date();
   const berlinFmt = new Intl.DateTimeFormat("de-DE", {
@@ -195,7 +197,19 @@ function getBusinessHoursContext(): {
     realisticHandoverLabel = nextOpenLabel;
   }
 
-  return { status, isOpen, nowLabel, reason, nextOpenLabel, realisticHandoverLabel };
+  // nextWorkdayLabel: was bedeutet "morgen" REALISTISCH? Am Freitag → "Montag".
+  // Am Mo-Do → "morgen". Am Samstag → "Montag". Am Sonntag → "morgen" (= Montag).
+  let nextWorkdayLabel: string;
+  if (weekday === "Freitag" || weekday === "Samstag") {
+    nextWorkdayLabel = "Montag früh";
+  } else if (weekday === "Sonntag") {
+    nextWorkdayLabel = "morgen früh"; // Montag
+  } else {
+    // Mo-Do — morgen ist ein Werktag, außer es ist ein Feiertag (vereinfacht: dann auch "Montag")
+    nextWorkdayLabel = "morgen früh";
+  }
+
+  return { status, isOpen, nowLabel, reason, nextOpenLabel, realisticHandoverLabel, nextWorkdayLabel, todayWeekday: weekday };
 }
 
 /**
@@ -467,6 +481,9 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
 
   if (biz.status === "open_wide") {
     systemPrompt += `- Bei Übergaben darfst du 'meldet sich gleich', 'schreibt dir in Kürze' o.ä. nutzen — die Mitarbeiterinnen sind JETZT da und haben noch Zeit.\n`;
+    systemPrompt += `- 🚨 ABER: Wenn die Übergabe-Aufgabe erst MORGEN passieren kann (z.B. Stylistin macht morgens Fotos), prüfe ob morgen ein Werktag ist:\n`;
+    systemPrompt += `  - Heute ist **${biz.todayWeekday}** → "morgen" = **${biz.nextWorkdayLabel}**\n`;
+    systemPrompt += `  - Am Freitag heißt "morgen" immer **Montag früh**, NIE "Samstag" — am Wochenende ist der Salon zu.\n`;
   } else if (biz.status === "open_closing_soon") {
     systemPrompt += `- 🚨 NICHT 'gleich' versprechen — die Mitarbeiterinnen haben nur noch wenig Zeit bis Feierabend.\n`;
     systemPrompt += `- Realistisch kommunizieren: 'Wir versuchen noch heute, spätestens aber ${biz.nextOpenLabel} schreibt dir die Kollegin' o.ä.\n`;
@@ -1196,6 +1213,38 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
     }
   } catch (e) {
     console.warn("[respond] URL-sanitizer failed:", (e as Error).message);
+  }
+
+  // SAFETY-NET 1c1: WOCHENENDE-FALLE — "morgen früh" am Freitag/Samstag.
+  // Bot schreibt manchmal "morgen früh ab 10" obwohl heute Freitag ist und
+  // morgen Samstag (Salon zu). Kundin wartet vergebens bis Montag.
+  // Wir ersetzen "morgen" → "Montag" wenn aktuell Freitag/Samstag ist.
+  {
+    const bizMorgen = getBusinessHoursContext();
+    if (bizMorgen.todayWeekday === "Freitag" || bizMorgen.todayWeekday === "Samstag") {
+      const beforeMorgen = finalText;
+      const replacements: Array<[RegExp, string]> = [
+        // "morgen früh ab 10" / "morgen früh ab 10 Uhr"
+        [/\bmorgen\s+früh\s+ab\s+10(\s*uhr)?\b/gi, "Montag früh ab 10 Uhr"],
+        // "morgen früh wieder im Salon"
+        [/\bmorgen\s+früh\s+wieder\s+im\s+salon\b/gi, "Montag früh wieder im Salon"],
+        // "morgen früh" (generisch)
+        [/\bmorgen\s+früh\b/gi, "Montag früh"],
+        // "(ab Morgen)" / "morgen um 10"
+        [/\bmorgen\s+um\s+10(\s*uhr)?\b/gi, "Montag ab 10 Uhr"],
+        // "morgen wieder erreichbar" / "morgen ab"
+        [/\bmorgen\s+wieder\s+(erreichbar|im\s+salon|im\s+studio|da)/gi, "Montag wieder $1"],
+        [/\bmorgen\s+ab\s+10\b/gi, "Montag ab 10 Uhr"],
+        // "ab morgen" → "ab Montag"
+        [/\bab\s+morgen\b/gi, "ab Montag"],
+      ];
+      for (const [re, repl] of replacements) {
+        finalText = finalText.replace(re, repl);
+      }
+      if (beforeMorgen !== finalText) {
+        console.warn(`[respond] SCRUBBED Wochenende-Falle: "morgen" → "Montag" (heute ist ${bizMorgen.todayWeekday})`);
+      }
+    }
   }
 
   // SAFETY-NET 1c2: "gleich"-Phrasen wenn closed ODER closing_soon ersetzen.
