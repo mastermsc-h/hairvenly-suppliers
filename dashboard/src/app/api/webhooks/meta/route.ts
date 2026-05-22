@@ -553,15 +553,20 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
   ];
   if (uncertaintyPatterns.some(p => p.test(botReply))) return false;
 
-  // 2b. ABSOLUTE NO-GOs (alle Kategorien): proaktives Anbieten von extra Fotos/Videos
-  //     der Tressen — siehe FAQ color-advice-no-proactive-extra-photos
+  // 2b. PROAKTIVES Anbieten von extra Fotos/Videos der Tressen ist verboten.
+  //     ABER: Reaktive Antworten ("klar, Kollegin schickt's sobald Montag wieder
+  //     da") sind erlaubt — wir erkennen sie am Übergabe-Marker im selben Satz.
+  //     Siehe FAQ color-advice-no-proactive-extra-photos.
   const forbiddenOffers = [
     /\b(extra |zusätzliche? )?(fotos? oder videos?|videos? oder fotos?|videos?)\b.{0,40}\b(machen|schicken|senden|aufnehmen|filmen)/i,
     /\bich (kann|könnte) dir (ein |noch ein )?(video|extra foto)\b/i,
     /\bwir filmen (dir |die )/i,
     /\b(wir|ich) (machen|mache) dir (extra |gerne extra )?(fotos|videos)\b/i,
   ];
-  if (forbiddenOffers.some(p => p.test(botReply))) return false;
+  const reactiveHandoverMarker = /(kollegin|stylistin|farb-?expertin|im\s+salon|mo[\s-]?fr|montag|dienstag|mittwoch|donnerstag|freitag|sobald\s+wir\s+wieder|ab\s+\d{1,2}(:\d{2}|\s*uhr)|werktag)/i;
+  if (forbiddenOffers.some(p => p.test(botReply)) && !reactiveHandoverMarker.test(botReply)) {
+    return false;
+  }
 
   // 2c. INVISIBLE TAPES sind ein heikles Thema (Launch August 2026, eigenständiges
   //     Produkt, NICHT Mini Tapes). Antworten dazu sollen IMMER von Stylistin

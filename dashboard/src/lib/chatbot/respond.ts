@@ -947,10 +947,21 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
   finalText = sanitizeStockLeaks(finalText);
 
   // SAFETY-NET 1y: NIEMALS proaktiv extra Fotos/Videos der Tressen anbieten.
-  // Wenn der Bot diesen Satz trotz FAQ erzeugt → ersatzlos streichen.
-  // (Reaktiv auf direkte Kundenfrage wäre auch riskant, aber das macht im
-  // Zweifel die Stylistin via Draft. Hier filtern wir den proaktiven Pitch.)
+  // ABER: Wenn die Kundin selbst nach extra Bildern/Videos gefragt hat, darf der
+  // Bot reaktiv zustimmen — mit Verweis dass die Stylistin sich darum kümmert
+  // (sobald sie im Salon ist). Wir unterscheiden:
+  //   PROAKTIV-PITCH (verboten):    "Wir können dir gerne extra Fotos/Videos machen 💕"
+  //   REAKTIVE ÜBERGABE (erlaubt):  "Klar, sobald die Kollegin Montag wieder im Salon ist,
+  //                                  schickt sie dir gerne weitere Bilder ✨"
+  //
+  // Heuristik: wenn der Satz einen Übergabe-Marker enthält ("Kollegin", "Stylistin",
+  // "Farb-Expertin", "im Salon", "Mo-Fr", "Montag", "ab 10", "sobald wir wieder")
+  // ist es eine reaktive Antwort — wir lassen sie durch.
   {
+    const isReactiveHandover = (line: string): boolean => {
+      const handoverMarkers = /(kollegin|stylistin|farb-?expertin|im\s+salon|mo[\s-]?fr|montag|dienstag|mittwoch|donnerstag|freitag|sobald\s+wir\s+wieder|ab\s+\d{1,2}(:\d{2}|\s*uhr)|werktag)/i;
+      return handoverMarkers.test(line);
+    };
     const extraPhotoOfferPatterns: RegExp[] = [
       // "Wir können dir auch gerne extra Fotos oder Videos von ... machen"
       /(^|\n)[^\n]*\b(wir|ich)\b[^\n]{0,40}\b(können|kann|könnten|machen|mache|schicken|sende|filmen)\b[^\n]{0,80}\b(extra |zusätzliche? )?(fotos? (oder|und) videos?|videos? (oder|und) fotos?|extra fotos?|extra videos?)\b[^\n]*(\n|$)/gi,
@@ -961,12 +972,15 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
     ];
     let dropped = false;
     for (const pat of extraPhotoOfferPatterns) {
-      const before = finalText;
-      finalText = finalText.replace(pat, "\n");
-      if (before !== finalText) dropped = true;
+      finalText = finalText.replace(pat, (match) => {
+        // Reaktive Übergabe → durchlassen, sonst blocken
+        if (isReactiveHandover(match)) return match;
+        dropped = true;
+        return "\n";
+      });
     }
     if (dropped) {
-      console.warn("[respond] DROPPED proaktives Extra-Foto/Video-Angebot (siehe FAQ color-advice-no-proactive-extra-photos)");
+      console.warn("[respond] DROPPED proaktives Extra-Foto/Video-Angebot (kein Übergabe-Marker — siehe FAQ color-advice-no-proactive-extra-photos)");
       finalText = finalText.replace(/\n{3,}/g, "\n\n").trim();
     }
   }
