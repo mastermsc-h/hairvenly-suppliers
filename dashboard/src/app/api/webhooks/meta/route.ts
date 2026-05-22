@@ -691,6 +691,12 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
   //     - KEINE konkrete Farb-Empfehlung (Farbnamen-Codes wie 6A, 3A,
   //       Cappuccino, Toffee, Dubai, Mocha, Pearl White, RAW, Honey etc.)
   //     - KEIN konkreter Preis (€-Angaben)
+  // Preis-Check: nur "echte" Produktpreise blocken, nicht Service-Infos wie
+  // Versandkosten-Schwelle ("ab 150€ gratis Versand", "Mindestbestellwert").
+  const hasEurAnywhere = /\b\d+[.,]?\d*\s*€/i.test(botReply);
+  const isShippingOrThresholdContext = /\b(versand|bestellwert|mindestbestellwert|gratis|kostenfrei|kostenlos|ab\s+\d+\s*€|dhl|paket|lieferung)\b/i.test(botReply);
+  const hasProductPriceClaim = hasEurAnywhere && !isShippingOrThresholdContext;
+
   const looksLikeClarifyingQuestion =
     botReply.length < 1000 &&
     /\?/.test(botReply) &&
@@ -702,7 +708,7 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
     // ist es keine reine Klärung mehr, sondern eine Empfehlung
     !/\b(cappuccino|toffee|dubai|mocha|pearl\s+white|raw|honey|ebony|caramel|cool\s+toned|warm\s+toned|taupe|chestnut|hazelnut|platin|blond|aschbraun|mittelbraun|rehbraun|balayage|cool\s+blonde)\b/i.test(botReply) &&
     !/\b#?\d+[A-Z]\b/.test(botReply) && // Farb-Codes wie 5A, 6A, 4/27T24
-    !/\b\d+[.,]?\d*\s*€/i.test(botReply); // keine konkreten Preise
+    !hasProductPriceClaim; // konkrete Produktpreise blocken, Versand/Bestellwert OK
   if (looksLikeClarifyingQuestion) return true;
 
   // 4. availability / general / pricing: Reply muss konkrete Daten enthalten
