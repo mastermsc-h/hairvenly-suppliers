@@ -691,11 +691,15 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
   //     - KEINE konkrete Farb-Empfehlung (Farbnamen-Codes wie 6A, 3A,
   //       Cappuccino, Toffee, Dubai, Mocha, Pearl White, RAW, Honey etc.)
   //     - KEIN konkreter Preis (€-Angaben)
-  // Preis-Check: nur "echte" Produktpreise blocken, nicht Service-Infos wie
-  // Versandkosten-Schwelle ("ab 150€ gratis Versand", "Mindestbestellwert").
+  // Preis-Check: nur SALON-DIENSTLEISTUNGS-Preise blocken.
+  // - Produktpreise vom Shop (Tapes, Bondings etc.) sind OK — die Daten sind
+  //   verifiziert in product_colors.
+  // - Versandkosten / Bestellwert sind OK — reine Service-Infos.
+  // - Heikel: Salon-Vor-Ort-Dienstleistungen (Einarbeiten, Termine, vor Ort
+  //   Beratung). Da kann der Bot Fehler machen weil die Preise variabel sind.
   const hasEurAnywhere = /\b\d+[.,]?\d*\s*€/i.test(botReply);
-  const isShippingOrThresholdContext = /\b(versand|bestellwert|mindestbestellwert|gratis|kostenfrei|kostenlos|ab\s+\d+\s*€|dhl|paket|lieferung)\b/i.test(botReply);
-  const hasProductPriceClaim = hasEurAnywhere && !isShippingOrThresholdContext;
+  const isSalonServiceContext = /\b(einarbeit\w*|einset\w+|einleg\w+|einnäh\w+|einsetzen|im\s+salon\b|im\s+studio\b|vor\s+ort\b|salon-?termin|arbeitskosten|dienstleistung|service-?leistung|behandlung\w*|beratungs-?termin)\b/i.test(botReply);
+  const hasSalonPriceClaim = hasEurAnywhere && isSalonServiceContext;
 
   const looksLikeClarifyingQuestion =
     botReply.length < 1000 &&
@@ -708,7 +712,7 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
     // ist es keine reine Klärung mehr, sondern eine Empfehlung
     !/\b(cappuccino|toffee|dubai|mocha|pearl\s+white|raw|honey|ebony|caramel|cool\s+toned|warm\s+toned|taupe|chestnut|hazelnut|platin|blond|aschbraun|mittelbraun|rehbraun|balayage|cool\s+blonde)\b/i.test(botReply) &&
     !/\b#?\d+[A-Z]\b/.test(botReply) && // Farb-Codes wie 5A, 6A, 4/27T24
-    !hasProductPriceClaim; // konkrete Produktpreise blocken, Versand/Bestellwert OK
+    !hasSalonPriceClaim; // nur Salon-Service-Preise blocken; Produktpreise + Versand OK
   if (looksLikeClarifyingQuestion) return true;
 
   // 4. availability / general / pricing: Reply muss konkrete Daten enthalten
@@ -716,6 +720,11 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
   const hasStockStatus = /(auf lager|sofort verfügbar|gerade unterwegs|ausverkauft|nicht (mehr|auf)? lager)/i.test(botReply);
   const hasSpecificAnswer = /\b(150g|200g|225g|125g|100g|60cm|65cm|55cm|45cm|85cm|5[-–]8\s*wochen|6[-–]8\s*wochen|6\s*monate)\b/i.test(botReply);
   if (!hasUrl && !hasStockStatus && !hasSpecificAnswer) return false;
+
+  // 4b. SALON-DIENSTLEISTUNGSPREISE blocken — auch wenn andere konkrete
+  //     Daten da sind. Bot soll bei Vor-Ort-Einarbeit-Preisen IMMER an
+  //     Stylistin übergeben.
+  if (hasSalonPriceClaim) return false;
 
   // 5. Reply darf nicht zu lang sein (komplexe Beratung ist meist >800 Zeichen)
   if (botReply.length > 1200) return false;
