@@ -373,6 +373,10 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += "- Beispiel: Kundin schreibt 'Standard Tapes in 55cm' → Antwort: 'In Russisch glatt haben wir Standard Tapes nur in 60cm. 55cm gibt es bei uns nur bei den Tapes in Usbekisch wellig. Was passt besser zu dir?'\n";
   systemPrompt += "- NIE Längen erfinden, runden oder annehmen.\n";
   systemPrompt += "- 🔒 NIEMALS Lieferanten-Namen erwähnen: Amanda, Eyfel, Ebru, China, etc. Das sind INTERNE Codes. Kundin spricht IMMER von der Haarqualität (Russisch glatt / Usbekisch wellig).\n";
+  systemPrompt += "- 🔗 WICHTIG: Wenn du eine konkrete Farbe (COLDNESS, ASH MELT, FROSTY, CAPPUCCINO etc.) empfiehlst oder nennst, packe IMMER die passende Shopify-URL direkt hinter den Farbnamen. Niemals einen Farbnamen 'nackt' lassen. Die Kundin muss DIREKT klicken und das Produkt sehen können — sonst muss sie selbst suchen.\n";
+  systemPrompt += "  Wenn dir aus dem Tool-Output keine URL bekannt ist, NICHT die Farbe nennen.\n";
+  systemPrompt += "- 🚫 NIEMALS proaktiv 'extra Fotos/Videos' anbieten — auch nicht via Übergabe ('Magst du, dass unsere Farb-Expertin dir extra Fotos schickt?'). Das ist ein heikler Service, den nur die Stylistin selektiv vergibt. Nur reaktiv erlaubt, wenn die Kundin EXPLIZIT um Fotos/Videos fragt.\n";
+  systemPrompt += "- ✂️ KEINE selbstreferenziellen Klammer-Disclaimer am Ende (z.B. '_(Kurz: die exakte Längen-Methoden-Kombi muss ich dir noch sauber benennen — Kollegin durchsprechen.)_'). Das wirkt unsicher und verwirrt die Kundin. Wenn du etwas wirklich abklären musst, sag's klar im Hauptteil, nicht als nachträgliche Klammer.\n";
 
   // GESCHÄFTSZEIT-KONTEXT
   // Bot muss wissen ob aktuell Öffnungszeit ist UND wie viel Zeit noch übrig ist.
@@ -1033,24 +1037,31 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
   }
 
   // SAFETY-NET 1y: NIEMALS proaktiv extra Fotos/Videos der Tressen anbieten.
-  // ABER: Wenn die Kundin selbst nach extra Bildern/Videos gefragt hat, darf der
-  // Bot reaktiv zustimmen — mit Verweis dass die Stylistin sich darum kümmert
-  // (sobald sie im Salon ist). Wir unterscheiden:
-  //   PROAKTIV-PITCH (verboten):    "Wir können dir gerne extra Fotos/Videos machen 💕"
-  //   REAKTIVE ÜBERGABE (erlaubt):  "Klar, sobald die Kollegin Montag wieder im Salon ist,
-  //                                  schickt sie dir gerne weitere Bilder ✨"
+  // ABER: Wenn die Kundin EXPLIZIT nach Bildern/Videos gefragt hat, darf der
+  // Bot reaktiv zustimmen.
   //
-  // Heuristik: wenn der Satz einen Übergabe-Marker enthält ("Kollegin", "Stylistin",
-  // "Farb-Expertin", "im Salon", "Mo-Fr", "Montag", "ab 10", "sobald wir wieder")
-  // ist es eine reaktive Antwort — wir lassen sie durch.
+  // STRENGE VORAUSSETZUNG: in den letzten ~3 Customer-Messages muss explizit
+  // nach Fotos/Videos/Bildern GEFRAGT worden sein (mit Frage-Verb wie "habt
+  // ihr", "könnt ihr", "schickt ihr", "magst", "hättest").
+  // Übergabe-Marker im Bot-Reply allein reicht NICHT — sonst kann der Bot
+  // proaktiv "Farb-Expertin schickt dir extra Fotos" pushen, was verboten ist.
   {
-    const isReactiveHandover = (line: string): boolean => {
-      const handoverMarkers = /(kollegin|stylistin|farb-?expertin|im\s+salon|mo[\s-]?fr|montag|dienstag|mittwoch|donnerstag|freitag|sobald\s+wir\s+wieder|ab\s+\d{1,2}(:\d{2}|\s*uhr)|werktag)/i;
-      return handoverMarkers.test(line);
-    };
+    // Hat die Kundin in den letzten 3 Customer-Messages NACH Fotos/Videos GEFRAGT?
+    const recentCustomerMsgs = (msgs || []).filter(m => m.role === "user").slice(-3);
+    const customerAskedForPhotos = recentCustomerMsgs.some(m => {
+      const txt = (m.content || "").toLowerCase();
+      const hasMediaWord = /\b(fotos?|videos?|bilder|aufnahmen|aufnahme)\b/.test(txt);
+      // Frage-Indikator: ? im Text ODER bittende Verben
+      const hasQuestion = /\?/.test(txt) ||
+        /\b(habt\s+ihr|hättet\s+ihr|hättest|könnt\s+ihr|könntet\s+ihr|magst|wäre.{0,20}möglich|gibt['e\s]+es|schickt\s+(mir|ihr))\b/i.test(txt);
+      return hasMediaWord && hasQuestion;
+    });
+
     const extraPhotoOfferPatterns: RegExp[] = [
       // "Wir können dir auch gerne extra Fotos oder Videos von ... machen"
       /(^|\n)[^\n]*\b(wir|ich)\b[^\n]{0,40}\b(können|kann|könnten|machen|mache|schicken|sende|filmen)\b[^\n]{0,80}\b(extra |zusätzliche? )?(fotos? (oder|und) videos?|videos? (oder|und) fotos?|extra fotos?|extra videos?)\b[^\n]*(\n|$)/gi,
+      // "Magst du, dass unsere Farb-Expertin/Kollegin dir extra Fotos/Videos schickt?"
+      /(^|\n)[^\n]*\bmagst\s+du[^\n]{0,80}\b(extra\s+)?(fotos?|videos?|bilder)\b[^\n]{0,40}\b(schickt?|schicken|sendet?|senden|machen?|aufnimmt)\b[^\n]*(\n|$)/gi,
       // "Ich kann dir ein Video von der Farbe schicken/machen"
       /(^|\n)[^\n]*\bich (kann|könnte) dir (ein |noch ein )?(video|extra foto)[^\n]*(\n|$)/gi,
       // "Wir filmen die Farbe"
@@ -1059,14 +1070,39 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
     let dropped = false;
     for (const pat of extraPhotoOfferPatterns) {
       finalText = finalText.replace(pat, (match) => {
-        // Reaktive Übergabe → durchlassen, sonst blocken
-        if (isReactiveHandover(match)) return match;
+        if (customerAskedForPhotos) return match; // reaktiv OK
         dropped = true;
         return "\n";
       });
     }
     if (dropped) {
-      console.warn("[respond] DROPPED proaktives Extra-Foto/Video-Angebot (kein Übergabe-Marker — siehe FAQ color-advice-no-proactive-extra-photos)");
+      console.warn("[respond] DROPPED proaktives Extra-Foto/Video-Angebot (Kundin hat NICHT explizit gefragt — siehe FAQ color-advice-no-proactive-extra-photos)");
+      finalText = finalText.replace(/\n{3,}/g, "\n\n").trim();
+    }
+  }
+
+  // SAFETY-NET 1w: Selbstreferenzielle Klammer-Disclaimer entfernen.
+  // Der Bot fügt gerne am Ende sowas an wie:
+  //   "_(Kurz: die exakte Längen-Methoden-Kombi muss ich dir nochmal sauber
+  //    benennen — schreibe dir die Optionen gleich mit der Kollegin durch.)_"
+  // Das ist unnötiges Meta-Geschwätz und verwirrt die Kundin. Strippen.
+  {
+    const selfReferentialDisclaimerPatterns: RegExp[] = [
+      // "_(Kurz: ... muss ich ... mit der Kollegin durch.)_"
+      /\n+_?\(\s*kurz:?[^()]{0,300}\)\s*_?/gi,
+      // "(Hinweis: ich muss das nochmal mit der Kollegin abklären)"
+      /\n+\(\s*hinweis:?[^()]{0,200}(kolleg|stylistin|abklären|abstimmen|durchsprechen)[^()]{0,100}\)\s*/gi,
+      // ohne Klammern: "Kurz: die exakte X muss ich noch mit der Kollegin abklären."
+      /\n+kurz:?\s+die\s+(exakte|genauen?|richtige[rn]?)[^.\n]{0,200}\b(kolleg|stylistin|abklären|abstimmen|durchsprechen)\b[^.\n]{0,100}\.?/gi,
+    ];
+    let strippedDisclaimer = false;
+    for (const pat of selfReferentialDisclaimerPatterns) {
+      const before = finalText;
+      finalText = finalText.replace(pat, "");
+      if (before !== finalText) strippedDisclaimer = true;
+    }
+    if (strippedDisclaimer) {
+      console.warn("[respond] STRIPPED selbstreferenziellen Klammer-Disclaimer am Ende");
       finalText = finalText.replace(/\n{3,}/g, "\n\n").trim();
     }
   }
