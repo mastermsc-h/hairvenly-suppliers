@@ -390,17 +390,6 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   if (!session) return { success: false, error: "session not found" };
   if (session.status !== "active") return { success: false, error: "session not active" };
 
-  // 🚨 KATEGORIE-SKIP: bestimmte Kategorien wo der Bot fundamental KEINE
-  // Daten hat, dürfen GAR KEINEN Draft generieren. Egal welcher Aufrufpfad
-  // (Webhook, setBotMode, manueller "Antwort generieren"-Button) — Skip
-  // hier zentral, damit nirgendwo durchrutscht.
-  //
-  // appointment: kein Planity-Kalender-Zugriff → Bot würde Termine halluzinieren
-  if (session.category === "appointment") {
-    console.warn(`[respond] SKIP session=${sessionId.slice(0,8)} — category=appointment, Bot hat keinen Kalender-Zugriff. Mitarbeiter:in muss manuell mit Planity-Link antworten.`);
-    return { success: false, error: "skip_appointment_no_calendar_access" };
-  }
-
   const signatureName = session.bot_signature_name || "Lara";
 
   // Persona
@@ -866,7 +855,39 @@ Diese 5 Regeln werden auch NACH deiner Antwort vom System gecheckt und ggf. korr
   // (openTurnsHint, sorry-hint, greetingHint, urlRule) gehen in einen separaten Block —
   // werden nicht gecacht, sind aber pro Call eh klein.
   const systemPromptStable = systemPrompt;
-  const systemPromptVariable = openTurnsHint + greetingHint + existenceRule + urlRule + styleRule;
+
+  // KATEGORIE-SPEZIFISCHE HARD-RULES — direkt vor der Antwort als VARIABLE
+  // Block injizieren (LLMs gewichten späte Regeln stärker). Diese überschreiben
+  // alles davor wenn die Session-Kategorie einen Spezialfall hat.
+  let categoryHardRule = "";
+  if (session.category === "appointment") {
+    categoryHardRule = `
+
+## 📅 DIESE SESSION IST EINE TERMIN-ANFRAGE — HARTE REGELN
+Du HAST KEINEN ZUGRIFF auf den Salon-Kalender (Planity). Du kannst NICHT wissen ob ein konkreter Tag oder eine konkrete Uhrzeit frei ist.
+
+ERLAUBT:
+✓ Freundlich auf Planity verweisen mit dem Link: https://www.planity.com/de-DE/hairvenly-28217-bremen
+✓ Kurz erklären dass die Kundin dort live alle freien Slots sieht und direkt buchen kann
+✓ Eine warmherzige Note ("freuen uns auf dich" etc.)
+
+VERBOTEN (führt zu falschen Versprechen!):
+❌ "Am 25. Juni hätten wir was frei" — du WEISST das NICHT
+❌ "14:00 Uhr passt" / "Magst du vormittags oder nachmittags?" — du WEISST das NICHT
+❌ "Lass mich kurz schauen was am X möglich ist" — du KANNST nicht schauen
+❌ "Ich check das für dich" — du HAST keinen Kalender-Zugriff
+❌ "Wir hätten dann gerne X-Y Uhr" — Datum/Uhrzeit kommen IMMER von der Kundin via Planity
+
+WENN die Kundin schon Planity erwähnt hat ("hab schon gesehen über planity"):
+→ Nur kurze Bestätigung, KEIN Link nochmal posten. Z.B.: "Super, dann bist du goldrichtig 💕 Wir freuen uns auf dich!"
+
+WENN die Kundin ein Wunsch-Datum nennt:
+→ NIE bestätigen oder ablehnen. Stattdessen: "Schau bitte direkt in Planity ob das frei ist — dort siehst du live alle verfügbaren Slots 💌"
+
+KEINE Ausnahmen. Wenn unsicher: nur Planity-Link + freundliche Note. KURZ.`;
+  }
+
+  const systemPromptVariable = openTurnsHint + greetingHint + existenceRule + urlRule + styleRule + categoryHardRule;
 
   // Set aller external_ids in dieser Session — für Reply-Lookup. Wenn eine
   // Customer-Message eine reply_to_external_id hat, die NICHT in diesem Set

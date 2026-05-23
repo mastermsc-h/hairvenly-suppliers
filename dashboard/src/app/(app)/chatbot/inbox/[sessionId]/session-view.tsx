@@ -628,9 +628,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
       ) : session.status === "active" ? (
         <div className="border-t border-neutral-100 p-3 flex items-center justify-between gap-3 flex-wrap bg-gradient-to-r from-blue-50/40 to-transparent">
           <div className="text-xs text-neutral-500 flex-1 min-w-0">
-            {session.category === "appointment"
-              ? <span>📅 <b>Termin-Anfrage</b> — Bot hat keinen Kalender-Zugriff. Bitte direkt selbst antworten (Planity-Link).</span>
-              : session.bot_mode === "auto"
+            {session.bot_mode === "auto"
               ? <span>🤖 Bot antwortet bei neuen Nachrichten automatisch.</span>
               : session.bot_mode === "assisted"
               ? <span>🧑‍🏫 Bot bereitet bei neuen Nachrichten automatisch einen Entwurf vor.</span>
@@ -639,11 +637,8 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
           <div className="flex gap-2 items-center">
             <button
               onClick={handleGenerate}
-              disabled={generating || isPending || session.category === "appointment"}
-              title={session.category === "appointment"
-                ? "Termin-Anfragen kann der Bot nicht beantworten — kein Kalender-Zugriff. Bitte selbst antworten."
-                : undefined}
-              className="bg-blue-600 text-white rounded-xl px-4 py-2 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1.5 text-sm font-medium shadow-sm"
+              disabled={generating || isPending}
+              className="bg-blue-600 text-white rounded-xl px-4 py-2 hover:bg-blue-700 disabled:opacity-40 inline-flex items-center gap-1.5 text-sm font-medium shadow-sm"
             >
               <Sparkles size={14} className={generating ? "animate-pulse" : ""} />
               {generating ? "Generiert…" : "Antwort generieren"}
