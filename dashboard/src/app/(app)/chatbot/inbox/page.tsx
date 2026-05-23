@@ -585,9 +585,6 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 const meta = STATUS_LABELS[s.status] || STATUS_LABELS.active;
                 const Icon = meta.icon;
                 const st = stats[s.id] || { botCount: 0, humanCount: 0 };
-                const profile = (s.assigned_profile as unknown as { display_name?: string; email?: string } | null);
-                const assignedName = profile?.display_name || profile?.email || null;
-                const isHybrid = st.humanCount > 0;
                 // Wir-zuletzt-geantwortet (Kundin dran): leichter blauer Touch
                 const ourTurn = st.lastMsgRole === "assistant" || st.lastMsgRole === "human_agent";
                 // Sentinel-Check: explizit vom Mitarbeiter via "Als ungelesen" /
@@ -869,12 +866,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                             </span>
                           );
                         })()}
-                        {isHybrid && (
-                          <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
-                            <UserCheck size={11} /> Mitarbeiter eingegriffen
-                            {assignedName && <span className="font-medium">· {assignedName}</span>}
-                          </span>
-                        )}
+                        {/* "Mitarbeiter eingegriffen"-Badge entfernt — redundant.
+                            Der Mode-Badge oben zeigt jetzt schon "✋ Manuell" wenn
+                            die letzte Antwort vom Mitarbeiter kam, bzw. "🤝 Assistiert"
+                            wenn ein Bot-Entwurf freigegeben wurde. */}
                         <span className="inline-flex items-center gap-2 text-neutral-400 ml-auto">
                           {s.status === "awaiting_human" && (() => {
                             const wait = (Date.now() - new Date(s.last_message_at).getTime()) / 60000;
