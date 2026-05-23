@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
-import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User, AlertTriangle, StickyNote, Bell } from "lucide-react";
+import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User, AlertTriangle, StickyNote, Bell, Filter, X } from "lucide-react";
 import SyncInstagramButton from "./sync-instagram-button";
 import MarkUnreadButton from "./mark-unread-button";
 import MarkSeenButton from "./mark-seen-button";
@@ -397,138 +397,140 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         )}
       </div>
 
-      {/* Filter — kompakte Reihen mit Inline-Labels statt großer Section-Headers */}
-      <div className="flex items-center gap-x-3 gap-y-2 flex-wrap text-xs">
-        <span className="text-neutral-500 font-medium shrink-0">Kanal</span>
-        <div className="flex gap-1.5 flex-wrap">
-          {["all", "instagram", "whatsapp", "web"].map(c => (
-            <Link
-              key={c}
-              href={`/chatbot/inbox?${new URLSearchParams({
-                ...(filter !== "all" ? { status: filter } : {}),
-                ...(mode !== "all" ? { mode } : {}),
-                ...(c !== "all" ? { channel: c } : {}),
-                ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
-                ...(searchQuery ? { q: searchQuery } : {}),
-                ...(!onlyUnread ? { unread: "0" } : {}),
-              }).toString()}`}
-              className={`px-2.5 py-1 rounded-full transition ${
-                channelFilter === c
-                  ? "bg-neutral-900 text-white"
-                  : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
-              }`}
-            >
-              {c === "all" ? "Alle" : CHANNEL_LABELS[c] || c}
-            </Link>
-          ))}
-        </div>
-      </div>
+      {/* Aktive Filter als kompakte Chips ÜBER dem Klapp-Bereich.
+          So sieht die Mitarbeiterin auf einen Blick welche Filter aktiv sind,
+          ohne dass die ganze Wand sichtbar sein muss. */}
+      {(() => {
+        const activeChips: Array<{ label: string; clearHref: string }> = [];
+        const buildClear = (paramToRemove: string) => {
+          const next = new URLSearchParams();
+          if (view !== "todo") next.set("view", view);
+          if (mode !== "all" && paramToRemove !== "mode") next.set("mode", mode);
+          if (channelFilter !== "all" && paramToRemove !== "channel") next.set("channel", channelFilter);
+          if (categoryFilter !== "all" && paramToRemove !== "category") next.set("category", categoryFilter);
+          if (searchQuery) next.set("q", searchQuery);
+          if (sortMode !== "newest" && paramToRemove !== "sort") next.set("sort", sortMode);
+          return `/chatbot/inbox?${next.toString()}`;
+        };
+        if (channelFilter !== "all") activeChips.push({ label: CHANNEL_LABELS[channelFilter] || channelFilter, clearHref: buildClear("channel") });
+        if (categoryFilter !== "all") {
+          const cat = CATEGORY_LABELS[categoryFilter];
+          activeChips.push({ label: cat ? `${cat.emoji} ${cat.label}` : categoryFilter, clearHref: buildClear("category") });
+        }
+        if (sortMode !== "newest" && SORT_OPTIONS[sortMode]) {
+          activeChips.push({ label: `${SORT_OPTIONS[sortMode].emoji} ${SORT_OPTIONS[sortMode].label}`, clearHref: buildClear("sort") });
+        }
+        const activeCount = activeChips.length;
+        return (
+          <details className="group" {...(activeCount > 0 ? {} : {})}>
+            <summary className="list-none cursor-pointer select-none flex items-center gap-2 flex-wrap text-xs">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-neutral-100 text-neutral-700 hover:bg-neutral-200 transition border border-neutral-200 font-medium">
+                <Filter size={11} />
+                Filter
+                {activeCount > 0 && (
+                  <span className="bg-neutral-900 text-white rounded-full px-1.5 text-[10px] font-bold">{activeCount}</span>
+                )}
+                <span className="text-neutral-400 group-open:rotate-90 transition-transform">›</span>
+              </span>
+              {/* Aktive Filter-Chips — auch sichtbar wenn Klapp-Bereich zu */}
+              {activeChips.map((chip, i) => (
+                <Link key={i} href={chip.clearHref}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200 text-[11px] hover:bg-blue-100"
+                  onClick={(e) => e.stopPropagation()}
+                  title="Filter entfernen"
+                >
+                  {chip.label}
+                  <X size={10} />
+                </Link>
+              ))}
+            </summary>
 
-      <div className="flex items-center gap-x-3 gap-y-2 flex-wrap text-xs">
-        <span className="text-neutral-500 font-medium shrink-0">Kategorie</span>
-        <div className="flex gap-1.5 flex-wrap items-center">
-          <ClassifyBackfillButton />
-          <Link
-            href={`/chatbot/inbox?${new URLSearchParams({
-              ...(filter !== "all" ? { status: filter } : {}),
-              ...(mode !== "all" ? { mode } : {}),
-              ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
-              ...(searchQuery ? { q: searchQuery } : {}),
-              ...(!onlyUnread ? { unread: "0" } : {}),
-            }).toString()}`}
-            className={`px-2.5 py-1 rounded-full transition ${
-              categoryFilter === "all"
-                ? "bg-neutral-900 text-white"
-                : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
-            }`}
-          >
-            Alle
-          </Link>
-          {Object.entries(CATEGORY_LABELS).map(([key, meta]) => {
-            const cnt = categoryCounts[key] || 0;
-            return (
-              <Link
-                key={key}
-                href={`/chatbot/inbox?${new URLSearchParams({
-                  ...(filter !== "all" ? { status: filter } : {}),
-                  ...(mode !== "all" ? { mode } : {}),
-                  ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
-                  ...(searchQuery ? { q: searchQuery } : {}),
-                  ...(!onlyUnread ? { unread: "0" } : {}),
-                  category: key,
-                }).toString()}`}
-                className={`px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition ${
-                  categoryFilter === key
-                    ? "bg-neutral-900 text-white"
-                    : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
-                }`}
-              >
-                <span>{meta.emoji}</span>
-                {meta.label}
-                {cnt > 0 && <span className={categoryFilter === key ? "text-white/70" : "text-neutral-400"}>· {cnt}</span>}
-              </Link>
-            );
-          })}
-        </div>
-      </div>
+            {/* Aufgeklappter Filter-Bereich */}
+            <div className="mt-3 space-y-2.5 pl-1">
+              <div className="flex items-center gap-x-3 gap-y-2 flex-wrap text-xs">
+                <span className="text-neutral-500 font-medium shrink-0 w-20">Kanal</span>
+                <div className="flex gap-1.5 flex-wrap">
+                  {["all", "instagram", "whatsapp", "web"].map(c => (
+                    <Link key={c}
+                      href={`/chatbot/inbox?${new URLSearchParams({
+                        ...(view !== "todo" ? { view } : {}),
+                        ...(mode !== "all" ? { mode } : {}),
+                        ...(c !== "all" ? { channel: c } : {}),
+                        ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
+                        ...(searchQuery ? { q: searchQuery } : {}),
+                      }).toString()}`}
+                      className={`px-2.5 py-1 rounded-full transition ${
+                        channelFilter === c ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                      }`}
+                    >
+                      {c === "all" ? "Alle" : CHANNEL_LABELS[c] || c}
+                    </Link>
+                  ))}
+                </div>
+              </div>
 
-      <div className="flex items-center gap-x-3 gap-y-2 flex-wrap text-xs">
-        <span className="text-neutral-500 font-medium shrink-0">Bot/Mensch</span>
-        <div className="flex gap-1.5 flex-wrap">
-          {[
-            { key: "all",            label: `Alle (${(sessions ?? []).length})`,                  icon: null },
-            { key: "pure_bot",       label: `Reine Bot-Chats (${pureBotCount})`,                  icon: <Bot size={11} className="text-pink-600" /> },
-            { key: "with_human",     label: `Mit Mitarbeiter-Eingriff (${withHumanCount})`,        icon: <UserCheck size={11} className="text-amber-700" /> },
-            { key: "autobot_active", label: `🤖 Autobot war aktiv (${autobotActiveCount})`,        icon: null },
-          ].map(opt => (
-            <Link
-              key={opt.key}
-              href={`/chatbot/inbox?${new URLSearchParams({
-                ...(filter !== "all" ? { status: filter } : {}),
-                ...(opt.key !== "all" ? { mode: opt.key } : {}),
-                ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
-                ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
-                ...(searchQuery ? { q: searchQuery } : {}),
-                ...(!onlyUnread ? { unread: "0" } : {}),
-              }).toString()}`}
-              className={`px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition ${
-                mode === opt.key
-                  ? "bg-neutral-900 text-white"
-                  : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
-              }`}
-            >
-              {opt.icon} {opt.label}
-            </Link>
-          ))}
-        </div>
-      </div>
+              <div className="flex items-center gap-x-3 gap-y-2 flex-wrap text-xs">
+                <span className="text-neutral-500 font-medium shrink-0 w-20">Kategorie</span>
+                <div className="flex gap-1.5 flex-wrap items-center">
+                  <ClassifyBackfillButton />
+                  <Link href={`/chatbot/inbox?${new URLSearchParams({
+                      ...(view !== "todo" ? { view } : {}),
+                      ...(mode !== "all" ? { mode } : {}),
+                      ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
+                      ...(searchQuery ? { q: searchQuery } : {}),
+                    }).toString()}`}
+                    className={`px-2.5 py-1 rounded-full transition ${
+                      categoryFilter === "all" ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                    }`}>
+                    Alle
+                  </Link>
+                  {Object.entries(CATEGORY_LABELS).map(([key, meta]) => {
+                    const cnt = categoryCounts[key] || 0;
+                    return (
+                      <Link key={key}
+                        href={`/chatbot/inbox?${new URLSearchParams({
+                          ...(view !== "todo" ? { view } : {}),
+                          ...(mode !== "all" ? { mode } : {}),
+                          ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
+                          ...(searchQuery ? { q: searchQuery } : {}),
+                          category: key,
+                        }).toString()}`}
+                        className={`px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition ${
+                          categoryFilter === key ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                        }`}>
+                        <span>{meta.emoji}</span>{meta.label}
+                        {cnt > 0 && <span className={categoryFilter === key ? "text-white/70" : "text-neutral-400"}>· {cnt}</span>}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
 
-      <div className="flex items-center gap-x-3 gap-y-2 flex-wrap text-xs">
-        <span className="text-neutral-500 font-medium shrink-0">Sortieren</span>
-        <div className="flex gap-1.5 flex-wrap">
-          {Object.entries(SORT_OPTIONS).map(([key, meta]) => (
-            <Link
-              key={key}
-              href={`/chatbot/inbox?${new URLSearchParams({
-                ...(filter !== "all" ? { status: filter } : {}),
-                ...(mode !== "all" ? { mode } : {}),
-                ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
-                ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
-                ...(searchQuery ? { q: searchQuery } : {}),
-                ...(!onlyUnread ? { unread: "0" } : {}),
-                ...(key !== "newest" ? { sort: key } : {}),
-              }).toString()}`}
-              className={`px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition ${
-                sortMode === key
-                  ? "bg-neutral-900 text-white"
-                  : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
-              }`}
-            >
-              <span>{meta.emoji}</span> {meta.label}
-            </Link>
-          ))}
-        </div>
-      </div>
+              <div className="flex items-center gap-x-3 gap-y-2 flex-wrap text-xs">
+                <span className="text-neutral-500 font-medium shrink-0 w-20">Sortieren</span>
+                <div className="flex gap-1.5 flex-wrap">
+                  {Object.entries(SORT_OPTIONS).map(([key, meta]) => (
+                    <Link key={key}
+                      href={`/chatbot/inbox?${new URLSearchParams({
+                        ...(view !== "todo" ? { view } : {}),
+                        ...(mode !== "all" ? { mode } : {}),
+                        ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
+                        ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
+                        ...(searchQuery ? { q: searchQuery } : {}),
+                        ...(key !== "newest" ? { sort: key } : {}),
+                      }).toString()}`}
+                      className={`px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition ${
+                        sortMode === key ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                      }`}>
+                      <span>{meta.emoji}</span> {meta.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </details>
+        );
+      })()}
 
       {/* Sessions Liste — immer als atmende Card-Liste mit Abstand, damit auch
           längere Listen nicht erdrückend wirken (vorher war Default eine
