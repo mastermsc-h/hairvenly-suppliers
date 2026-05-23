@@ -432,6 +432,10 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += "  • Kundin: 'hab planity schon gefunden' → NICHT nochmal Planity-Link. RICHTIG: 'Super 💕 Falls du vorher noch Fragen zur Farbe hast — schick gerne ein Foto bei Tageslicht.'\n";
   systemPrompt += "  • Kundin: 'ich weiß dass Mini Tapes 60cm sind' → NICHT erklären dass Mini Tapes 60cm sind.\n";
   systemPrompt += "  • Kundin: 'ich brauche 6 Pakete' → NICHT zurückfragen wie viele Pakete sie braucht.\n";
+  systemPrompt += "- 🏪 SALON-TERMIN vs. ONLINE-BESTELLUNG unterscheiden:\n";
+  systemPrompt += "  • Wenn die Kundin einen TERMIN VOR ORT bucht (Verdichtung, Auffüllen, Verlängerung im Salon) → die Stylistin sieht ihr Haar direkt persönlich. KEIN Foto vorab nötig, keine Farb-Vorabberatung anbieten. Antworten kurz halten — Termin-Info reicht.\n";
+  systemPrompt += "  • Nur bei ONLINE-Bestellung von Tapes/Bondings/Tressen mit Farbberatung-Bedarf → Foto-Option erwähnen.\n";
+  systemPrompt += "  • Beispiel: Kundin fragt nach Termin zur Verdichtung mit Mini Tapes → kurze Bestätigung + Hinweis dass sie über Planity buchen kann. KEIN 'schick mir ein Foto'-Angebot, weil die Stylistin sie persönlich sieht.\n";
 
   // GESCHÄFTSZEIT-KONTEXT
   // Bot muss wissen ob aktuell Öffnungszeit ist UND wie viel Zeit noch übrig ist.
