@@ -347,6 +347,7 @@ export async function approveDraft(
   finalText: string,
   note?: string,
   saveAsTraining = true, // Default = ja, Mitarbeiterin kann via Checkbox abwählen
+  markAsPositive = false, // 👍 — auch ohne Edit als positives Vorbild speichern
 ) {
   if (!finalText?.trim()) throw new Error("Leerer Text");
   const supabase = await createClient();
@@ -375,6 +376,7 @@ export async function approveDraft(
   // Final-Message als assistant in chat_messages speichern (ID merken für MID-Update nach Versand)
   // auto_sent=false explizit → diese Message wurde via assisted-Modus + Mitarbeiter-Approve
   // gesendet (= "manueller autobot"), nicht autonom vom Bot.
+  // Wenn explizit als positives Vorbild bewertet: sentiment + feedback-marker direkt setzen.
   const { data: insertedMsg } = await svc.from("chat_messages").insert({
     session_id:   draft.session_id,
     role:         "assistant",
@@ -382,6 +384,9 @@ export async function approveDraft(
     tool_calls:   draft.tool_calls,
     tool_results: draft.tool_results,
     auto_sent:    false,
+    teach_feedback_at: markAsPositive ? new Date().toISOString() : null,
+    teach_feedback_by: markAsPositive ? user.id : null,
+    teach_sentiment:   markAsPositive ? "positive" : null,
   }).select("id").single();
   await svc.from("chat_sessions")
     .update({
@@ -422,7 +427,7 @@ export async function approveDraft(
     }
   }
 
-  if (saveAsTraining && (wasEdited || hasNote || hasRefineFeedback) && draft.trigger_message_id) {
+  if (saveAsTraining && (wasEdited || hasNote || hasRefineFeedback || markAsPositive) && draft.trigger_message_id) {
     const { data: trigger } = await svc
       .from("chat_messages")
       .select("content, created_at")
@@ -449,6 +454,11 @@ export async function approveDraft(
         }));
 
       const feedbackParts: string[] = [];
+      if (markAsPositive && !wasEdited && !hasRefineFeedback) {
+        feedbackParts.push("👍 POSITIVES VORBILD: Diese Bot-Antwort war so gut, dass die Mitarbeiterin sie unverändert senden konnte. Antworte bei ähnlichen Fragen in diesem Stil/mit diesem Inhalt.");
+      } else if (markAsPositive) {
+        feedbackParts.push("👍 ALS GUT BEWERTET nach Mitarbeiter-Approve (mit ggf. Edit/Refine).");
+      }
       if (hasRefineFeedback) {
         feedbackParts.push(
           "REFINE-FEEDBACKS DER MITARBEITERIN (in chronologischer Reihenfolge):\n" +
@@ -458,9 +468,12 @@ export async function approveDraft(
       if (hasNote) feedbackParts.push(`STRATEGIE-HINWEIS: ${note!.trim()}`);
       if (wasEdited) feedbackParts.push("Mitarbeiterin hat finalen Text noch direkt editiert");
 
-      const tags = ["assisted_correction"];
+      const tags = markAsPositive && !wasEdited && !hasRefineFeedback
+        ? ["positive_exemplar", "thumbs_up"]
+        : ["assisted_correction"];
       if (hasRefineFeedback) tags.push("refined");
       if (hasNote) tags.push("with_strategy_note");
+      if (markAsPositive && (wasEdited || hasRefineFeedback)) tags.push("positive_exemplar");
 
       const { data: insertedTraining, error: trainErr } = await svc.from("chatbot_training").insert({
         user_message:    trigger.content,
@@ -473,6 +486,9 @@ export async function approveDraft(
         // Strategie-Notiz festhalten.
         avatar_name:     null,
         active:          true,
+        // Reine positive Vorbilder werden gepinnt, damit der Bot sie priorisiert.
+        // Mixed-Fälle (positive + edit/refine) sind eher Korrektur — nicht pinnen.
+        pinned:          markAsPositive && !wasEdited && !hasRefineFeedback,
         tags:            [...tags, `from_avatar:${session.bot_signature_name || "unknown"}`],
         // context_messages ist NOT NULL in der DB (default '[]') — niemals null senden,
         // sonst schlägt der Insert silently fehl und es entsteht KEIN Trainings-Eintrag.
@@ -963,7 +979,109 @@ export async function teachFromAutobotMessage(
   // 6) Auf der Bot-Message ein Flag setzen, damit UI weiß "diese wurde nachtrainiert"
   //    — verhindert dass dieselbe Korrektur 5× landet.
   await svc.from("chat_messages")
-    .update({ teach_feedback_at: new Date().toISOString(), teach_feedback_by: user.id })
+    .update({
+      teach_feedback_at: new Date().toISOString(),
+      teach_feedback_by: user.id,
+      teach_sentiment:   "correction",
+    })
+    .eq("id", messageId);
+
+  revalidatePath(`/chatbot/inbox/${msg.session_id}`);
+  return { ok: true as const };
+}
+
+/**
+ * Positiv-Bewertung: Mitarbeiter:in sagt "diese Bot-Antwort war gut, nimm sie
+ * als Vorbild für ähnliche Fälle". Speichert einen Training-Eintrag mit
+ *   good_answer = Bot-Text (unverändert)
+ *   bad_answer  = null  (es gibt keine Gegen-Version)
+ *   tags        = ["positive_exemplar", "thumbs_up"]
+ *   pinned      = true  (Bot priorisiert positive Vorbilder)
+ *
+ * Damit lernt der Bot: "wenn jemand sowas Ähnliches fragt → antworte in dem
+ * Stil/Inhalt". Anders als bei Korrekturen gibt's hier keinen Diff zu lernen,
+ * sondern ein positives Muster zu verankern.
+ *
+ * Funktioniert für JEDE assistant-Message — autonom-gesendete Autobot-Antworten
+ * UND nach Approve gesendete Assisted-Antworten. Beide Wege bekommen ein
+ * teach_sentiment='positive' auf chat_messages.
+ */
+export async function markBotMessageAsGood(messageId: string, note?: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const svc = createServiceClient();
+
+  // 1) Bot-Message holen
+  const { data: msg } = await svc.from("chat_messages")
+    .select("id, session_id, content, role, created_at, teach_feedback_at")
+    .eq("id", messageId).single();
+  if (!msg) throw new Error("Bot-Message nicht gefunden");
+  if (msg.role !== "assistant") throw new Error("Nur Bot-Antworten können bewertet werden");
+  if (msg.teach_feedback_at) {
+    // bereits bewertet — Idempotent, einfach nichts tun
+    return { ok: true as const, alreadyRated: true };
+  }
+
+  // 2) Letzte User-Message davor = Trigger
+  const { data: triggerMsg } = await svc.from("chat_messages")
+    .select("content")
+    .eq("session_id", msg.session_id)
+    .eq("role", "user")
+    .is("deleted_at", null)
+    .lt("created_at", msg.created_at)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // 3) Letzte ~6 Messages bis inkl. der Bot-Message als Kontext
+  const { data: contextMsgs } = await svc.from("chat_messages")
+    .select("role, content, created_at")
+    .eq("session_id", msg.session_id)
+    .is("deleted_at", null)
+    .lte("created_at", msg.created_at)
+    .order("created_at", { ascending: false })
+    .limit(8);
+  const context = (contextMsgs || [])
+    .slice().reverse()
+    .filter(m => (m.role === "user" || m.role === "assistant" || m.role === "human_agent") && m.content)
+    .map(m => ({
+      role: m.role === "human_agent" ? "assistant" : m.role,
+      content: (m.content || "").trim(),
+    }));
+
+  // 4) Mitarbeiter:in
+  const { data: profile } = await svc.from("profiles")
+    .select("display_name, email").eq("id", user.id).maybeSingle();
+  const authorLabel = profile?.display_name || profile?.email || "Mitarbeiterin";
+
+  // 5) Training-Eintrag: positives Vorbild
+  const cleanedNote = note?.trim();
+  const feedbackText = cleanedNote
+    ? `[👍 POSITIVES VORBILD — bewertet von ${authorLabel}] ${cleanedNote}`
+    : `[👍 POSITIVES VORBILD — bewertet von ${authorLabel}] Diese Bot-Antwort war gut so. Antwortet bei ähnlichen Fragen in diesem Stil/mit diesem Inhalt.`;
+
+  const trainErr = await svc.from("chatbot_training").insert({
+    user_message:     triggerMsg?.content || "(keine direkte Kunden-Frage davor)",
+    bad_answer:       null, // bewusst null — es gibt keine Gegen-Version
+    good_answer:      msg.content,
+    feedback:         feedbackText,
+    context_messages: context,
+    tags:             ["positive_exemplar", "thumbs_up"],
+    pinned:           true,
+    active:           true,
+    created_by:       user.id,
+  });
+  if (trainErr.error) throw new Error("Training konnte nicht gespeichert werden: " + trainErr.error.message);
+
+  // 6) Marker auf der Bot-Message
+  await svc.from("chat_messages")
+    .update({
+      teach_feedback_at: new Date().toISOString(),
+      teach_feedback_by: user.id,
+      teach_sentiment:   "positive",
+    })
     .eq("id", messageId);
 
   revalidatePath(`/chatbot/inbox/${msg.session_id}`);

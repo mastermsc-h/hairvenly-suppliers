@@ -36,6 +36,7 @@ interface Message {
   agent_name: string | null;
   auto_sent?: boolean;
   teach_feedback_at?: string | null;
+  teach_sentiment?: "positive" | "correction" | null;
   reply_to?: { id?: string | null; role: string; content_preview: string } | null;
   created_at: string;
 }
@@ -831,7 +832,12 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
           </div>
           {/* Nachtraining-Box für Autobot-Antworten */}
           {msg.auto_sent && (
-            <AutobotTeachBox messageId={msg.id} originalText={msg.content || ""} alreadyTaught={!!msg.teach_feedback_at} />
+            <AutobotTeachBox
+              messageId={msg.id}
+              originalText={msg.content || ""}
+              alreadyTaught={!!msg.teach_feedback_at}
+              sentiment={msg.teach_sentiment ?? null}
+            />
           )}
         </div>
         <div className="w-7 h-7 rounded-full bg-rose-100 flex-shrink-0 flex items-center justify-center">
@@ -919,11 +925,11 @@ function DraftBox({
     document.body.style.userSelect = "none";
   }
 
-  async function handleSend() {
+  async function handleSend(markAsPositive = false) {
     if (!text.trim() || busy) return;
     setBusy("send");
     try {
-      await approveDraft(draft.id, text.trim(), note.trim() || undefined, saveAsTraining);
+      await approveDraft(draft.id, text.trim(), note.trim() || undefined, saveAsTraining, markAsPositive);
       onDone();
     } catch (e) {
       alert(`Senden fehlgeschlagen: ${(e as Error).message}`);
@@ -1124,11 +1130,23 @@ function DraftBox({
       <div className={`shrink-0 border-t border-blue-200 px-3 py-2 bg-gradient-to-b from-blue-50/60 to-blue-50/30 ${collapsed ? "hidden" : ""}`}>
         <div className="flex gap-2 flex-wrap items-center">
           <button
-            onClick={handleSend}
+            onClick={() => handleSend(false)}
             disabled={busy !== null || !text.trim()}
             className="bg-green-600 text-white rounded-xl px-4 py-2 hover:bg-green-700 disabled:opacity-40 inline-flex items-center gap-1 text-xs font-medium shadow-sm"
           >
             <Check size={12} /> {busy === "send" ? "Sende…" : "Senden ✓"}
+          </button>
+          {/* 👍 Senden + als positives Vorbild fürs Training markieren — Bot lernt
+              "diese Antwort war gut so" und priorisiert ähnliche bei neuen Fragen. */}
+          <button
+            onClick={() => handleSend(true)}
+            disabled={busy !== null || !text.trim()}
+            className="bg-emerald-500 text-white rounded-xl px-3 py-2 hover:bg-emerald-600 disabled:opacity-40 inline-flex items-center gap-1 text-xs font-medium shadow-sm"
+            title={wasEdited
+              ? "Senden + die finale Version als positives Vorbild speichern (Bot lernt aus deinem Edit + Vorbild)"
+              : "Senden + Bot-Entwurf war perfekt — als positives Vorbild speichern. Bot wird bei ähnlichen Fragen sicherer."}
+          >
+            👍 {busy === "send" ? "Sende…" : "Senden + Vorbild"}
           </button>
           <button
             onClick={handleGrammar}
@@ -1260,15 +1278,44 @@ function AutobotTeachBox({
   messageId,
   originalText,
   alreadyTaught,
-}: { messageId: string; originalText: string; alreadyTaught: boolean }) {
+  sentiment,
+}: { messageId: string; originalText: string; alreadyTaught: boolean; sentiment?: "positive" | "correction" | null }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [showGoodNote, setShowGoodNote] = useState(false);
+  const [goodNote, setGoodNote] = useState("");
   const [text, setText] = useState(originalText);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(alreadyTaught);
+  const [doneSentiment, setDoneSentiment] = useState<"positive" | "correction" | null>(
+    alreadyTaught ? (sentiment ?? "correction") : null
+  );
 
-  if (done) {
+  async function markAsGood() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { markBotMessageAsGood } = await import("@/lib/actions/chat-inbox");
+      await markBotMessageAsGood(messageId, goodNote.trim() || undefined);
+      setDoneSentiment("positive");
+      setShowGoodNote(false);
+      setGoodNote("");
+      router.refresh();
+    } catch (e) {
+      alert(`Bewerten fehlgeschlagen: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (doneSentiment === "positive") {
+    return (
+      <div className="mt-1 inline-flex items-center gap-1 text-[10px] text-emerald-700">
+        <Check size={10} /> 👍 Als positives Vorbild gespeichert — Bot priorisiert diesen Stil
+      </div>
+    );
+  }
+  if (doneSentiment === "correction") {
     return (
       <div className="mt-1 inline-flex items-center gap-1 text-[10px] text-emerald-700">
         <Check size={10} /> Nachtrainiert — Bot lernt fürs nächste Mal
@@ -1278,14 +1325,69 @@ function AutobotTeachBox({
 
   if (!open) {
     return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="mt-1 inline-flex items-center gap-1 text-[10px] text-purple-600 hover:text-purple-900 underline-offset-2 hover:underline"
-        title="Bot-Antwort war nicht optimal? Sag dem Bot wie es besser wäre — er lernt für ähnliche Fälle"
-      >
-        <Sparkles size={10} /> Für nächstes Mal trainieren
-      </button>
+      <div className="mt-1 flex items-center gap-2.5 flex-wrap">
+        {/* 👍 Direkt-Bewertung — ein Klick = "war gut so" (mit optionaler Notiz-Erweiterung) */}
+        {showGoodNote ? (
+          <div className="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1">
+            <input
+              type="text"
+              value={goodNote}
+              onChange={(e) => setGoodNote(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") markAsGood(); }}
+              placeholder="Optional: warum war's gut? (z.B. guter Ton bei unsicherer Kundin)"
+              className="text-[11px] bg-white border border-emerald-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-emerald-400 w-72 max-w-[60vw]"
+              disabled={busy}
+              autoFocus
+            />
+            <button
+              type="button"
+              onClick={markAsGood}
+              disabled={busy}
+              className="text-[11px] bg-emerald-600 text-white rounded px-2 py-1 hover:bg-emerald-700 disabled:opacity-40 inline-flex items-center gap-1"
+            >
+              <Check size={10} /> {busy ? "…" : "Speichern"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowGoodNote(false); setGoodNote(""); }}
+              disabled={busy}
+              className="text-[10px] text-neutral-500 hover:text-neutral-800 px-1"
+            >
+              Abbrechen
+            </button>
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={markAsGood}
+              disabled={busy}
+              className="inline-flex items-center gap-1 text-[10px] text-emerald-700 hover:text-emerald-900 underline-offset-2 hover:underline disabled:opacity-40"
+              title="Diese Antwort war gut so — als Vorbild speichern, damit der Bot bei ähnlichen Fragen sicherer wird"
+            >
+              👍 War gut so
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowGoodNote(true)}
+              disabled={busy}
+              className="text-[10px] text-emerald-600 hover:text-emerald-900 disabled:opacity-40"
+              title="Mit kurzer Notiz speichern (warum die Antwort besonders gut war)"
+            >
+              + Notiz
+            </button>
+            <span className="text-[10px] text-neutral-300">|</span>
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              className="inline-flex items-center gap-1 text-[10px] text-purple-600 hover:text-purple-900 underline-offset-2 hover:underline"
+              title="Bot-Antwort war nicht optimal? Sag dem Bot wie es besser wäre — er lernt für ähnliche Fälle"
+            >
+              <Sparkles size={10} /> Korrigieren / Nachtraining
+            </button>
+          </>
+        )}
+      </div>
     );
   }
 
@@ -1295,7 +1397,7 @@ function AutobotTeachBox({
     try {
       const { teachFromAutobotMessage } = await import("@/lib/actions/chat-inbox");
       await teachFromAutobotMessage(messageId, text.trim(), note.trim());
-      setDone(true);
+      setDoneSentiment("correction");
       setOpen(false);
       router.refresh();
     } catch (e) {

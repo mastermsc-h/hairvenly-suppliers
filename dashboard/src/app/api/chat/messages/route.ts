@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   let q = svc
     .from("chat_messages")
     .select(`
-      id, role, content, attachments, tool_calls, agent_id, auto_sent, teach_feedback_at, external_id, reply_to_external_id, created_at,
+      id, role, content, attachments, tool_calls, agent_id, auto_sent, teach_feedback_at, teach_sentiment, external_id, reply_to_external_id, created_at,
       agent:profiles!chat_messages_agent_id_fkey(display_name,email)
     `)
     .eq("session_id", sessionId)
@@ -74,6 +74,7 @@ export async function GET(req: NextRequest) {
       })(),
       auto_sent: (m as { auto_sent?: boolean }).auto_sent ?? false,
       teach_feedback_at: (m as { teach_feedback_at?: string | null }).teach_feedback_at ?? null,
+      teach_sentiment: (m as { teach_sentiment?: "positive" | "correction" | null }).teach_sentiment ?? null,
       reply_to: replyTo,
       created_at: m.created_at,
     };
