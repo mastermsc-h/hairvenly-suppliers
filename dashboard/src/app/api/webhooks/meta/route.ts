@@ -646,8 +646,35 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
   // → IMMER Draft, auch wenn der Bot nur Foto-Briefing macht. Die Stylistin
   // klickt 'Senden' in 5 Sekunden, das Risiko einer falschen autonomen
   // Farbempfehlung ist nicht wert.
+  //
+  // AUSNAHME 1a: Wenn Session-Kategorie 'color_advice' ist, aber die Antwort
+  // klar um PACK-INHALT / VERFÜGBARKEIT / LAGER geht und KEINE konkrete
+  // Farb-EMPFEHLUNG enthält → safe behandeln. Beispiel:
+  // Kundin: "Wie viele Tapes pro Packung?" → Bot: "25 Strähnen, FAWN auf Lager"
+  // Das ist Pack-Info + Lagerstand, keine Farbberatung. Session-Kategorie ist
+  // nur "color_advice" weil früher über Farben gesprochen wurde (sticky).
+  let effectiveCategory = category;
+  if (category === "color_advice") {
+    const hasPackOrStockClaim =
+      /\b\d+\s*(strähnen?|packung(en)?|pakete?|paket\b)/i.test(botReply) ||
+      /\b(auf lager|verfügbar|gerade unterwegs|nicht (mehr )?da|ausverkauft|wieder rein|hairvenly\.de\/products)\b/i.test(botReply);
+    // "Echte" Farbempfehlung erkennen — wenn diese Phrasen drin sind, ist es
+    // KEINE simple Verfügbarkeits-Antwort sondern aktive Beratung → bleibt Draft.
+    // WICHTIG: NICHT zu breit fassen — "für dein Haar brauchst" ist KEIN Color-Advice,
+    // sondern eine Pack-Mengen-Frage. Pattern muss color-spezifisch sein.
+    const isActualColorAdvice =
+      /\b(empfehle dir|empfehle ich|passt perfekt zu|würde gut zu dir|harmoniert mit|trifft deinen ton|für deinen ton|passend zu deinem ton|passend zu deiner)\b/i.test(botReply) ||
+      /\b(deine haarfarbe|dein farbton|deinem farbton|dein ansatz|deinem ansatz|dein eigenes haar)\b/i.test(botReply) ||
+      /\b(foto|bild)\b.{0,30}\b(schau|gucke|analysier|brauch|schick)/i.test(botReply) ||
+      /\b(kühles?|warmes?|honig-?|aschiges?|goldenes?)\s+(blond|braun|mittelbraun|dunkelbraun|hellbraun)\b/i.test(botReply);
+    if (hasPackOrStockClaim && !isActualColorAdvice) {
+      effectiveCategory = "availability";
+      console.log("[isHighConfidence] color_advice → availability override (Pack/Lager-Antwort ohne Farbempfehlung)");
+    }
+  }
+
   const safeCategories = new Set(["availability", "general", "pricing"]);
-  if (!category || !safeCategories.has(category)) return false;
+  if (!effectiveCategory || !safeCategories.has(effectiveCategory)) return false;
 
   // 2. Unsicherheits-Phrasen im Reply → NICHT autonom senden
   const uncertaintyPatterns = [
