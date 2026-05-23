@@ -1476,21 +1476,58 @@ Diese 5 Regeln werden auch NACH deiner Antwort vom System gecheckt und ggf. korr
           ? biz2.nextOpenLabel
           : `noch heute, spätestens ${biz2.nextOpenLabel}`;
 
+      // Erweiterte Verb-Liste — alles was eine Mitarbeiterin "gleich" tun
+      // könnte: schauen/gucken/sehen/prüfen/checken/lesen, plus die alten
+      // Meldungs-Verben. Pattern erlaubt jetzt bis zu 60 Zeichen zwischen
+      // "sich" und "gleich" — damit Sätze wie
+      // "Farb-Expertin schaut sich deine Fotos gleich persönlich an"
+      // gematcht werden (vorher nicht — "deine Fotos" stand dazwischen).
       const replacements: Array<[RegExp, string]> = [
-        [/\b(meine\s+|eine\s+|unsere\s+)?(kollegin|farb-?expertin|stylistin|mitarbeiterin)\s+(meldet|schreibt|kommt|antwortet|kümmert)\s+sich\s+(gleich|in\s+kürze|sofort|kurz\s+(durch|gleich)|gleich\s+(durch|bei\s+dir))/gi,
-         `$1$2 meldet sich ${replacementLabel}`],
-        [/\b(schreibe|melde|sage)\s+(dir|euch)\s+gleich(\s+mit\s+der\s+kollegin\s+durch)?/gi,
+        // Variante A — Person + Verb + sich + (irgendwas) + gleich + (optional persönlich/an)
+        // (z.B. "Farb-Expertin schaut sich deine Fotos gleich persönlich an"
+        // wird komplett ersetzt durch "Farb-Expertin meldet sich [time] bei dir")
+        [new RegExp(
+          `\\b(meine\\s+|eine\\s+|unsere\\s+)?(kollegin|farb-?expertin|stylistin|mitarbeiterin|farb-?beraterin)\\s+` +
+          `(meldet|schreibt|kommt|antwortet|kümmert|schaut|guckt|sieht|prüft|checkt|liest|bearbeitet|beantwortet)` +
+          `\\s+sich(?:\\s+[^.!?\\n]{0,60})?\\s+(gleich|in\\s+kürze|sofort|in\\s+ein\\s+paar\\s+minuten)` +
+          `(?:\\s+persönlich)?` +
+          `(?:\\s+(an|für\\s+dich|für\\s+euch))?\\b`,
+          "gi",
+         ),
+         `$1$2 meldet sich ${replacementLabel} bei dir`],
+        // Variante B — Verb + dich/dir/euch + gleich
+        [/\b(schreibe|melde|sage|antworte|kümmere)\s+(dir|euch|mich)\s+gleich(\s+mit\s+der\s+kollegin\s+durch)?/gi,
          `melde mich ${replacementLabel} bei dir`],
-        [/\b(meldet\s+sich\s+(gleich|in\s+kürze|kurz)\s+bei\s+dir)/gi,
+        // Variante C — "meldet sich gleich"
+        [/\b(meldet\s+sich\s+(gleich|in\s+kürze|kurz)\s+(bei\s+dir|zurück|persönlich)?)/gi,
          `meldet sich ${replacementLabel} bei dir`],
-        [/\bschreibe?\s+dir\s+(die\s+\w+\s+)?gleich(\s+durch)?/gi,
+        // Variante D — "schreibe dir gleich"
+        [/\bschreibe?\s+(dir|euch)\s+(die\s+\w+\s+)?gleich(\s+durch)?/gi,
          biz2.status === "closed"
            ? `schreibe dir ${biz2.reason === "Wochenende" ? "Montag" : "morgen"} die Details`
            : `schreibe dir die Details noch heute oder spätestens ${biz2.nextOpenLabel}`],
+        // Variante E — "schaut/guckt sich [...] gleich an" (Person implizit
+        // — fängt Sätze ohne explizit genannte Person ab, z.B. wenn die
+        // Person schon im Vorsatz erwähnt wurde)
+        [/\b(schaut|guckt|sieht|prüft|checkt|liest)\s+sich\s+([^.!?\n]{0,60})\s+gleich\b/gi,
+         `$1 sich $2 ${replacementLabel}`],
+        // Variante F — Bare "gleich persönlich" / "gleich für dich"
+        [/\bgleich\s+(persönlich|für\s+dich|für\s+euch)\b/gi,
+         `${replacementLabel} $1`],
       ];
       for (const [re, repl] of replacements) {
         finalText = finalText.replace(re, repl);
       }
+      // Post-Cleanup nach Replacement: "meldet sich X bei dir und meldet sich Y" → "meldet sich X bei dir mit Y"
+      // (entsteht wenn das Pattern den Block + ein nachfolgendes "und meldet sich" parallel zueinander hat)
+      finalText = finalText.replace(
+        /meldet sich ([^.!?\n]{3,60}) bei dir\s+und\s+meldet sich(?:\s+mit)?\s+/gi,
+        "meldet sich $1 bei dir mit ",
+      );
+      finalText = finalText.replace(
+        /meldet sich ([^.!?\n]{3,60}) bei dir\.\s*([A-ZÄÖÜ][^.!?\n]{0,40})\s+meldet sich/gi,
+        "meldet sich $1 bei dir. $2 meldet",
+      );
       if (beforeBiz !== finalText) {
         console.warn(`[respond] SCRUBBED "gleich"-Phrasen → "${replacementLabel}" (Status: ${biz2.status})`);
       }

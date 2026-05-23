@@ -737,7 +737,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                             title="Mitarbeiter übernimmt — Bot pausiert für diese Session"
                           >
                             <Check size={10} />
-                            Übernommen
+                            MA übernommen
                           </span>
                         )}
                         {/* Auto-Hinweis: Kundin hat Foto geschickt + Session ist

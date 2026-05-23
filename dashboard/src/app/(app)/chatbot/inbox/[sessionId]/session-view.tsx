@@ -454,7 +454,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               }`}
             >
               {session.human_only ? (
-                <><Check size={13} /> Übernommen</>
+                <><Check size={13} /> MA übernommen</>
               ) : (
                 <><AlertTriangle size={13} /> Mitarbeiter benötigt!</>
               )}
