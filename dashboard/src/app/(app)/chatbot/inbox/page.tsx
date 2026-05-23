@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
-import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User, AlertTriangle, StickyNote, Bell, Filter, X } from "lucide-react";
+import { Bot, MessageSquare, Clock, UserCheck, CheckCircle2, User, AlertTriangle, StickyNote, Bell, Filter, X, Check } from "lucide-react";
 import SyncInstagramButton from "./sync-instagram-button";
 import MarkUnreadButton from "./mark-unread-button";
 import MarkSeenButton from "./mark-seen-button";
@@ -46,6 +46,7 @@ interface SessionStats {
   humanCount: number;
   autobotCount: number;            // assistant-Messages mit auto_sent=true
   lastAutobotAt?: string;          // wann zuletzt eine autonome Bot-Antwort raus ging
+  lastUserHasPhoto?: boolean;      // hat die NEUESTE Kunden-Message ein Foto/Image-Attachment?
 }
 
 /**
@@ -167,7 +168,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     const cutoff = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString();
     const { data: msgs } = await svc
       .from("chat_messages")
-      .select("session_id, role, content, created_at, agent_id, auto_sent")
+      .select("session_id, role, content, created_at, agent_id, auto_sent, attachments")
       .in("session_id", sessionIds)
       .is("deleted_at", null)
       .gte("created_at", cutoff)
@@ -191,7 +192,17 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         s.lastMsgAgentId = (m as { agent_id?: string | null }).agent_id ?? null;
         s.lastMsgAutoSent = m.role === "assistant" ? autoSent : false;
       }
-      if (m.role === "user" && !s.lastUser) s.lastUser = m.content;
+      if (m.role === "user" && !s.lastUser) {
+        s.lastUser = m.content;
+        // NEUESTE Kunden-Message: hat sie ein Foto/Image-Attachment?
+        // Wenn ja, muss eine Mitarbeiter:in das auswerten — auto_send kommt
+        // bei color_advice/Fotos nicht zustande, also Hinweis "Mitarbeiter benötigt".
+        const att = (m as { attachments?: Array<{ type?: string; url?: string }> | null }).attachments;
+        s.lastUserHasPhoto = Array.isArray(att) && att.some(a =>
+          a?.type === "image" || a?.type === "photo" ||
+          (typeof a?.url === "string" && /\.(jpg|jpeg|png|webp|heic|gif)(\?|$)/i.test(a.url))
+        );
+      }
       if ((m.role === "assistant" || m.role === "human_agent") && !s.lastBot) {
         s.lastBot = m.content;
       }
@@ -722,8 +733,25 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         })()}
                         {(s as { human_only?: boolean }).human_only && (
                           <span
+                            className="bg-rose-500 text-white border border-rose-600 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
+                            title="Mitarbeiter übernimmt — Bot pausiert für diese Session"
+                          >
+                            <Check size={10} />
+                            Übernommen
+                          </span>
+                        )}
+                        {/* Auto-Hinweis: Kundin hat Foto geschickt + Session ist
+                            in Bearbeitung → "Mitarbeiter benötigt!" (orange).
+                            Wird NICHT in der DB persistiert — rein abgeleitet aus
+                            "letzte Kunden-Message hat ein Bild + steht in todo".
+                            Der Bot generiert weiterhin Drafts, aber der Badge
+                            macht klar: hier muss ein Mensch ran. */}
+                        {!(s as { human_only?: boolean }).human_only
+                          && stats[s.id]?.lastUserHasPhoto
+                          && (uiStatusMap[s.id] === "todo_unread" || uiStatusMap[s.id] === "todo_draft") && (
+                          <span
                             className="bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
-                            title="Mitarbeiter benötigt! — Bot pausiert für diese Session, ein Mensch übernimmt"
+                            title="Kundin hat ein Foto geschickt — der Bot kann das nicht alleine beurteilen. Bitte als Mitarbeiter:in beantworten."
                           >
                             <AlertTriangle size={10} className="text-amber-700" />
                             Mitarbeiter benötigt!

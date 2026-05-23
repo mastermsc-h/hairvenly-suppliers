@@ -447,13 +447,17 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               title={session.human_only
                 ? "Bot wieder zulassen — die Session läuft wieder im aktuellen Bot-Modus"
                 : "Markieren als 'Mitarbeiter benötigt!' — Bot pausiert für diese Session, du übernimmst komplett. Bleibt aktiv bis du es wieder ausschaltest."}
-              className={`h-8 px-3 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 disabled:opacity-50 transition ${
+              className={`h-8 px-3 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 disabled:opacity-50 transition whitespace-nowrap ${
                 session.human_only
                   ? "bg-rose-500 text-white hover:bg-rose-600 shadow-sm"
                   : "text-rose-700 hover:bg-rose-50"
               }`}
             >
-              <AlertTriangle size={13} /> {session.human_only ? "Mitarbeiter übernimmt ✓" : "Mitarbeiter benötigt!"}
+              {session.human_only ? (
+                <><Check size={13} /> Übernommen</>
+              ) : (
+                <><AlertTriangle size={13} /> Mitarbeiter benötigt!</>
+              )}
             </button>
           )}
           <div className="divider" />
