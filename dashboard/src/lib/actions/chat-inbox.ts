@@ -138,6 +138,121 @@ export async function setBotMode(sessionId: string, mode: "auto" | "selective_au
     bot_auto_reply: mode === "auto",
   }).eq("id", sessionId);
 
+  // Helper: gibt es offene Customer-Messages (= Kundin hat zuletzt geschrieben,
+  // noch keine Bot/Agent-Antwort danach)? Wenn ja → Bot triggern, sonst nichts.
+  const findOpenCustomerMsg = async () => {
+    const { data: recent } = await svc.from("chat_messages")
+      .select("id, role, created_at")
+      .eq("session_id", sessionId)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(10);
+    const msgs = recent || [];
+    const lastAgentIdx = msgs.findIndex(m => m.role === "assistant" || m.role === "human_agent");
+    const openCustomerMsgs =
+      lastAgentIdx === -1 ? msgs.filter(m => m.role === "user")
+                          : msgs.slice(0, lastAgentIdx).filter(m => m.role === "user");
+    // Stale-Schutz: jüngste offene Frage > 60 Tage alt → nicht reaktivieren
+    if (openCustomerMsgs.length > 0) {
+      const youngest = new Date(openCustomerMsgs[0].created_at).getTime();
+      if (Date.now() - youngest > 60 * 24 * 60 * 60 * 1000) return null;
+    }
+    return openCustomerMsgs.length > 0 ? openCustomerMsgs[openCustomerMsgs.length - 1] : null;
+  };
+
+  // Bei Wechsel auf "auto" oder "selective_auto" mit offener Kunden-Nachricht:
+  // sofort Bot generieren + senden (analog zu Webhook-Trigger), damit die
+  // Kundin nicht warten muss bis sie nochmal schreibt.
+  if (mode === "auto" || mode === "selective_auto") {
+    // Klassifikation nachholen falls fehlt
+    (async () => {
+      try {
+        const { classifySession } = await import("@/lib/chatbot/classify");
+        const { data: cur } = await svc.from("chat_sessions").select("category").eq("id", sessionId).single();
+        if (!cur?.category) await classifySession(sessionId);
+      } catch {}
+    })();
+
+    const openMsg = await findOpenCustomerMsg();
+    if (openMsg) {
+      const { data: existingDraft } = await svc.from("chat_drafts")
+        .select("id").eq("session_id", sessionId).eq("status", "pending").maybeSingle();
+      if (!existingDraft) {
+        try {
+          const { respondAsBot, splitLongMessage } = await import("@/lib/chatbot/respond");
+          // Bei auto: direkt senden. Bei selective_auto: erstmal generieren,
+          // dann via Confidence-Check entscheiden ob senden oder Draft.
+          const willDecideAfter = mode === "selective_auto";
+          const result = await respondAsBot(sessionId, { assisted: willDecideAfter });
+          if (result.success && result.text) {
+            // Channel ermitteln
+            const { data: ses } = await svc.from("chat_sessions")
+              .select("channel, external_id, category").eq("id", sessionId).single();
+
+            let shouldSendAutonomous = mode === "auto";
+            if (mode === "selective_auto") {
+              // Confidence-Check inline (vermeiden Import-Loop mit webhook)
+              const replyText = result.text;
+              const category = ses?.category || null;
+              const safeCategories = new Set(["availability", "general", "pricing"]);
+              const looksClarify = replyText.length < 1000 &&
+                /\?/.test(replyText) &&
+                /\b(suchst|brauchst|möchtest|welche|magst\s+du|hast\s+du)\b/i.test(replyText) &&
+                !/hairvenly\.de\/products\//i.test(replyText);
+              shouldSendAutonomous = looksClarify || (category && safeCategories.has(category) && (
+                /hairvenly\.de\/products\//i.test(replyText) ||
+                /(auf lager|sofort verfügbar|gerade unterwegs|ausverkauft)/i.test(replyText)
+              )) || false;
+            }
+
+            if (shouldSendAutonomous) {
+              // assistant-Message + senden
+              const { data: inserted } = await svc.from("chat_messages").insert({
+                session_id: sessionId, role: "assistant", content: result.text,
+                tool_calls:   result.toolCalls && result.toolCalls.length > 0 ? result.toolCalls : null,
+                tool_results: result.toolResults && result.toolResults.length > 0 ? result.toolResults : null,
+                auto_sent: true,
+              }).select("id").single();
+              await svc.from("chat_sessions").update({ last_message_at: new Date().toISOString() }).eq("id", sessionId);
+
+              if (ses?.channel === "instagram" && ses.external_id) {
+                const { sendInstagramMessage } = await import("@/lib/messaging/meta");
+                const parts = splitLongMessage(result.text);
+                let firstMid: string | undefined;
+                for (let i = 0; i < parts.length; i++) {
+                  const r = await sendInstagramMessage(ses.external_id, parts[i]);
+                  if (i === 0 && r.success && r.message_id) firstMid = r.message_id;
+                  if (i < parts.length - 1) await new Promise(s => setTimeout(s, 600));
+                }
+                if (firstMid && inserted?.id) {
+                  await svc.from("chat_messages").update({ external_id: firstMid }).eq("id", inserted.id);
+                }
+              } else if (ses?.channel === "whatsapp" && ses.external_id) {
+                const { sendWhatsAppMessage } = await import("@/lib/messaging/meta");
+                const r = await sendWhatsAppMessage(ses.external_id, result.text);
+                if (r.success && r.message_id && inserted?.id) {
+                  await svc.from("chat_messages").update({ external_id: r.message_id }).eq("id", inserted.id);
+                }
+              }
+              console.log(`[setBotMode] AUTO-SENT for session ${sessionId} (mode=${mode})`);
+            } else {
+              // Draft speichern (selective_auto + nicht confident)
+              await svc.from("chat_drafts").insert({
+                session_id: sessionId, original_text: result.text,
+                tool_calls:   result.toolCalls && result.toolCalls.length > 0 ? result.toolCalls : null,
+                tool_results: result.toolResults && result.toolResults.length > 0 ? result.toolResults : null,
+                trigger_message_id: openMsg.id, status: "pending",
+              });
+              console.log(`[setBotMode] draft for session ${sessionId} (selective_auto, not confident)`);
+            }
+          }
+        } catch (e) {
+          console.error("[setBotMode] auto-trigger crashed:", e);
+        }
+      }
+    }
+  }
+
   if (mode === "assisted") {
     // Klassifikation nachholen falls noch keine (fire-and-forget)
     (async () => {
