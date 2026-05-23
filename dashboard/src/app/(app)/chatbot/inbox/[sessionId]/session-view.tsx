@@ -198,10 +198,15 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
     setGenerating(true);
     try {
       const r = await generateDraftOnDemand(session.id);
-      if (!r.ok) alert(r.reason);
-      else router.refresh();
+      if (!r.ok) {
+        // Skip-Errors human-readable übersetzen
+        const friendly = friendlyErrorMessage(r.reason || "Unbekannter Fehler");
+        alert(friendly);
+      } else {
+        router.refresh();
+      }
     } catch (e) {
-      alert(`Generierung fehlgeschlagen: ${(e as Error).message}`);
+      alert(`Generierung fehlgeschlagen: ${friendlyErrorMessage((e as Error).message)}`);
     } finally {
       setGenerating(false);
     }
@@ -623,7 +628,9 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
       ) : session.status === "active" ? (
         <div className="border-t border-neutral-100 p-3 flex items-center justify-between gap-3 flex-wrap bg-gradient-to-r from-blue-50/40 to-transparent">
           <div className="text-xs text-neutral-500 flex-1 min-w-0">
-            {session.bot_mode === "auto"
+            {session.category === "appointment"
+              ? <span>📅 <b>Termin-Anfrage</b> — Bot hat keinen Kalender-Zugriff. Bitte direkt selbst antworten (Planity-Link).</span>
+              : session.bot_mode === "auto"
               ? <span>🤖 Bot antwortet bei neuen Nachrichten automatisch.</span>
               : session.bot_mode === "assisted"
               ? <span>🧑‍🏫 Bot bereitet bei neuen Nachrichten automatisch einen Entwurf vor.</span>
@@ -632,8 +639,11 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
           <div className="flex gap-2 items-center">
             <button
               onClick={handleGenerate}
-              disabled={generating || isPending}
-              className="bg-blue-600 text-white rounded-xl px-4 py-2 hover:bg-blue-700 disabled:opacity-40 inline-flex items-center gap-1.5 text-sm font-medium shadow-sm"
+              disabled={generating || isPending || session.category === "appointment"}
+              title={session.category === "appointment"
+                ? "Termin-Anfragen kann der Bot nicht beantworten — kein Kalender-Zugriff. Bitte selbst antworten."
+                : undefined}
+              className="bg-blue-600 text-white rounded-xl px-4 py-2 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1.5 text-sm font-medium shadow-sm"
             >
               <Sparkles size={14} className={generating ? "animate-pulse" : ""} />
               {generating ? "Generiert…" : "Antwort generieren"}
@@ -661,6 +671,24 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
       )}
     </div>
   );
+}
+
+/**
+ * Übersetzt interne Skip-/Fehler-Codes in menschenlesbare Texte.
+ * Wird in handleGenerate / handleRefine / approveDraft genutzt damit
+ * Mitarbeiter:innen wissen WARUM ein Bot-Aktion fehlgeschlagen ist.
+ */
+function friendlyErrorMessage(raw: string): string {
+  if (!raw) return "Unbekannter Fehler";
+  const r = raw.toLowerCase();
+  if (r.includes("skip_appointment_no_calendar_access")) {
+    return "⚠️ Bot kann keinen Termin-Entwurf erstellen — wir haben noch keinen Kalender-Zugriff (Planity). Bitte direkt selbst antworten mit dem Planity-Link.";
+  }
+  if (r.includes("session not found")) return "Session nicht gefunden — neu laden.";
+  if (r.includes("session not active")) return "Diese Session ist nicht mehr aktiv.";
+  if (r.includes("no persona")) return "Bot ist nicht konfiguriert (keine Persona aktiv).";
+  if (r.includes("keine kundennachricht")) return "Keine Kundennachricht da — der Bot hätte nichts zu beantworten.";
+  return raw;
 }
 
 function formatMsgTime(iso: string): string {
@@ -970,7 +998,7 @@ function DraftBox({
       setRefineLog(l => [...l, fb]);
       setRefineInput("");
     } catch (e) {
-      alert(`Neu generieren fehlgeschlagen: ${(e as Error).message}`);
+      alert(`Neu generieren fehlgeschlagen: ${friendlyErrorMessage((e as Error).message)}`);
     } finally {
       setBusy(null);
     }
