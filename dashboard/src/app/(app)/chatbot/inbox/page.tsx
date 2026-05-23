@@ -490,9 +490,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      {/* Sessions Liste — im "Nur unbeantwortet"-Modus transparenter Container,
-          damit die einzelnen Karten gut atmen können; sonst klassische Card-Wand. */}
-      <div className={onlyUnread ? "" : "bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden"}>
+      {/* Sessions Liste — immer als atmende Card-Liste mit Abstand, damit auch
+          längere Listen nicht erdrückend wirken (vorher war Default eine
+          dichte Card-Wand, jetzt einheitlich). */}
+      <div>
         {filteredSessions.length === 0 ? (
           <div className="p-12 text-center text-neutral-400">
             <Bot size={32} className="mx-auto mb-2 text-neutral-300" />
@@ -500,7 +501,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
           </div>
         ) : (
           <Suspense fallback={null}>
-            <ul className={onlyUnread ? "p-2 space-y-2" : ""}>
+            <ul className="space-y-2">
               {filteredSessions.map((s, idx) => {
                 const meta = STATUS_LABELS[s.status] || STATUS_LABELS.active;
                 const Icon = meta.icon;
@@ -574,16 +575,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                   : !isUnseen
                   ? "border-l-neutral-200"
                   : visual.box;
-                const baseLi = onlyUnread
-                  ? `rounded-xl border border-neutral-200 hover:border-emerald-300 hover:shadow-sm transition-all border-l-4 ${boxBorder}`
-                  : `border-b border-neutral-100 hover:bg-blue-100/40 transition-colors ${
-                      isUnread
-                        ? "border-l-4 border-l-pink-500"
-                        : ourTurn
-                        ? "border-l-4 border-l-blue-300"
-                        : "border-l-4 border-l-transparent"
-                    }`;
-                const effectiveBg = onlyUnread && visual ? visual.tint : rowBg;
+                // Immer atmende Card-Form, unabhängig vom Filter — verhindert
+                // dass "In Bearbeitung" als dichte Wand aussieht.
+                const baseLi = `rounded-xl border border-neutral-200 hover:border-emerald-300 hover:shadow-sm transition-all border-l-4 ${boxBorder}`;
+                const effectiveBg = visual ? visual.tint : rowBg;
                 const badgeClass = visual?.badge ?? "bg-neutral-100 text-neutral-600 border-transparent";
                 return (
                   <li
