@@ -92,7 +92,7 @@ WICHTIG:
       model: MODEL,
       max_tokens: 1024,
       system: [
-        { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } as const },
+        { type: "text", text: systemPrompt, cache_control: { type: "ephemeral", ttl: "1h" } as const },
       ],
       messages,
     });

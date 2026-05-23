@@ -1005,7 +1005,7 @@ KEINE Ausnahmen. Wenn unsicher: nur Planity-Link + freundliche Note. KURZ.`;
   const allToolResults: { tool_use_id: string; content: string }[] = [];
 
   const systemBlocks: Anthropic.TextBlockParam[] = [
-    { type: "text", text: systemPromptStable, cache_control: { type: "ephemeral" } as const },
+    { type: "text", text: systemPromptStable, cache_control: { type: "ephemeral", ttl: "1h" } as const },
   ];
   if (systemPromptVariable.trim()) {
     systemBlocks.push({ type: "text", text: systemPromptVariable });
@@ -1013,7 +1013,7 @@ KEINE Ausnahmen. Wenn unsicher: nur Planity-Link + freundliche Note. KURZ.`;
   // Tools-Schema ebenfalls cachen (letztes Tool kriegt cache_control)
   const cachedTools = TOOL_SCHEMAS.map((t, i) =>
     i === TOOL_SCHEMAS.length - 1
-      ? { ...t, cache_control: { type: "ephemeral" } as const }
+      ? { ...t, cache_control: { type: "ephemeral", ttl: "1h" } as const }
       : t
   );
 
@@ -1087,7 +1087,7 @@ KEINE Ausnahmen. Wenn unsicher: nur Planity-Link + freundliche Note. KURZ.`;
         model: MODEL,
         max_tokens: 1024,
         system: [
-          { type: "text", text: systemPromptStable, cache_control: { type: "ephemeral" } as const },
+          { type: "text", text: systemPromptStable, cache_control: { type: "ephemeral", ttl: "1h" } as const },
           { type: "text", text: (systemPromptVariable || "") + "\n\nFasse jetzt die Tool-Ergebnisse zusammen und antworte dem Kunden auf seine letzte Frage. KEINE weiteren Tools aufrufen. SCHREIBE UNBEDINGT EINE KOMPLETTE ANTWORT — auch wenn du dir unsicher bist, formuliere mit den verfügbaren Infos das Beste was du kannst." },
         ],
         messages: convo,
