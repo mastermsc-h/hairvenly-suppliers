@@ -561,25 +561,19 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                   box: "border-l-emerald-200", tint: "bg-neutral-50/50",
                   badge: "bg-neutral-50 text-neutral-600 border-neutral-200",
                 };
-                const visual = onlyUnread
-                  ? (s.category && CATEGORY_VISUAL[s.category]) || DEFAULT_VISUAL
-                  : null;
+                // Kategorie-Visual IMMER setzen — auch in der Default-View
+                // ("In Bearbeitung") sollen die farbigen Balken links sichtbar
+                // sein, damit man Sessions auf einen Blick einordnen kann.
+                const visual = (s.category && CATEGORY_VISUAL[s.category]) || DEFAULT_VISUAL;
                 // Wenn die Session schon gelesen wurde (Name nicht mehr fett),
                 // wird der linke Balken neutral grau — die Kategorie-Farbe steht
-                // dann nur noch im Badge. So sieht man auf einen Blick: erledigt-
-                // schauen vs. noch ungelesen.
-                // Bei deaktiviertem Unread-Modus ist visual=null — dann irrelevant,
-                // aber boxBorder wird trotzdem ausgewertet → Fallback nötig.
-                const boxBorder = !visual
-                  ? "border-l-transparent"
-                  : !isUnseen
-                  ? "border-l-neutral-200"
-                  : visual.box;
-                // Immer atmende Card-Form, unabhängig vom Filter — verhindert
-                // dass "In Bearbeitung" als dichte Wand aussieht.
+                // dann nur noch im Badge. So sieht man auf einen Blick:
+                // schon-gesehen vs. noch ungelesen.
+                const boxBorder = !isUnseen ? "border-l-neutral-200" : visual.box;
+                // Immer atmende Card-Form, unabhängig vom Filter.
                 const baseLi = `rounded-xl border border-neutral-200 hover:border-emerald-300 hover:shadow-sm transition-all border-l-4 ${boxBorder}`;
-                const effectiveBg = visual ? visual.tint : rowBg;
-                const badgeClass = visual?.badge ?? "bg-neutral-100 text-neutral-600 border-transparent";
+                const effectiveBg = visual.tint;
+                const badgeClass = visual.badge ?? "bg-neutral-100 text-neutral-600 border-transparent";
                 return (
                   <li
                     key={s.id}
