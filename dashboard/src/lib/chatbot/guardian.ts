@@ -121,7 +121,9 @@ export async function persistAlerts(sessionId: string, alerts: AlertOut[]): Prom
  */
 async function scanLongWaitSessions(maxAgeHours: number = 12 * 7 * 24): Promise<number> {
   const svc = createServiceClient();
-  const triggerAge = new Date(Date.now() - 12 * 3600 * 1000).toISOString();
+  // Trigger erhöht auf 18h (von 12h) — User-Anweisung. Nur Sessions wo die
+  // Kundin LÄNGER als 18h Realzeit gewartet hat.
+  const triggerAge = new Date(Date.now() - 18 * 3600 * 1000).toISOString();
   const tooOld = new Date(Date.now() - maxAgeHours * 3600 * 1000).toISOString();
 
   // Sessions wo last_customer_msg_at zwischen tooOld und triggerAge liegt
@@ -137,18 +139,65 @@ async function scanLongWaitSessions(maxAgeHours: number = 12 * 7 * 24): Promise<
 
   if (!sessions || sessions.length === 0) return 0;
 
-  // Triviale-Nachrichten-Pattern: kurz und/oder reine Höflichkeitsfloskel
-  const TRIVIAL_PATTERNS = [
+  // Triviale-Nachrichten-Pattern: kurz und/oder reine Höflichkeitsfloskel.
+  // Match auch wenn das Wort nicht ganz am Anfang steht (z.B. "Oki supi
+  // Dankeschön für die Antwort ☺").
+  const TRIVIAL_START_PATTERNS = [
     /^(danke|dankeschön|danke dir|vielen dank|dankee+|thx|merci)\b/i,
     /^(ok|okay|kk|alles klar|alles gut|jo|ja)\b\s*[!.?]?\s*$/i,
-    /^(super|perfekt|toll|cool|nice|mega|genial)\b\s*[!.?]?\s*$/i,
+    /^(super|perfekt|toll|cool|nice|mega|genial|oki|oké|okiii)\b\s*[!.?]?\s*$/i,
     /^👍$|^❤️$|^💕$|^🥰$|^🩷$|^🙏$|^🙏🏼$|^👌$/u,
     /^\s*$/,
   ];
+  // Trivial-Marker irgendwo im kurzen Text — wenn die Message KEINE Frage
+  // ist und ein Dank-/OK-Marker enthält und kurz ist, gilt sie als trivial.
+  const TRIVIAL_INTRINSIC_MARKERS = /\b(dankesch(ö|oe)n|vielen dank|danke|merci|thanks|thx|alles klar|alles gut|perfekt|super|toll|nice|mega|cool|oki|gerne)\b/i;
   const isTrivial = (text: string): boolean => {
-    const t = text.trim().slice(0, 100);
+    const t = text.trim();
     if (t.length < 4) return true;
-    return TRIVIAL_PATTERNS.some(p => p.test(t));
+    // Frage drin → NIE trivial, egal wie sie anfängt.
+    // "Danke, aber wann kommt es wieder?" ist KEINE Höflichkeit, sondern eine Frage.
+    if (/\?/.test(t) || /\b(wie|was|wann|wo|welche|warum|wieviel|kannst|könnt ihr|hättet ihr|habt ihr|gibt es)\b/i.test(t)) {
+      return false;
+    }
+    if (TRIVIAL_START_PATTERNS.some(p => p.test(t.slice(0, 100)))) return true;
+    // Kurz + Trivial-Wort drin
+    if (t.length <= 80 && TRIVIAL_INTRINSIC_MARKERS.test(t)) {
+      return true;
+    }
+    return false;
+  };
+
+  // Business-Hours-Check: wurde die Kundennachricht WÄHREND der Öffnungszeit
+  // gesendet? Wenn nicht (Wochenende/Nacht), kein Alert — das ist normal dass
+  // nicht direkt geantwortet wird.
+  const wasSentDuringBusinessHours = (iso: string): boolean => {
+    const d = new Date(iso);
+    // Berlin-Zeit, Wochentag + Stunde
+    const fmt = new Intl.DateTimeFormat("de-DE", {
+      timeZone: "Europe/Berlin",
+      weekday: "long",
+      hour: "2-digit",
+      minute: "2-digit",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const parts = Object.fromEntries(fmt.formatToParts(d).map(p => [p.type, p.value]));
+    const weekday = parts.weekday || "";
+    const hour = Number(parts.hour || "0");
+    const isoDate = `${parts.year}-${parts.month}-${parts.day}`;
+    // Wochenende → false
+    if (weekday === "Samstag" || weekday === "Sonntag") return false;
+    // Bremen-Feiertage 2026 (identisch zu business-hours.ts)
+    const holidays2026 = new Set([
+      "2026-01-01", "2026-04-03", "2026-04-06", "2026-05-01",
+      "2026-05-14", "2026-05-25", "2026-10-03", "2026-10-31",
+      "2026-12-25", "2026-12-26",
+    ]);
+    if (holidays2026.has(isoDate)) return false;
+    // 10:00-18:00 Uhr
+    return hour >= 10 && hour < 18;
   };
 
   let inserted = 0;
@@ -169,6 +218,14 @@ async function scanLongWaitSessions(maxAgeHours: number = 12 * 7 * 24): Promise<
     // last_seen_by_agent_at > last_customer_msg_at → schon abgehandelt
     if (s.last_seen_by_agent_at && s.last_customer_msg_at &&
         new Date(s.last_seen_by_agent_at) >= new Date(s.last_customer_msg_at)) {
+      continue;
+    }
+
+    // BUSINESS-HOURS-CHECK: Nur alarmieren wenn die Kundennachricht
+    // WÄHREND der Öffnungszeit (Mo-Fr 10-18, ohne Feiertage) kam.
+    // Sonst ist es normal dass nicht direkt geantwortet wird (Foto-Anfragen
+    // für Farbberatung am Wochenende = warten auf Stylistin am Montag).
+    if (!s.last_customer_msg_at || !wasSentDuringBusinessHours(s.last_customer_msg_at)) {
       continue;
     }
 
