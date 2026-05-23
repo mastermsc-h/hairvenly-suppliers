@@ -76,10 +76,18 @@ export async function consolidateCorrection(trainingId: string): Promise<void> {
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   let raw = "";
   try {
+    const consolidateStart = Date.now();
     const r = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 400,
       messages: [{ role: "user", content: promptFilled }],
+    });
+    const { logUsage } = await import("./usage-logger");
+    logUsage({
+      purpose: "auto_consolidate",
+      model: MODEL,
+      usage: r.usage,
+      durationMs: Date.now() - consolidateStart,
     });
     raw = r.content[0].type === "text" ? r.content[0].text : "";
   } catch (e) {

@@ -906,13 +906,23 @@ Diese 5 Regeln werden auch NACH deiner Antwort vom System gecheckt und ggf. korr
       : t
   );
 
+  const { logUsage } = await import("./usage-logger");
   for (let iter = 0; iter < MAX_ITER; iter++) {
+    const callStart = Date.now();
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 1024,
       system: systemBlocks,
       tools: cachedTools,
       messages: convo,
+    });
+    logUsage({
+      purpose: opts.assisted ? "respond" : "respond",
+      model: MODEL,
+      usage: response.usage,
+      sessionId,
+      durationMs: Date.now() - callStart,
+      extra: { iter, tool_calls: response.content.filter(b => b.type === "tool_use").length },
     });
 
     const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
@@ -961,6 +971,7 @@ Diese 5 Regeln werden auch NACH deiner Antwort vom System gecheckt und ggf. korr
   if (!finalText) {
     console.warn(`[respond] empty after tool loop — forcing final text-only call (iter done, toolCalls=${allToolCalls.length}, toolResults=${allToolResults.length})`);
     try {
+      const finalCallStart = Date.now();
       const finalResp = await anthropic.messages.create({
         model: MODEL,
         max_tokens: 1024,
@@ -969,6 +980,14 @@ Diese 5 Regeln werden auch NACH deiner Antwort vom System gecheckt und ggf. korr
           { type: "text", text: (systemPromptVariable || "") + "\n\nFasse jetzt die Tool-Ergebnisse zusammen und antworte dem Kunden auf seine letzte Frage. KEINE weiteren Tools aufrufen. SCHREIBE UNBEDINGT EINE KOMPLETTE ANTWORT — auch wenn du dir unsicher bist, formuliere mit den verfügbaren Infos das Beste was du kannst." },
         ],
         messages: convo,
+      });
+      logUsage({
+        purpose: "respond",
+        model: MODEL,
+        usage: finalResp.usage,
+        sessionId,
+        durationMs: Date.now() - finalCallStart,
+        extra: { phase: "fallback_text_only" },
       });
       const finalBlocks = finalResp.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
       const fdedup: string[] = [];

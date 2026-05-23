@@ -75,10 +75,19 @@ export async function analyzeSession(sessionId: string): Promise<AlertOut[]> {
 
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   try {
+    const guardianStart = Date.now();
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 600,
       messages: [{ role: "user", content: GUARDIAN_PROMPT + transcript }],
+    });
+    const { logUsage } = await import("./usage-logger");
+    logUsage({
+      purpose: "guardian_analyze",
+      model: MODEL,
+      usage: response.usage,
+      sessionId,
+      durationMs: Date.now() - guardianStart,
     });
     let raw = response.content[0].type === "text" ? response.content[0].text : "[]";
     raw = raw.trim();
@@ -188,10 +197,18 @@ CHAT (chronologisch, letzte Nachricht ist relevant):
     }).join("\n");
     try {
       const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const needsAnswerStart = Date.now();
       const response = await anthropic.messages.create({
         model: MODEL,
         max_tokens: 10,
         messages: [{ role: "user", content: NEEDS_ANSWER_PROMPT + transcript }],
+      });
+      const { logUsage } = await import("./usage-logger");
+      logUsage({
+        purpose: "needs_answer",
+        model: MODEL,
+        usage: response.usage,
+        durationMs: Date.now() - needsAnswerStart,
       });
       const raw = (response.content[0].type === "text" ? response.content[0].text : "").trim().toLowerCase();
       if (raw.includes("conversation_done")) return "conversation_done";

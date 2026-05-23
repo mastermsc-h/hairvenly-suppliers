@@ -87,6 +87,7 @@ WICHTIG:
 
   try {
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const refineStart = Date.now();
     const resp = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 1024,
@@ -94,6 +95,14 @@ WICHTIG:
         { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } as const },
       ],
       messages,
+    });
+    const { logUsage } = await import("./usage-logger");
+    logUsage({
+      purpose: "refine",
+      model: MODEL,
+      usage: resp.usage,
+      sessionId,
+      durationMs: Date.now() - refineStart,
     });
     const textBlocks = resp.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
     let newText = textBlocks.map(b => b.text).join("\n").trim();

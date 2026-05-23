@@ -72,6 +72,7 @@ export async function classifySession(sessionId: string): Promise<Category | nul
 
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   try {
+    const classifyStart = Date.now();
     const resp = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 50,
@@ -90,6 +91,14 @@ WICHTIGE REGELN:
 
 Antworte AUSSCHLIESSLICH mit dem Kategorie-Key in Kleinbuchstaben (z.B. "availability") — kein Erklärtext, keine Anführungszeichen, kein Punkt.`,
       messages: [{ role: "user", content: userText }],
+    });
+    const { logUsage } = await import("./usage-logger");
+    logUsage({
+      purpose: "classify_category",
+      model: MODEL,
+      usage: resp.usage,
+      sessionId,
+      durationMs: Date.now() - classifyStart,
     });
     const out = resp.content
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
