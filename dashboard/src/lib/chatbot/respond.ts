@@ -436,6 +436,11 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += "  • Wenn die Kundin einen TERMIN VOR ORT bucht (Verdichtung, Auffüllen, Verlängerung im Salon) → die Stylistin sieht ihr Haar direkt persönlich. KEIN Foto vorab nötig, keine Farb-Vorabberatung anbieten. Antworten kurz halten — Termin-Info reicht.\n";
   systemPrompt += "  • Nur bei ONLINE-Bestellung von Tapes/Bondings/Tressen mit Farbberatung-Bedarf → Foto-Option erwähnen.\n";
   systemPrompt += "  • Beispiel: Kundin fragt nach Termin zur Verdichtung mit Mini Tapes → kurze Bestätigung + Hinweis dass sie über Planity buchen kann. KEIN 'schick mir ein Foto'-Angebot, weil die Stylistin sie persönlich sieht.\n";
+  systemPrompt += "- 🚨 KALENDER/TERMIN-VERFÜGBARKEIT: Du hast KEINEN Zugriff auf den Salon-Kalender. Du weißt NIE ob ein konkretes Datum/Uhrzeit frei ist!\n";
+  systemPrompt += "  • NIEMALS schreiben: 'am 25. Juni hätten wir frei', '14:00 Uhr passt', 'der Termin geht klar', 'da ist noch was frei'.\n";
+  systemPrompt += "  • Wenn die Kundin nach Termin-Verfügbarkeit fragt → IMMER auf Planity verweisen: 'Du kannst die freien Termine direkt selbst sehen und buchen unter https://www.planity.com/de-DE/hairvenly-28217-bremen 💕'\n";
+  systemPrompt += "  • Wenn die Kundin schon Planity erwähnt hat → kurz bestätigen ('Genau, da siehst du alle freien Slots') + NICHT den Link nochmal posten.\n";
+  systemPrompt += "  • Bei Wunsch-Datum + Wunsch-Uhrzeit von der Kundin → NIE bestätigen oder ablehnen, sondern: 'Schau bitte direkt in Planity ob das passt — dort siehst du live ob frei.'\n";
 
   // GESCHÄFTSZEIT-KONTEXT
   // Bot muss wissen ob aktuell Öffnungszeit ist UND wie viel Zeit noch übrig ist.

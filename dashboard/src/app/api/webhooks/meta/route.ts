@@ -781,6 +781,26 @@ async function triggerBotResponse(
 ) {
   const triggerStart = Date.now();
   console.log(`[meta-webhook] TRIGGER START session=${sessionId.slice(0,8)} mode=${mode} channel=${channel}`);
+
+  // SKIP-CHECK: bei Termin-Anfragen darf der Bot KEINE Drafts generieren —
+  // wir haben keine Kalender-Anbindung (Planity), Bot würde sonst Termine
+  // halluzinieren ("am 25. Juni hätten wir 14:00 frei"). Stattdessen: Session
+  // bleibt offen, Mitarbeiter:in antwortet manuell mit Planity-Link.
+  // Bei der Kategorie-Klassifikation wird "appointment" gesetzt → hier
+  // greifen wir's ab.
+  {
+    const svc = createServiceClient();
+    const { data: sess } = await svc
+      .from("chat_sessions")
+      .select("category")
+      .eq("id", sessionId)
+      .maybeSingle();
+    if (sess?.category === "appointment") {
+      console.log(`[meta-webhook] SKIP TRIGGER session=${sessionId.slice(0,8)} — category=appointment (keine Kalender-Anbindung, kein Draft)`);
+      return;
+    }
+  }
+
   const { respondAsBot } = await import("@/lib/chatbot/respond");
   // Für assisted UND selective_auto erstmal als assisted laufen lassen (also
   // KEIN auto-insert in chat_messages) — wir entscheiden danach was wir damit tun.
