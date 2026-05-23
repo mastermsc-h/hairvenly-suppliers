@@ -139,33 +139,67 @@ async function scanLongWaitSessions(maxAgeHours: number = 12 * 7 * 24): Promise<
 
   if (!sessions || sessions.length === 0) return 0;
 
-  // Triviale-Nachrichten-Pattern: kurz und/oder reine Höflichkeitsfloskel.
-  // Match auch wenn das Wort nicht ganz am Anfang steht (z.B. "Oki supi
-  // Dankeschön für die Antwort ☺").
-  const TRIVIAL_START_PATTERNS = [
-    /^(danke|dankeschön|danke dir|vielen dank|dankee+|thx|merci)\b/i,
-    /^(ok|okay|kk|alles klar|alles gut|jo|ja)\b\s*[!.?]?\s*$/i,
-    /^(super|perfekt|toll|cool|nice|mega|genial|oki|oké|okiii)\b\s*[!.?]?\s*$/i,
-    /^👍$|^❤️$|^💕$|^🥰$|^🩷$|^🙏$|^🙏🏼$|^👌$/u,
-    /^\s*$/,
-  ];
-  // Trivial-Marker irgendwo im kurzen Text — wenn die Message KEINE Frage
-  // ist und ein Dank-/OK-Marker enthält und kurz ist, gilt sie als trivial.
-  const TRIVIAL_INTRINSIC_MARKERS = /\b(dankesch(ö|oe)n|vielen dank|danke|merci|thanks|thx|alles klar|alles gut|perfekt|super|toll|nice|mega|cool|oki|gerne)\b/i;
-  const isTrivial = (text: string): boolean => {
+  // Sehr-kurze-Strings sind immer trivial (Emojis, "ok", "👍" etc.)
+  const isObviouslyTrivial = (text: string): boolean => {
     const t = text.trim();
-    if (t.length < 4) return true;
-    // Frage drin → NIE trivial, egal wie sie anfängt.
-    // "Danke, aber wann kommt es wieder?" ist KEINE Höflichkeit, sondern eine Frage.
-    if (/\?/.test(t) || /\b(wie|was|wann|wo|welche|warum|wieviel|kannst|könnt ihr|hättet ihr|habt ihr|gibt es)\b/i.test(t)) {
-      return false;
+    return t.length < 4;
+  };
+
+  // KI-Klassifikation: Braucht diese Kundenmessage eine Antwort vom Team?
+  // Wir geben dem Haiku-Modell die letzten 3-5 Messages als Kontext und es
+  // entscheidet: "needs_answer" oder "conversation_done". Das ist viel
+  // verlässlicher als Regex-Pattern weil's Kontext + Mehrdeutigkeit versteht.
+  // Beispiele:
+  //   "Okiiiii danke" nach erschöpfender Beratung → done
+  //   "Danke, aber wann kommt es wieder?" → needs_answer
+  //   "Aah hab den Link schon gefunden 😊" → done
+  //   "Habt ihr die Farbe in 65cm?" → needs_answer
+  const NEEDS_ANSWER_PROMPT = `Du analysierst einen Hairvenly-Kundenservice-Chat. Schau dir die letzten Nachrichten an und entscheide: Braucht die LETZTE Kundennachricht noch eine Antwort vom Team — oder hat die Kundin das Gespräch ihrerseits "abgeschlossen" (Höflichkeitsfloskel, Bestätigung, Selbst-gefunden)?
+
+Beispiele "conversation_done" (KEINE Antwort mehr nötig):
+- "Okiiiii danke!"
+- "Super, vielen Dank ❤️"
+- "Aah hab den Link selbst schon gefunden 😊"
+- "Alles klar, dann buche ich selbst"
+- "Perfekt, jetzt weiß ich Bescheid"
+- "Danke dir 🙏"
+- Reine Emoji-Antwort
+
+Beispiele "needs_answer" (Antwort/Aktion vom Team nötig):
+- "Habt ihr die Farbe in 65cm?"
+- "Danke, aber wann kommt sie wieder rein?"  ← hat Frage trotz "danke"
+- "[Foto]"  ← Bild allein = will Farb-/Längen-Einschätzung
+- "Ah okay und wieviele brauche ich?"
+- jede Nachricht mit Fragezeichen ODER neuer offener Bitte
+
+Output: NUR EIN WORT — entweder "needs_answer" oder "conversation_done". Sonst nichts.
+
+CHAT (chronologisch, letzte Nachricht ist relevant):
+`;
+
+  const classifyNeedsAnswer = async (
+    contextMsgs: Array<{ role: string; content: string }>,
+  ): Promise<"needs_answer" | "conversation_done"> => {
+    const transcript = contextMsgs.map(m => {
+      const role = m.role === "user" ? "Kunde"
+        : m.role === "assistant" ? "Bot"
+        : "Team";
+      return `[${role}] ${(m.content || "").slice(0, 300)}`;
+    }).join("\n");
+    try {
+      const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const response = await anthropic.messages.create({
+        model: MODEL,
+        max_tokens: 10,
+        messages: [{ role: "user", content: NEEDS_ANSWER_PROMPT + transcript }],
+      });
+      const raw = (response.content[0].type === "text" ? response.content[0].text : "").trim().toLowerCase();
+      if (raw.includes("conversation_done")) return "conversation_done";
+      return "needs_answer";
+    } catch (e) {
+      console.warn("[guardian] classifyNeedsAnswer failed, default needs_answer:", (e as Error).message);
+      return "needs_answer"; // Safe default — lieber alarmieren als verpassen
     }
-    if (TRIVIAL_START_PATTERNS.some(p => p.test(t.slice(0, 100)))) return true;
-    // Kurz + Trivial-Wort drin
-    if (t.length <= 80 && TRIVIAL_INTRINSIC_MARKERS.test(t)) {
-      return true;
-    }
-    return false;
   };
 
   // Business-Hours-Check: wurde die Kundennachricht WÄHREND der Öffnungszeit
@@ -202,18 +236,21 @@ async function scanLongWaitSessions(maxAgeHours: number = 12 * 7 * 24): Promise<
 
   let inserted = 0;
   for (const s of sessions) {
-    // Letzte Kundennachricht laden — wir brauchen den Text um Trivialität zu prüfen
-    const { data: lastUserMsg } = await svc
+    // Letzten ~5 Messages laden — als Kontext für die KI-Klassifikation.
+    const { data: ctxMsgs } = await svc
       .from("chat_messages")
       .select("content, created_at, role")
       .eq("session_id", s.id)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
-      .limit(3);
-    if (!lastUserMsg || lastUserMsg.length === 0) continue;
-    // Letzte Message muss von user sein
-    if (lastUserMsg[0].role !== "user") continue;
-    if (isTrivial(lastUserMsg[0].content || "")) continue;
+      .limit(5);
+    if (!ctxMsgs || ctxMsgs.length === 0) continue;
+    // Letzte Message muss von user sein (Reihenfolge: DESC, also [0] = neueste)
+    if (ctxMsgs[0].role !== "user") continue;
+
+    const lastUserText = ctxMsgs[0].content || "";
+    // Sehr kurze Floskeln direkt rausfiltern — kein KI-Call nötig
+    if (isObviouslyTrivial(lastUserText)) continue;
 
     // last_seen_by_agent_at > last_customer_msg_at → schon abgehandelt
     if (s.last_seen_by_agent_at && s.last_customer_msg_at &&
@@ -223,9 +260,20 @@ async function scanLongWaitSessions(maxAgeHours: number = 12 * 7 * 24): Promise<
 
     // BUSINESS-HOURS-CHECK: Nur alarmieren wenn die Kundennachricht
     // WÄHREND der Öffnungszeit (Mo-Fr 10-18, ohne Feiertage) kam.
-    // Sonst ist es normal dass nicht direkt geantwortet wird (Foto-Anfragen
-    // für Farbberatung am Wochenende = warten auf Stylistin am Montag).
     if (!s.last_customer_msg_at || !wasSentDuringBusinessHours(s.last_customer_msg_at)) {
+      continue;
+    }
+
+    // KI-Klassifikation: Braucht die letzte Kundennachricht im Kontext
+    // wirklich noch eine Antwort? Haiku versteht Kontext + Mehrdeutigkeit
+    // viel besser als Regex. Bei Unsicherheit → safe default = needs_answer.
+    const contextChronological = ctxMsgs.slice().reverse().map(m => ({
+      role: m.role,
+      content: m.content || "",
+    }));
+    const verdict = await classifyNeedsAnswer(contextChronological);
+    if (verdict === "conversation_done") {
+      console.log(`[guardian/long_wait] Session ${s.id.slice(0,8)} → conversation_done (kein Alert)`);
       continue;
     }
 
@@ -235,7 +283,7 @@ async function scanLongWaitSessions(maxAgeHours: number = 12 * 7 * 24): Promise<
       session_id: s.id,
       severity: hoursWaiting > 48 ? "critical" : "warning",
       alert_type: "long_wait_no_answer",
-      description: `${customerDisplay} wartet seit ${hoursWaiting}h auf eine Antwort: „${(lastUserMsg[0].content || "").slice(0, 120)}…"`,
+      description: `${customerDisplay} wartet seit ${hoursWaiting}h auf eine Antwort: „${lastUserText.slice(0, 120)}…"`,
       suggestion: `Session öffnen und antworten — bei >48h ist's kritisch. Falls keine Antwort nötig (Höflichkeitsfloskel), als erledigt markieren.`,
     });
     if (!error) inserted++;
