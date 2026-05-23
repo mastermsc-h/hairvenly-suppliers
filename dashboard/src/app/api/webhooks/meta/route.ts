@@ -577,9 +577,18 @@ async function routeIncoming(opts: {
         return;
       }
       // Alles klar → Bot generiert (Auto-Respond-Override forciert curMode='auto')
+      console.log(`[meta-webhook] DEBOUNCE PASSED session=${session.id.slice(0,8)} → trigger`);
       await triggerBotResponse(session.id, opts.channel, opts.externalId, effectiveCurMode, lastUserMsg?.id);
     } catch (e) {
-      console.error("[meta-webhook] bot reply failed:", e);
+      console.error(`[meta-webhook] bot reply EXCEPTION session=${session.id.slice(0,8)}:`, e);
+    }
+  } else {
+    // Loggen warum NICHT getriggert wurde — wichtig für Reliability-Debugging
+    const skipReason: string[] = [];
+    if (effectiveBotMode === "off") skipReason.push(`mode=${botMode}(no autoOverride)`);
+    if (session.status !== "active") skipReason.push(`status=${session.status}`);
+    if (skipReason.length > 0) {
+      console.log(`[meta-webhook] BOT SKIP session=${session.id.slice(0,8)} reason=${skipReason.join(",")}`);
     }
   }
 }
@@ -740,13 +749,41 @@ async function triggerBotResponse(
   mode: string,
   triggerMessageId?: string,
 ) {
+  const triggerStart = Date.now();
+  console.log(`[meta-webhook] TRIGGER START session=${sessionId.slice(0,8)} mode=${mode} channel=${channel}`);
   const { respondAsBot } = await import("@/lib/chatbot/respond");
   // Für assisted UND selective_auto erstmal als assisted laufen lassen (also
   // KEIN auto-insert in chat_messages) — wir entscheiden danach was wir damit tun.
   const willDecideAfter = mode === "assisted" || mode === "selective_auto";
-  const result = await respondAsBot(sessionId, { assisted: willDecideAfter });
+
+  // RETRY-LOGIK: respondAsBot kann durch transiente Fehler (Anthropic 5xx,
+  // Sheet-Timeout, Race in Tool-Calls) fehlschlagen. 1× retry nach 5s.
+  let result: Awaited<ReturnType<typeof respondAsBot>>;
+  try {
+    result = await respondAsBot(sessionId, { assisted: willDecideAfter });
+    if (!result.success || !result.text) {
+      console.warn(`[meta-webhook] TRIGGER FIRST-ATTEMPT failed session=${sessionId.slice(0,8)}: ${result.error}. Retrying in 5s...`);
+      await new Promise(r => setTimeout(r, 5000));
+      try {
+        result = await respondAsBot(sessionId, { assisted: willDecideAfter });
+      } catch (retryErr) {
+        console.error(`[meta-webhook] TRIGGER RETRY threw session=${sessionId.slice(0,8)}:`, retryErr);
+        return;
+      }
+    }
+  } catch (e) {
+    console.error(`[meta-webhook] TRIGGER FIRST-ATTEMPT threw session=${sessionId.slice(0,8)}:`, e);
+    await new Promise(r => setTimeout(r, 5000));
+    try {
+      result = await respondAsBot(sessionId, { assisted: willDecideAfter });
+    } catch (retryErr) {
+      console.error(`[meta-webhook] TRIGGER RETRY threw session=${sessionId.slice(0,8)}:`, retryErr);
+      return;
+    }
+  }
+
   if (!result.success || !result.text) {
-    console.error("[meta-webhook] bot response failed:", result.error);
+    console.error(`[meta-webhook] TRIGGER FAILED (also retry) session=${sessionId.slice(0,8)} mode=${mode} elapsed=${Date.now() - triggerStart}ms error=${result.error}`);
     return;
   }
 
@@ -824,4 +861,5 @@ async function triggerBotResponse(
     }
   }
   // whatsapp: später analog
+  console.log(`[meta-webhook] TRIGGER DONE session=${sessionId.slice(0,8)} mode=${mode}→${finalMode} elapsed=${Date.now() - triggerStart}ms textLen=${result.text.length}`);
 }
