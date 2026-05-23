@@ -1542,10 +1542,13 @@ Diese 5 Regeln werden auch NACH deiner Antwort vom System gecheckt und ggf. korr
       catalog.methodLengths,
     );
     if (corrections.length > 0) {
-      console.warn("[respond] METHOD×LENGTH mismatch detected:", corrections.join("; "));
+      console.warn("[respond] METHOD×LENGTH mismatch detected (silent fix):", corrections.join("; "));
+      // Stilles Korrigieren — validateMethodLengthCombos hat den Text bereits
+      // bereinigt (falsche Kombi raus, URL gestrippt). KEIN Klammer-Disclaimer
+      // anhängen — das wirkt unsicher und verwirrt die Kundin. Wenn der Text
+      // nach der Korrektur zu kurz/inhaltsleer ist, übernimmt die Mitarbeiterin
+      // beim Review.
       finalText = validatedText;
-      // Korrektive Notiz freundlich anhängen — Bot soll bewusst klären statt blind weiter
-      finalText += "\n\n_(Kurz: die exakte Längen-Methoden-Kombi muss ich dir nochmal sauber benennen — schreibe dir die Optionen gleich mit der Kollegin durch.)_";
     }
   } catch (e) {
     console.warn("[respond] method×length validation failed:", (e as Error).message);
