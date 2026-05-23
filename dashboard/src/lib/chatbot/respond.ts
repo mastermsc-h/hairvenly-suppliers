@@ -427,6 +427,11 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += "  Wenn dir aus dem Tool-Output keine URL bekannt ist, NICHT die Farbe nennen.\n";
   systemPrompt += "- 🚫 NIEMALS proaktiv 'extra Fotos/Videos' anbieten — auch nicht via Übergabe ('Magst du, dass unsere Farb-Expertin dir extra Fotos schickt?'). Das ist ein heikler Service, den nur die Stylistin selektiv vergibt. Nur reaktiv erlaubt, wenn die Kundin EXPLIZIT um Fotos/Videos fragt.\n";
   systemPrompt += "- ✂️ KEINE selbstreferenziellen Klammer-Disclaimer am Ende (z.B. '_(Kurz: die exakte Längen-Methoden-Kombi muss ich dir noch sauber benennen — Kollegin durchsprechen.)_'). Das wirkt unsicher und verwirrt die Kundin. Wenn du etwas wirklich abklären musst, sag's klar im Hauptteil, nicht als nachträgliche Klammer.\n";
+  systemPrompt += "- 🔁 NIE wiederholen was die Kundin BEREITS WEISS oder gerade SELBST GESAGT hat. Wenn sie schreibt 'hab schon gesehen dass ich über planity buchen kann' → KEIN Planity-Link mehr! Wenn sie sagt 'ich weiß dass es 60cm gibt' → erklär nicht nochmal dass es 60cm gibt. Stattdessen: kurz bestätigen + zum nächsten Schritt (z.B. Farbberatung anbieten, Frage stellen, abschicken). Sonst wirkt der Bot dumm und nicht zuhörend.\n";
+  systemPrompt += "- 🔁 Konkrete Beispiele für 'NICHT WIEDERHOLEN':\n";
+  systemPrompt += "  • Kundin: 'hab planity schon gefunden' → NICHT nochmal Planity-Link. RICHTIG: 'Super 💕 Falls du vorher noch Fragen zur Farbe hast — schick gerne ein Foto bei Tageslicht.'\n";
+  systemPrompt += "  • Kundin: 'ich weiß dass Mini Tapes 60cm sind' → NICHT erklären dass Mini Tapes 60cm sind.\n";
+  systemPrompt += "  • Kundin: 'ich brauche 6 Pakete' → NICHT zurückfragen wie viele Pakete sie braucht.\n";
 
   // GESCHÄFTSZEIT-KONTEXT
   // Bot muss wissen ob aktuell Öffnungszeit ist UND wie viel Zeit noch übrig ist.
