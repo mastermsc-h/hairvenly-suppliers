@@ -236,21 +236,36 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             <div className="text-sm font-semibold text-neutral-900 leading-tight">
               {session.customer_full_name || session.customer_name || "Unbekannt"}
             </div>
-            <div className="text-[11px] text-neutral-500 leading-tight">
+            <div className="text-[11px] text-neutral-500 leading-tight inline-flex items-center gap-1 flex-wrap">
               {session.customer_full_name && session.customer_name ? session.customer_name : null}
-              {/* Status nur zeigen wenn besonders (nicht "active"/"closed" — redundant
-                  zum Bot-Modus-Selector unten + zum Tab-Status oben). */}
+              {/* Bot-Status-Indikator basierend auf bot_mode (nicht session.status).
+                  Zeigt: Bot aktiv / Assistiert / Manuell — abhängig vom Modus. */}
+              {(() => {
+                const m = session.bot_mode;
+                const info = m === "auto" || m === "selective_auto"
+                  ? { label: "Bot aktiv", color: "text-green-700" }
+                  : m === "assisted"
+                  ? { label: "Assistiert", color: "text-blue-700" }
+                  : { label: "Manuell", color: "text-neutral-500" };
+                return (
+                  <>
+                    {session.customer_full_name && session.customer_name && <span>·</span>}
+                    <span className={`${info.color} font-medium`}>{info.label}</span>
+                  </>
+                );
+              })()}
+              {/* Besondere session.status nur wenn awaiting_human / escalated (manuell gesetzt) */}
               {session.status !== "active" && session.status !== "closed" && (
                 <>
-                  {session.customer_full_name && session.customer_name && <span className="mx-1">·</span>}
-                  <span className={`inline-flex items-center gap-1 ${statusBadge.color.replace("bg-", "text-").split(" ")[0].replace("100", "700")}`}>
+                  <span>·</span>
+                  <span className={statusBadge.color.replace("bg-", "text-").split(" ")[0].replace("100", "700")}>
                     {statusBadge.label}
                   </span>
                 </>
               )}
               {session.assigned_name && (
                 <>
-                  <span className="mx-1">·</span>
+                  <span>·</span>
                   <span>übernommen von <span className="text-neutral-700">{session.assigned_name}</span></span>
                 </>
               )}
