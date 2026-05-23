@@ -165,13 +165,62 @@ async function loadProductCatalog(): Promise<{
     if (!grouped.has(m.supplier)) grouped.set(m.supplier, []);
     grouped.get(m.supplier)!.push({ name: m.name, lengths: m.lengths });
   }
+  // Linie-Suffix-Map: macht Methoden-Namen eindeutig pro Linie.
+  // Wichtig für Methoden wie "Classic Weft" (nur russisch) vs "Classic Tressen"
+  // (nur usbekisch) oder "Genius Weft" (beide Linien — je nach Lieferant).
+  // Der Bot sah vorher nur den nackten Namen → konnte nicht sehen welche Linie.
+  // Jetzt wird der Linien-Suffix Teil des Namens → Klarheit garantiert.
+  const lineSuffix = (sup: string) =>
+    sup.toLowerCase().includes("russisch")  ? "Russisch"
+    : sup.toLowerCase().includes("usbekisch") ? "Usbekisch"
+    : sup.toLowerCase().includes("china")    ? "China"
+    : "";
   for (const [supLabel, items] of grouped.entries()) {
     txt += `### ${supLabel}\n`;
+    const suffix = lineSuffix(supLabel);
     for (const it of items) {
       const lens = it.lengths.length > 0 ? it.lengths.join(", ") : "(keine Länge hinterlegt)";
-      txt += `- **${it.name}**: ${lens}\n`;
+      // Display-Name mit Linien-Suffix — nur wenn nicht schon im Namen
+      const displayName = suffix && !it.name.toLowerCase().includes(suffix.toLowerCase())
+        ? `${it.name} ${suffix}`
+        : it.name;
+      txt += `- **${displayName}**: ${lens}\n`;
     }
     txt += "\n";
+  }
+  // Cross-Line-Methoden hervorheben — Methoden, die unter mehreren Linien existieren
+  // (z.B. Genius Weft, Bondings, Tapes). WICHTIG für Klärungs-Fragen wie
+  // "habt ihr Classic und Genius in beiden Strukturen?". Bot soll bei vagen
+  // Anfragen NIEMALS willkürlich eine Linie picken — sondern beide nennen.
+  const methodToLines = new Map<string, Set<string>>();
+  for (const m of methodMap.values()) {
+    const baseName = m.name; // Original-Name ohne Linien-Suffix
+    if (!methodToLines.has(baseName)) methodToLines.set(baseName, new Set());
+    methodToLines.get(baseName)!.add(m.supplier);
+  }
+  const conceptToVariants = new Map<string, Array<{ method: string; line: string; lengths: string[] }>>();
+  for (const m of methodMap.values()) {
+    // Concept = Method-Name OHNE die typischen Linien-Suffixe Tressen/Weft
+    // → "Classic Tressen" + "Classic Weft" = Concept "Classic"
+    // → "Genius Weft" (beide Linien) = Concept "Genius"
+    const concept = m.name.replace(/\s*(Tressen|Weft)\s*$/i, "").trim();
+    if (!concept) continue;
+    if (!conceptToVariants.has(concept)) conceptToVariants.set(concept, []);
+    conceptToVariants.get(concept)!.push({ method: m.name, line: m.supplier, lengths: m.lengths });
+  }
+  const multiLineConcepts = Array.from(conceptToVariants.entries())
+    .filter(([, variants]) => new Set(variants.map(v => v.line)).size > 1);
+  if (multiLineConcepts.length > 0) {
+    txt += "### 🔀 PRODUKTE DIE ES IN BEIDEN LINIEN GIBT (wichtig für Klärungs-Fragen!)\n";
+    txt += "Wenn eine Kundin nur den Produktnamen nennt ('Classic', 'Genius', 'Tapes') OHNE Linie zu sagen, dann gib IMMER BEIDE Linien an — NIEMALS eine willkürlich auswählen.\n\n";
+    for (const [concept, variants] of multiLineConcepts) {
+      txt += `**${concept}** gibt es in:\n`;
+      for (const v of variants) {
+        const lens = v.lengths.length > 0 ? v.lengths.join(", ") : "(keine Länge)";
+        txt += `  - ${v.method} (${v.line}): ${lens}\n`;
+      }
+      txt += "\n";
+    }
   }
   txt += "💡 Beispiele für UNMÖGLICHE Kombis (NIE bestätigen):\n";
   txt += "- 55cm Standard Tapes in Russisch glatt → 55cm gibt's NUR bei Tapes in Usbekisch wellig\n";
@@ -718,31 +767,7 @@ Diese 5 Regeln werden auch NACH deiner Antwort vom System gecheckt und ggf. korr
 
 5. **NIEMALS LIEFERANTEN-NAMEN.** Amanda, Eyfel, Ebru, China sind INTERNE Codes. Sprich IMMER von der Haarqualität: "Russisch glatt" / "Usbekisch wellig".
 
-6. **BLEIB KURZ. WIRKLICH KURZ.** Die meisten Antworten gehören in **2-4 Sätze, max. 1-2 kurze Absätze**. Längere Antworten NUR bei: konkreter Bestellung (Mengen + Preise + URLs), mehreren Farbvorschlägen, expliziter "erklär mir ausführlich"-Bitte.
-
-   ❌ FALSCH (echte Bot-Antwort, viel zu lang für ein Ja/Nein):
-   > Klar, das ist grundsätzlich möglich 💕
-   >
-   > Du kannst Classic Tressen und Genius Weft kombinieren lassen — viele machen das z.B. so: Genius Weft für die oberen Partien (besonders unauffällig) und Classic Tressen für mehr Volumen unten.
-   >
-   > **Aber:** Die beiden haben unterschiedliche Strukturen, Genius Weft ist russisch glatt, Classic Tressen usbekisch wellig. Das mischt sich optisch nicht ideal, weil die eine glatt und die andere wellig ist.
-   >
-   > Bei feinem Haar würde ich das wirklich mit unserer Stylistin besprechen, bevor du bestellst. Sie meldet sich Montag früh ab 10 Uhr bei dir und kann dir genau sagen, welche Kombi bei deinem Haar am besten funktioniert 💌
-   >
-   > Magst du bis Montag warten, oder hast du es sehr eilig?
-
-   ✅ RICHTIG (gleicher Inhalt, 3 Sätze):
-   > Ja, kombinieren geht — aber die Strukturen unterscheiden sich (Genius = glatt, Classic = wellig), das mischt sich optisch nicht immer schön 💕
-   >
-   > Soll dich unsere Stylistin Montag früh kurz anrufen? Sie sagt dir genau, welche Kombi zu deinem Haar passt.
-
-   FAUSTREGEL:
-   - Ja/Nein-Frage → 1-3 Sätze
-   - Klärungs-Frage → 1 Frage + 0-2 Kontext-Sätze
-   - Konkrete Bestellung/Preis → so kompakt wie möglich, Bullets erlaubt
-   - NIE einen Caveat als eigenen Absatz, wenn er in einen Halbsatz passt
-
-🔁 Halte dich an diese 6 Regeln BEIM ERSTEN MAL. Sonst korrigiert das System und die Antwort wirkt holpriger.`;
+🔁 Halte dich an diese 5 Regeln BEIM ERSTEN MAL. Sonst korrigiert das System und die Antwort wirkt holpriger.`;
 
   // Wichtig: systemPrompt (= persona + avatar + training + strategies) bleibt STABIL
   // pro Avatar und wird via Prompt-Caching wiederverwendet. Variable Teile
