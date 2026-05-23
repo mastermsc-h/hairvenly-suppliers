@@ -238,10 +238,16 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             </div>
             <div className="text-[11px] text-neutral-500 leading-tight">
               {session.customer_full_name && session.customer_name ? session.customer_name : null}
-              {session.customer_full_name && session.customer_name && <span className="mx-1">·</span>}
-              <span className={`inline-flex items-center gap-1 ${statusBadge.color.replace("bg-", "text-").split(" ")[0].replace("100", "700")}`}>
-                {statusBadge.label}
-              </span>
+              {/* Status nur zeigen wenn besonders (nicht "active"/"closed" — redundant
+                  zum Bot-Modus-Selector unten + zum Tab-Status oben). */}
+              {session.status !== "active" && session.status !== "closed" && (
+                <>
+                  {session.customer_full_name && session.customer_name && <span className="mx-1">·</span>}
+                  <span className={`inline-flex items-center gap-1 ${statusBadge.color.replace("bg-", "text-").split(" ")[0].replace("100", "700")}`}>
+                    {statusBadge.label}
+                  </span>
+                </>
+              )}
               {session.assigned_name && (
                 <>
                   <span className="mx-1">·</span>

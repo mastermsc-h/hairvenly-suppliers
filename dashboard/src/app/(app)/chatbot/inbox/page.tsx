@@ -736,11 +736,17 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                           {CHANNEL_LABELS[s.channel] || s.channel}
                         </span>
                         <span className="text-neutral-300">·</span>
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full ${meta.color}`}>
-                          <Icon size={11} />
-                          {meta.label}
-                        </span>
-                        <span className="text-neutral-300">·</span>
+                        {/* Session-Status nur zeigen wenn besonders (nicht "active",
+                            das ist der Default und redundant — siehe Mode-Badge + Status-Badge). */}
+                        {s.status !== "active" && s.status !== "closed" && (
+                          <>
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full ${meta.color}`}>
+                              <Icon size={11} />
+                              {meta.label}
+                            </span>
+                            <span className="text-neutral-300">·</span>
+                          </>
+                        )}
                         <span className="text-neutral-500">Ava von <strong>{s.bot_signature_name || "?"}</strong></span>
 
                         {/* Aktueller Bot-Modus + Mitarbeiter-Eingriff-Flag */}
