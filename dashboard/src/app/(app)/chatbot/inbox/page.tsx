@@ -784,18 +784,27 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         )}
                         <span className="text-neutral-500">Ava von <strong>{s.bot_signature_name || "?"}</strong></span>
 
-                        {/* Aktueller Bot-Modus + Mitarbeiter-Eingriff-Flag */}
+                        {/* Aktueller Bot-Modus — Farbe je nachdem ob Bot in DIESER
+                            Session schon aktiv war. Wenn ja: voll gefärbt.
+                            Wenn noch nichts passiert ist: neutral grau (= "Modus
+                            ist gesetzt, Bot wartet aber noch"). */}
                         {(() => {
                           const m = s.bot_mode as string | null;
-                          const modeMeta: Record<string, { label: string; color: string }> = {
-                            "auto":            { label: "🤖 Auto-Antwort",    color: "bg-green-100 text-green-800 border-green-200" },
-                            "selective_auto":  { label: "🧠 Smart-Auto",      color: "bg-purple-100 text-purple-800 border-purple-200" },
-                            "assisted":        { label: "🧑‍🏫 Auto-Entwurf",   color: "bg-blue-100 text-blue-800 border-blue-200" },
-                            "off":             { label: "✋ Manuell",          color: "bg-neutral-100 text-neutral-700 border-neutral-200" },
+                          // Hat der Bot in dieser Session schon was produziert?
+                          const botWasActive = (st.botCount || 0) > 0 || (st.autobotCount || 0) > 0;
+                          const modeMeta: Record<string, { label: string; activeColor: string; idleColor: string }> = {
+                            "auto":            { label: "🤖 Auto-Antwort",    activeColor: "bg-green-100 text-green-800 border-green-200",     idleColor: "bg-neutral-50 text-neutral-500 border-neutral-200" },
+                            "selective_auto":  { label: "🧠 Smart-Auto",      activeColor: "bg-purple-100 text-purple-800 border-purple-200",  idleColor: "bg-neutral-50 text-neutral-500 border-neutral-200" },
+                            "assisted":        { label: "🧑‍🏫 Auto-Entwurf",   activeColor: "bg-blue-100 text-blue-800 border-blue-200",        idleColor: "bg-neutral-50 text-neutral-500 border-neutral-200" },
+                            "off":             { label: "✋ Manuell",          activeColor: "bg-neutral-100 text-neutral-700 border-neutral-200", idleColor: "bg-neutral-100 text-neutral-700 border-neutral-200" },
                           };
                           const mm = (m && modeMeta[m]) || modeMeta.off;
+                          const color = botWasActive ? mm.activeColor : mm.idleColor;
                           return (
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${mm.color}`}>
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${color}`}
+                              title={botWasActive ? `Bot ist in dieser Session aktiv (Modus: ${mm.label})` : `Modus ${mm.label} — Bot war hier noch nicht aktiv`}
+                            >
                               {mm.label}
                             </span>
                           );
