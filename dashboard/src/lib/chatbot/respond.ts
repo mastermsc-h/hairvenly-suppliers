@@ -381,14 +381,25 @@ interface RespondOptions {
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
 
-  // Session laden
+  // Session laden — inkl. category für Skip-Check
   const { data: session } = await svc
     .from("chat_sessions")
-    .select("id, bot_signature_name, channel, status")
+    .select("id, bot_signature_name, channel, status, category")
     .eq("id", sessionId)
     .single();
   if (!session) return { success: false, error: "session not found" };
   if (session.status !== "active") return { success: false, error: "session not active" };
+
+  // 🚨 KATEGORIE-SKIP: bestimmte Kategorien wo der Bot fundamental KEINE
+  // Daten hat, dürfen GAR KEINEN Draft generieren. Egal welcher Aufrufpfad
+  // (Webhook, setBotMode, manueller "Antwort generieren"-Button) — Skip
+  // hier zentral, damit nirgendwo durchrutscht.
+  //
+  // appointment: kein Planity-Kalender-Zugriff → Bot würde Termine halluzinieren
+  if (session.category === "appointment") {
+    console.warn(`[respond] SKIP session=${sessionId.slice(0,8)} — category=appointment, Bot hat keinen Kalender-Zugriff. Mitarbeiter:in muss manuell mit Planity-Link antworten.`);
+    return { success: false, error: "skip_appointment_no_calendar_access" };
+  }
 
   const signatureName = session.bot_signature_name || "Lara";
 
