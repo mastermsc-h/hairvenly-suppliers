@@ -469,21 +469,91 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += `- Sachfragen (Verfügbarkeit, Preise, allgemeine Infos) darfst du immer direkt beantworten — die Einschränkung gilt nur für Übergaben an Mitarbeiterinnen.\n`;
 
 
-  // WISSENSDATENBANK (chatbot_faq) — statische Fakten die IMMER gelten.
-  // Vorher gar nicht im Prompt — die 46 Einträge waren ungenutzt. Jetzt alle
-  // aktiven werden geladen und kommen als feste Wissensbasis in den Prompt.
-  // Hier rein gehören keine situativen Korrekturen, sondern dauerhafte Wahrheiten:
-  // Methoden-Specs, Längen, Pflege-Tipps, Service-Infos, Preisstrukturen.
+  // Letzte Kunden-Message LADEN (vor FAQ-Filter — brauchen wir für Keyword-Topic-Match).
+  // Wird später auch für Training-Retrieval verwendet (dort nochmal — günstig).
+  const { data: lastUserMsgRow } = await svc
+    .from("chat_messages")
+    .select("content")
+    .eq("session_id", sessionId)
+    .eq("role", "user")
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // WISSENSDATENBANK (chatbot_faq) — TOPIC-FILTER für Token-Sparen (Phase A).
+  // Vorher: ALLE 106 FAQs (~13.6k Token) in jeden Prompt → riesige Bloat-Quelle.
+  // Jetzt: Core-Topics + Themen-Topics passend zur letzten Kundennachricht.
+  //
+  // Core-Topics IMMER im Prompt (kritische Verhaltens-FAQs ohne die der Bot
+  // halluziniert): produkte (Methoden×Längen), allgemeine Verhaltensregeln,
+  // Lieferanten-Namen-Tabu, Foto-Verhalten.
+  //
+  // Themen-Topics nur wenn die letzte Kunden-Message passende Keywords hat:
+  // farbberatung, preise, versand, zahlung, salon, pflege etc.
+  const CORE_TOPICS = new Set([
+    "produkte", "allgemein",
+    "🔒 Interne Bezeichnungen — niemals zur Kundin",
+    "🔒 Color-Advice — niemals vollautonom",
+    "🔒 Foto/Video-Service der Tressen — wann der Bot zustimmen darf",
+    "✂️ Fokussiert antworten — eine Sache pro Message",
+    "✅ Standard-Eröffnung — Bot darf direkt autonom klären",
+    "🚨 Methoden die es in BEIDEN Linien gibt — niemals ausschließen",
+    "🎯 Methode-Existenz vs. Farb-Verfügbarkeit unterscheiden",
+    "🎤 Audio-/Video-Nachrichten — Bot kann nicht abhören",
+    "🕒 Wartezeit ehrlich kommunizieren — Öffnungszeiten",
+    "ETA-Ehrlichkeit — Liefertermin gehört zur Linie, in der das Produkt wirklich existiert",
+  ]);
+  // Keyword-Topic-Map: welche Topics sind relevant je Keyword?
+  const TOPIC_BY_KEYWORD: Array<{ keywords: RegExp; topics: string[] }> = [
+    { keywords: /\b(farbe|farbton|blond|braun|rot|asch|honig|kühl|warm|melt|color|nuance|haarfarbe|ansatz)\b/i,
+      topics: ["farbberatung", "Farbberatung — Reihenfolge: erst Foto, dann Empfehlung", "Foto-Angebot der Kundin annehmen", "📸 Foto-Briefing für Farbmatching — Pflicht-Checkliste", "💆 Feines Haar — Genius Weft vs Classic Tressen Entscheidung"] },
+    { keywords: /\b(preis|kosten|€|euro|kostet|teuer|günstig|bezahl|raten)\b/i,
+      topics: ["preise", "zahlung", "💶 Produktpreise vs. Salon-Dienstleistungspreise"] },
+    { keywords: /\b(versand|liefer|paket|dhl|hermes|kommt|wann.*da)\b/i,
+      topics: ["versand"] },
+    { keywords: /\b(termin|salon|laden|showroom|vorbei|öffnungs|vor.ort|planity|buchen)\b/i,
+      topics: ["salon"] },
+    { keywords: /\b(pflege|waschen|schwimmen|wasch|föhn|hitze|haltbar|halten)\b/i,
+      topics: ["pflege", "haltbarkeit"] },
+    { keywords: /\b(gewerbe|friseur|wholesale|großhandel|b2b)\b/i,
+      topics: ["gewerbe", "schulung"] },
+    { keywords: /\b(rückgabe|retoure|umtausch|reklamation|kaputt|defekt|widerruf)\b/i,
+      topics: ["reklamation"] },
+    { keywords: /\b(zopf|frisur|hochsteck|knoten|workout|sport)\b/i,
+      topics: ["mythen"] },
+    { keywords: /\b(kontakt|whatsapp|instagram|social|email)\b/i,
+      topics: ["kontakt"] },
+    { keywords: /\b(tresse|weft|classic|genius|invisible|mikroring|einnäh|befestig)\b/i,
+      topics: [
+        "produkte",
+        "👶 Tressen: Classic vs Genius Weft (Invisible) — beide flexibel befestigbar",
+        "💆 Feines Haar — Genius Weft vs Classic Tressen Entscheidung",
+      ] },
+    { keywords: /\b(invisible.tape)\b/i,
+      topics: ["Invisible Tapes — Markteinführung August 2026"] },
+    { keywords: /\b(reply|antwort.*alt|story|zurück.*nachricht)\b/i,
+      topics: ["↩️ Reply auf alte Nachricht — Bot fragt freundlich nach"] },
+    { keywords: /\b(ephemeral|foto.*einmal|view.*once|wegklick)\b/i,
+      topics: ["📸 Einmal-Ansicht-Fotos — bitte normal schicken"] },
+  ];
+  const lastUserText = (lastUserMsgRow?.content as string | undefined) || "";
+  const wantedTopics = new Set<string>(CORE_TOPICS);
+  for (const rule of TOPIC_BY_KEYWORD) {
+    if (rule.keywords.test(lastUserText)) {
+      for (const t of rule.topics) wantedTopics.add(t);
+    }
+  }
   const { data: faqs } = await svc
     .from("chatbot_faq")
     .select("topic, question, answer")
     .eq("active", true)
+    .in("topic", Array.from(wantedTopics))
     .order("topic")
     .order("order_idx");
   if (faqs && faqs.length > 0) {
     systemPrompt += "\n\n## 📚 WISSENSDATENBANK — feste Fakten und FAQ\n";
     systemPrompt += "Diese Fakten sind IMMER wahr und gelten unabhängig vom konkreten Gespräch. Bei Widerspruch zwischen einem Trainings-Beispiel und der Wissensdatenbank: die Wissensdatenbank gewinnt.\n\n";
-    // gruppiert nach topic für bessere Lesbarkeit
     const byTopic = new Map<string, { question: string; answer: string }[]>();
     for (const f of faqs) {
       const t = f.topic || "allgemein";
@@ -517,15 +587,6 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     "danke", "hey", "hallo", "hi", "ja", "nein", "ok", "gut", "super",
     "bitte", "gerne", "vielleicht", "etwa", "etwas", "ungefähr",
   ]);
-  const { data: lastUserMsgRow } = await svc
-    .from("chat_messages")
-    .select("content")
-    .eq("session_id", sessionId)
-    .eq("role", "user")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
   let keywords: string[] = [];
   if (lastUserMsgRow?.content) {
     keywords = (lastUserMsgRow.content as string)
@@ -536,16 +597,21 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       .slice(0, 6);
   }
 
+  // PHASE-A KOSTENOPTIMIERUNG: viel kleinere Trainings-Selektion.
+  // Vorher: bis zu 25 Trainings (10.3k Token), praktisch immer 70k-Total-Prompt.
+  // Jetzt: max 10 Trainings, davon 5 pinned + 3 themen-relevant + 2 recency.
+  // Pinned werden NACH created_at DESC limitiert (neueste Pinned zuerst) —
+  // ältere Pinned die nicht mehr gebraucht werden sollten manuell archiviert.
   const [{ data: pinnedTraining }, { data: relevantTraining }, { data: recentTraining }] = await Promise.all([
-    // 1) Alle gepinnten Trainings — immer dabei
+    // 1) Pinned Trainings — max 5 (Reihenfolge: neueste zuerst)
     svc.from("chatbot_training")
       .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
       .eq("active", true)
       .eq("pinned", true)
       .or(`avatar_name.is.null,avatar_name.eq.${signatureName}`)
-      .order("created_at", { ascending: false }),
-    // 2) Themenbezogen: Trainings deren user_message ODER feedback ein Keyword
-    //    aus der aktuellen Kunden-Message enthält. Egal wie alt.
+      .order("created_at", { ascending: false })
+      .limit(5),
+    // 2) Themen-Match — max 3 (vorher 15)
     keywords.length > 0
       ? svc.from("chatbot_training")
           .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
@@ -553,15 +619,15 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
           .or(`avatar_name.is.null,avatar_name.eq.${signatureName}`)
           .or(keywords.map(k => `user_message.ilike.%${k}%,feedback.ilike.%${k}%`).join(","))
           .order("created_at", { ascending: false })
-          .limit(15)
+          .limit(3)
       : Promise.resolve({ data: [] }),
-    // 3) Plus die 10 absolut neuesten als Recency-Backstop
+    // 3) Recency-Backstop — max 2 (vorher 10)
     svc.from("chatbot_training")
       .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
       .eq("active", true)
       .or(`avatar_name.is.null,avatar_name.eq.${signatureName}`)
       .order("created_at", { ascending: false })
-      .limit(10),
+      .limit(2),
   ]);
   const trainingIds = new Set<string>();
   type TrainingRow = NonNullable<typeof pinnedTraining>[number];
@@ -572,9 +638,8 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       training.push(t);
     }
   }
-  // Cap auf 25 damit Prompt nicht explodiert — Pin + Relevant haben Vorrang
-  // weil sie zuerst hinzugefügt wurden.
-  training.splice(25);
+  // Cap auf 10 (vorher 25) — Pinned + Themen-Match haben Vorrang.
+  training.splice(10);
   if (training.length > 0) {
     systemPrompt += "\n\n## DEINE TRAININGS-BEISPIELE\n";
     systemPrompt += "Diese Beispiele zeigen dir den GANZEN Gesprächsverlauf — nicht nur die Einzelfrage. ";
@@ -601,13 +666,15 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     }
   }
 
-  // Verkaufs-Strategien (höchste Priorität zuerst)
+  // Verkaufs-Strategien (höchste Priorität zuerst) — Cap auf 8 (vorher 20).
+  // Strategies sind oft generisch ("bei interesse höflich überleiten") — top 8
+  // nach Priorität reichen aus. Detailliertere Strategien sollten Trainings sein.
   const { data: strategies } = await svc
     .from("chatbot_strategies")
     .select("name, trigger, steps")
     .eq("active", true)
     .order("priority", { ascending: false })
-    .limit(20);
+    .limit(8);
   if (strategies && strategies.length > 0) {
     systemPrompt += "\n\n## VERKAUFS-STRATEGIEN\n";
     systemPrompt += "Wenn der Chat-Kontext zu einer dieser Strategien passt, folge IHRER Reihenfolge:\n\n";
