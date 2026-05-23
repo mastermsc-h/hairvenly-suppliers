@@ -743,14 +743,26 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         <span className="text-neutral-300">·</span>
                         <span className="text-neutral-500">Ava von <strong>{s.bot_signature_name || "?"}</strong></span>
 
-                        {isHybrid ? (
+                        {/* Aktueller Bot-Modus + Mitarbeiter-Eingriff-Flag */}
+                        {(() => {
+                          const m = s.bot_mode as string | null;
+                          const modeMeta: Record<string, { label: string; color: string }> = {
+                            "auto":            { label: "🤖 Auto-Antwort",    color: "bg-green-100 text-green-800 border-green-200" },
+                            "selective_auto":  { label: "🧠 Smart-Auto",      color: "bg-purple-100 text-purple-800 border-purple-200" },
+                            "assisted":        { label: "🧑‍🏫 Auto-Entwurf",   color: "bg-blue-100 text-blue-800 border-blue-200" },
+                            "off":             { label: "✋ Manuell",          color: "bg-neutral-100 text-neutral-700 border-neutral-200" },
+                          };
+                          const mm = (m && modeMeta[m]) || modeMeta.off;
+                          return (
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${mm.color}`}>
+                              {mm.label}
+                            </span>
+                          );
+                        })()}
+                        {isHybrid && (
                           <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
                             <UserCheck size={11} /> Mitarbeiter eingegriffen
                             {assignedName && <span className="font-medium">· {assignedName}</span>}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 bg-pink-100 text-pink-700 px-2 py-0.5 rounded-full">
-                            <Bot size={11} /> Reiner Bot-Chat
                           </span>
                         )}
                         <span className="inline-flex items-center gap-2 text-neutral-400 ml-auto">
