@@ -734,10 +734,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         {(s as { human_only?: boolean }).human_only && (
                           <span
                             className="bg-rose-500 text-white border border-rose-600 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
-                            title="Mitarbeiter übernimmt — Bot pausiert für diese Session"
+                            title="Markiert als 'Mitarbeiter benötigt!' — Bot pausiert für diese Session, ein Mensch muss ran"
                           >
-                            <Check size={10} />
-                            MA übernommen
+                            <AlertTriangle size={10} />
+                            Mitarbeiter benötigt!
                           </span>
                         )}
                         {/* Auto-Hinweis: Kundin hat Foto geschickt + Session ist

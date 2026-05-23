@@ -445,8 +445,8 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               })}
               disabled={isPending}
               title={session.human_only
-                ? "Bot wieder zulassen — die Session läuft wieder im aktuellen Bot-Modus"
-                : "Markieren als 'Mitarbeiter benötigt!' — Bot pausiert für diese Session, du übernimmst komplett. Bleibt aktiv bis du es wieder ausschaltest."}
+                ? "Markierung entfernen — der Bot darf wieder antworten"
+                : "Diese Session als 'Mitarbeiter benötigt!' markieren — Bot pausiert, im Team sichtbar dass ein Mensch ran muss. (Wenn du selbst übernimmst, klicke stattdessen orange 'Übernehmen'.)"}
               className={`h-8 px-3 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 disabled:opacity-50 transition whitespace-nowrap ${
                 session.human_only
                   ? "bg-rose-500 text-white hover:bg-rose-600 shadow-sm"
@@ -454,7 +454,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               }`}
             >
               {session.human_only ? (
-                <><Check size={13} /> MA übernommen</>
+                <><Check size={13} /> Markiert</>
               ) : (
                 <><AlertTriangle size={13} /> Mitarbeiter benötigt!</>
               )}
