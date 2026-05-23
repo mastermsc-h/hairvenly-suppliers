@@ -823,7 +823,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                           const modeMeta: Record<string, { label: string; activeColor: string; idleColor: string }> = {
                             "auto":            { label: "🤖 Auto-Antwort",    activeColor: "bg-green-100 text-green-800 border-green-200",     idleColor: "bg-neutral-50 text-neutral-500 border-neutral-200" },
                             "selective_auto":  { label: "🧠 Smart-Auto",      activeColor: "bg-purple-100 text-purple-800 border-purple-200",  idleColor: "bg-neutral-50 text-neutral-500 border-neutral-200" },
-                            "assisted":        { label: "🧑‍🏫 Auto-Entwurf",   activeColor: "bg-blue-100 text-blue-800 border-blue-200",        idleColor: "bg-neutral-50 text-neutral-500 border-neutral-200" },
+                            "assisted":        { label: "🤝 Assistiert",   activeColor: "bg-blue-100 text-blue-800 border-blue-200",        idleColor: "bg-neutral-50 text-neutral-500 border-neutral-200" },
                             "off":             { label: "✋ Manuell",          activeColor: "bg-neutral-100 text-neutral-700 border-neutral-200", idleColor: "bg-neutral-100 text-neutral-700 border-neutral-200" },
                           };
                           const mm = (m && modeMeta[m]) || modeMeta.off;

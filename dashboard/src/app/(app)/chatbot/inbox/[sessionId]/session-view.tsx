@@ -312,7 +312,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
                 type="button"
                 onClick={() => setShowModeSettings(v => !v)}
                 disabled={modeSwitching !== null}
-                title="Klick zum Ändern: Manuell · Auto-Entwurf · Smart-Auto · Auto-Antwort"
+                title="Klick zum Ändern: Manuell · Assistiert · Smart-Auto · Auto-Antwort"
                 className={`inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border-2 shadow-sm hover:shadow transition ${
                   session.bot_mode === "auto"
                     ? "bg-green-50 text-green-800 border-green-400 hover:bg-green-100"
@@ -325,12 +325,12 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               >
                 {session.bot_mode === "auto" ? "🤖"
                  : session.bot_mode === "selective_auto" ? "🧠"
-                 : session.bot_mode === "assisted" ? "🧑‍🏫"
+                 : session.bot_mode === "assisted" ? "🤝"
                  : "⏸"}
                 <span>
                   {session.bot_mode === "auto"           ? "Auto-Antwort" :
                    session.bot_mode === "selective_auto" ? "Smart-Auto" :
-                   session.bot_mode === "assisted"       ? "Auto-Entwurf" :
+                   session.bot_mode === "assisted"       ? "Assistiert" :
                                                            "Manuell"}
                 </span>
                 <ChevronDown size={14} className={`transition-transform ${showModeSettings ? "rotate-180" : ""}`} />
@@ -345,7 +345,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
                     </div>
                     {([
                       { v: "off",            icon: "⏸",    color: "neutral", label: "Manuell",       desc: "Bot tut nichts. Du klickst pro Antwort auf „Antwort generieren\"." },
-                      { v: "assisted",       icon: "🧑‍🏫", color: "blue",    label: "Auto-Entwurf",  desc: "Bot generiert IMMER einen Entwurf, du bestätigst vor dem Senden." },
+                      { v: "assisted",       icon: "🤝", color: "blue",    label: "Assistiert",  desc: "Bot generiert IMMER einen Entwurf, du bestätigst vor dem Senden. Antwort ist vom Bot, du gibst sie frei." },
                       { v: "selective_auto", icon: "🧠",   color: "violet",  label: "Smart-Auto",    desc: "Bot prüft selbst: bei einfachen Fragen (Verfügbarkeit, Info) antwortet er autonom, sonst Entwurf." },
                       { v: "auto",           icon: "🤖",   color: "green",   label: "Auto-Antwort",  desc: "Bot sendet IMMER selbst ohne Rückfrage. Nur für eingespielte Avatare." },
                     ] as const).map(opt => {
@@ -828,8 +828,8 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
                 🤖 autobot
               </span>
             ) : (
-              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-medium" title="Vom Mitarbeiter via Auto-Entwurf approved">
-                🧑‍🏫 manueller autobot
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-medium" title="Vom Bot generiert, von der Mitarbeiterin freigegeben — beste Mischung aus Effizienz und Qualität">
+                🤝 assistiert
               </span>
             )}
             <span>Ava von {signatureName || "—"} · {time}</span>
