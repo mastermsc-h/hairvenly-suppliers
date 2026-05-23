@@ -249,16 +249,42 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   }
   const autobotActiveCount = combinedSessions.filter(s => (stats[s.id]?.autobotCount || 0) > 0).length;
 
+  // Helper: gehört die Session in "Zu tun"?
+  //  - unbeantwortet ODER
+  //  - pending Draft existiert ODER
+  //  - in den letzten 24h von uns beantwortet (Grace Period — Mitarbeiterin kann
+  //    noch nachfassen / verwerfen / als erledigt markieren) ODER
+  //  - Bot hat in seiner letzten Antwort einen Handoff angekündigt
+  //    ("Kollegin meldet sich Montag", "morgen früh ab 10 Uhr" etc.)
+  //    → bleibt drin als Erinnerung für die Mitarbeiterin, am versprochenen Tag zu antworten
+  const HANDOFF_RE = /\b(kollegin|stylistin|farb-?expertin|mitarbeiterin)\b[^.\n]{0,80}\b(meldet|schreibt|kommt|kümmert|schaut)/i;
+  const HANDOFF_DAY_RE = /\b(montag|dienstag|mittwoch|donnerstag|freitag|morgen)\b[^.\n]{0,30}\b(früh|ab\s+10|10\s*uhr|ankommt)/i;
+  const isInTodo = (s: typeof combinedSessions[number]) => {
+    if (s.status === "closed") return false;
+    if (pendingDraftSet.has(s.id)) return true;
+    if (unreadMap[s.id]) return true;
+    const st = stats[s.id];
+    // 24h Grace Period — wenn von UNS geantwortet wurde
+    const lastMsg = s.last_message_at;
+    if (lastMsg && st) {
+      const ageH = (Date.now() - new Date(lastMsg).getTime()) / 3_600_000;
+      const lastWasOurs = st.lastMsgRole === "human_agent"
+        || (st.lastMsgRole === "assistant" && !st.lastMsgAutoSent);
+      if (ageH < 24 && lastWasOurs) return true;
+    }
+    // Handoff-Promise erkannt → bleibt drin
+    if (st?.lastBot && (HANDOFF_RE.test(st.lastBot) || HANDOFF_DAY_RE.test(st.lastBot))) return true;
+    return false;
+  };
+
   // VIEW-Filter (Tabs)
-  // - todo: pending Draft ODER unbeantwortete Customer-Message
+  // - todo: pending Draft ODER unbeantwortet ODER <24h beantwortet ODER Handoff-Promise
   // - autobot: Sessions wo autonom-gesendete Bot-Messages existieren
-  //   (zum Gegenchecken durch die Mitarbeiterin)
   // - all: alle nicht-erledigten (default: closed ausgeblendet)
   // - done: nur erledigte (status=closed)
-  // Bei aktiver Suche werden die view-Filter übersprungen — Treffer immer sichtbar.
   if (!searchQuery) {
     if (view === "todo") {
-      filteredSessions = filteredSessions.filter(s => unreadMap[s.id] || pendingDraftSet.has(s.id));
+      filteredSessions = filteredSessions.filter(s => isInTodo(s));
     } else if (view === "autobot") {
       filteredSessions = filteredSessions.filter(s => (stats[s.id]?.autobotCount || 0) > 0);
     } else if (view === "done") {
@@ -351,7 +377,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
           - Erledigt: closed-Archiv
       */}
       {(() => {
-        const todoCount    = combinedSessions.filter(s => s.status !== "closed" && (unreadMap[s.id] || pendingDraftSet.has(s.id))).length;
+        const todoCount    = combinedSessions.filter(s => isInTodo(s)).length;
         const autobotCount = combinedSessions.filter(s => s.status !== "closed" && (stats[s.id]?.autobotCount || 0) > 0).length;
         const allCount     = combinedSessions.filter(s => s.status !== "closed").length;
         const doneCount    = (cntClosed ?? 0);
@@ -659,8 +685,17 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                             </span>
                           );
                           if (us === "todo_unread") return (
-                            <span className="bg-pink-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide" title="Kundin hat geschrieben, niemand hat geantwortet">
-                              🟡 Wartet auf dich
+                            <span
+                              className="group/wait inline-flex items-center gap-1 cursor-default"
+                              title="Wartet auf dich — Kundin hat geschrieben, niemand hat geantwortet"
+                            >
+                              <span className="relative inline-flex">
+                                <span className="w-2.5 h-2.5 rounded-full bg-pink-500 ring-2 ring-amber-300" />
+                                <span className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-pink-500 animate-ping opacity-40" />
+                              </span>
+                              <span className="max-w-0 group-hover/wait:max-w-[140px] overflow-hidden whitespace-nowrap transition-[max-width] duration-300 ease-out text-pink-700 font-bold text-[10px] uppercase tracking-wide">
+                                <span className="pl-0.5">Wartet auf dich</span>
+                              </span>
                             </span>
                           );
                           if (us === "autobot") return (
