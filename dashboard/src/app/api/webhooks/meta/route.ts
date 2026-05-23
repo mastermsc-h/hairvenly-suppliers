@@ -13,10 +13,13 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { verifyMetaSignature, getInstagramUsername, getInstagramUserInfo, sendInstagramMessage } from "@/lib/messaging/meta";
 
-// Vercel-Function-Timeout auf 60s setzen (Default = 10s zu kurz für Bot+Tools)
-export const maxDuration = 60;
+// Vercel Function Timeout — Bot-Generation mit Tool-Calls + Debounce kann
+// bis zu 4 Min dauern. Default 60s killt die Function mitten in der
+// Debounce-Wartezeit → kein Bot-Trigger. Mit Pro Plan erlaubt Vercel
+// bis 300s (5 Min) maxDuration.
+export const maxDuration = 300;
+import { verifyMetaSignature, getInstagramUsername, getInstagramUserInfo, sendInstagramMessage } from "@/lib/messaging/meta";
 
 // GET: Webhook-Verification von Meta beim Setup
 export async function GET(req: NextRequest) {
@@ -530,18 +533,20 @@ async function routeIncoming(opts: {
   if ((effectiveBotMode === "auto" || effectiveBotMode === "assisted" || effectiveBotMode === "selective_auto") && session.status === "active") {
     try {
       // ── SMART DEBOUNCE ──
-      // Default ~2:30 Min Wartezeit, damit (a) die Kundin Zeit hat noch
-      // mehrere Nachrichten zu schicken bevor der Bot antwortet, und (b) die
-      // Antwort nicht nach billigem 0-Sekunden-Bot aussieht.
-      // Bei jeder neuen Customer-Message wird der Timer eh resettet (siehe
-      // refreshed?.last_customer_msg_at-Check unten).
+      // Wartezeit damit die Kundin Zeit hat mehrere Nachrichten zu schicken
+      // bevor der Bot antwortet, und damit's nicht nach 0-Sekunden-Bot wirkt.
+      // Bei jeder neuen Customer-Message wird der Timer resettet.
+      //
+      // ⚠️ WICHTIG — VERCEL FUNCTION TIMEOUT
+      // Die Function läuft maxDuration Sekunden (siehe oben: 300s mit Pro).
+      // Debounce muss sicher darunter bleiben + Buffer für Bot-Generation.
+      // Konservativ: max 50s Debounce, sodass mind. 250s für Bot übrig bleiben.
       //
       // Adaptiv:
-      //   - Default                            → 150s (2:30 Min)
-      //   - Letzte Bot-Nachricht hatte 2+ Fragen,
-      //     Customer-Reply ist nicht trivial    → 180s (3 Min)
-      //   - Customer-Reply ist sehr kurz
-      //     ("ok", "ja", "?")                   →  90s (1:30 Min)
+      //   - Default                            →  50s
+      //   - Letzte Bot-Nachricht hatte 2+ Fragen
+      //     (Kundin tippt evtl. lang)          →  50s (max)
+      //   - Customer-Reply ist sehr kurz       →  20s (schnelle Antwort)
       const { data: lastBot } = await svc.from("chat_messages")
         .select("content, role").eq("session_id", session.id)
         .in("role", ["assistant", "human_agent"])
@@ -550,10 +555,8 @@ async function routeIncoming(opts: {
         .limit(1).maybeSingle();
       const questionCount = (lastBot?.content || "").match(/\?/g)?.length || 0;
       const customerMsgShort = (opts.text || "").trim().length <= 30;
-      const DEBOUNCE_MS =
-        (questionCount >= 2 && !customerMsgShort) ? 180_000 :
-        customerMsgShort                           ?  90_000 :
-                                                     150_000;
+      const DEBOUNCE_MS = customerMsgShort ? 20_000 : 50_000;
+      void questionCount; // bleibt vorgehalten falls wir später wieder differenzieren wollen
       console.log(`[meta-webhook] debounce ${DEBOUNCE_MS}ms (last bot ?-count=${questionCount}, customer-len=${(opts.text || "").length})`);
       await new Promise(r => setTimeout(r, DEBOUNCE_MS));
 
