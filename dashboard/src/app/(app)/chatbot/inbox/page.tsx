@@ -817,23 +817,55 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                             Wenn noch nichts passiert ist: neutral grau (= "Modus
                             ist gesetzt, Bot wartet aber noch"). */}
                         {(() => {
-                          const m = s.bot_mode as string | null;
-                          // Hat der Bot in dieser Session schon was produziert?
-                          const botWasActive = (st.botCount || 0) > 0 || (st.autobotCount || 0) > 0;
-                          const modeMeta: Record<string, { label: string; activeColor: string; idleColor: string }> = {
-                            "auto":            { label: "🤖 Auto-Antwort",    activeColor: "bg-green-100 text-green-800 border-green-200",     idleColor: "bg-neutral-50 text-neutral-500 border-neutral-200" },
-                            "selective_auto":  { label: "🧠 Smart-Auto",      activeColor: "bg-purple-100 text-purple-800 border-purple-200",  idleColor: "bg-neutral-50 text-neutral-500 border-neutral-200" },
-                            "assisted":        { label: "🤝 Assistiert",   activeColor: "bg-blue-100 text-blue-800 border-blue-200",        idleColor: "bg-neutral-50 text-neutral-500 border-neutral-200" },
-                            "off":             { label: "✋ Manuell",          activeColor: "bg-neutral-100 text-neutral-700 border-neutral-200", idleColor: "bg-neutral-100 text-neutral-700 border-neutral-200" },
+                          // BADGE ZEIGT WIE DIE SESSION TATSÄCHLICH LIEF, nicht nur
+                          // die aktuelle bot_mode-Einstellung. Sonst zeigt eine
+                          // Session mit lauter Bot-Entwürfen "Manuell" — falsch.
+                          const currentMode = (s.bot_mode as string | null) || "off";
+                          const currentModeLabel: Record<string, string> = {
+                            "auto":            "🤖 Auto-Antwort",
+                            "selective_auto":  "🧠 Smart-Auto",
+                            "assisted":        "🤝 Assistiert",
+                            "off":             "✋ Manuell",
                           };
-                          const mm = (m && modeMeta[m]) || modeMeta.off;
-                          const color = botWasActive ? mm.activeColor : mm.idleColor;
+                          // Tatsächliche letzte Interaktion herleiten:
+                          // - assistant + auto_sent → Bot hat autonom gesendet (Autobot)
+                          // - assistant + !auto_sent → Bot-Entwurf von Mitarbeiterin freigegeben (Assistiert)
+                          // - human_agent → Mitarbeiterin hat selbst getippt (Manuell)
+                          // - pending Draft (Bot baut gerade) → Assistiert (Bot involviert)
+                          // - last = user / nichts → current mode anzeigen ("Was passiert als Nächstes")
+                          let label: string;
+                          let color: string;
+                          let tooltipPrefix: string;
+                          if (pendingDraftSet.has(s.id)) {
+                            label = "🤝 Assistiert";
+                            color = "bg-blue-100 text-blue-800 border-blue-200";
+                            tooltipPrefix = "Bot-Entwurf wartet auf Freigabe";
+                          } else if (st.lastMsgRole === "assistant" && st.lastMsgAutoSent) {
+                            label = "🤖 Autobot";
+                            color = "bg-green-100 text-green-800 border-green-200";
+                            tooltipPrefix = "Letzte Antwort: Bot hat autonom gesendet";
+                          } else if (st.lastMsgRole === "assistant" && !st.lastMsgAutoSent) {
+                            label = "🤝 Assistiert";
+                            color = "bg-blue-100 text-blue-800 border-blue-200";
+                            tooltipPrefix = "Letzte Antwort: vom Bot generiert + Mitarbeiterin freigegeben";
+                          } else if (st.lastMsgRole === "human_agent") {
+                            label = "✋ Manuell";
+                            color = "bg-neutral-100 text-neutral-700 border-neutral-200";
+                            tooltipPrefix = "Letzte Antwort: Mitarbeiterin selbst getippt";
+                          } else {
+                            // last = user (noch keine Antwort) → was wird als Nächstes passieren?
+                            label = currentModeLabel[currentMode] || currentModeLabel.off;
+                            color = currentMode === "off"
+                              ? "bg-neutral-50 text-neutral-500 border-neutral-200"
+                              : "bg-neutral-50 text-neutral-500 border-neutral-200";
+                            tooltipPrefix = `Modus ${label} — wartet auf nächste Aktion`;
+                          }
                           return (
                             <span
                               className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${color}`}
-                              title={botWasActive ? `Bot ist in dieser Session aktiv (Modus: ${mm.label})` : `Modus ${mm.label} — Bot war hier noch nicht aktiv`}
+                              title={`${tooltipPrefix} · Modus aktuell: ${currentModeLabel[currentMode] || currentModeLabel.off}`}
                             >
-                              {mm.label}
+                              {label}
                             </span>
                           );
                         })()}
