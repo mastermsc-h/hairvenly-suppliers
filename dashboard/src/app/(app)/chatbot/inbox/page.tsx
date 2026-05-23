@@ -12,7 +12,7 @@ import DefaultBotModeToggle from "./default-bot-mode-toggle";
 import ClassifyBackfillButton from "./classify-backfill-button";
 
 interface PageProps {
-  searchParams: Promise<{ status?: string; mode?: string; channel?: string; category?: string; q?: string; unread?: string; limit?: string; sort?: string; show?: string }>;
+  searchParams: Promise<{ status?: string; mode?: string; channel?: string; category?: string; q?: string; unread?: string; limit?: string; sort?: string; show?: string; view?: string }>;
 }
 
 const SORT_OPTIONS: Record<string, { label: string; emoji: string }> = {
@@ -41,11 +41,23 @@ interface SessionStats {
   lastMsg?: string;
   lastMsgRole?: string;
   lastMsgAgentId?: string | null;
+  lastMsgAutoSent?: boolean;       // war die letzte Bot-Message autonom?
   botCount: number;
   humanCount: number;
   autobotCount: number;            // assistant-Messages mit auto_sent=true
   lastAutobotAt?: string;          // wann zuletzt eine autonome Bot-Antwort raus ging
 }
+
+/**
+ * Status-Modell pro Session — was muss die Mitarbeiterin wissen?
+ *  todo_unread     → 🟡 Kundin hat geschrieben, niemand hat geantwortet
+ *  todo_draft      → 📝 Bot-Entwurf wartet auf dein Approve
+ *  autobot         → 🤖 Bot hat autonom geantwortet (zum Gegenchecken)
+ *  answered_team   → ✅ Mitarbeiterin hat zuletzt geantwortet
+ *  answered_human  → ✅ Beantwortet
+ *  done            → ✓ als erledigt markiert
+ */
+type SessionUiStatus = "todo_unread" | "todo_draft" | "autobot" | "answered_team" | "answered_human" | "done";
 
 export const dynamic = "force-dynamic";
 
@@ -70,13 +82,15 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   const channelFilter = params.channel  || "all"; // 'all' | 'web' | 'instagram' | 'whatsapp'
   const categoryFilter = params.category || "all";
   const searchQuery    = (params.q || "").trim();
-  // Default-View: "In Bearbeitung" = alle nicht-erledigten Sessions.
-  // Sessions verschwinden also erst, wenn die Mitarbeiterin manuell auf "Erledigt"
-  // klickt — auch nach erster Antwort bleibt die Konversation sichtbar.
-  // User kann via ?unread=1 nochmals einschränken auf "Nur unbeantwortet"
-  // oder via ?show=closed auch geschlossene anzeigen.
-  const onlyUnread     = params.unread === "1";
-  const showClosed     = params.show === "closed" || filter === "closed";
+  // VIEW-Modell — ein Tab pro Mental-Model:
+  //   todo    (Default): Pending Drafts ODER unbeantwortet → "was muss ich tun?"
+  //   autobot           : Sessions mit autonomer Bot-Aktivität (zum Gegenchecken)
+  //   all               : alle nicht-erledigten Sessions
+  //   done              : erledigte (status=closed)
+  const view = (params.view as "todo" | "autobot" | "all" | "done") || "todo";
+  // Legacy-Mappings für alte URLs (?unread=1, ?show=closed) — alles auf view normalisieren
+  const onlyUnread     = view === "todo" || params.unread === "1";
+  const showClosed     = view === "done" || params.show === "closed" || filter === "closed";
   const sortMode       = params.sort && SORT_OPTIONS[params.sort] ? params.sort : "newest";
   // Pagination: max 50 pro "Klick", über "Weitere laden" wird der Limit erhöht
   const limit = Math.min(Math.max(Number(params.limit) || PAGE_SIZE, PAGE_SIZE), 1000);
@@ -161,9 +175,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
       .limit(20000);
     for (const m of msgs ?? []) {
       const s = stats[m.session_id] ??= { botCount: 0, humanCount: 0, autobotCount: 0 };
+      const autoSent = (m as { auto_sent?: boolean }).auto_sent === true;
       if (m.role === "assistant") {
         s.botCount++;
-        if ((m as { auto_sent?: boolean }).auto_sent) {
+        if (autoSent) {
           s.autobotCount++;
           if (!s.lastAutobotAt) s.lastAutobotAt = m.created_at;
         }
@@ -174,17 +189,28 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         s.lastMsg = m.content;
         s.lastMsgRole = m.role;
         s.lastMsgAgentId = (m as { agent_id?: string | null }).agent_id ?? null;
+        s.lastMsgAutoSent = m.role === "assistant" ? autoSent : false;
       }
       if (m.role === "user" && !s.lastUser) s.lastUser = m.content;
       if ((m.role === "assistant" || m.role === "human_agent") && !s.lastBot) {
         s.lastBot = m.content;
       }
     }
+
+  }
+  // Pending Drafts pro Session — kritisch für "Zu tun"-Filter.
+  // Eigene let-Deklaration außerhalb des if-Blocks damit unten erreichbar.
+  let pendingDraftSet = new Set<string>();
+  if (sessionIds.length > 0) {
+    const { data: drafts } = await svc.from("chat_drafts")
+      .select("session_id").in("session_id", sessionIds).eq("status", "pending");
+    pendingDraftSet = new Set((drafts || []).map(d => d.session_id));
   }
 
   // Pro Session: ist sie "unbeantwortet"? = Kundin zuletzt geschrieben + nicht gesehen
   // ODER vom Mitarbeiter explizit als "nicht erledigt" geflaggt (Sentinel < 2000).
   const unreadMap: Record<string, boolean> = {};
+  const uiStatusMap: Record<string, SessionUiStatus> = {};
   for (const s of combinedSessions) {
     const st = stats[s.id];
     const lastRole = st?.lastMsgRole;
@@ -194,6 +220,20 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     unreadMap[s.id] = isExplicitlyNotDone || (!ourTurn && !!(s.last_customer_msg_at && (
       !s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at
     )));
+    // Deterministisches UI-Status-Modell — eindeutig pro Session.
+    if (s.status === "closed") {
+      uiStatusMap[s.id] = "done";
+    } else if (pendingDraftSet.has(s.id)) {
+      uiStatusMap[s.id] = "todo_draft";       // 📝 Entwurf wartet
+    } else if (unreadMap[s.id]) {
+      uiStatusMap[s.id] = "todo_unread";      // 🟡 Wartet auf dich
+    } else if (lastRole === "assistant" && st?.lastMsgAutoSent) {
+      uiStatusMap[s.id] = "autobot";          // 🤖 Bot autonom
+    } else if (lastRole === "human_agent") {
+      uiStatusMap[s.id] = "answered_team";    // ✅ Mitarbeiterin
+    } else {
+      uiStatusMap[s.id] = "answered_human";   // ✅ Beantwortet (Bot manuell approved)
+    }
   }
   const totalUnreadCount = combinedSessions.filter(s => unreadMap[s.id]).length;
 
@@ -209,10 +249,22 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   }
   const autobotActiveCount = combinedSessions.filter(s => (stats[s.id]?.autobotCount || 0) > 0).length;
 
-  // "Nur unbeantwortet" Filter + Sortierung. Bei aktiver Suche wird der Filter
-  // übersprungen — Treffer sollen IMMER sichtbar sein.
-  if (onlyUnread && !searchQuery) {
-    filteredSessions = filteredSessions.filter(s => unreadMap[s.id]);
+  // VIEW-Filter (Tabs)
+  // - todo: pending Draft ODER unbeantwortete Customer-Message
+  // - autobot: Sessions wo autonom-gesendete Bot-Messages existieren
+  //   (zum Gegenchecken durch die Mitarbeiterin)
+  // - all: alle nicht-erledigten (default: closed ausgeblendet)
+  // - done: nur erledigte (status=closed)
+  // Bei aktiver Suche werden die view-Filter übersprungen — Treffer immer sichtbar.
+  if (!searchQuery) {
+    if (view === "todo") {
+      filteredSessions = filteredSessions.filter(s => unreadMap[s.id] || pendingDraftSet.has(s.id));
+    } else if (view === "autobot") {
+      filteredSessions = filteredSessions.filter(s => (stats[s.id]?.autobotCount || 0) > 0);
+    } else if (view === "done") {
+      filteredSessions = filteredSessions.filter(s => s.status === "closed");
+    }
+    // view === "all" → keine zusätzliche Filterung (showClosed steuert closed-Anzeige)
   }
 
   // Sortierung — explizit per ?sort= überschreibbar.
@@ -289,63 +341,51 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         <div className="flex items-center gap-2 flex-wrap">
           <DefaultBotModeToggle currentMode={defaultBotMode} />
           <SyncInstagramButton />
-          <Link
-            href={(() => {
-              const next = new URLSearchParams();
-              if (filter !== "all")        next.set("status",   filter);
-              if (mode !== "all")          next.set("mode",     mode);
-              if (channelFilter !== "all") next.set("channel",  channelFilter);
-              if (categoryFilter !== "all") next.set("category", categoryFilter);
-              if (searchQuery)             next.set("q",        searchQuery);
-              if (showClosed)              next.set("show",     "closed");
-              if (!onlyUnread) next.set("unread", "1"); else next.delete("unread");
-              const qs = next.toString();
-              return `/chatbot/inbox${qs ? "?" + qs : ""}`;
-            })()}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-              onlyUnread
-                ? "bg-pink-600 text-white hover:bg-pink-700"
-                : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
-            }`}
-            title={onlyUnread
-              ? "Filter aktiv — Klick zeigt alle Sessions die noch nicht erledigt sind"
-              : "Strenger filtern: Nur Sessions wo die Kundin zuletzt geschrieben hat"}
-          >
-            🔔 {onlyUnread ? "Nur unbeantwortet" : "In Bearbeitung"}
-          </Link>
-          <Link
-            href={(() => {
-              const next = new URLSearchParams();
-              if (filter !== "all")        next.set("status",   filter);
-              if (mode !== "all")          next.set("mode",     mode);
-              if (channelFilter !== "all") next.set("channel",  channelFilter);
-              if (categoryFilter !== "all") next.set("category", categoryFilter);
-              if (searchQuery)             next.set("q",        searchQuery);
-              if (onlyUnread)              next.set("unread",   "1");
-              if (!showClosed) next.set("show", "closed"); else next.delete("show");
-              const qs = next.toString();
-              return `/chatbot/inbox${qs ? "?" + qs : ""}`;
-            })()}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-              showClosed
-                ? "bg-neutral-700 text-white hover:bg-neutral-800"
-                : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
-            }`}
-            title={showClosed ? "Klick: Erledigte wieder ausblenden" : "Klick: Auch erledigte Sessions anzeigen"}
-          >
-            {showClosed ? "✓ Erledigte gezeigt" : "Erledigte zeigen"}
-          </Link>
-          {onlyUnread && (
-            <Link
-              href="/chatbot/inbox?unread=0"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-100 text-neutral-700 hover:bg-neutral-200 transition"
-              title="Auch beantwortete und abgeschlossene Sessions anzeigen"
-            >
-              📥 Alle Nachrichten
-            </Link>
-          )}
         </div>
       </div>
+
+      {/* HAUPT-TABS: klares Mental-Model
+          - Zu tun: was muss die Mitarbeiterin anpacken (Drafts + Unbeantwortet)
+          - Autobot-Check: wo war der Bot autonom (gegenchecken)
+          - Alle aktiven: alles in Bearbeitung
+          - Erledigt: closed-Archiv
+      */}
+      {(() => {
+        const todoCount    = combinedSessions.filter(s => s.status !== "closed" && (unreadMap[s.id] || pendingDraftSet.has(s.id))).length;
+        const autobotCount = combinedSessions.filter(s => s.status !== "closed" && (stats[s.id]?.autobotCount || 0) > 0).length;
+        const allCount     = combinedSessions.filter(s => s.status !== "closed").length;
+        const doneCount    = (cntClosed ?? 0);
+        const buildHref = (newView: string) => {
+          const next = new URLSearchParams();
+          next.set("view", newView);
+          if (mode !== "all")          next.set("mode",     mode);
+          if (channelFilter !== "all") next.set("channel",  channelFilter);
+          if (categoryFilter !== "all") next.set("category", categoryFilter);
+          if (searchQuery)             next.set("q",        searchQuery);
+          return `/chatbot/inbox?${next.toString()}`;
+        };
+        const TAB = (key: string, label: string, count: number, color: string) => (
+          <Link key={key} href={buildHref(key)}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium transition border ${
+              view === key
+                ? `${color} shadow-sm`
+                : "bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-50"
+            }`}>
+            {label}
+            <span className={`text-xs px-1.5 py-0.5 rounded-full ${view === key ? "bg-white/30 text-white" : "bg-neutral-100 text-neutral-600"}`}>
+              {count}
+            </span>
+          </Link>
+        );
+        return (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {TAB("todo",    "🟡 Zu tun",          todoCount,    "bg-pink-600 text-white border-pink-600")}
+            {TAB("autobot", "🤖 Autobot-Check",   autobotCount, "bg-green-600 text-white border-green-600")}
+            {TAB("all",     "📂 Alle aktiven",    allCount,     "bg-neutral-900 text-white border-neutral-900")}
+            {TAB("done",    "✓ Erledigt",         doneCount,    "bg-neutral-600 text-white border-neutral-600")}
+          </div>
+        );
+      })()}
 
       {/* Suche — schlank, mit Treffer-Inline-Info */}
       <div className="flex items-center gap-3">
@@ -607,16 +647,42 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                             s.customer_name || <span className="text-neutral-400 font-normal">Unbekannt</span>
                           )}
                         </span>
-                        {isUnread && !onlyUnread && (
-                          <span className="bg-pink-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide">
-                            Neu
-                          </span>
-                        )}
-                        {!isUnread && ourTurn && (
-                          <span className="bg-blue-100 text-blue-700 text-[10px] font-medium px-1.5 py-0.5 rounded-full">
-                            wartet auf Kundin
-                          </span>
-                        )}
+                        {/* DETERMINISTISCHER Status-Badge — einer pro Session.
+                            Zeigt klar was der Mitarbeiter sehen muss. */}
+                        {(() => {
+                          const us = uiStatusMap[s.id];
+                          if (us === "todo_draft") return (
+                            <span className="bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide" title="Bot-Entwurf wartet auf dein Approve">
+                              📝 Entwurf bereit
+                            </span>
+                          );
+                          if (us === "todo_unread") return (
+                            <span className="bg-pink-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide" title="Kundin hat geschrieben, niemand hat geantwortet">
+                              🟡 Wartet auf dich
+                            </span>
+                          );
+                          if (us === "autobot") return (
+                            <span className="bg-green-100 text-green-800 border border-green-300 text-[10px] font-medium px-1.5 py-0.5 rounded-full" title="Bot hat autonom geantwortet — gegenchecken empfohlen">
+                              🤖 Bot hat geantwortet
+                            </span>
+                          );
+                          if (us === "answered_team") return (
+                            <span className="bg-blue-100 text-blue-700 text-[10px] font-medium px-1.5 py-0.5 rounded-full" title="Mitarbeiterin hat zuletzt geantwortet — wartet auf Kundin">
+                              ✅ Du hast geantwortet
+                            </span>
+                          );
+                          if (us === "answered_human") return (
+                            <span className="bg-neutral-100 text-neutral-600 text-[10px] font-medium px-1.5 py-0.5 rounded-full" title="Beantwortet">
+                              ✅ Beantwortet
+                            </span>
+                          );
+                          if (us === "done") return (
+                            <span className="bg-neutral-200 text-neutral-600 text-[10px] font-medium px-1.5 py-0.5 rounded-full">
+                              ✓ Erledigt
+                            </span>
+                          );
+                          return null;
+                        })()}
                         {(s as { human_only?: boolean }).human_only && (
                           <span
                             className="bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
