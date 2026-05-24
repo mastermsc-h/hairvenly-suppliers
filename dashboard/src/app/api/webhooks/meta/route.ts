@@ -782,6 +782,69 @@ async function triggerBotResponse(
   const triggerStart = Date.now();
   console.log(`[meta-webhook] TRIGGER START session=${sessionId.slice(0,8)} mode=${mode} channel=${channel}`);
 
+  // 🚀 DETERMINISTIC FAST-PATH: Kontakt-Anfragen bekommen Template-Antwort
+  // OHNE LLM. Verhindert Halluzinationen bei Adresse/Telefon/Öffnungszeiten,
+  // spart Tokens, schneller Response. Werte kommen aus business-config.ts.
+  try {
+    const { detectContactIntent, renderContactResponse } = await import("@/lib/chatbot/intent-contact");
+    const svcEarly = createServiceClient();
+    const { data: lastUserMsg } = await svcEarly
+      .from("chat_messages")
+      .select("content")
+      .eq("session_id", sessionId)
+      .eq("role", "user")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const contactIntent = detectContactIntent(lastUserMsg?.content || "");
+    if (contactIntent) {
+      const text = renderContactResponse(contactIntent);
+      // Direkt als Bot-Message speichern + auto-senden (kein Anthropic-Call,
+      // also auch kein Cost-Logging nötig). Nur wenn Modus auto/selective_auto.
+      if (mode === "auto" || mode === "selective_auto") {
+        const { data: ins } = await svcEarly.from("chat_messages").insert({
+          session_id: sessionId,
+          role:       "assistant",
+          content:    text,
+          auto_sent:  true,
+        }).select("id").single();
+        await svcEarly.from("chat_sessions")
+          .update({ last_message_at: new Date().toISOString() })
+          .eq("id", sessionId);
+        console.log(`[meta-webhook] FAST-PATH contact-intent=${contactIntent} → autosent (0 tokens, 0ms LLM)`);
+        // IG-Message senden
+        if (channel === "instagram" && externalId) {
+          const { sendInstagramMessage } = await import("@/lib/messaging/meta");
+          const send = await sendInstagramMessage(externalId, text);
+          if (send.success && send.message_id && ins?.id) {
+            await svcEarly.from("chat_messages").update({ external_id: send.message_id }).eq("id", ins.id);
+          }
+        } else if (channel === "whatsapp" && externalId) {
+          const { sendWhatsAppMessage } = await import("@/lib/messaging/meta");
+          const send = await sendWhatsAppMessage(externalId, text);
+          if (send.success && send.message_id && ins?.id) {
+            await svcEarly.from("chat_messages").update({ external_id: send.message_id }).eq("id", ins.id);
+          }
+        }
+        return;
+      } else {
+        // assisted-Mode: als Draft anlegen, Mitarbeiter:in approved
+        await svcEarly.from("chat_drafts").insert({
+          session_id:         sessionId,
+          original_text:      text,
+          trigger_message_id: triggerMessageId || null,
+          status:             "pending",
+        });
+        console.log(`[meta-webhook] FAST-PATH contact-intent=${contactIntent} → draft (0 tokens)`);
+        return;
+      }
+    }
+  } catch (e) {
+    // Fast-Path fehlgeschlagen → normaler LLM-Pfad. Niemals blocken.
+    console.warn("[meta-webhook] contact-intent-bypass failed, falling back to LLM:", (e as Error).message);
+  }
+
   const { respondAsBot } = await import("@/lib/chatbot/respond");
   // Für assisted UND selective_auto erstmal als assisted laufen lassen (also
   // KEIN auto-insert in chat_messages) — wir entscheiden danach was wir damit tun.
