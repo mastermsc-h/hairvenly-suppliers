@@ -98,6 +98,53 @@ keine Lösung. Zurück zu Schritt 3.
 
 ---
 
+## 🛡 ZERO-REGRESSION-GARANTIE (zusätzlich nicht-verhandelbar)
+
+**User-Feedback (2026-05):** *„Aber nicht, dass dadurch etwas kaputtgeht
+oder schlechter wird. Immer wenn du was machst, sicherstellen dass der
+Bot qualitativ besser wird, statt die Gefahr dass es schlechter wird!"*
+
+Bei JEDER Änderung am Live-Bot-Pfad gilt:
+
+1. **Beweise zuerst, dass es besser ist — dann switchen.**
+   Nie umgekehrt. Kein „wir testen es live und sehen schon".
+
+2. **Bei größeren Refactors (Router, neue Pipeline, neuer LLM-Pfad):**
+   ZWINGEND Shadow-Mode-Phase vor Switch:
+   - Neue Logik läuft PARALLEL zur alten
+   - Antwortet aber NICHT live an Customer
+   - Loggt die hypothetische Antwort + die echte Bot-Antwort
+   - Mind. 24-48h Datensammlung
+   - Vergleich: ist die neue Antwort objektiv besser (kürzer / korrekter /
+     deterministischer) oder Gleichstand? → switchen. Schlechter? → fix.
+
+3. **Feature-Flags pro Komponente** — never big-bang.
+   Jeder Handler/Pipeline-Teil einzeln on/off.
+
+4. **Konfidenz-Schwellwerte + Fallback auf alten Pfad** bei jeder
+   neuen Logik. Wenn Konfidenz < Schwelle → alter Pfad. Kein neuer
+   Failure-Modus.
+
+5. **Smoke-Test-Suite** vor jedem Deploy: kanonische Eingaben
+   („Habt ihr 5P18A?", „Adresse?", „Termin Montag?") MÜSSEN
+   weiterhin korrekt beantwortet werden. Refactor darf keinen
+   etablierten Fall brechen.
+
+6. **Rollback in <1 Min möglich**: Feature-Flag zurücksetzen, fertig.
+   Keine Migration die nur in eine Richtung geht.
+
+**Anti-Pattern** (NIE):
+- ❌ „Lass uns das mal live testen, ist ja besser als der alte Code"
+- ❌ „Der neue Pfad sollte funktionieren, deploy ich mal"
+- ❌ „Wenn was schiefgeht rollback ich"
+- ❌ Big-Bang-Refactor ohne Shadow-Phase
+
+**Faustregel:** Wenn du nicht beweisen kannst, dass die Änderung
+mindestens neutral ist (idealerweise besser), darfst du sie nicht
+live deployen. Punkt.
+
+---
+
 ## 1. Drei nicht-verhandelbare Architektur-Prinzipien
 
 ### 1.1 Pre-LLM-Inject statt LLM-Decide
