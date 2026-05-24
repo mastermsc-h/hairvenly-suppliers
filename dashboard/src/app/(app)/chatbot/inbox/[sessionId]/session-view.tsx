@@ -454,8 +454,8 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
                 : "Diese Session als 'Mitarbeiter benötigt!' markieren — Bot pausiert, im Team sichtbar dass ein Mensch ran muss. (Wenn du selbst übernimmst, klicke stattdessen orange 'Übernehmen'.)"}
               className={`h-8 px-3 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 disabled:opacity-50 transition whitespace-nowrap ${
                 session.human_only
-                  ? "bg-rose-500 text-white hover:bg-rose-600 shadow-sm"
-                  : "text-rose-700 hover:bg-rose-50"
+                  ? "bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200"
+                  : "text-amber-700 hover:bg-amber-50"
               }`}
             >
               {session.human_only ? (

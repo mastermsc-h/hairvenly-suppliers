@@ -743,10 +743,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         })()}
                         {(s as { human_only?: boolean }).human_only && (
                           <span
-                            className="bg-rose-500 text-white border border-rose-600 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
+                            className="bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
                             title="Markiert als 'Mitarbeiter benötigt!' — Bot pausiert für diese Session, ein Mensch muss ran"
                           >
-                            <AlertTriangle size={10} />
+                            <AlertTriangle size={10} className="text-amber-700" />
                             Mitarbeiter benötigt!
                           </span>
                         )}
