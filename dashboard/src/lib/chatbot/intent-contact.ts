@@ -17,8 +17,11 @@ export type ContactIntent =
   | "address_or_location"  // "wo seid ihr?", "adresse?", "showroom?"
   | "address_correction"   // "ich muss in die hans-bernhard?" → FALSCHE Adresse, korrigieren
   | "phone"                // "telefonnummer?", "rufnummer?"
+  | "phone_correction"     // "0421/234567 ist eure?" → FALSCHE Nummer
   | "email"                // "email?", "mail?"
+  | "email_correction"     // "info@hairvenli.de richtig?" → falsche Email
   | "opening_hours"        // "öffnungszeiten?", "wann habt ihr offen?"
+  | "hours_correction"     // "ihr habt bis 19 Uhr offen, oder?" → falsche Stunden
   | "general_contact"      // "wie erreiche ich euch?"
   | null;
 
@@ -73,14 +76,61 @@ export function detectContactIntent(userMessage: string): ContactIntent {
     return "address_or_location";
   }
 
+  // TELEFON-KORREKTUR: Kunde nennt eine FALSCHE Telefonnummer + Frage-Marker
+  // "ist 0421/12345 eure Nummer?", "ich rufe 030/... an, richtig?"
+  // Vergleich: nur Ziffern beider Nummern → wenn ungleich, Korrektur.
+  {
+    const phoneInText = t.match(/(?:\+?\d[\d\s\/\-.()]{7,18}\d)/);
+    if (phoneInText && /\b(richtig|stimmt|euer[e]?\s*nummer|eure\s*nummer|ist (das|es) (eure|deine)|anrufen|telefon|rufnummer|whatsapp.{0,15}\d)/i.test(t)) {
+      const txtDigits = phoneInText[0].replace(/\D/g, "");
+      const realDigits = BUSINESS_CONFIG.whatsapp_number.replace(/\D/g, "");
+      // Match nur, wenn beide ≥8 stellig und letzte 8 Ziffern ungleich
+      if (txtDigits.length >= 8 && txtDigits.slice(-8) !== realDigits.slice(-8)) {
+        return "phone_correction";
+      }
+    }
+  }
+
   // TELEFON
   if (/\b(telefon|tel\.?[\s\d]|rufnummer|anrufen|nummer|whatsapp.+nummer)\b/i.test(t)) {
     return "phone";
   }
 
+  // EMAIL-KORREKTUR: Kunde nennt eine FALSCHE Email-Adresse + Frage-Marker
+  // "info@hairvenli.de richtig?", "schreibe ich an kontakt@hairvenli.de?"
+  {
+    const mailInText = t.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+    if (mailInText && /\b(richtig|stimmt|eure|euer|deine|schreibe|sende|maile)/i.test(t)) {
+      const mentioned = mailInText[0].toLowerCase().trim();
+      if (mentioned !== BUSINESS_CONFIG.email.toLowerCase()) {
+        return "email_correction";
+      }
+    }
+  }
+
   // E-MAIL
   if (/\b(e[-\s]?mail|mail.adresse|@hairvenly|schreibe.+mail)\b/i.test(t)) {
     return "email";
+  }
+
+  // ÖFFNUNGSZEITEN-KORREKTUR: Kunde nennt FALSCHE Uhrzeit/Tag mit Frage-Marker
+  // "ihr habt bis 19 Uhr offen, oder?", "samstag geöffnet?"
+  {
+    const hourMentioned = t.match(/\b(\d{1,2})\s*uhr\b/);
+    const hasOpenWord = /\b(offen|geöffnet|habt|öffnet|schließt|schließt|zu)\b/.test(t);
+    const hasQuestionMark = /\b(richtig|stimmt|oder|wirklich)\??/.test(t) || /\?/.test(t);
+    if (hourMentioned && hasOpenWord && hasQuestionMark) {
+      const hourNum = parseInt(hourMentioned[1], 10);
+      // Falls die genannte Stunde NICHT zwischen Open-Start und Open-End liegt
+      // (z.B. "bis 19 Uhr" oder "ab 9 Uhr" während wir 10-18 sind)
+      if (hourNum < BUSINESS_CONFIG.opening_start_hour || hourNum > BUSINESS_CONFIG.opening_end_hour) {
+        return "hours_correction";
+      }
+    }
+    // Samstag/Sonntag-Frage
+    if (/\b(samstag|sonntag|wochenende)\b[^.\n]{0,20}\b(offen|geöffnet|da)\b/.test(t)) {
+      return "hours_correction";
+    }
   }
 
   // ÖFFNUNGSZEITEN
@@ -124,11 +174,35 @@ export function renderContactResponse(intent: ContactIntent): string {
     case "address_correction":
       // Kunde hat eine FALSCHE Adresse genannt — höflich korrigieren, NIE bestätigen
       return [
-        `Fast 💕 — wir sind tatsächlich in der **${c.street}**, ${c.postal_code} ${c.city}.`,
+        `Fast 💕 — wir sind tatsächlich in der ${c.street}, ${c.postal_code} ${c.city}.`,
         "",
         `🕒 ${c.opening_hours_text}`,
         "",
         "Magst du in Google Maps reinschauen? Dort findest du uns sofort.",
+      ].join("\n");
+
+    case "phone_correction":
+      // Kunde hat FALSCHE Telefonnummer genannt
+      return [
+        `Fast 💕 — unsere Nummer ist ${c.whatsapp_number} (WhatsApp).`,
+        "",
+        `📧 Oder per E-Mail: ${c.email}`,
+      ].join("\n");
+
+    case "email_correction":
+      // Kunde hat FALSCHE Email genannt (z.B. Typo wie "hairvenli.de")
+      return [
+        `Fast 💕 — die richtige Adresse ist ${c.email}.`,
+        "",
+        `💬 Schneller geht's per WhatsApp: ${c.whatsapp_number}`,
+      ].join("\n");
+
+    case "hours_correction":
+      // Kunde nennt FALSCHE Öffnungszeit (z.B. "bis 19 Uhr" oder Samstag)
+      return [
+        `Nicht ganz 💕 — wir sind ${c.opening_hours_text} für dich da.`,
+        "",
+        `Am ${c.closed_days.join(" und ")} ist der Showroom zu.`,
       ].join("\n");
 
     case "phone":

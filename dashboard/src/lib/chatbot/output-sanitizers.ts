@@ -265,16 +265,35 @@ export function stripRedundantFollowupQuestion(text: string): string {
   // Zähle Bullets / Listeneinträge
   const bulletCount = lines.filter(l => /^\s*[-•*]\s+\S/.test(l) || /^\s*\d+\.\s+\S/.test(l)).length;
   if (bulletCount < 3) return text;
-  // Suche redundante Schluss-Frage in den letzten 2 nicht-leeren Zeilen
+  // Suche redundante Schluss-Frage in den letzten 3 nicht-leeren Zeilen
   const lastNonEmpty: number[] = [];
-  for (let i = lines.length - 1; i >= 0 && lastNonEmpty.length < 2; i--) {
+  for (let i = lines.length - 1; i >= 0 && lastNonEmpty.length < 3; i--) {
     if (lines[i].trim().length > 0) lastNonEmpty.push(i);
   }
-  const REDUNDANT_FOLLOWUP = /^\s*(welche|welches)\s+(methode|länge|variante|farbe|kombination|option|davon)[^?]*\??\s*$/i;
+  // SIBLING-SWEEP: nicht nur "Welche X suchst du?", sondern alle redundanten
+  // Schluss-Fragen-Klassen nach exhaustiver Auflistung.
+  const REDUNDANT_PATTERNS: RegExp[] = [
+    // "Welche Methode/Länge/Variante/Farbe ... suchst du?"
+    /^\s*(welche|welches|welcher)\s+(methode|länge|variante|farbe|kombination|option|davon|version|größe|menge)[^?]*\??\s*$/i,
+    // "Magst/Möchtest du ... wissen/sehen/wählen?"
+    /^\s*(möchtest|magst|willst)\s+du\b[^?]{0,80}(wissen|sehen|wählen|hören|haben|nehmen|bestellen)[^?]*\??\s*$/i,
+    // "Soll ich dir ... schicken/zeigen/empfehlen?"
+    /^\s*soll\s+ich\s+(dir|euch)\b[^?]{0,80}(schicken|zeigen|empfehlen|nennen|raussuchen|senden)[^?]*\??\s*$/i,
+    // "Brauchst du noch ... Info/Hilfe?"
+    /^\s*brauchst\s+du\b[^?]{0,80}(info|infos|hilfe|details|empfehlung|tipps?)[^?]*\??\s*$/i,
+    // "Hast du noch Fragen?" / "Sonst noch was?"
+    /^\s*(hast\s+du\s+(noch\s+)?(weitere\s+)?fragen|sonst\s+noch\s+(etwas|was)|kann\s+ich\s+sonst)[^?]*\??\s*$/i,
+    // "Dann finde ich die passende X für dich"  (passive Aufforderung zur Methodenwahl)
+    /^\s*dann\s+(finde|suche|empfehle|nenne)\s+ich[^.]{0,80}(passende[rn]?\s+)?(methode|länge|farbe|kombination|option)[^.]*\.\??\s*$/i,
+  ];
   for (const idx of lastNonEmpty) {
-    if (REDUNDANT_FOLLOWUP.test(lines[idx])) {
-      console.warn(`[sanitizer] stripping redundant follow-up question: "${lines[idx].trim()}"`);
-      lines[idx] = "";
+    const line = lines[idx];
+    for (const pat of REDUNDANT_PATTERNS) {
+      if (pat.test(line)) {
+        console.warn(`[sanitizer] stripping redundant follow-up question: "${line.trim()}"`);
+        lines[idx] = "";
+        break;
+      }
     }
   }
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();

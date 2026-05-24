@@ -23,6 +23,28 @@ Bei JEDEM Bug, BEVOR irgendwelcher Code angefasst wird:
 3. **Strukturelle Invariante suchen.** Eine Regel, die alle Varianten der
    Klasse strukturell abdeckt — NIE Varianten enumerieren.
 
+4. **🌳 SIBLING-CASE-SWEEP — PFLICHTSCHRITT vor jeder Implementierung.**
+   *„Welche 3 verwandten Fälle würde derselbe Root-Cause noch produzieren?
+   Sind die mit derselben Lösung erschlagen?"*
+
+   Beispiele wo das DIESEN Fix erweitert:
+   - „Bot bestätigt falsche Straße" (Hans-Bernhard) → Sibling-Sweep fragt:
+     **was wenn Kundin falsche Telefonnummer/Email/PLZ/Öffnungszeit nennt?**
+     → ALLE Contact-Intent-Klassen brauchen Korrektur-Variante, nicht nur Adresse.
+   - „Bot lügt über Tape 65cm" → Sibling-Sweep fragt:
+     **was wenn Bot über Linien-Verfügbarkeit lügt? Über Preise? Über Stock?**
+     → Validator muss diese Klassen mitabdecken, nicht nur Method×Length.
+   - „Bot fragt redundant 'Welche Methode?'" → Sibling-Sweep fragt:
+     **welche anderen redundanten Schluss-Fragen gibt es?**
+     → „Möchtest du…", „Soll ich…", „Brauchst du noch…" → Pattern broadenen.
+
+   Diese Schritte sind **PFLICHT** — wenn du nur den genannten Fall fixt
+   und 3 verwandte Fälle übrig lässt, ist es ein Pflaster.
+
+   Wenn dir partout kein Sibling einfällt → notiere im Commit
+   „Sibling-Sweep: keine verwandten Fälle identifiziert" — das zeigt,
+   dass du den Schritt absichtlich gegangen bist, nicht vergessen hast.
+
 4. **Drei Architekt-Dimensionen prüfen, bevor implementiert wird:**
 
    **🔭 WEITSICHT** — *"Was lädt dieser Fix für die nächsten 3 Bugs ein?"*

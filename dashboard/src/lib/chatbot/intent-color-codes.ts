@@ -216,17 +216,41 @@ export function validateNegativeClaims(text: string, matches: ColorCodeMatch[]):
     codeToVariantSet.set(m.code.toUpperCase(), set);
   }
 
-  // Patterns für falsche Negativ-Aussagen:
-  //   "Tapes 65cm gibt es nicht", "Tapes 65cm haben wir leider nicht",
-  //   "65cm existiert in der Tape-Variante nicht", "85cm Tapes haben wir leider nicht"
+  // Patterns für falsche Method×Length-Negationen:
   const NEGATIVE_CLAIM_PATTERNS: RegExp[] = [
-    // "<method> <length> ... (haben wir|gibt es|existiert) ... nicht"
+    // 1) "<method> <length> ... (haben wir|gibt es|existiert) ... nicht"
     /\b(Tapes|Bondings|Tressen|Weft|Clip[- ]?ins?|Ponytail|Genius\s+Weft|Classic\s+Tressen|Mini\s+Tapes)\b\s*(\d{2,3}\s*cm)?[^.\n!?]{0,80}\b(haben wir|gibt es|existiert|gibt's|hätten wir)\s+(leider\s+)?(in\s+(dieser\s+)?Farbe\s+)?nicht\b/gi,
-    // "<length> ... in der <method>-Variante ... nicht"
+    // 2) "<length> ... in der <method>-Variante ... nicht"
     /\b(\d{2,3}\s*cm)\b[^.\n!?]{0,40}\bin\s+der\s+(Tape|Bondings?|Tressen|Weft|Clip|Ponytail|Mini\s*Tape)-?(Variante)?\b[^.\n!?]{0,40}\b(gibt es|existiert|haben wir)\s+(leider\s+)?(generell\s+)?nicht\b/gi,
-    // "<method> <length> haben wir leider nicht"
+    // 3) "<method> <length> haben wir leider nicht"
     /\b(\d{2,3}\s*cm)\s+(Tapes|Bondings|Tressen|Weft|Clip[- ]?ins?|Ponytail|Mini\s+Tapes)\b[^.\n!?]{0,40}\b(haben wir|gibt es)\s+(leider\s+)?nicht\b/gi,
   ];
+
+  // SIBLING-SWEEP: Linien-Exklusivitäts-Lügen.
+  // Wenn der Bot sagt "gibt's nur in der russischen Linie", aber laut DB
+  // die Color in BEIDEN Linien existiert (russisch + usbekisch) → Lüge.
+  // Separater Replace-Pass mit eigener DB-Logik.
+  const linesPresent = new Set<string>();
+  for (const m of matches) {
+    if (!m.found || !m.variants) continue;
+    for (const v of m.variants) {
+      if (v.line.toLowerCase().includes("russisch")) linesPresent.add("russisch");
+      if (v.line.toLowerCase().includes("usbekisch")) linesPresent.add("usbekisch");
+    }
+  }
+  const hasMultipleLines = linesPresent.size >= 2;
+  if (hasMultipleLines) {
+    const LINE_EXCLUSIVITY_PATTERNS: RegExp[] = [
+      /\b(gibt['']?s|haben wir|verfügbar|kommt|existiert)\s+(nur|ausschließlich|lediglich)\s+(in\s+der\s+)?(russisch(en)?|usbekisch(en)?|glatten?|welligen?)\s*(linie|qualität|variante|haarstruktur)?[^.\n!?]*\.?/gi,
+      /\b(nicht|gibt's nicht|haben wir nicht)\s+in\s+(russisch|usbekisch|glatt|wellig)[^.\n!?]*\.?/gi,
+    ];
+    for (const pat of LINE_EXCLUSIVITY_PATTERNS) {
+      out = out.replace(pat, (match) => {
+        console.warn(`[color-validator] FALSE LINE EXCLUSIVITY stripped: "${match}" (DB has multiple lines)`);
+        return "";
+      });
+    }
+  }
 
   // Helper: prüft ob Method+Length im DB-Set existiert (für einen der erwähnten Codes)
   const methodLengthExists = (method: string, length: string | undefined): boolean => {
