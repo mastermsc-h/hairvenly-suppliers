@@ -145,11 +145,16 @@ export function enforceBusinessFacts(text: string): { text: string; changed: boo
   let changed = false;
   let out = text;
 
-  // 1) Falsche Bremen-Adressen (alles ausser Hans-Böckler-Straße 60, 28217) → ersetzen
-  const wrongAddr = /\b([A-ZÄÖÜ][a-zäöüß-]+(?:straße|str\.|allee|weg|platz|gasse|ring))\s+(\d{1,4}[a-z]?),?\s*(2\d{4})\s+Bremen\b/gi;
-  out = out.replace(wrongAddr, (match, street, _num, plz) => {
-    const ok = /Hans-Böckler/i.test(street) && plz === c.postal_code;
-    if (ok) return match;
+  // 1) Falsche Bremen-Adressen → ersetzen.
+  // PERMISSIVES Pattern: matched ALLES was wie eine Straßen-Adresse in Bremen
+  // aussieht — egal welche Endung (Haferwende, Domshof, Schlachte, Faulenstraße,
+  // Wallring, Sögestraße, Parkallee — alle Varianten). Wenn nicht EXAKT
+  // Hans-Böckler-Straße 60, 28217 → ersetzen.
+  // Strukturell: "<großgeschriebenes Wort+Zusatz> <Nummer>[,] <5-stellige PLZ> Bremen"
+  const wrongAddr = /\b([A-ZÄÖÜ][\wäöüß.-]{2,40})\s+(\d{1,4}[a-z]?),?\s*(2\d{4})\s+Bremen\b/gi;
+  out = out.replace(wrongAddr, (match, street, num, plz) => {
+    const isOurs = /Hans[\s-]?Böckler/i.test(street) && plz === c.postal_code && /^60[a-z]?$/i.test(num);
+    if (isOurs) return match;
     changed = true;
     console.warn(`[enforceBusinessFacts] Adresse halluziniert (${match}) → ${c.address_oneline}`);
     return c.address_oneline;

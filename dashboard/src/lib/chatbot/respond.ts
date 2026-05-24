@@ -390,6 +390,57 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   if (!session) return { success: false, error: "session not found" };
   if (session.status !== "active") return { success: false, error: "session not active" };
 
+  // 🚀 DETERMINISTIC CONTACT-INTENT-BYPASS (zentral, alle Aufrufpfade)
+  // Wenn die LETZTE Kunden-Message nach Adresse/Telefon/Öffnungszeiten/E-Mail
+  // fragt → Template aus business-config.ts, KEIN LLM-Call. Verhindert
+  // Halluzinationen wie "Haferwende 1, 28217 Bremen" oder "Parkallee 106".
+  // Single point of truth — egal ob Webhook, setBotMode, manueller Trigger.
+  {
+    const { data: lastUserMsg } = await svc
+      .from("chat_messages")
+      .select("content")
+      .eq("session_id", sessionId)
+      .eq("role", "user")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const userText = (lastUserMsg?.content as string | undefined) || "";
+    const { detectContactIntent, renderContactResponse } = await import("./intent-contact");
+    const intent = detectContactIntent(userText);
+    if (intent) {
+      const templated = renderContactResponse(intent);
+      console.warn(`[respond] CONTACT-INTENT-BYPASS session=${sessionId.slice(0,8)} intent=${intent} (0 tokens, 0 ms LLM)`);
+      // Im assisted-Mode: kein direkter Insert — Caller speichert als Draft
+      // Im non-assisted-Mode: in chat_messages inserten + last_message_at update
+      if (!opts.assisted) {
+        const { data: ins } = await svc.from("chat_messages").insert({
+          session_id: sessionId,
+          role:       "assistant",
+          content:    templated,
+        }).select("id").single();
+        await svc.from("chat_sessions")
+          .update({ last_message_at: new Date().toISOString() })
+          .eq("id", sessionId);
+        return {
+          success: true,
+          text: templated,
+          toolsUsed: [],
+          toolCalls: [],
+          toolResults: [],
+          insertedMessageId: ins?.id,
+        };
+      }
+      return {
+        success: true,
+        text: templated,
+        toolsUsed: [],
+        toolCalls: [],
+        toolResults: [],
+      };
+    }
+  }
+
   const signatureName = session.bot_signature_name || "Lara";
 
   // Persona
