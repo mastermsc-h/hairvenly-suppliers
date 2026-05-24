@@ -140,40 +140,56 @@ export function renderContactResponse(intent: ContactIntent): string {
  * Wird als Post-Sanitizer eingesetzt (zusätzlich zum Intent-Bypass).
  * Schutz vor LLM-Halluzination bei nicht-Bypass-Pfaden.
  */
+/**
+ * STRUKTURELLE INVARIANTE: Bot-Output darf KEINE unautorisierte Kontakt-Info enthalten.
+ *
+ * Ein einziger generischer Check für jede Pattern-Klasse (Adresse / Telefon / Email):
+ *   - erkennt ANY Pattern dieser Klasse
+ *   - prüft ob es EXAKT die Config-Werte sind
+ *   - wenn nicht: durch Config-Werte ersetzen (deterministisch)
+ *
+ * KEINE Enumeration von Straßen-Endungen, Festnetz-Vorwahlen, Email-Aliassen.
+ * Pattern auf Struktur-Ebene — nicht auf String-Ebene.
+ */
 export function enforceBusinessFacts(text: string): { text: string; changed: boolean } {
   const c = BUSINESS_CONFIG;
   let changed = false;
   let out = text;
 
-  // 1) Falsche Bremen-Adressen → ersetzen.
-  // PERMISSIVES Pattern: matched ALLES was wie eine Straßen-Adresse in Bremen
-  // aussieht — egal welche Endung (Haferwende, Domshof, Schlachte, Faulenstraße,
-  // Wallring, Sögestraße, Parkallee — alle Varianten). Wenn nicht EXAKT
-  // Hans-Böckler-Straße 60, 28217 → ersetzen.
-  // Strukturell: "<großgeschriebenes Wort+Zusatz> <Nummer>[,] <5-stellige PLZ> Bremen"
-  const wrongAddr = /\b([A-ZÄÖÜ][\wäöüß.-]{2,40})\s+(\d{1,4}[a-z]?),?\s*(2\d{4})\s+Bremen\b/gi;
-  out = out.replace(wrongAddr, (match, street, num, plz) => {
-    const isOurs = /Hans[\s-]?Böckler/i.test(street) && plz === c.postal_code && /^60[a-z]?$/i.test(num);
-    if (isOurs) return match;
+  // ADRESSE — strukturell: "<Großgeschriebenes-Wort(e)> <Nummer>[,] <5-stellige-PLZ> <Stadt>"
+  // Funktioniert für ALLE Städte, ALLE Straßennamen-Endungen.
+  // Echte Hairvenly-Adresse ist die EINZIGE die durchgelassen wird.
+  const anyAddress = /\b([A-ZÄÖÜ][^\n,;]{2,60}?)\s+(\d{1,4}[a-z]?),?\s*(\d{5})\s+([A-ZÄÖÜ][\wäöüß.-]+)\b/gi;
+  out = out.replace(anyAddress, (match, _street, _num, _plz, _city) => {
+    if (match === c.address_oneline) return match;
     changed = true;
-    console.warn(`[enforceBusinessFacts] Adresse halluziniert (${match}) → ${c.address_oneline}`);
+    console.warn(`[enforceBusinessFacts] Adresse blockiert (${match}) → ${c.address_oneline}`);
     return c.address_oneline;
   });
 
-  // 2) Falsche Bremen-Festnetz-Nummern (0421 ...) → WhatsApp
-  const wrongPhone = /\b0421[\s\/\-.]*\d{1,3}[\s\/\-.]*\d{1,3}[\s\/\-.]*\d{1,4}(?:[\s\/\-.]*\d{1,3})?\b/g;
-  out = out.replace(wrongPhone, (match) => {
+  // TELEFON — strukturell: jede zusammenhängende Ziffern-Sequenz die wie eine
+  // deutsche Telefonnummer aussieht. Egal welches Format (Spaces, Slash,
+  // Bindestrich, Klammern). Wir extrahieren nur die Ziffern und prüfen.
+  // Range 8-14 Ziffern: deckt deutsche Festnetz + Handy + mit/ohne +49 ab.
+  const anyPhonePattern = /\b\+?[\d\s\/\-.()]{8,20}\b/g;
+  const ourDigits = c.whatsapp_number.replace(/\D/g, "");
+  out = out.replace(anyPhonePattern, (match) => {
+    const digits = match.replace(/\D/g, "");
+    if (digits.length < 8 || digits.length > 14) return match; // keine Phone-Nummer
+    // Akzeptiere wenn Ziffern exakt unsere sind (mit/ohne Länderpräfix 49)
+    if (digits === ourDigits) return match;
+    if (digits === "49" + ourDigits.slice(1)) return match;
     changed = true;
-    console.warn(`[enforceBusinessFacts] Telefon halluziniert (${match}) → WhatsApp ${c.whatsapp_number}`);
+    console.warn(`[enforceBusinessFacts] Telefon blockiert (${match} → digits=${digits}) → WhatsApp ${c.whatsapp_number}`);
     return `WhatsApp ${c.whatsapp_number}`;
   });
 
-  // 3) Falsche E-Mail-Aliase → kontakt@
-  const wrongEmail = /\b(info|hello|hi|support|service|kontakte|kontak)@hairvenly\.de\b/gi;
-  out = out.replace(wrongEmail, (match) => {
+  // EMAIL — strukturell: jede @hairvenly.de Adresse.
+  const anyHairvenlyEmail = /\b[a-z0-9._%+-]+@hairvenly\.de\b/gi;
+  out = out.replace(anyHairvenlyEmail, (match) => {
     if (match.toLowerCase() === c.email) return match;
     changed = true;
-    console.warn(`[enforceBusinessFacts] E-Mail halluziniert (${match}) → ${c.email}`);
+    console.warn(`[enforceBusinessFacts] Email blockiert (${match}) → ${c.email}`);
     return c.email;
   });
 
