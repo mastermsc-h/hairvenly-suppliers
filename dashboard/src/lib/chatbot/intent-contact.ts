@@ -22,6 +22,7 @@ export type ContactIntent =
   | "email_correction"     // "info@hairvenli.de richtig?" → falsche Email
   | "opening_hours"        // "öffnungszeiten?", "wann habt ihr offen?"
   | "hours_correction"     // "ihr habt bis 19 Uhr offen, oder?" → falsche Stunden
+  | "appointment"          // "termin buchen?", "wann frei?" → Planity-Verweis
   | "general_contact"      // "wie erreiche ich euch?"
   | null;
 
@@ -47,73 +48,30 @@ export function detectContactIntent(userMessage: string): ContactIntent {
     return null;
   }
 
-  // ADRESS-KORREKTUR: Kunde nennt eine FALSCHE Adresse und fragt nach Bestätigung
-  // ("muss ich in die hans-bernhard?", "ihr seid ja in der parkallee?")
-  // Wenn der Kunde einen Straßennamen nennt, der NICHT die echte Adresse ist,
-  // muss der Bot KORRIGIEREN — nicht bestätigen mit "Genau, richtig 💕".
-  // Erkennung: Straße-Suffix-Wort + Frage-Marker irgendwo in der Message.
-  // WICHTIG: Lücken mit `[^\n]` (NICHT `[^.\n]`) — sonst springt Regex nicht
-  //   über "str." hinweg, wenn der Punkt im Straßenkürzel steht.
-  // Sibling-Sweep: 3 Patterns decken die häufigen Formulierungen ab:
-  //   (1) Frage-Verb + Straße im selben Satz
-  //   (2) Straße + "richtig?/stimmt?/oder?" Bestätigungsfrage
-  //   (3) "ihr seid/sind"-Form + Straße (ergänzt Pattern 1, wo Wortreihenfolge anders ist)
-  // STREET_WORD matched ein WORT das mit einem Straßen-Suffix ENDET.
-  // \w* davor → "parkallee", "haferwende", "buchtstraße" werden gefangen.
-  const STREET_WORD = /\b\w*(?:stra(?:ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee|wende|pfad|ufer|damm|stieg|twiete|markt|hof)\b/i;
-  const hasStreetSuffix = STREET_WORD.test(t);
-  const isCorrectionForm =
-    // Pattern A: Frage-Verb + Straße im selben Satz
-    /\b(muss ich|fahre ich|komme ich|kommt man|ist das|sind das|ist es|seid ihr in|liegt das in|heißt es|in die)\b[^\n]{0,40}\b\w*(?:stra(?:ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee|wende|pfad|ufer|damm|stieg|twiete|markt|hof)\b/i.test(t) ||
-    // Pattern B: Straße + "richtig/stimmt/oder"-Bestätigungsfrage
-    /\b\w*(?:stra(?:ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee|wende|pfad|ufer|damm|stieg|twiete|markt|hof)\b[^\n]{0,30}(richtig|stimmt|oder)\??/i.test(t) ||
-    // Pattern C: irgendwo Straße + Frage-Form → wahrscheinlich Adress-Frage
-    (hasStreetSuffix && /\?\s*$/.test(t.split(/[.!]/).pop() || t));
-  if (isCorrectionForm) {
-    // Extrahiere genannten Straßennamen (vereinfachte Heuristik)
-    const streetMatch = t.match(/\b([a-zäöüß][a-zäöüß-]{2,30})(?:[-\s])?(stra(?:ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee)\b/i);
-    if (streetMatch) {
-      const mentionedStreet = streetMatch[0].toLowerCase().replace(/\s+/g, "").replace(/ß/g, "ss").replace(/[-_]/g, "");
-      const realStreet = BUSINESS_CONFIG.street.toLowerCase().replace(/\s+/g, "").replace(/ß/g, "ss").replace(/[-_]/g, "");
-      // Wenn die genannte Straße NICHT mit der echten beginnt/übereinstimmt → Korrektur
-      if (!realStreet.includes(mentionedStreet.slice(0, 6)) && !mentionedStreet.includes(realStreet.slice(0, 6))) {
-        return "address_correction";
-      }
-    }
-    // PLZ-Check: nennt der Kunde eine FALSCHE PLZ?
-    const plzMatch = t.match(/\b(\d{5})\b/);
-    if (plzMatch && plzMatch[1] !== BUSINESS_CONFIG.postal_code) {
-      return "address_correction";
-    }
-  }
+  // ─── REIHENFOLGE (wichtig!) ─────────────────────────────────────
+  // Spezifischere Intents zuerst (Korrekturen vor generischen Lookups),
+  // sonst gewinnen breite Adress-Pattern gegen Email/Phone-Subtypen.
+  // Beispiel: "eure mail adresse?" enthält "adresse" → würde sonst als
+  // address_or_location klassifiziert, ist aber Email-Frage.
 
-  // ADRESSE / STANDORT / SHOWROOM
-  if (/\b(wo (seid|sitzt|finde|find)|adresse|standort|showroom|laden|studio|vor.ort|wo kann ich|kommen|vorbeikommen|vorbeischauen)\b/i.test(t)) {
-    return "address_or_location";
-  }
-
-  // TELEFON-KORREKTUR: Kunde nennt eine FALSCHE Telefonnummer + Frage-Marker
-  // "ist 0421/12345 eure Nummer?", "ich rufe 030/... an, richtig?"
-  // Vergleich: nur Ziffern beider Nummern → wenn ungleich, Korrektur.
+  // ── TELEFON-KORREKTUR (vor TELEFON) ────────────────────────────
   {
     const phoneInText = t.match(/(?:\+?\d[\d\s\/\-.()]{7,18}\d)/);
-    if (phoneInText && /\b(richtig|stimmt|euer[e]?\s*nummer|eure\s*nummer|ist (das|es) (eure|deine)|anrufen|telefon|rufnummer|whatsapp.{0,15}\d)/i.test(t)) {
+    if (phoneInText && /\b(richtig|stimmt|euer[e]?\s*nummer|eure\s*nummer|ist (das|es) (eure|deine)|anrufen|telefon\w*|rufnummer\w*|whatsapp.{0,15}\d)/i.test(t)) {
       const txtDigits = phoneInText[0].replace(/\D/g, "");
       const realDigits = BUSINESS_CONFIG.whatsapp_number.replace(/\D/g, "");
-      // Match nur, wenn beide ≥8 stellig und letzte 8 Ziffern ungleich
       if (txtDigits.length >= 8 && txtDigits.slice(-8) !== realDigits.slice(-8)) {
         return "phone_correction";
       }
     }
   }
 
-  // TELEFON
-  if (/\b(telefon|tel\.?[\s\d]|rufnummer|anrufen|nummer|whatsapp.+nummer)\b/i.test(t)) {
+  // ── TELEFON (telefon\w* deckt "telefonnummer" und Komposita ab) ─
+  if (/\b(telefon\w*|tel\.?[\s\d]|rufnummer\w*|anrufen|whatsapp.{0,5}nummer)\b/i.test(t)) {
     return "phone";
   }
 
-  // EMAIL-KORREKTUR: Kunde nennt eine FALSCHE Email-Adresse + Frage-Marker
-  // "info@hairvenli.de richtig?", "schreibe ich an kontakt@hairvenli.de?"
+  // ── EMAIL-KORREKTUR (vor EMAIL und vor ADRESSE!) ────────────────
   {
     const mailInText = t.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
     if (mailInText && /\b(richtig|stimmt|eure|euer|deine|schreibe|sende|maile)/i.test(t)) {
@@ -124,37 +82,75 @@ export function detectContactIntent(userMessage: string): ContactIntent {
     }
   }
 
-  // E-MAIL
-  if (/\b(e[-\s]?mail|mail.adresse|@hairvenly|schreibe.+mail)\b/i.test(t)) {
+  // ── E-MAIL (muss VOR address_or_location stehen — "mail adresse"
+  //    enthält "adresse", aber ist Email-Frage)
+  if (/\b(e[-\s]?mail\w*|mail[-\s]?adresse|mail[-\s]?anschrift|@hairvenly|schreibe.+mail)\b/i.test(t)) {
     return "email";
   }
 
-  // ÖFFNUNGSZEITEN-KORREKTUR: Kunde nennt FALSCHE Uhrzeit/Tag mit Frage-Marker
-  // "ihr habt bis 19 Uhr offen, oder?", "samstag geöffnet?"
+  // ── ÖFFNUNGSZEITEN-KORREKTUR (vor opening_hours) ────────────────
   {
     const hourMentioned = t.match(/\b(\d{1,2})\s*uhr\b/);
-    const hasOpenWord = /\b(offen|geöffnet|habt|öffnet|schließt|schließt|zu)\b/.test(t);
+    const hasOpenWord = /\b(offen|geöffnet|habt|öffnet|schließt|zu)\b/.test(t);
     const hasQuestionMark = /\b(richtig|stimmt|oder|wirklich)\??/.test(t) || /\?/.test(t);
     if (hourMentioned && hasOpenWord && hasQuestionMark) {
       const hourNum = parseInt(hourMentioned[1], 10);
-      // Falls die genannte Stunde NICHT zwischen Open-Start und Open-End liegt
-      // (z.B. "bis 19 Uhr" oder "ab 9 Uhr" während wir 10-18 sind)
       if (hourNum < BUSINESS_CONFIG.opening_start_hour || hourNum > BUSINESS_CONFIG.opening_end_hour) {
         return "hours_correction";
       }
     }
-    // Samstag/Sonntag-Frage
     if (/\b(samstag|sonntag|wochenende)\b[^.\n]{0,20}\b(offen|geöffnet|da)\b/.test(t)) {
       return "hours_correction";
     }
   }
 
-  // ÖFFNUNGSZEITEN
-  if (/\b(öffnungszeit|wann (habt|seid|geöffnet|offen)|geöffnet|offen.*uhr|wann.*da)\b/i.test(t)) {
+  // ── ÖFFNUNGSZEITEN (öffnungszeit\w* deckt Plural "öffnungszeiten") ──
+  // SIBLING-SWEEP: JS-`\b` ist ASCII-only — matched nicht vor Umlauten
+  // ("ö" wird als non-word behandelt → \b vor "öffnungszeit" failt). Daher
+  // (?:^|[^\wäöüß]) als Boundary-Replacement für Umlaut-Wortanfänge.
+  if (/(?:^|[^\wäöüß])(öffnungszeit\w*|wann (habt|seid|geöffnet|offen)|geöffnet|offen.*uhr|wann.*da)/i.test(t)) {
     return "opening_hours";
   }
 
-  // ALLGEMEINER KONTAKT
+  // ── ADRESS-KORREKTUR ─────────────────────────────────────────────
+  // STREET_WORD matched WORTE die mit Straßen-Suffix ENDEN.
+  // Pattern C eingeschränkt: nur wenn Hausnummer ODER spezifischer
+  // Eigenname-Marker dabei — vermeidet false-positive "die straße einfach
+  // zu finden?" (generisches Wort, keine konkrete Adresse).
+  const STREET_WORD = /\b\w*(?:stra(?:ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee|wende|pfad|ufer|damm|stieg|twiete|markt|hof)\b/i;
+  const hasStreetSuffix = STREET_WORD.test(t);
+  // "Konkret-Adresse"-Marker: Hausnummer ODER Bindestrich-Komposita
+  // ("hans-bernhard-str") ODER mehrteiliger Eigenname mit Großbuchstabe
+  // im Original. Da wir bereits lowercased haben: Hausnummer + Suffix-Wort.
+  const hasConcreteAddressMarker =
+    /\d{1,4}[a-z]?\b[^\n]{0,15}\b\w*(?:stra(?:ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee|wende|pfad|ufer|damm|stieg|twiete|markt|hof)\b/i.test(t) ||
+    /\b\w*(?:stra(?:ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee|wende|pfad|ufer|damm|stieg|twiete|markt|hof)\b[^\n]{0,15}\d{1,4}[a-z]?\b/i.test(t) ||
+    /-(?:stra(?:ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee|wende|pfad|ufer|damm|stieg|twiete|markt|hof)\b/i.test(t); // bindestrich-komposita
+  const isCorrectionForm =
+    /\b(muss ich|fahre ich|komme ich|kommt man|ist das|sind das|ist es|seid ihr in|liegt das in|heißt es|in die)\b[^\n]{0,40}\b\w*(?:stra(?:ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee|wende|pfad|ufer|damm|stieg|twiete|markt|hof)\b/i.test(t) ||
+    /\b\w*(?:stra(?:ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee|wende|pfad|ufer|damm|stieg|twiete|markt|hof)\b[^\n]{0,30}(richtig|stimmt|oder)\??/i.test(t) ||
+    (hasStreetSuffix && hasConcreteAddressMarker && /\?\s*$/.test(t.split(/[.!]/).pop() || t));
+  if (isCorrectionForm) {
+    // STRUKTURELLER FIX: wenn die Form Korrektur ist, IMMER address_correction
+    // returnen. Vorher fiel der Code durch wenn der Street-Extractor scheiterte
+    // (z.B. bei "haferwende 1" — kein Bindestrich-Prefix) → endete in
+    // address_or_location, was die FALSCHE Antwort triggerte (Bestätigung
+    // statt Korrektur). Sicherer: bei Zweifel Korrektur-Template, das die
+    // echte Adresse explizit nennt.
+    return "address_correction";
+  }
+
+  // ── ADRESSE / STANDORT / SHOWROOM ────────────────────────────────
+  if (/\b(wo (seid|sitzt|finde|find)|adresse|standort|showroom|laden|studio|vor.ort|wo kann ich|kommen|vorbeikommen|vorbeischauen)\b/i.test(t)) {
+    return "address_or_location";
+  }
+
+  // ── APPOINTMENT — Terminanfrage → deterministischer Planity-Verweis
+  if (/\b(termin\w*|buchung|buchen|verfügbar.+(termin|datum|uhr)|wann.+frei|frei.+(termin|uhrzeit)|reservier\w*)/i.test(t)) {
+    return "appointment";
+  }
+
+  // ── ALLGEMEINER KONTAKT (Fallback) ───────────────────────────────
   if (/\b(wie (erreich|kontakt|kontakte ich)|kontaktdaten|erreichbar)\b/i.test(t)) {
     return "general_contact";
   }
@@ -219,6 +215,16 @@ export function renderContactResponse(intent: ContactIntent): string {
         `Nicht ganz 💕 — wir sind ${c.opening_hours_text} für dich da.`,
         "",
         `Am ${c.closed_days.join(" und ")} ist der Showroom zu.`,
+      ].join("\n");
+
+    case "appointment":
+      // Termin-Anfrage → Planity-Verweis (wir haben keinen Kalender-API-Zugriff)
+      return [
+        "Klar 💕 — Termine kannst du direkt online buchen, dort siehst du live alle freien Slots:",
+        "",
+        c.planity_url,
+        "",
+        `Falls etwas Bestimmtes wichtig ist (z.B. Farbberatung mit Foto-Vorab-Check), sag gerne kurz Bescheid.`,
       ].join("\n");
 
     case "phone":
