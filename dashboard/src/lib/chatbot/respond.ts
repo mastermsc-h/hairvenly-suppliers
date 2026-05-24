@@ -1149,6 +1149,44 @@ KEINE Ausnahmen. Wenn unsicher: nur Planity-Link + freundliche Note. KURZ.`;
 
   // (Hier kommt finalText immer mit etwas drin an — graceful Fallback weiter oben.)
 
+  // SAFETY-NET 1addr: HARTE ADRESS-/TELEFON-/EMAIL-KORREKTUR
+  // Bot halluziniert gerne andere Bremen-Adressen ("Parkallee 106") und
+  // erfindet Festnetz-Nummern (0421/...). Korrigiert deterministisch:
+  //  - Falsche Straßen/PLZ in Bremen-Kontext → richtige Adresse einsetzen
+  //  - 0421-Nummern → WhatsApp 0173 8000865
+  //  - info@hairvenly.de → kontakt@hairvenly.de
+  {
+    const REAL_ADDRESS = "Hans-Böckler-Straße 60, 28217 Bremen";
+    const REAL_PHONE = "0173 8000865";
+    const REAL_EMAIL = "kontakt@hairvenly.de";
+
+    // Falsche Adressen (irgendeine Straße + Bremen mit anderer PLZ als 28217)
+    // erkennen und auf richtige ersetzen. Pattern: "[Straßenname] [Nr], [PLZ] Bremen"
+    const wrongAddrPattern = /\b([A-ZÄÖÜ][a-zäöüß-]+(?:straße|str\.|allee|weg|platz|gasse|ring))\s+(\d{1,4}[a-z]?),?\s*(2\d{4})\s+Bremen\b/gi;
+    finalText = finalText.replace(wrongAddrPattern, (match, street, num, plz) => {
+      const isCorrect = /Hans-Böckler/i.test(street) && plz === "28217";
+      if (isCorrect) return match;
+      console.warn(`[respond] SAFETY-1addr: Adresse halluziniert (${match}) → ersetzt`);
+      return REAL_ADDRESS;
+    });
+
+    // Erfundene Festnetz-Nummern (0421 ...) → WhatsApp-Nummer.
+    // Pattern lockerer: erlaubt Whitespace, /, -, . zwischen Zifferblöcken.
+    // Match 0421 gefolgt von mindestens 6 weiteren Ziffern (mit beliebigen Trennzeichen).
+    const wrongPhonePattern = /\b0421[\s\/\-.]*\d{1,3}[\s\/\-.]*\d{1,3}[\s\/\-.]*\d{1,4}(?:[\s\/\-.]*\d{1,3})?\b/g;
+    finalText = finalText.replace(wrongPhonePattern, (match) => {
+      console.warn(`[respond] SAFETY-1addr: Telefon halluziniert (${match}) → WhatsApp ${REAL_PHONE}`);
+      return `WhatsApp ${REAL_PHONE}`;
+    });
+
+    // Falsche E-Mail (info@, hello@, support@hairvenly.de) → kontakt@
+    finalText = finalText.replace(/\b(info|hello|hi|support|service|kontakte|kontak)@hairvenly\.de\b/gi, (match) => {
+      if (match.toLowerCase() === REAL_EMAIL) return match;
+      console.warn(`[respond] SAFETY-1addr: E-Mail halluziniert (${match}) → ${REAL_EMAIL}`);
+      return REAL_EMAIL;
+    });
+  }
+
   // SAFETY-NET 1: konkrete Lagerzahlen rausfiltern
   finalText = sanitizeStockLeaks(finalText);
 
