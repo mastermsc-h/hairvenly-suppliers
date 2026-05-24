@@ -565,6 +565,19 @@ export async function refineDraftWithFeedback(
   if (!draft) throw new Error("Entwurf nicht gefunden");
   if (draft.status !== "pending") throw new Error("Entwurf bereits bearbeitet");
 
+  // REFINE-LIMIT: Maximal 2 Iterationen pro Draft. Jeder Refine kostet einen
+  // vollen Sonnet-Call (~$0.04-0.17). Bei mehr als 2 Versuchen: Mitarbeiter:in
+  // sollte manuell editieren statt weiter generieren — sonst Kosten-Explosion
+  // ohne Mehrwert.
+  const existingRefines = ((draft.refinement_history as Array<unknown> | null) || []).length;
+  const MAX_REFINES = 2;
+  if (existingRefines >= MAX_REFINES) {
+    throw new Error(
+      `Limit erreicht: maximal ${MAX_REFINES} "Neu generieren" pro Entwurf. ` +
+      `Bitte den Text jetzt manuell editieren oder verwerfen und selbst antworten.`
+    );
+  }
+
   const { refineBotDraft } = await import("@/lib/chatbot/refine");
   const result = await refineBotDraft(draft.session_id, currentText, feedback);
   if (!result.success || !result.text) {
