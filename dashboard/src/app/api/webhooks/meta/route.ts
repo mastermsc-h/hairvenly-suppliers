@@ -555,7 +555,9 @@ async function routeIncoming(opts: {
         .limit(1).maybeSingle();
       const questionCount = (lastBot?.content || "").match(/\?/g)?.length || 0;
       const customerMsgShort = (opts.text || "").trim().length <= 30;
-      const DEBOUNCE_MS = customerMsgShort ? 20_000 : 50_000;
+      // Erhöht: 45s (kurz) / 90s (normal). Customer braucht oft 1-2 Min um
+      // mehrere Nachrichten/Foto-Uploads zu schicken. Vorher 20/50s zu knapp.
+      const DEBOUNCE_MS = customerMsgShort ? 45_000 : 90_000;
       void questionCount; // bleibt vorgehalten falls wir später wieder differenzieren wollen
       console.log(`[meta-webhook] debounce ${DEBOUNCE_MS}ms (last bot ?-count=${questionCount}, customer-len=${(opts.text || "").length})`);
       await new Promise(r => setTimeout(r, DEBOUNCE_MS));
@@ -569,6 +571,27 @@ async function routeIncoming(opts: {
       // Neuere Kundennachricht eingegangen? → wir antworten NICHT, die andere Webhook tut's
       if (refreshed?.last_customer_msg_at && refreshed.last_customer_msg_at > myMsgTimestamp) {
         console.log(`[meta-webhook] debounce: newer message arrived (${refreshed.last_customer_msg_at} > ${myMsgTimestamp}), skipping`);
+        return;
+      }
+      // 🔒 LATEST-WINS GUARD: hat zwischen MEINER Customer-Message und JETZT
+      // schon jemand (Bot/Team/parallel-Webhook) geantwortet?
+      //   - Bot/Team-Message NACH myMsgTimestamp → ja → skip
+      //
+      // Verhindert den Spam-Loop bei mehreren Customer-Messages innerhalb
+      // weniger Minuten (Customer tippt + lädt Foto hoch = 3 Webhooks):
+      // nur EINE Antwort, egal wie viele Trigger.
+      const { data: laterReply } = await svc
+        .from("chat_messages")
+        .select("id, role, created_at, auto_sent")
+        .eq("session_id", session.id)
+        .in("role", ["assistant", "human_agent"])
+        .gt("created_at", myMsgTimestamp)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (laterReply) {
+        console.log(`[meta-webhook] LATEST-WINS: ${laterReply.role}-reply (${laterReply.created_at}) bereits nach customer-msg (${myMsgTimestamp}) — skip`);
         return;
       }
       // Status hat sich geändert (z.B. Mitarbeiter hat übernommen)?
