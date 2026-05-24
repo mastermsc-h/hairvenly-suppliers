@@ -3,6 +3,9 @@
 > ⚠️ **IMMER LESEN bei jeder Änderung am Chatbot.** Diese Datei ist das
 > Gedächtnis des Projekts — sie verhindert, dass dieselben Bug-Klassen
 > immer wieder neu "entdeckt" und neu "vorgeschlagen" werden.
+>
+> 📊 **Visuelle Übersicht:** [CHATBOT_FLOW.md](./CHATBOT_FLOW.md) — Mermaid-
+> Diagramme zur Pipeline, Sanitizer-Chain, Datenfluss, Cost-Modell.
 
 ---
 
