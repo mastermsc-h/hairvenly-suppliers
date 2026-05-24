@@ -6,7 +6,10 @@
 
 ---
 
-## 🚨 Top-Regel: Löse wie ein echter Informatiker
+## 🚨 Top-Regel: Löse wie ein echter Informatiker-Architekt
+
+**Architekt-Denken** heißt: Weitsicht + Wirtschaftlichkeit + Skalierbarkeit.
+NICHT: warten bis es brennt, dann Pflaster drauf.
 
 Bei JEDEM Bug, BEVOR irgendwelcher Code angefasst wird:
 
@@ -20,7 +23,39 @@ Bei JEDEM Bug, BEVOR irgendwelcher Code angefasst wird:
 3. **Strukturelle Invariante suchen.** Eine Regel, die alle Varianten der
    Klasse strukturell abdeckt — NIE Varianten enumerieren.
 
-4. **Erst dann implementieren.** Keine Pflaster, keine zusätzliche FAQ als
+4. **Drei Architekt-Dimensionen prüfen, bevor implementiert wird:**
+
+   **🔭 WEITSICHT** — *"Was lädt dieser Fix für die nächsten 3 Bugs ein?"*
+   - Welche neue Klasse von Folgefehlern wird durch die Lösung möglich?
+   - Wo entsteht Schuld, die später bezahlt werden muss?
+   - Welche zwei verwandten Bugs lösen wir IM GLEICHEN Zug mit?
+   - Beispiel: Pre-LLM-Inject für Farben → gleiche Schicht ist auch
+     für Stock / Stylistinnen / Versandkosten anwendbar — bauen wir
+     gleich generisch genug?
+
+   **💰 WIRTSCHAFTLICHKEIT** — *"Was kostet dieser Fix pro Anfrage?"*
+   - Wieviele Tokens fügt er zum Prompt hinzu? (jedes neue System-Block
+     kostet $$ × 500 Nachrichten/Tag × 365)
+   - Spart er Tokens an anderer Stelle? (z.B. FAQ rauswerfen wenn
+     Pre-LLM-Inject die Frage schon beantwortet)
+   - Verhindert er einen Refine-Round-Trip? (Refine kostet einen
+     ganzen zweiten LLM-Call)
+   - Cache-Stabilität: bricht der Fix den 1h-Prompt-Cache? (jeder
+     dynamische Inhalt ganz oben im Prompt killt den Cache → +$0.15/call)
+   - Faustregel: **3ct/Anfrage Hard-Cap.** Wer drüber liegt, muss
+     einen anderen Hebel finden.
+
+   **📈 SKALIERBARKEIT** — *"Hält der Fix bei 10x Last?"*
+   - Heute 500 msg/Tag — morgen 5000? bei 5000 noch dieselbe Architektur?
+   - Skaliert die Lösung linear mit Anzahl FAQs / Trainings / Sessions?
+     Wenn ja → das ist Schuld, nicht Lösung (Bsp: alle 500 FAQs in
+     jedem Prompt = unbezahlbar).
+   - Braucht jeder neue Fall menschliches Eingreifen? Dann skaliert
+     er NICHT.
+   - Race-Conditions: greift der Fix auch bei 100 Webhooks pro Minute?
+     (Bsp: Latest-Wins-Guard schon — independent Timer-Pattern nicht.)
+
+5. **Erst dann implementieren.** Keine Pflaster, keine zusätzliche FAQ als
    Erstlösung, keine "noch eine Sanitizer-Regel".
 
 **Anti-Muster (NIE machen):**
@@ -28,6 +63,13 @@ Bei JEDEM Bug, BEVOR irgendwelcher Code angefasst wird:
 - ❌ „Ich schreibe eine FAQ, die dem Bot sagt er soll Tool X aufrufen"
 - ❌ „Defensive Doppel-Absicherung an Stelle Y"
 - ❌ „Den Edge-Case behandeln wir später"
+- ❌ „Reaktiv: erst wenn's brennt, dann fixen"
+- ❌ „Token-Kosten checken wir später"
+- ❌ „Skaliert bei 5000 msg/Tag schauen wir uns dann an"
+
+**Faustregel:** Wenn ein Fix unter einer der drei Dimensionen (Weitsicht /
+Wirtschaftlichkeit / Skalierbarkeit) durchfällt → ist es ein Pflaster,
+keine Lösung. Zurück zu Schritt 3.
 
 ---
 
