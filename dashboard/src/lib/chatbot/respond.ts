@@ -506,7 +506,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   ]);
   // Keyword-Topic-Map: welche Topics sind relevant je Keyword?
   const TOPIC_BY_KEYWORD: Array<{ keywords: RegExp; topics: string[] }> = [
-    { keywords: /\b(farbe|farbton|blond|braun|rot|asch|honig|kühl|warm|melt|color|nuance|haarfarbe|ansatz)\b/i,
+    { keywords: /\b(farbe|farbton|blond|braun|rot|asch|honig|kühl|warm|melt|color|nuance|haarfarbe|ansatz|#\d|balayage|ombré|solide|sträh|highlight)\b/i,
       topics: ["farbberatung", "Farbberatung — Reihenfolge: erst Foto, dann Empfehlung", "Foto-Angebot der Kundin annehmen", "📸 Foto-Briefing für Farbmatching — Pflicht-Checkliste", "💆 Feines Haar — Genius Weft vs Classic Tressen Entscheidung"] },
     { keywords: /\b(preis|kosten|€|euro|kostet|teuer|günstig|bezahl|raten)\b/i,
       topics: ["preise", "zahlung", "💶 Produktpreise vs. Salon-Dienstleistungspreise"] },
