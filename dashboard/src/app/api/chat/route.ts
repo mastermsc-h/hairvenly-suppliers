@@ -224,6 +224,46 @@ export async function POST(req: NextRequest) {
     .update(updates)
     .eq("id", session.id);
 
+  // 🚀 CONTACT-INTENT FAST-PATH (gleicher Schutz wie in respondAsBot).
+  // Wenn die User-Message nach Adresse/Telefon/Öffnungszeiten/E-Mail fragt
+  // → Template aus business-config.ts streamen, KEIN LLM-Call.
+  // Garantiert deterministische korrekte Daten — unmöglich zu halluzinieren.
+  {
+    const { detectContactIntent, renderContactResponse } = await import("@/lib/chatbot/intent-contact");
+    const contactIntent = detectContactIntent(body.message);
+    if (contactIntent) {
+      const templated = renderContactResponse(contactIntent);
+      console.log(`[chat/route] CONTACT-INTENT-BYPASS session=${session.id.slice(0,8)} intent=${contactIntent} (0 tokens)`);
+      // Direkt in chat_messages speichern
+      await supabase.from("chat_messages").insert({
+        session_id: session.id,
+        role:       "assistant",
+        content:    templated,
+      });
+      await supabase
+        .from("chat_sessions")
+        .update({ last_message_at: new Date().toISOString() })
+        .eq("id", session.id);
+      // Als Stream zurückgeben (Client erwartet SSE-Format)
+      const sseEncoder = new TextEncoder();
+      const sseStream = new ReadableStream({
+        start(controller) {
+          // Den ganzen Text in einem Chunk (Template ist statisch)
+          controller.enqueue(sseEncoder.encode(`data: ${JSON.stringify({ type: "text", delta: templated })}\n\n`));
+          controller.enqueue(sseEncoder.encode(`data: ${JSON.stringify({ type: "done", status: "active" })}\n\n`));
+          controller.close();
+        }
+      });
+      return new Response(sseStream, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          "Connection": "keep-alive",
+        }
+      });
+    }
+  }
+
   // History laden
   const history = await loadHistory(supabase, session.id);
 
@@ -371,11 +411,20 @@ export async function POST(req: NextRequest) {
           ];
         }
 
-        // Assistant-Antwort speichern (Volltext)
+        // SAFETY-NET: Bot-Output gegen Business-Config validieren.
+        // Halluzinierte Adressen/Telefon/Emails werden hier deterministisch
+        // ersetzt — gleiche Logik wie in respondAsBot.
+        const { enforceBusinessFacts } = await import("@/lib/chatbot/intent-contact");
+        const enforced = enforceBusinessFacts(finalText);
+        if (enforced.changed) {
+          console.warn(`[chat/route] enforceBusinessFacts hat Kontakt-Daten korrigiert (session=${session.id.slice(0,8)})`);
+        }
+
+        // Assistant-Antwort speichern (Volltext, sanitized)
         await supabase.from("chat_messages").insert({
           session_id:   session.id,
           role:         "assistant",
-          content:      finalText,
+          content:      enforced.text,
           tool_calls:   allToolCalls.length > 0 ? allToolCalls : null,
           tool_results: allToolResults.length > 0 ? allToolResults : null,
         });
