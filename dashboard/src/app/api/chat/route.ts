@@ -276,11 +276,14 @@ export async function POST(req: NextRequest) {
 
   // 🎨 PRE-LLM COLOR-CODE INJECTOR (gleiche Schicht wie respond.ts) —
   // siehe dashboard/CHATBOT_ARCHITECTURE.md §1.1 (Pre-LLM-Inject statt LLM-Decide)
+  // Matches behalten wir für Post-LLM-Validator (validateNegativeClaims).
+  let colorCodeMatches: import("@/lib/chatbot/intent-color-codes").ColorCodeMatch[] = [];
   try {
-    const { buildColorCodeContextHint } = await import("@/lib/chatbot/intent-color-codes");
-    const colorHint = await buildColorCodeContextHint(body.message);
-    if (colorHint) {
-      systemPrompt += "\n\n" + colorHint + "\n";
+    const { buildColorCodeContext } = await import("@/lib/chatbot/intent-color-codes");
+    const { hint, matches } = await buildColorCodeContext(body.message);
+    colorCodeMatches = matches;
+    if (hint) {
+      systemPrompt += "\n\n" + hint + "\n";
     }
   } catch (e) {
     console.warn("[chat-route] color-code-injector error:", e);
@@ -423,20 +426,49 @@ export async function POST(req: NextRequest) {
           ];
         }
 
-        // SAFETY-NET: Bot-Output gegen Business-Config validieren.
-        // Halluzinierte Adressen/Telefon/Emails werden hier deterministisch
-        // ersetzt — gleiche Logik wie in respondAsBot.
+        // 🛡 KOMPLETTE SANITIZER-PIPELINE (vorher fehlten hier alle Sanitizer
+        // außer enforceBusinessFacts → Task #137-Schuld: Web-Chat + Webhook
+        // hatten getrennte Pipelines). Jetzt gleiche Reihenfolge wie respond.ts.
+        const originalFinalText = finalText;
+
+        // 1) Business-Config-Sanitizer (Adresse/Phone/Mail/Hours)
         const { enforceBusinessFacts } = await import("@/lib/chatbot/intent-contact");
         const enforced = enforceBusinessFacts(finalText);
-        if (enforced.changed) {
-          console.warn(`[chat/route] enforceBusinessFacts hat Kontakt-Daten korrigiert (session=${session.id.slice(0,8)}). Sending text_replace event to client.`);
-          // Wenn der Stream live an den Client gestreamt wurde, hat der DOM
-          // jetzt die FALSCHE Version. Wir schicken ein "text_replace"-Event
-          // damit der Client die Bot-Message-Bubble mit der korrigierten
-          // Version überschreibt.
+        finalText = enforced.text;
+
+        // 2) Negative-Claim-Validator (verhindert "Tape 65cm gibt es nicht"-Lügen
+        //    wenn die Variante laut DB existiert)
+        if (colorCodeMatches.length > 0) {
+          try {
+            const { validateNegativeClaims } = await import("@/lib/chatbot/intent-color-codes");
+            finalText = validateNegativeClaims(finalText, colorCodeMatches);
+          } catch (e) {
+            console.warn("[chat/route] negative-claim-validator error:", e);
+          }
+        }
+
+        // 3) Universal-Output-Sanitizer (stripSelfReferentialDisclaimer,
+        //    stripProactivePhotoOffer, scrubWeekendTrap, scrubClosedHandover,
+        //    scrubSupplierNames, stripColorUrlMismatch, limitUrls,
+        //    stripRedundantFollowupQuestion, stripMarkdownFormatting, emDashBrake)
+        try {
+          const { applyAllOutputSanitizers } = await import("@/lib/chatbot/output-sanitizers");
+          finalText = applyAllOutputSanitizers(finalText, {
+            // customerAskedForPhotos: konservativ false (Web-Chat selten Foto-Anfrage)
+            customerAskedForPhotos: false,
+          });
+        } catch (e) {
+          console.warn("[chat/route] applyAllOutputSanitizers error:", e);
+        }
+
+        // 4) Stream-Korrektur-Event falls Sanitizer was geändert haben —
+        //    der Client hat die ungereinigte Version live gesehen, muss
+        //    DOM überschreiben.
+        if (finalText !== originalFinalText) {
+          console.warn(`[chat/route] sanitizer pipeline modified text (session=${session.id.slice(0,8)}, ${originalFinalText.length}→${finalText.length} chars). Sending text_replace event.`);
           controller.enqueue(sse({
             type: "text_replace",
-            fullText: enforced.text,
+            fullText: finalText,
           }));
         }
 
@@ -444,7 +476,7 @@ export async function POST(req: NextRequest) {
         await supabase.from("chat_messages").insert({
           session_id:   session.id,
           role:         "assistant",
-          content:      enforced.text,
+          content:      finalText,
           tool_calls:   allToolCalls.length > 0 ? allToolCalls : null,
           tool_results: allToolResults.length > 0 ? allToolResults : null,
         });
@@ -463,7 +495,7 @@ export async function POST(req: NextRequest) {
         controller.enqueue(sse({
           type: "done",
           status: updated?.status || "active",
-          finalText: enforced.text,
+          finalText: finalText,
         }));
         // (Wächter läuft per Cron alle 30 Min, nicht in Echtzeit)
       } catch (e) {
