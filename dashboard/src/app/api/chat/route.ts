@@ -274,20 +274,13 @@ export async function POST(req: NextRequest) {
   const sessionAvatar = activeAvatars.find(a => a.name === effectiveSignature) || chosenAvatar;
   systemPrompt += `\n\n## DEINE PERSÖNLICHKEIT (als ${sessionAvatar.name})\n${sessionAvatar.personality}`;
 
-  // 🎨 PRE-LLM COLOR-CODE INJECTOR (gleiche Schicht wie respond.ts) —
-  // siehe dashboard/CHATBOT_ARCHITECTURE.md §1.1 (Pre-LLM-Inject statt LLM-Decide)
-  // Matches behalten wir für Post-LLM-Validator (validateNegativeClaims).
-  let colorCodeMatches: import("@/lib/chatbot/intent-color-codes").ColorCodeMatch[] = [];
-  try {
-    const { buildColorCodeContext } = await import("@/lib/chatbot/intent-color-codes");
-    const { hint, matches } = await buildColorCodeContext(body.message);
-    colorCodeMatches = matches;
-    if (hint) {
-      systemPrompt += "\n\n" + hint + "\n";
-    }
-  } catch (e) {
-    console.warn("[chat-route] color-code-injector error:", e);
-  }
+  // 🛡 ZENTRALE PRE-LLM PIPELINE (Single Source of Truth — pipeline.ts)
+  // Erweitert systemPrompt + liefert ctx für Post-LLM-Sanitizer.
+  // Webhook (respond.ts) UND Web-Chat (diese Route) nutzen IDENTISCHE Pipeline.
+  const { applyPreLlmContext, applyPostLlmSanitizers } = await import("@/lib/chatbot/pipeline");
+  const preLlm = await applyPreLlmContext(systemPrompt, body.message);
+  systemPrompt = preLlm.systemPrompt;
+  const pipelineCtx = preLlm.ctx;
 
   // Lade Trainings-Korrekturen: global (avatar_name=null) + spezifisch für aktuellen Avatar
   const { data: trainingExamples } = await supabase
@@ -426,51 +419,19 @@ export async function POST(req: NextRequest) {
           ];
         }
 
-        // 🛡 KOMPLETTE SANITIZER-PIPELINE (vorher fehlten hier alle Sanitizer
-        // außer enforceBusinessFacts → Task #137-Schuld: Web-Chat + Webhook
-        // hatten getrennte Pipelines). Jetzt gleiche Reihenfolge wie respond.ts.
-        const originalFinalText = finalText;
-
-        // 1) Business-Config-Sanitizer (Adresse/Phone/Mail/Hours)
-        const { enforceBusinessFacts } = await import("@/lib/chatbot/intent-contact");
-        const enforced = enforceBusinessFacts(finalText);
-        finalText = enforced.text;
-
-        // 2) Negative-Claim-Validator (verhindert "Tape 65cm gibt es nicht"-Lügen
-        //    wenn die Variante laut DB existiert)
-        if (colorCodeMatches.length > 0) {
-          try {
-            const { validateNegativeClaims } = await import("@/lib/chatbot/intent-color-codes");
-            finalText = validateNegativeClaims(finalText, colorCodeMatches);
-          } catch (e) {
-            console.warn("[chat/route] negative-claim-validator error:", e);
-          }
-        }
-
-        // 3) Universal-Output-Sanitizer (stripSelfReferentialDisclaimer,
-        //    stripProactivePhotoOffer, scrubWeekendTrap, scrubClosedHandover,
-        //    scrubSupplierNames, stripColorUrlMismatch, limitUrls,
-        //    stripRedundantFollowupQuestion, stripMarkdownFormatting, emDashBrake)
-        try {
-          const { applyAllOutputSanitizers } = await import("@/lib/chatbot/output-sanitizers");
-          finalText = applyAllOutputSanitizers(finalText, {
-            // customerAskedForPhotos: konservativ false (Web-Chat selten Foto-Anfrage)
-            customerAskedForPhotos: false,
-          });
-        } catch (e) {
-          console.warn("[chat/route] applyAllOutputSanitizers error:", e);
-        }
-
-        // 4) Stream-Korrektur-Event falls Sanitizer was geändert haben —
-        //    der Client hat die ungereinigte Version live gesehen, muss
-        //    DOM überschreiben.
-        if (finalText !== originalFinalText) {
-          console.warn(`[chat/route] sanitizer pipeline modified text (session=${session.id.slice(0,8)}, ${originalFinalText.length}→${finalText.length} chars). Sending text_replace event.`);
+        // 🛡 ZENTRALE POST-LLM PIPELINE (Single Source of Truth — pipeline.ts)
+        // Beide Pipelines (Webhook + Web-Chat) rufen IDENTISCHE Sanitizer-
+        // Reihenfolge auf. Neue Sanitizer kommen IMMER in pipeline.ts —
+        // dann wirken sie automatisch in beiden Pipelines.
+        const sanitized = applyPostLlmSanitizers(finalText, pipelineCtx);
+        if (sanitized.changed) {
+          console.warn(`[chat/route] post-llm pipeline modified text (session=${session.id.slice(0,8)}, ${finalText.length}→${sanitized.text.length} chars). Sending text_replace event.`);
           controller.enqueue(sse({
             type: "text_replace",
-            fullText: finalText,
+            fullText: sanitized.text,
           }));
         }
+        finalText = sanitized.text;
 
         // Assistant-Antwort speichern (Volltext, sanitized)
         await supabase.from("chat_messages").insert({

@@ -211,17 +211,47 @@ Refactor statt 4. Fix.
 
 ---
 
-## 4. Web-Chat vs. Webhook — getrennte Pipelines
+## 4. EINE Pipeline für beide Routes — `pipeline.ts` (seit 2026-05)
 
-**Wichtige Schuld**, noch nicht konsolidiert:
-- `/api/chat/route.ts` — Web-Chat, eigener Anthropic-Stream
-- `/api/webhooks/meta/route.ts` + `respond.ts` — Instagram/WhatsApp
+**Endlich konsolidiert.** Beide Routes
+(`/api/webhooks/meta/route.ts` + `respond.ts` für Instagram/WhatsApp,
+und `/api/chat/route.ts` für Web-Chat/Dashboard-Test) rufen nur noch
+zwei Funktionen aus `src/lib/chatbot/pipeline.ts`:
 
-Jeder neue Bot-Schutz muss in **BEIDEN** angewendet werden, sonst
-greift er nur für eine Pipeline. Existierende Sanitizer/Bypässe sind in
-beiden, neue müssen das auch sein.
+```ts
+const pre  = await applyPreLlmContext(systemPrompt, customerText);
+//   ↳ fügt Color-Code-Inject hinzu (später: Stock, Stylistinnen)
+//   ↳ returned ctx mit Match-Daten für Validator unten
 
-**TODO**: Pipelines konsolidieren (Task #137).
+// ... Anthropic-Call ...
+
+const out = applyPostLlmSanitizers(finalText, pre.ctx);
+//   ↳ ruft enforceBusinessFacts + validateNegativeClaims
+//   ↳ ruft applyAllOutputSanitizers (10 Sub-Sanitizer)
+//   ↳ returned { text, changed } für Stream-Korrektur
+```
+
+**Konsequenz:** Wer einen neuen Sanitizer/Injector hinzufügen will,
+ändert AUSSCHLIESSLICH `pipeline.ts`. Beide Pipelines erben automatisch.
+Die ganze Klasse "vergessen in einer Pipeline einzubauen" ist
+strukturell eliminiert.
+
+**Bewusst NICHT in pipeline.ts** (bleibt in respond.ts):
+- `sanitizeStockLeaks` — braucht Tool-Result-Context
+- ETA-Linien-Validator — braucht Tool-Result-Context
+- Ephemeral-Halluzinations-Sanitizer — braucht message-history
+- Contact-Intent-BYPASS (Template statt LLM-Call) — ersetzt die ganze
+  Response, läuft VOR jeglicher Pipeline. Bleibt pro Route.
+
+Diese sind respond-spezifisch und haben keinen Sinn in der Web-Chat-
+Route (die hat keine vergleichbaren Tool-Calls).
+
+**Bonus-Erkenntnis aus dem Refactor:** `respond.ts` (Live-Webhook)
+hatte historisch `applyAllOutputSanitizers` GAR NICHT aufgerufen —
+nur `refine.ts` (Mitarbeiter klickt „Neu generieren") tat das.
+Live-Bot-Antworten an Customers gingen also ohne stripMarkdown /
+stripRedundantFollowupQuestion / scrubWeekendTrap / etc. raus.
+Mit der zentralen Pipeline jetzt strukturell behoben.
 
 ---
 

@@ -590,31 +590,19 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     .limit(1)
     .maybeSingle();
 
-  // 🎨 PRE-LLM COLOR-CODE INJECTOR — strukturelle Lösung gegen
-  // "Bot sagt 'kenne ich nicht' zu existierenden Farbcodes".
-  // Architektur-Prinzip: Pre-LLM-Inject statt LLM-Decide (siehe
-  // dashboard/CHATBOT_ARCHITECTURE.md §1.1).
-  //
-  // Wir erkennen Farbcode-Muster (5P18A, 2T18A, 4/27, P14, ...) in der
-  // Customer-Message, machen den DB-Lookup SELBST und packen die echten
-  // Treffer als System-Block in den Prompt. Bot hat die Wahrheit dann
-  // bereits im Kontext und KANN keine "kenne ich nicht"-Halluzination
-  // mehr produzieren.
-  // Matches behalten wir, damit der Output-Negative-Claim-Validator
-  // nach dem LLM-Call die Bot-Antwort gegen die echten DB-Daten prüfen kann.
-  let colorCodeMatches: import("./intent-color-codes").ColorCodeMatch[] = [];
+  // 🛡 ZENTRALE PRE-LLM PIPELINE (Single Source of Truth — pipeline.ts)
+  // Identisch zu /api/chat/route.ts — Webhook + Web-Chat teilen sich
+  // dieselbe Schutzschicht. Jeder neue Pre-LLM-Injector kommt in
+  // pipeline.ts → beide Pipelines erben automatisch.
+  let pipelineCtx: import("./pipeline").ChatbotPipelineContext;
   {
-    try {
-      const { buildColorCodeContext } = await import("./intent-color-codes");
-      const userTxt = (lastUserMsgRow?.content as string | undefined) || "";
-      const { hint, matches } = await buildColorCodeContext(userTxt);
-      colorCodeMatches = matches;
-      if (hint) {
-        systemPrompt += "\n\n" + hint + "\n";
-        console.log(`[respond] color-code-hint injected (session=${sessionId.slice(0,8)}, codes=${matches.map(m=>m.code).join(",")})`);
-      }
-    } catch (e) {
-      console.warn(`[respond] color-code-injector error:`, e);
+    const { applyPreLlmContext } = await import("./pipeline");
+    const userTxt = (lastUserMsgRow?.content as string | undefined) || "";
+    const pre = await applyPreLlmContext(systemPrompt, userTxt);
+    systemPrompt = pre.systemPrompt;
+    pipelineCtx = pre.ctx;
+    if (pipelineCtx.colorCodeMatches.length > 0) {
+      console.log(`[respond] pre-llm pipeline injected (session=${sessionId.slice(0,8)}, codes=${pipelineCtx.colorCodeMatches.map(m=>m.code).join(",")})`);
     }
   }
 
@@ -1286,40 +1274,31 @@ KEINE Ausnahmen. Wenn unsicher: nur Planity-Link + freundliche Note. KURZ.`;
 
   // (Hier kommt finalText immer mit etwas drin an — graceful Fallback weiter oben.)
 
-  // SAFETY-NET 1addr: zentrale Business-Fakten-Enforcement.
-  // Quelle: business-config.ts. Adresse, Telefon, E-Mail werden hart
-  // gegen die Config validiert — Halluzinationen werden ersetzt.
-  // Falls Kontakt-Frage direkt erkannt wird, läuft sie eh über den Fast-Path
-  // (intent-contact.ts) — diese Schicht greift NUR bei nicht-Bypass-Pfaden.
+  // 🛡 ZENTRALE POST-LLM PIPELINE (Single Source of Truth — pipeline.ts).
+  // Ersetzt die früheren einzelnen Aufrufe von enforceBusinessFacts +
+  // validateNegativeClaims hier. Jetzt einmal zentral — inklusive ALLER
+  // Sanitizer aus applyAllOutputSanitizers (stripSelfReferentialDisclaimer,
+  // stripProactivePhotoOffer, scrubWeekendTrap, scrubClosedHandover,
+  // scrubSupplierNames, stripColorUrlMismatch, autoAddColorUrls, limitUrls,
+  // stripRedundantFollowupQuestion, stripMarkdownFormatting, emDashBrake).
+  //
+  // ⚠️ ARCHITEKTUR-NOTE: Diese Sanitizer-Schicht war historisch NUR in
+  // refine.ts aktiv (Mitarbeiter-Refresh). Live-Bot-Antworten an
+  // Kundinnen liefen ohne sie raus → Markdown-Sterne, redundante
+  // Follow-up-Fragen, etc. wurden in echten Chats sichtbar. Mit der
+  // zentralen Pipeline ist das automatisch behoben.
   {
-    const { enforceBusinessFacts } = await import("./intent-contact");
-    const enforced = enforceBusinessFacts(finalText);
-    finalText = enforced.text;
-  }
-
-  // SAFETY-NET color-code: Negative-Claim-Validator.
-  // Bot hat trotz injizierter Daten manchmal NEGATIVE Aussagen über
-  // Varianten gemacht, die laut DB existieren ("Tapes 65cm gibt es nicht").
-  // Hier strippen wir solche Lügen deterministisch.
-  if (colorCodeMatches.length > 0) {
-    try {
-      const { validateNegativeClaims } = await import("./intent-color-codes");
-      const before = finalText;
-      finalText = validateNegativeClaims(finalText, colorCodeMatches);
-      if (before !== finalText) {
-        console.warn(`[respond] negative-claim-validator stripped false claims (session=${sessionId.slice(0,8)})`);
-      }
-    } catch (e) {
-      console.warn(`[respond] negative-claim-validator error:`, e);
+    const { applyPostLlmSanitizers } = await import("./pipeline");
+    const sanitized = applyPostLlmSanitizers(finalText, pipelineCtx);
+    if (sanitized.changed) {
+      console.warn(`[respond] post-llm pipeline modified text (session=${sessionId.slice(0,8)})`);
     }
+    finalText = sanitized.text;
   }
 
-  // SAFETY-NET 1: konkrete Lagerzahlen rausfiltern
+  // SAFETY-NET 1stock: konkrete Lagerzahlen rausfiltern (respond-spezifisch,
+  // bleibt hier weil es Tool-Result-Context braucht).
   finalText = sanitizeStockLeaks(finalText);
-
-  // SAFETY-NET 1tcm: URL-Color-Mismatch (TAUPE vs SMOKY TAUPE etc.)
-  // Wenn Bot **TAUPE** sagt aber URL "smoky-taupe" enthält → URL strippen.
-  finalText = stripColorUrlMismatch(finalText);
 
   // SAFETY-NET 1eta: ETA-LINIEN-KONSISTENZ
   // Häufiger Halluzinationsfehler: Bot bekommt vom get_stock_eta-Tool ETAs
