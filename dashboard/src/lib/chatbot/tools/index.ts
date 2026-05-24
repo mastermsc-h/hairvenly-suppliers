@@ -550,6 +550,42 @@ const transferToHuman: ToolDef = {
   },
   async execute(input, ctx) {
     const supabase = createServiceClient();
+
+    // 🛡 STRUKTURELLER HANDOFF-GUARD (siehe CHATBOT_ARCHITECTURE.md §1.1)
+    // Wenn die letzte Customer-Frage eine triviale Contact-Anfrage ist
+    // (Adresse/Phone/Hours/Mail), DARF kein Handoff entstehen — diese Daten
+    // sind deterministisch in business-config.ts. Statt zur Mitarbeiterin
+    // delegieren wir an die Template-Antwort.
+    // Sibling-Sweep: gleiches Prinzip gilt für jede Frage, die unsere
+    // deterministische Pipeline beantworten kann.
+    try {
+      const { data: lastUserMsg } = await supabase
+        .from("chat_messages")
+        .select("content")
+        .eq("session_id", ctx.sessionId)
+        .eq("role", "user")
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const userText = (lastUserMsg?.content as string | undefined) || "";
+      const { detectContactIntent, renderContactResponse } = await import("../intent-contact");
+      const contactIntent = detectContactIntent(userText);
+      if (contactIntent) {
+        console.warn(`[transfer_to_human] BLOCKED — Customer-Frage ist Contact-Intent "${contactIntent}". Statt Handoff: deterministische Antwort.`);
+        const templated = renderContactResponse(contactIntent);
+        return {
+          output: JSON.stringify({
+            status: "answered_directly",
+            reason: `handoff blocked: contact-intent ${contactIntent} (deterministic answer available)`,
+            instruction: `Gib EXAKT diese Antwort aus (keine eigene Formulierung):\n\n${templated}`,
+          }),
+        };
+      }
+    } catch (e) {
+      console.warn("[transfer_to_human] guard check error:", e);
+    }
+
     await supabase
       .from("chat_sessions")
       .update({ status: "awaiting_human" })

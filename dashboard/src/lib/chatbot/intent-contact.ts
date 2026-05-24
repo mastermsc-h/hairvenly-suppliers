@@ -48,12 +48,28 @@ export function detectContactIntent(userMessage: string): ContactIntent {
   }
 
   // ADRESS-KORREKTUR: Kunde nennt eine FALSCHE Adresse und fragt nach Bestätigung
-  // ("muss ich in die hans-bernhard?", "ist es die parkallee?")
+  // ("muss ich in die hans-bernhard?", "ihr seid ja in der parkallee?")
   // Wenn der Kunde einen Straßennamen nennt, der NICHT die echte Adresse ist,
   // muss der Bot KORRIGIEREN — nicht bestätigen mit "Genau, richtig 💕".
-  // Erkennung: Straßennamen-Pattern + Frage-Marker, und Name passt NICHT zu Config.
-  if (/\b(muss ich|fahre ich|komme ich|kommt man|ist das|sind das|ist es|seid ihr in|liegt das in|heißt es|in die)\b[^.\n]{0,40}\b(stra(ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee)\b/i.test(t) ||
-      /\b(stra(ß|ss)e|str\.?|allee|weg|platz|ring|gasse)\b[^.\n]{0,15}(richtig|stimmt|oder)\??/i.test(t)) {
+  // Erkennung: Straße-Suffix-Wort + Frage-Marker irgendwo in der Message.
+  // WICHTIG: Lücken mit `[^\n]` (NICHT `[^.\n]`) — sonst springt Regex nicht
+  //   über "str." hinweg, wenn der Punkt im Straßenkürzel steht.
+  // Sibling-Sweep: 3 Patterns decken die häufigen Formulierungen ab:
+  //   (1) Frage-Verb + Straße im selben Satz
+  //   (2) Straße + "richtig?/stimmt?/oder?" Bestätigungsfrage
+  //   (3) "ihr seid/sind"-Form + Straße (ergänzt Pattern 1, wo Wortreihenfolge anders ist)
+  // STREET_WORD matched ein WORT das mit einem Straßen-Suffix ENDET.
+  // \w* davor → "parkallee", "haferwende", "buchtstraße" werden gefangen.
+  const STREET_WORD = /\b\w*(?:stra(?:ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee|wende|pfad|ufer|damm|stieg|twiete|markt|hof)\b/i;
+  const hasStreetSuffix = STREET_WORD.test(t);
+  const isCorrectionForm =
+    // Pattern A: Frage-Verb + Straße im selben Satz
+    /\b(muss ich|fahre ich|komme ich|kommt man|ist das|sind das|ist es|seid ihr in|liegt das in|heißt es|in die)\b[^\n]{0,40}\b\w*(?:stra(?:ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee|wende|pfad|ufer|damm|stieg|twiete|markt|hof)\b/i.test(t) ||
+    // Pattern B: Straße + "richtig/stimmt/oder"-Bestätigungsfrage
+    /\b\w*(?:stra(?:ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee|wende|pfad|ufer|damm|stieg|twiete|markt|hof)\b[^\n]{0,30}(richtig|stimmt|oder)\??/i.test(t) ||
+    // Pattern C: irgendwo Straße + Frage-Form → wahrscheinlich Adress-Frage
+    (hasStreetSuffix && /\?\s*$/.test(t.split(/[.!]/).pop() || t));
+  if (isCorrectionForm) {
     // Extrahiere genannten Straßennamen (vereinfachte Heuristik)
     const streetMatch = t.match(/\b([a-zäöüß][a-zäöüß-]{2,30})(?:[-\s])?(stra(?:ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee)\b/i);
     if (streetMatch) {
