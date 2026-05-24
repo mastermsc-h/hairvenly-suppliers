@@ -296,6 +296,12 @@ export async function POST(req: NextRequest) {
     .reverse();
   const preLlm = await applyPreLlmContext(systemPrompt, body.message, recentTexts);
   systemPrompt = preLlm.systemPrompt;
+  // Pipeline returnt dynamicHint jetzt separat — hier (Web-Chat) hängen wir
+  // ihn ans Ende des Prompts. Web-Chat hat heute kein eigenes Cache-Setup,
+  // also ist Position weniger kritisch — aber Konsistenz mit respond.ts.
+  if (preLlm.dynamicHint) {
+    systemPrompt += preLlm.dynamicHint;
+  }
   const pipelineCtx = preLlm.ctx;
 
   // Lade Trainings-Korrekturen: global (avatar_name=null) + spezifisch für aktuellen Avatar

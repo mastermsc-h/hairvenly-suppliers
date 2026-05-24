@@ -75,19 +75,25 @@ export async function applyPreLlmContext(
   systemPrompt: string,
   customerText: string,
   /**
-   * Optional: die letzten N Customer-Messages aus der Session-History
-   * (älteste zuerst oder neueste — egal, wird zum Detection-Buffer
-   * konkateniert). WICHTIG für Folge-Fragen wie „tapes. zeig mir das
-   * produkt" — der Farbcode steht dort nicht mehr, sondern 2 Messages
-   * vorher. Ohne History würde der Color-Code-Injector hier nichts
-   * finden und der Bot würde aus dem Kopf antworten.
-   *
-   * Caller sollte typischerweise die letzten 3-5 Customer-Messages
-   * mitliefern. Wenn leer/undefined → fallback auf nur customerText.
+   * Optional: letzte N Customer-Messages aus Session-History (für Folge-Fragen,
+   * wo der relevante Keyword/Code nur in früheren Messages stand).
    */
   recentCustomerHistory?: string[]
-): Promise<{ systemPrompt: string; ctx: ChatbotPipelineContext }> {
-  let prompt = systemPrompt;
+): Promise<{
+  /** Unveränderter stable systemPrompt — geht in den GECACHTEN Block */
+  systemPrompt: string;
+  /**
+   * Dynamische Hints, die PRO Customer-Frage variieren (Color-Code-Lookup-
+   * Treffer etc.). Caller MUSS diesen Teil als SEPARATEN, UNCACHED Block
+   * an Anthropic schicken — sonst zerschießt es bei jeder Anfrage den
+   * Cache des stable-Blocks.
+   *
+   * Architektur-Note (CHATBOT_ARCHITECTURE.md §1.1): jeder dynamische
+   * Inhalt MUSS hier raus, nicht in systemPrompt mergen.
+   */
+  dynamicHint: string;
+  ctx: ChatbotPipelineContext;
+}> {
   const ctx: ChatbotPipelineContext = {
     customerText,
     colorCodeMatches: [],
@@ -95,34 +101,27 @@ export async function applyPreLlmContext(
   };
 
   // Konkateniere Conversation-Context für die Detection.
-  // Aktuelle msg PLUS letzte N Customer-Messages (falls geliefert).
   const detectionBuffer = recentCustomerHistory && recentCustomerHistory.length > 0
     ? [...recentCustomerHistory, customerText].filter(Boolean).join("\n\n")
     : customerText;
 
+  let dynamicHint = "";
+
   // ── 🎨 COLOR-CODE-INJECTOR ──────────────────────────────────────
-  // Erkennt Farbcode-Muster (5P18A, 2T18A, 4/27, P14, ...) im
-  // Detection-Buffer (current msg + History), macht DB-Lookup,
-  // packt VOLLSTÄNDIGE Liste als System-Block in den Prompt.
   try {
     const { hint, matches } = await buildColorCodeContext(detectionBuffer);
     ctx.colorCodeMatches = matches;
     if (hint) {
-      prompt += "\n\n" + hint + "\n";
+      dynamicHint += "\n\n" + hint + "\n";
     }
   } catch (e) {
     console.warn("[pipeline] color-code-injector error:", e);
   }
 
-  // ── 📦 STOCK-INJECTOR (TODO) ────────────────────────────────────
-  // Geplant: erkennt „vorrätig?" / „auf Lager?" / „verfügbar?" und
-  // packt Stock-Snapshot pro erwähntem Produkt rein.
+  // ── 📦 STOCK-INJECTOR (TODO) — wenn gebaut, dynamicHint ergänzen
+  // ── 👩 STYLISTINNEN-INJECTOR (TODO) — wenn gebaut, dynamicHint ergänzen
 
-  // ── 👩 STYLISTINNEN-INJECTOR (TODO) ─────────────────────────────
-  // Geplant: erkennt Stylistinnen-Namen-Anfragen und packt die echte
-  // Team-Liste rein, damit der Bot keine Namen erfindet.
-
-  return { systemPrompt: prompt, ctx };
+  return { systemPrompt, dynamicHint, ctx };
 }
 
 /**

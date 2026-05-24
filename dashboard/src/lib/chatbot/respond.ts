@@ -551,31 +551,31 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += "  • Wenn die Kundin schon Planity erwähnt hat → kurz bestätigen ('Genau, da siehst du alle freien Slots') + NICHT den Link nochmal posten.\n";
   systemPrompt += "  • Bei Wunsch-Datum + Wunsch-Uhrzeit von der Kundin → NIE bestätigen oder ablehnen, sondern: 'Schau bitte direkt in Planity ob das passt — dort siehst du live ob frei.'\n";
 
-  // GESCHÄFTSZEIT-KONTEXT
-  // Bot muss wissen ob aktuell Öffnungszeit ist UND wie viel Zeit noch übrig ist.
-  // Drei Stufen: open_wide ("gleich" OK), open_closing_soon (kurz vor Feierabend,
-  // realistisch "noch heute oder morgen früh"), closed (nächste Öffnung).
+  // GESCHÄFTSZEIT-KONTEXT — DYNAMISCH! Pro Anfrage anders (open/closing_soon/closed).
+  // ⚠️ MUSS in den dynamic-Block (siehe Architektur-Memo §1.2 Cache-Stabilität),
+  // nicht in systemPrompt (= stable cached Block) — sonst zerschießt es bei jedem
+  // Call den Cache-Hash des Persona/Catalog/Trainings-Vorbereichs.
   const biz = getBusinessHoursContext();
-  systemPrompt += "\n## 🕒 AKTUELLE GESCHÄFTSZEIT\n";
-  systemPrompt += `- Jetzt ist: **${biz.nowLabel} (Europe/Berlin)**\n`;
-  systemPrompt += `- Status: **${biz.status === "open_wide" ? "✅ GEÖFFNET" : biz.status === "open_closing_soon" ? "⚠️ KURZ VOR FEIERABEND" : "❌ GESCHLOSSEN"}** (${biz.reason})\n`;
-  systemPrompt += `- Öffnungszeiten: Mo-Fr 10:00-18:00 Uhr (ohne Feiertage in Bremen)\n`;
-  systemPrompt += `- Realistische Wartezeit-Erwartung für Übergaben an Mitarbeiterinnen: **${biz.realisticHandoverLabel}**\n`;
+  let businessHoursBlock = "\n## 🕒 AKTUELLE GESCHÄFTSZEIT\n";
+  businessHoursBlock += `- Jetzt ist: **${biz.nowLabel} (Europe/Berlin)**\n`;
+  businessHoursBlock += `- Status: **${biz.status === "open_wide" ? "✅ GEÖFFNET" : biz.status === "open_closing_soon" ? "⚠️ KURZ VOR FEIERABEND" : "❌ GESCHLOSSEN"}** (${biz.reason})\n`;
+  businessHoursBlock += `- Öffnungszeiten: Mo-Fr 10:00-18:00 Uhr (ohne Feiertage in Bremen)\n`;
+  businessHoursBlock += `- Realistische Wartezeit-Erwartung für Übergaben an Mitarbeiterinnen: **${biz.realisticHandoverLabel}**\n`;
 
   if (biz.status === "open_wide") {
-    systemPrompt += `- Bei Übergaben darfst du 'meldet sich gleich', 'schreibt dir in Kürze' o.ä. nutzen — die Mitarbeiterinnen sind JETZT da und haben noch Zeit.\n`;
-    systemPrompt += `- 🚨 ABER: Wenn die Übergabe-Aufgabe erst MORGEN passieren kann (z.B. Stylistin macht morgens Fotos), prüfe ob morgen ein Werktag ist:\n`;
-    systemPrompt += `  - Heute ist **${biz.todayWeekday}** → "morgen" = **${biz.nextWorkdayLabel}**\n`;
-    systemPrompt += `  - Am Freitag heißt "morgen" immer **Montag früh**, NIE "Samstag" — am Wochenende ist der Salon zu.\n`;
+    businessHoursBlock += `- Bei Übergaben darfst du 'meldet sich gleich', 'schreibt dir in Kürze' o.ä. nutzen — die Mitarbeiterinnen sind JETZT da und haben noch Zeit.\n`;
+    businessHoursBlock += `- 🚨 ABER: Wenn die Übergabe-Aufgabe erst MORGEN passieren kann (z.B. Stylistin macht morgens Fotos), prüfe ob morgen ein Werktag ist:\n`;
+    businessHoursBlock += `  - Heute ist **${biz.todayWeekday}** → "morgen" = **${biz.nextWorkdayLabel}**\n`;
+    businessHoursBlock += `  - Am Freitag heißt "morgen" immer **Montag früh**, NIE "Samstag" — am Wochenende ist der Salon zu.\n`;
   } else if (biz.status === "open_closing_soon") {
-    systemPrompt += `- 🚨 NICHT 'gleich' versprechen — die Mitarbeiterinnen haben nur noch wenig Zeit bis Feierabend.\n`;
-    systemPrompt += `- Realistisch kommunizieren: 'Wir versuchen noch heute, spätestens aber ${biz.nextOpenLabel} schreibt dir die Kollegin' o.ä.\n`;
-    systemPrompt += `- Bei komplexeren Themen direkt 'spätestens ${biz.nextOpenLabel}' sagen — nicht falsche Hoffnung machen.\n`;
+    businessHoursBlock += `- 🚨 NICHT 'gleich' versprechen — die Mitarbeiterinnen haben nur noch wenig Zeit bis Feierabend.\n`;
+    businessHoursBlock += `- Realistisch kommunizieren: 'Wir versuchen noch heute, spätestens aber ${biz.nextOpenLabel} schreibt dir die Kollegin' o.ä.\n`;
+    businessHoursBlock += `- Bei komplexeren Themen direkt 'spätestens ${biz.nextOpenLabel}' sagen — nicht falsche Hoffnung machen.\n`;
   } else {
-    systemPrompt += `- 🚨 NICHT 'gleich' / 'in Kürze' / 'sofort' / 'schreibt dir durch' verwenden — wir sind aktuell ${biz.reason.toLowerCase()}.\n`;
-    systemPrompt += `- Stattdessen ehrlich kommunizieren: '${biz.nextOpenLabel} meldet sich eine Kollegin mit den Details bei dir 💌' o.ä.\n`;
+    businessHoursBlock += `- 🚨 NICHT 'gleich' / 'in Kürze' / 'sofort' / 'schreibt dir durch' verwenden — wir sind aktuell ${biz.reason.toLowerCase()}.\n`;
+    businessHoursBlock += `- Stattdessen ehrlich kommunizieren: '${biz.nextOpenLabel} meldet sich eine Kollegin mit den Details bei dir 💌' o.ä.\n`;
   }
-  systemPrompt += `- Sachfragen (Verfügbarkeit, Preise, allgemeine Infos) darfst du immer direkt beantworten — die Einschränkung gilt nur für Übergaben an Mitarbeiterinnen.\n`;
+  businessHoursBlock += `- Sachfragen (Verfügbarkeit, Preise, allgemeine Infos) darfst du immer direkt beantworten — die Einschränkung gilt nur für Übergaben an Mitarbeiterinnen.\n`;
 
 
   // Letzte Kunden-Message LADEN (vor FAQ-Filter — brauchen wir für Keyword-Topic-Match).
@@ -591,15 +591,12 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     .maybeSingle();
 
   // 🛡 ZENTRALE PRE-LLM PIPELINE (Single Source of Truth — pipeline.ts)
-  // Identisch zu /api/chat/route.ts — Webhook + Web-Chat teilen sich
-  // dieselbe Schutzschicht. Jeder neue Pre-LLM-Injector kommt in
-  // pipeline.ts → beide Pipelines erben automatisch.
-  //
-  // SIBLING-SWEEP: lädt die letzten 5 Customer-Messages (nicht nur die
-  // aktuelle), damit Folge-Fragen wie "tapes. zeig mir das produkt"
-  // den Farbcode aus früheren Messages erkennen — sonst würde der
-  // Bot aus dem Kopf antworten und Varianten erfinden/vergessen.
+  // pipeline.applyPreLlmContext returnt jetzt `dynamicHint` SEPARAT
+  // (nicht mehr gemerged in systemPrompt) — damit der dynamische Color-
+  // Code-Inject NICHT den Cache des stable Blocks zerschießt.
+  // Architektur: dynamicHint geht in den dynamic-Block (uncached, ans Ende).
   let pipelineCtx: import("./pipeline").ChatbotPipelineContext;
+  let colorCodeDynamicHint = "";
   {
     const { applyPreLlmContext } = await import("./pipeline");
     const userTxt = (lastUserMsgRow?.content as string | undefined) || "";
@@ -614,9 +611,10 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     const recentTexts: string[] = (recentUsers || [])
       .map(r => (r.content as string | null) || "")
       .filter(t => t.length > 0)
-      .reverse(); // älteste zuerst
+      .reverse();
     const pre = await applyPreLlmContext(systemPrompt, userTxt, recentTexts);
-    systemPrompt = pre.systemPrompt;
+    systemPrompt = pre.systemPrompt;          // unverändert (stable)
+    colorCodeDynamicHint = pre.dynamicHint;   // dynamic, separat
     pipelineCtx = pre.ctx;
     if (pipelineCtx.colorCodeMatches.length > 0) {
       console.log(`[respond] pre-llm pipeline injected (session=${sessionId.slice(0,8)}, codes=${pipelineCtx.colorCodeMatches.map(m=>m.code).join(",")}, history-msgs=${recentTexts.length})`);
@@ -1036,7 +1034,14 @@ WENN die Kundin ein Wunsch-Datum nennt:
 KEINE Ausnahmen. Wenn unsicher: nur Planity-Link + freundliche Note. KURZ.`;
   }
 
-  const systemPromptVariable = openTurnsHint + greetingHint + existenceRule + urlRule + styleRule + categoryHardRule;
+  // systemPromptVariable enthält ALLE dynamischen Inhalte, die pro Anfrage
+  // variieren. Diese gehen als UNCACHED Block AN ENDE (nach dem stable cache).
+  // Reihenfolge: dynamische Hints zuerst (Color-Code-Lookup, Business-Hours),
+  // dann variable Wording-Hints (greeting, urls, style, kategorie-hardrule).
+  const systemPromptVariable =
+    colorCodeDynamicHint +
+    businessHoursBlock +
+    openTurnsHint + greetingHint + existenceRule + urlRule + styleRule + categoryHardRule;
 
   // Set aller external_ids in dieser Session — für Reply-Lookup. Wenn eine
   // Customer-Message eine reply_to_external_id hat, die NICHT in diesem Set
