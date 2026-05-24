@@ -73,7 +73,19 @@ export function detectCustomerAskedForPhotos(customerText: string): boolean {
  */
 export async function applyPreLlmContext(
   systemPrompt: string,
-  customerText: string
+  customerText: string,
+  /**
+   * Optional: die letzten N Customer-Messages aus der Session-History
+   * (älteste zuerst oder neueste — egal, wird zum Detection-Buffer
+   * konkateniert). WICHTIG für Folge-Fragen wie „tapes. zeig mir das
+   * produkt" — der Farbcode steht dort nicht mehr, sondern 2 Messages
+   * vorher. Ohne History würde der Color-Code-Injector hier nichts
+   * finden und der Bot würde aus dem Kopf antworten.
+   *
+   * Caller sollte typischerweise die letzten 3-5 Customer-Messages
+   * mitliefern. Wenn leer/undefined → fallback auf nur customerText.
+   */
+  recentCustomerHistory?: string[]
 ): Promise<{ systemPrompt: string; ctx: ChatbotPipelineContext }> {
   let prompt = systemPrompt;
   const ctx: ChatbotPipelineContext = {
@@ -82,12 +94,18 @@ export async function applyPreLlmContext(
     customerAskedForPhotos: detectCustomerAskedForPhotos(customerText),
   };
 
+  // Konkateniere Conversation-Context für die Detection.
+  // Aktuelle msg PLUS letzte N Customer-Messages (falls geliefert).
+  const detectionBuffer = recentCustomerHistory && recentCustomerHistory.length > 0
+    ? [...recentCustomerHistory, customerText].filter(Boolean).join("\n\n")
+    : customerText;
+
   // ── 🎨 COLOR-CODE-INJECTOR ──────────────────────────────────────
-  // Erkennt Farbcode-Muster (5P18A, 2T18A, 4/27, P14, ...) in der
-  // Customer-Message, macht DB-Lookup, packt VOLLSTÄNDIGE Liste
-  // als System-Block in den Prompt.
+  // Erkennt Farbcode-Muster (5P18A, 2T18A, 4/27, P14, ...) im
+  // Detection-Buffer (current msg + History), macht DB-Lookup,
+  // packt VOLLSTÄNDIGE Liste als System-Block in den Prompt.
   try {
-    const { hint, matches } = await buildColorCodeContext(customerText);
+    const { hint, matches } = await buildColorCodeContext(detectionBuffer);
     ctx.colorCodeMatches = matches;
     if (hint) {
       prompt += "\n\n" + hint + "\n";

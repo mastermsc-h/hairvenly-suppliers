@@ -264,7 +264,11 @@ export function stripRedundantFollowupQuestion(text: string): string {
   const lines = text.split("\n");
   // Zähle Bullets / Listeneinträge
   const bulletCount = lines.filter(l => /^\s*[-•*]\s+\S/.test(l) || /^\s*\d+\.\s+\S/.test(l)).length;
-  if (bulletCount < 3) return text;
+  // Schwelle 2: auch bei 2-Optionen-Listen ist "Welche willst du?" redundant —
+  // die Kundin sieht die Optionen direkt vor sich. User-Feedback: "krampfhaft
+  // fragen ohne sinnvollen Hintergrund". Bei 0-1 Bullets KEIN Strip, weil
+  // dann die Frage ggf. zur Klärung dient.
+  if (bulletCount < 2) return text;
   // Suche redundante Schluss-Frage in den letzten 3 nicht-leeren Zeilen
   const lastNonEmpty: number[] = [];
   for (let i = lines.length - 1; i >= 0 && lastNonEmpty.length < 3; i--) {

@@ -277,8 +277,24 @@ export async function POST(req: NextRequest) {
   // 🛡 ZENTRALE PRE-LLM PIPELINE (Single Source of Truth — pipeline.ts)
   // Erweitert systemPrompt + liefert ctx für Post-LLM-Sanitizer.
   // Webhook (respond.ts) UND Web-Chat (diese Route) nutzen IDENTISCHE Pipeline.
+  //
+  // SIBLING-SWEEP: lädt die letzten 5 Customer-Messages (nicht nur body.message),
+  // damit Folge-Fragen wie "zeig mir das produkt" den Farbcode aus früheren
+  // Messages erkennen — sonst injiziert der Code-Lookup nichts und der Bot
+  // antwortet aus dem Kopf.
   const { applyPreLlmContext, applyPostLlmSanitizers } = await import("@/lib/chatbot/pipeline");
-  const preLlm = await applyPreLlmContext(systemPrompt, body.message);
+  const { data: recentUserMsgs } = await supabase
+    .from("chat_messages")
+    .select("content")
+    .eq("session_id", session.id)
+    .eq("role", "user")
+    .order("created_at", { ascending: false })
+    .limit(5);
+  const recentTexts: string[] = (recentUserMsgs || [])
+    .map(r => (r.content as string | null) || "")
+    .filter(t => t.length > 0)
+    .reverse();
+  const preLlm = await applyPreLlmContext(systemPrompt, body.message, recentTexts);
   systemPrompt = preLlm.systemPrompt;
   const pipelineCtx = preLlm.ctx;
 

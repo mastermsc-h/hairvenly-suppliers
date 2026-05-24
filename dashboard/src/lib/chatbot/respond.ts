@@ -594,15 +594,32 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   // Identisch zu /api/chat/route.ts — Webhook + Web-Chat teilen sich
   // dieselbe Schutzschicht. Jeder neue Pre-LLM-Injector kommt in
   // pipeline.ts → beide Pipelines erben automatisch.
+  //
+  // SIBLING-SWEEP: lädt die letzten 5 Customer-Messages (nicht nur die
+  // aktuelle), damit Folge-Fragen wie "tapes. zeig mir das produkt"
+  // den Farbcode aus früheren Messages erkennen — sonst würde der
+  // Bot aus dem Kopf antworten und Varianten erfinden/vergessen.
   let pipelineCtx: import("./pipeline").ChatbotPipelineContext;
   {
     const { applyPreLlmContext } = await import("./pipeline");
     const userTxt = (lastUserMsgRow?.content as string | undefined) || "";
-    const pre = await applyPreLlmContext(systemPrompt, userTxt);
+    const { data: recentUsers } = await svc
+      .from("chat_messages")
+      .select("content")
+      .eq("session_id", sessionId)
+      .eq("role", "user")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    const recentTexts: string[] = (recentUsers || [])
+      .map(r => (r.content as string | null) || "")
+      .filter(t => t.length > 0)
+      .reverse(); // älteste zuerst
+    const pre = await applyPreLlmContext(systemPrompt, userTxt, recentTexts);
     systemPrompt = pre.systemPrompt;
     pipelineCtx = pre.ctx;
     if (pipelineCtx.colorCodeMatches.length > 0) {
-      console.log(`[respond] pre-llm pipeline injected (session=${sessionId.slice(0,8)}, codes=${pipelineCtx.colorCodeMatches.map(m=>m.code).join(",")})`);
+      console.log(`[respond] pre-llm pipeline injected (session=${sessionId.slice(0,8)}, codes=${pipelineCtx.colorCodeMatches.map(m=>m.code).join(",")}, history-msgs=${recentTexts.length})`);
     }
   }
 

@@ -200,6 +200,8 @@ Wenn eine neue Risiko-Kategorie auftaucht → hier ergänzen, nicht "case-by-cas
 | 2026-05 | Action-Bar im Inbox-Header rechts abgeschnitten | `flex-wrap` hinzugefügt | `session-view.tsx` |
 | 2026-05 | Delete-Button pro Message nur bei Hover sichtbar | `opacity-30 → group-hover:100` (vorher 0) + größeres Icon | `session-view.tsx` |
 | 2026-05 | **Web-Chat-Pipeline hatte nur enforceBusinessFacts, ALLE anderen Sanitizer fehlten** (Task #137-Schuld). Erscheinung: Bot-Test-Page in Dashboard zeigt verbose Output + ungestrippte Negativ-Lügen, obwohl Webhook-Pipeline alles fixt | Komplette Sanitizer-Pipeline in `/api/chat/route.ts` einbauen (gleiche Reihenfolge wie respond.ts: enforce → validate → applyAllOutputSanitizers → text_replace SSE) | `api/chat/route.ts` |
+| 2026-05 | Pre-LLM-Injektor sah nur die aktuelle Customer-Message → Folge-Fragen wie „tapes. zeig mir das produkt" injizierten nichts, weil Code "2T18A" nur 2 msg vorher stand. Bot listete 2 von 4 Varianten aus Eigengedächtnis. | `applyPreLlmContext(prompt, currentMsg, recentHistory?)` — Pipeline akzeptiert jetzt optionale History; beide Routes laden letzte 5 Customer-Messages | `pipeline.ts`, `respond.ts`, `api/chat/route.ts` |
+| 2026-05 | `stripRedundantFollowupQuestion` feuerte erst ab 3 Bullets → kleinere 2-Optionen-Listen kamen mit „Welche willst du?"-Frage durch | Schwelle von 3 auf 2 gesenkt; User-Rule: ab 2 visible Optionen entscheidet Kundin selbst | `output-sanitizers.ts` |
 | 2026-05 | Token-Kosten explodieren (≥17ct/call) | 1h Cache-TTL + Persona-Trim + Refine-Limit 2 + FAQs statt Persona | `bedrock-client.ts`, DB `chatbot_persona`, FAQ-Topic-Filter |
 
 **Konvention:** Bei jedem strukturellen Fix wird diese Tabelle ergänzt.
