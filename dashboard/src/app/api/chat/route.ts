@@ -417,7 +417,15 @@ export async function POST(req: NextRequest) {
         const { enforceBusinessFacts } = await import("@/lib/chatbot/intent-contact");
         const enforced = enforceBusinessFacts(finalText);
         if (enforced.changed) {
-          console.warn(`[chat/route] enforceBusinessFacts hat Kontakt-Daten korrigiert (session=${session.id.slice(0,8)})`);
+          console.warn(`[chat/route] enforceBusinessFacts hat Kontakt-Daten korrigiert (session=${session.id.slice(0,8)}). Sending text_replace event to client.`);
+          // Wenn der Stream live an den Client gestreamt wurde, hat der DOM
+          // jetzt die FALSCHE Version. Wir schicken ein "text_replace"-Event
+          // damit der Client die Bot-Message-Bubble mit der korrigierten
+          // Version überschreibt.
+          controller.enqueue(sse({
+            type: "text_replace",
+            fullText: enforced.text,
+          }));
         }
 
         // Assistant-Antwort speichern (Volltext, sanitized)
@@ -443,7 +451,7 @@ export async function POST(req: NextRequest) {
         controller.enqueue(sse({
           type: "done",
           status: updated?.status || "active",
-          finalText,
+          finalText: enforced.text,
         }));
         // (Wächter läuft per Cron alle 30 Min, nicht in Echtzeit)
       } catch (e) {

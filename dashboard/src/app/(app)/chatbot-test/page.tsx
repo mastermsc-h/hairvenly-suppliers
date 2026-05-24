@@ -181,6 +181,14 @@ export default function ChatbotTestPage() {
             setMessages(m => m.map(x => x.id === botMsgId
               ? { ...x, content: x.content.replace(/\n_⏳ schaue im Lager nach…_\n/g, "") }
               : x));
+          } else if (payload.type === "text_replace") {
+            // Server hat Bot-Output korrigiert (z.B. halluzinierte Adresse →
+            // Hans-Böckler-Straße via enforceBusinessFacts). Wir überschreiben
+            // den live-gestreamten Text mit der korrigierten Version.
+            const fullText = payload.fullText as string;
+            setMessages(m => m.map(x => x.id === botMsgId
+              ? { ...x, content: fullText }
+              : x));
           } else if (payload.type === "done") {
             const status = payload.status as string;
             if (status) setStatus(status);
