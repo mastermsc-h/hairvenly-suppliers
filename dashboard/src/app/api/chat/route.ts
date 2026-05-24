@@ -274,6 +274,18 @@ export async function POST(req: NextRequest) {
   const sessionAvatar = activeAvatars.find(a => a.name === effectiveSignature) || chosenAvatar;
   systemPrompt += `\n\n## DEINE PERSÖNLICHKEIT (als ${sessionAvatar.name})\n${sessionAvatar.personality}`;
 
+  // 🎨 PRE-LLM COLOR-CODE INJECTOR (gleiche Schicht wie respond.ts) —
+  // siehe dashboard/CHATBOT_ARCHITECTURE.md §1.1 (Pre-LLM-Inject statt LLM-Decide)
+  try {
+    const { buildColorCodeContextHint } = await import("@/lib/chatbot/intent-color-codes");
+    const colorHint = await buildColorCodeContextHint(body.message);
+    if (colorHint) {
+      systemPrompt += "\n\n" + colorHint + "\n";
+    }
+  } catch (e) {
+    console.warn("[chat-route] color-code-injector error:", e);
+  }
+
   // Lade Trainings-Korrekturen: global (avatar_name=null) + spezifisch für aktuellen Avatar
   const { data: trainingExamples } = await supabase
     .from("chatbot_training")

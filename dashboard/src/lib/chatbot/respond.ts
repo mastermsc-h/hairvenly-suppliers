@@ -590,6 +590,30 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     .limit(1)
     .maybeSingle();
 
+  // 🎨 PRE-LLM COLOR-CODE INJECTOR — strukturelle Lösung gegen
+  // "Bot sagt 'kenne ich nicht' zu existierenden Farbcodes".
+  // Architektur-Prinzip: Pre-LLM-Inject statt LLM-Decide (siehe
+  // dashboard/CHATBOT_ARCHITECTURE.md §1.1).
+  //
+  // Wir erkennen Farbcode-Muster (5P18A, 2T18A, 4/27, P14, ...) in der
+  // Customer-Message, machen den DB-Lookup SELBST und packen die echten
+  // Treffer als System-Block in den Prompt. Bot hat die Wahrheit dann
+  // bereits im Kontext und KANN keine "kenne ich nicht"-Halluzination
+  // mehr produzieren.
+  {
+    try {
+      const { buildColorCodeContextHint } = await import("./intent-color-codes");
+      const userTxt = (lastUserMsgRow?.content as string | undefined) || "";
+      const hint = await buildColorCodeContextHint(userTxt);
+      if (hint) {
+        systemPrompt += "\n\n" + hint + "\n";
+        console.log(`[respond] color-code-hint injected (session=${sessionId.slice(0,8)})`);
+      }
+    } catch (e) {
+      console.warn(`[respond] color-code-injector error:`, e);
+    }
+  }
+
   // WISSENSDATENBANK (chatbot_faq) — TOPIC-FILTER für Token-Sparen (Phase A).
   // Vorher: ALLE 106 FAQs (~13.6k Token) in jeden Prompt → riesige Bloat-Quelle.
   // Jetzt: Core-Topics + Themen-Topics passend zur letzten Kundennachricht.
