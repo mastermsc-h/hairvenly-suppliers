@@ -7,6 +7,7 @@ import SyncInstagramButton from "./sync-instagram-button";
 import MarkUnreadButton from "./mark-unread-button";
 import MarkSeenButton from "./mark-seen-button";
 import MarkNotDoneButton from "./mark-not-done-button";
+import DeleteSessionButton from "./delete-session-button";
 import InboxSearchBar from "./search-bar";
 import DefaultBotModeToggle from "./default-bot-mode-toggle";
 import ClassifyBackfillButton from "./classify-backfill-button";
@@ -667,6 +668,15 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         ? <MarkSeenButton sessionId={s.id} />
                         : <MarkNotDoneButton sessionId={s.id} />}
                       {!isUnseen && <MarkUnreadButton sessionId={s.id} variant="icon" />}
+                    </div>
+                    {/* Delete-Button unten-rechts — für Spam-Sweep schnell
+                        erreichbar. Halbtransparent (opacity-20) damit es nicht
+                        vom Lesen ablenkt; voll sichtbar bei Hover über Card. */}
+                    <div className="absolute bottom-2 right-2 z-10 opacity-20 group-hover:opacity-100 transition">
+                      <DeleteSessionButton
+                        sessionId={s.id}
+                        customerName={(s as { customer_full_name?: string | null }).customer_full_name || s.customer_name || null}
+                      />
                     </div>
                     <Link href={`/chatbot/inbox/${s.id}`} className={`block ${onlyUnread ? "p-5" : "p-4"} pr-14`}>
                       {/* Customer-Name oben + Status-Badges links / IG-App-Hinweis rechts */}
