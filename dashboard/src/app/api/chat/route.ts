@@ -358,6 +358,7 @@ export async function POST(req: NextRequest) {
           let currentToolName = "";
           let currentToolInputJson = "";
 
+          const callStart = Date.now();
           const claudeStream = anthropic.messages.stream({
             model: MODEL,
             max_tokens: 1024,
@@ -408,6 +409,24 @@ export async function POST(req: NextRequest) {
 
           const finalMsg = await claudeStream.finalMessage();
           if (iterText) finalText = iterText;
+
+          // 💰 COST-LOGGING — bisher fehlte das in der Web-Chat-Pipeline.
+          // Jetzt werden auch Dashboard-Test-Sessions in chatbot_usage_log
+          // erfasst (gleiche Schicht wie respond.ts). Fire-and-forget,
+          // blockt den Stream nicht.
+          try {
+            const { logUsage } = await import("@/lib/chatbot/usage-logger");
+            logUsage({
+              purpose: "respond",
+              model: MODEL,
+              usage: finalMsg.usage,
+              sessionId: session.id,
+              durationMs: Date.now() - callStart,
+              extra: { iter, channel: "web-chat", tool_calls: toolBlocks.length },
+            });
+          } catch (e) {
+            console.warn("[chat/route] usage logging failed:", (e as Error).message);
+          }
 
           // Wenn keine Tool-Calls → fertig
           if (toolBlocks.length === 0 || finalMsg.stop_reason === "end_turn") break;
