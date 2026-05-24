@@ -274,6 +274,9 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     if (s.status === "closed") return false;
     if (pendingDraftSet.has(s.id)) return true;
     if (unreadMap[s.id]) return true;
+    // 🏢 B2B-AUTOBOT-WARNING: Gewerbe-Session + Bot hat autonom geantwortet
+    // → IMMER in "Zu tun", muss gegengecheckt werden (kein B2B-Lead verlieren)
+    if (s.category === "gewerbe" && (stats[s.id]?.autobotCount || 0) > 0) return true;
     const st = stats[s.id];
     // 24h Grace Period — wenn von UNS geantwortet wurde
     const lastMsg = s.last_message_at;
@@ -735,6 +738,18 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                           >
                             <AlertTriangle size={10} />
                             Mitarbeiter benötigt!
+                          </span>
+                        )}
+                        {/* 🏢 B2B-AUTOBOT-WARNING: Gewerbe-Lead + autonomer Bot-Versand
+                            → kritisch: B2B-Anfragen gehören NIE auf Autobot,
+                            Mitarbeiterin muss persönlich gegenchecken */}
+                        {s.category === "gewerbe" && (stats[s.id]?.autobotCount || 0) > 0 && (
+                          <span
+                            className="bg-red-600 text-white border border-red-700 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5 animate-pulse"
+                            title="Autobot bei Gewerbe-Anfrage — bitte sofort gegenchecken! B2B-Leads gehören nicht auf Autobot."
+                          >
+                            <AlertTriangle size={10} />
+                            Autobot bei Gewerbe!
                           </span>
                         )}
                         {/* Auto-Hinweis: Kundin hat Foto geschickt + Session ist

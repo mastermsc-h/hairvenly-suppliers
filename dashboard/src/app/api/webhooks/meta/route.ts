@@ -675,6 +675,8 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
 
   const safeCategories = new Set(["availability", "general", "pricing"]);
   if (!effectiveCategory || !safeCategories.has(effectiveCategory)) return false;
+  // gewerbe explizit blacklisten — selbst wenn safeCategory (sollte nicht sein, defensive)
+  if (effectiveCategory === "gewerbe") return false;
 
   // 2. Unsicherheits-Phrasen im Reply → NICHT autonom senden
   const uncertaintyPatterns = [

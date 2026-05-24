@@ -390,6 +390,64 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   if (!session) return { success: false, error: "session not found" };
   if (session.status !== "active") return { success: false, error: "session not active" };
 
+  // 🚨 ANTI-SELF-TRIGGER-GUARD: Bot darf KEINE neue Antwort generieren wenn:
+  //   - Die letzte Message in der Session vom Bot/Team kam (kein neuer Customer-Trigger)
+  //   - UND diese Antwort jünger als 30 Sekunden ist
+  // → Verhindert Spam-Loops durch Webhook-Duplikate, Debounce-Doppel-Firing,
+  // Background-Job-Re-Trigger. Strukturell — egal welcher Aufrufpfad.
+  {
+    const { data: lastMsgs } = await svc
+      .from("chat_messages")
+      .select("role, created_at")
+      .eq("session_id", sessionId)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const last = lastMsgs?.[0];
+    if (last && (last.role === "assistant" || last.role === "human_agent")) {
+      const ageSec = (Date.now() - new Date(last.created_at).getTime()) / 1000;
+      if (ageSec < 30) {
+        console.warn(`[respond] SELF-TRIGGER-GUARD blocked session=${sessionId.slice(0,8)} — last ${last.role} ${ageSec.toFixed(0)}s old, no new customer message`);
+        return { success: false, error: "self_trigger_blocked_no_new_customer_message" };
+      }
+    }
+  }
+
+  // 🏢 B2B-DETECTOR: Gewerbe-Marker erkennen → category override + niemals autosend
+  // Signale: Display-Name, Username, Customer-Text. Wenn EINS davon B2B-Marker
+  // enthält → category=gewerbe, opts.assisted=true (kein direkter Send).
+  // Damit Autobot-Antworten an Friseur-/Salon-/Studio-Kunden strukturell unmöglich.
+  let detectedB2B = false;
+  {
+    const B2B_RE = /\b(gewerbe|großhandel|wholesale|b2b|wiederverkäufer|wiederverkaufer|auf\s+rechnung|salon|friseur|friseure|friseurin|frisör|barber|hairstudio|haircare|coiffeur)\b/i;
+    const meta = `${(session as { customer_name?: string }).customer_name || ""} ${(session as { customer_full_name?: string }).customer_full_name || ""}`;
+    let userTextCombined = "";
+    if (B2B_RE.test(meta)) {
+      detectedB2B = true;
+    } else {
+      // Auch Customer-Messages der letzten 5 prüfen (z.B. "Auf Gewerbe")
+      const { data: recentUsers } = await svc
+        .from("chat_messages")
+        .select("content")
+        .eq("session_id", sessionId)
+        .eq("role", "user")
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      userTextCombined = (recentUsers || []).map(m => m.content || "").join(" ");
+      if (B2B_RE.test(userTextCombined)) detectedB2B = true;
+    }
+    if (detectedB2B) {
+      console.warn(`[respond] B2B-DETECTED session=${sessionId.slice(0,8)} (meta="${meta.slice(0,60)}", text="${userTextCombined.slice(0,80)}") — forcing assisted-mode + category=gewerbe`);
+      // category in DB updaten falls noch nicht gewerbe
+      if ((session as { category?: string }).category !== "gewerbe") {
+        await svc.from("chat_sessions").update({ category: "gewerbe" }).eq("id", sessionId);
+      }
+      // Force assisted: Bot generiert Draft, KEIN direkter Send
+      opts.assisted = true;
+    }
+  }
+
   // 🚀 DETERMINISTIC CONTACT-INTENT-BYPASS (zentral, alle Aufrufpfade)
   // Wenn die LETZTE Kunden-Message nach Adresse/Telefon/Öffnungszeiten/E-Mail
   // fragt → Template aus business-config.ts, KEIN LLM-Call. Verhindert

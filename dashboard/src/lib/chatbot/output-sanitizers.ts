@@ -248,6 +248,35 @@ export function emDashBrake(text: string): string {
  *   6. Auto-URL für Farben (nur wenn colorUrlMap vorhanden)
  *   7. Em-Dash-Bremse zuletzt
  */
+/**
+ * Markdown-Strip — Persona-Regel "KEIN Markdown" deterministisch erzwingen.
+ *
+ * WhatsApp/Instagram rendern kein Markdown, also würden Kunden literal
+ * "**Hairvenly Showroom**" sehen. Diese Sanitizer entfernen die häufigsten
+ * Markdown-Strukturen, die der Bot trotz Persona-Regel produziert.
+ *
+ * Behält bewusst:
+ *   - URLs (werden separat via autoAddColorUrls/limitUrls verwaltet)
+ *   - Listen mit "- " oder "• " (kein klassisches Markdown)
+ */
+export function stripMarkdownFormatting(text: string): string {
+  let out = text;
+  // Bold **x** und __x__ — Inhalt behalten, Marker entfernen
+  out = out.replace(/\*\*([^*\n]+?)\*\*/g, "$1");
+  out = out.replace(/__([^_\n]+?)__/g, "$1");
+  // Markdown-Link [Label](URL) → "Label URL" (URL bleibt klickbar)
+  out = out.replace(/\[([^\]\n]+?)\]\((https?:\/\/[^\s)]+)\)/g, "$1 $2");
+  // Header-Prefix am Zeilenanfang entfernen (### Titel → Titel)
+  out = out.replace(/(^|\n)#{1,6}\s+/g, "$1");
+  // Italic _x_ und *x* — nur wenn von non-word/edge umgeben, damit
+  // Wörter wie "snake_case" oder Bullet-Listen "* item" intakt bleiben
+  out = out.replace(/(^|[\s(])\*([^*\n]{1,200}?)\*(?=[\s.,!?:;)\n]|$)/g, "$1$2");
+  out = out.replace(/(^|[\s(])_([^_\n]{1,200}?)_(?=[\s.,!?:;)\n]|$)/g, "$1$2");
+  // Blockquote-Marker entfernen ("> x" → "x")
+  out = out.replace(/(^|\n)>\s+/g, "$1");
+  return out;
+}
+
 export function applyAllOutputSanitizers(
   text: string,
   opts: { customerAskedForPhotos?: boolean; colorUrlMap?: Map<string, string> } = {}
@@ -260,9 +289,11 @@ export function applyAllOutputSanitizers(
   out = scrubSupplierNames(out);
   out = stripColorUrlMismatch(out);
   if (opts.colorUrlMap) out = autoAddColorUrls(out, opts.colorUrlMap);
-  // URL-Limit ZULETZT — falls autoAddColorUrls noch welche hinzugefügt hat,
-  // werden die zusammen mit den bot-eigenen auf max 3 begrenzt.
+  // URL-Limit VOR Markdown-Strip — limitUrls erkennt noch [Label](URL)-Form
   out = limitUrls(out, 3);
+  // Markdown-Strip ZULETZT (vor emDashBrake), damit alle vorherigen
+  // Sanitizer ihre Pattern noch mit Markdown matchen können
+  out = stripMarkdownFormatting(out);
   out = emDashBrake(out);
   return out;
 }
