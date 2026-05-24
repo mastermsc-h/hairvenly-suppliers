@@ -41,8 +41,10 @@ export const BUSINESS_CONFIG = {
   shipping_days_min: 1,
   shipping_days_max: 2,
 
-  // Soft-Hinweis bei Termin-Buchungen
-  booking_note: "Am besten kurz vorher Bescheid geben, dann nehmen wir uns Zeit für dich.",
+  // Soft-Hinweis bei Spontan-Vorbeikommen. Bewusst NICHT als Pflicht
+  // formuliert — sondern als hilfreicher Tipp für Anfahrten von weiter weg.
+  // User-Feedback 2026-05: "Bitte vorher melden" klingt zu sehr nach Muss.
+  booking_note: "Wenn du von weiter weg kommst und nicht umsonst herfahren willst, frag vorher kurz nach, ob wir deine Wunschfarbe da haben — wenn dir das wichtig ist.",
 } as const;
 
 export type BusinessConfig = typeof BUSINESS_CONFIG;

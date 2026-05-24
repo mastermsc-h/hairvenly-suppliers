@@ -265,15 +265,44 @@ export function enforceBusinessFacts(text: string): { text: string; changed: boo
   let changed = false;
   let out = text;
 
-  // ADRESSE — strukturell: "<Großgeschriebenes-Wort(e)> <Nummer>[,] <5-stellige-PLZ> <Stadt>"
-  // Funktioniert für ALLE Städte, ALLE Straßennamen-Endungen.
-  // Echte Hairvenly-Adresse ist die EINZIGE die durchgelassen wird.
+  // ADRESSE Pattern A — Vollform "<Straße> <Nr>[,] <PLZ> <Stadt>"
   const anyAddress = /\b([A-ZÄÖÜ][^\n,;]{2,60}?)\s+(\d{1,4}[a-z]?),?\s*(\d{5})\s+([A-ZÄÖÜ][\wäöüß.-]+)\b/gi;
-  out = out.replace(anyAddress, (match, _street, _num, _plz, _city) => {
+  out = out.replace(anyAddress, (match) => {
     if (match === c.address_oneline) return match;
     changed = true;
-    console.warn(`[enforceBusinessFacts] Adresse blockiert (${match}) → ${c.address_oneline}`);
+    console.warn(`[enforceBusinessFacts] Adresse A blockiert (${match}) → ${c.address_oneline}`);
     return c.address_oneline;
+  });
+
+  // SIBLING-SWEEP — ADRESSE Pattern B: "<Straße>-Suffix <Nr>" OHNE PLZ
+  // Bug-Fall: Bot schreibt "Hans-Böckler-Straße 59 in Bremen" (falsche Hausnummer)
+  //   ↑ Pattern A matched NICHT weil PLZ fehlt → ging durch.
+  // Pattern B matched JEDE Straße+Hausnummer; ersetzt nur den Adress-Teil, nicht die
+  // umgebende Stadt-Nennung — sonst entsteht "Hans-Böckler-Straße 60, 28217 Bremen in Bremen".
+  // `i`-Flag: damit "Parkallee" (lowercase "allee") auch matched gegen "Allee" in Alternation.
+  const streetWithNumNoPlz = /\b([A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ.-]{1,50}?(?:Straße|Strasse|Str\.|Allee|Weg|Platz|Ring|Gasse|Gässchen|Chaussee|Wende|Pfad|Ufer|Damm|Stieg|Twiete|Markt|Park|Hof))\s+(\d{1,4}[a-z]?)\b/gi;
+  out = out.replace(streetWithNumNoPlz, (match, street, num) => {
+    const normMatch = `${street} ${num}`.toLowerCase().replace(/ß/g, "ss").replace(/\s+/g, " ").trim();
+    const normReal = c.street.toLowerCase().replace(/ß/g, "ss").replace(/\s+/g, " ").trim();
+    if (normMatch === normReal) return match;
+    changed = true;
+    console.warn(`[enforceBusinessFacts] Adresse B blockiert (${match}) → ${c.street}`);
+    return c.street; // nur Straße+Nr, NICHT ganze Adresse — Stadt bleibt im Kontext
+  });
+
+  // SIBLING-SWEEP — ADRESSE Pattern C: Straße OHNE Hausnummer, OHNE PLZ
+  // Bug-Fall: "wir sind in der Parkallee" (Bot lässt Hausnummer weg, falsche Straße)
+  // Match nur Bindestrich-Komposita ("Hans-Böckler-Straße") — vermeidet Generika
+  // wie "Hauptstraße", "Bahnhofstraße". Falls Bot eine ungewöhnliche Straße
+  // ohne Bindestrich nennt: bleibt unverändert (akzeptabler False-Negative-Tradeoff).
+  const streetOnlyNoNum = /\b([A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ]{2,30}(?:-[A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ]{2,30})*-(?:Straße|Strasse|Str\.|Allee|Weg|Platz|Ring|Gasse|Gässchen|Chaussee|Wende|Pfad|Ufer|Damm|Stieg|Twiete|Markt|Park|Hof))\b/gi;
+  out = out.replace(streetOnlyNoNum, (match) => {
+    const normMatch = match.toLowerCase().replace(/ß/g, "ss").trim();
+    const realStreetOnly = c.street.replace(/\s+\d.*$/, "").toLowerCase().replace(/ß/g, "ss").trim();
+    if (normMatch === realStreetOnly || normMatch.includes(realStreetOnly.slice(0,15))) return match;
+    changed = true;
+    console.warn(`[enforceBusinessFacts] Adresse C blockiert (${match}) → ${c.street}`);
+    return c.street;
   });
 
   // TELEFON — strukturell: jede zusammenhängende Ziffern-Sequenz die wie eine
