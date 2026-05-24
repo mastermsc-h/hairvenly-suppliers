@@ -34,6 +34,22 @@ export default function ChatbotTestPage() {
   const [selectedAvatar, setSelectedAvatar] = useState<string>(""); // "" = Zufall
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Prefill aus URL ?prefill=... — kommt vom FAQ-Editor "Test mit Bot" Button.
+  // Setzt die Frage ins Input-Feld (nicht auto-senden — Mitarbeiterin soll
+  // erst sehen was sie testet, dann auf Senden klicken).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const prefill = params.get("prefill");
+    if (prefill) {
+      setInput(prefill);
+      // URL-Param entfernen damit ein Refresh nicht wieder befüllt
+      const url = new URL(window.location.href);
+      url.searchParams.delete("prefill");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, []);
+
   const loadSessions = useCallback(async () => {
     try {
       const res = await fetch("/api/chat/sessions?channel=web&limit=30");

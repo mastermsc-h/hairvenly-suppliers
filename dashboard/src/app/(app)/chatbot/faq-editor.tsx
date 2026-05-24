@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Edit3, Trash2, Save, X, BookOpen } from "lucide-react";
+import { Plus, Edit3, Trash2, Save, X, BookOpen, Search, Sparkles } from "lucide-react";
 
 interface Faq {
   id: string;
@@ -33,6 +33,7 @@ export default function FaqEditor({ initialFaqs }: { initialFaqs: Faq[] }) {
   const [editing, setEditing] = useState<Faq | null>(null);
   const [creating, setCreating] = useState(false);
   const [topicFilter, setTopicFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState<string>("");
 
   async function reload() {
     const res = await fetch("/api/chatbot/faq");
@@ -67,7 +68,14 @@ export default function FaqEditor({ initialFaqs }: { initialFaqs: Faq[] }) {
     await save({ id: f.id, active: !f.active });
   }
 
-  const filtered = topicFilter === "all" ? faqs : faqs.filter(f => f.topic === topicFilter);
+  // Filter: zuerst Topic, dann Volltext-Suche (Slug + Topic + Frage + Antwort)
+  const topicFiltered = topicFilter === "all" ? faqs : faqs.filter(f => f.topic === topicFilter);
+  const q = searchQuery.trim().toLowerCase();
+  const filtered = q.length === 0 ? topicFiltered : topicFiltered.filter(f => {
+    const hay = `${f.slug} ${f.topic} ${f.question} ${f.answer}`.toLowerCase();
+    // Alle Such-Tokens müssen vorkommen (AND-Semantik)
+    return q.split(/\s+/).every(token => hay.includes(token));
+  });
   const topicCounts: Record<string, number> = {};
   for (const f of faqs) topicCounts[f.topic] = (topicCounts[f.topic] || 0) + 1;
 
@@ -91,6 +99,29 @@ export default function FaqEditor({ initialFaqs }: { initialFaqs: Faq[] }) {
         >
           <Plus size={12} /> Neue FAQ
         </button>
+      </div>
+
+      {/* Volltext-Suche — findet Stichwort in Slug/Topic/Frage/Antwort */}
+      <div className="px-5 py-3 border-b border-neutral-100">
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Suche in allen FAQs (Slug, Topic, Frage, Antwort)… z.B. 'genius', 'tape 65cm', 'farbe'"
+            className="w-full pl-9 pr-9 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-neutral-900 focus:border-transparent outline-none"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-neutral-700"
+              title="Suche löschen"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Topic-Filter */}
@@ -142,6 +173,18 @@ export default function FaqEditor({ initialFaqs }: { initialFaqs: Faq[] }) {
                   >
                     <Edit3 size={11} /> Bearbeiten
                   </button>
+                  {/* Bot-Test pro FAQ — öffnet chatbot-test in neuem Tab
+                      mit der Frage prefilled, damit der Mitarbeiter sofort
+                      sieht ob die FAQ wirkt wie gedacht. */}
+                  <a
+                    href={`/chatbot-test?prefill=${encodeURIComponent(f.question)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs px-2 py-1 rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50 inline-flex items-center gap-1"
+                    title="Frage im Chatbot-Test öffnen — sieht ob die FAQ richtig wirkt"
+                  >
+                    <Sparkles size={11} /> Test mit Bot
+                  </a>
                   <button
                     onClick={() => toggleActive(f)}
                     className={`text-xs px-2 py-1 rounded-lg ${
