@@ -168,6 +168,12 @@ Wenn eine neue Risiko-Kategorie auftaucht → hier ergänzen, nicht "case-by-cas
 | 2026-05 | Mehrere Bot-Antworten weil Customer 3 Messages in 90s schickt | Latest-Wins-Guard (SQL-Check „jemand schon geantwortet seit my-msg?") | `meta/route.ts` „LATEST-WINS GUARD" |
 | 2026-05 | Markdown-Sterne (`**bold**`) literal in WhatsApp sichtbar | `stripMarkdownFormatting` als letzter Sanitizer | `output-sanitizers.ts` |
 | 2026-05 | Bot sagt „kenne ich nicht" zu existierendem Farbcode | Pre-LLM Color-Code-Injector (Regex+Lookup) | `intent-color-codes.ts` |
+| 2026-05 | Bot LÜGT über Existenz einer Variante TROTZ injizierter Daten („Tape 65cm gibt es generell nicht" obwohl in DB) | Negative-Claim-Validator als Post-LLM-Sanitizer + verschärfte Hint-Sprache („VOLLSTÄNDIGE Liste, jede Negativ-Aussage muss durch Liste oben gestützt sein") | `intent-color-codes.ts` → `validateNegativeClaims` |
+| 2026-05 | Bot bestätigt FALSCHE Adress-Annahme der Kundin („Hans-Bernhard? Genau, richtig — Hans-Böckler-Straße 60") | `address_correction`-Intent: detect fremden Straßennamen/PLZ → Korrektur-Template „Fast — wir sind in der …" | `intent-contact.ts` |
+| 2026-05 | Bot fragt redundant „Welche Methode/Länge suchst du?" nach exhaustiver Liste | `stripRedundantFollowupQuestion` Sanitizer (≥3 Bullets + trailing Fragen-Pattern → strip) | `output-sanitizers.ts` |
+| 2026-05 | Debounce zu kurz für reale Customer-Tippzeit (Foto-Upload 2-4 Min) | Debounce 90s → 240s (normal) / 60s (kurz); via Latest-Wins immer noch nur eine Antwort | `webhooks/meta/route.ts` |
+| 2026-05 | Action-Bar im Inbox-Header rechts abgeschnitten | `flex-wrap` hinzugefügt | `session-view.tsx` |
+| 2026-05 | Delete-Button pro Message nur bei Hover sichtbar | `opacity-30 → group-hover:100` (vorher 0) + größeres Icon | `session-view.tsx` |
 | 2026-05 | Token-Kosten explodieren (≥17ct/call) | 1h Cache-TTL + Persona-Trim + Refine-Limit 2 + FAQs statt Persona | `bedrock-client.ts`, DB `chatbot_persona`, FAQ-Topic-Filter |
 
 **Konvention:** Bei jedem strukturellen Fix wird diese Tabelle ergänzt.

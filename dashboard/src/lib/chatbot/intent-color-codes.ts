@@ -132,14 +132,13 @@ export async function lookupColorCodes(codes: string[]): Promise<ColorCodeMatch[
 export function buildColorCodeHint(matches: ColorCodeMatch[]): string | null {
   if (matches.length === 0) return null;
   const lines: string[] = [];
-  lines.push("## 🎨 FARBCODE-LOOKUP (deterministisch aus DB — KEINE Halluzination möglich)");
+  lines.push("## 🎨 FARBCODE-LOOKUP (deterministisch aus DB — VOLLSTÄNDIG & VERBINDLICH)");
   lines.push("");
-  lines.push("Die Kundin hat in ihrer Message folgende Farbcode-ähnliche Tokens erwähnt. Dies sind die VERIFIZIERTEN Fakten aus product_colors:");
+  lines.push("Die Kundin hat folgende Farbcode-Tokens erwähnt. Die Listen unten sind VOLLSTÄNDIG aus der DB.");
   for (const m of matches) {
     if (m.found && m.variants && m.variants.length > 0) {
       lines.push("");
-      lines.push(`**${m.code}** → EXISTIERT in unserem Katalog (${m.variants.length} Varianten):`);
-      // Gruppieren nach Linie, dann Methode+Länge
+      lines.push(`**${m.code}** existiert in genau diesen Varianten (VOLLSTÄNDIGE LISTE, ${m.variants.length} Stück):`);
       const byLine = new Map<string, Set<string>>();
       for (const v of m.variants) {
         if (!byLine.has(v.line)) byLine.set(v.line, new Set());
@@ -150,11 +149,15 @@ export function buildColorCodeHint(matches: ColorCodeMatch[]): string | null {
       }
     } else {
       lines.push("");
-      lines.push(`**${m.code}** → NICHT im aktiven Katalog gefunden. → Frage die Kundin freundlich, wo sie den Code gesehen hat. NIEMALS hart behaupten "kenne ich nicht" — vielleicht ist es eine ältere Bezeichnung oder ein Tippfehler.`);
+      lines.push(`**${m.code}** → NICHT im aktiven Katalog gefunden. Frage die Kundin freundlich wo sie den Code gesehen hat. NIEMALS hart behaupten "kenne ich nicht".`);
     }
   }
   lines.push("");
-  lines.push("**HARTE REGEL:** Du DARFST NICHT behaupten, einen oben als EXISTIEREND gelisteten Code nicht zu kennen. Die Fakten oben sind verbindlich.");
+  lines.push("**HARTE REGELN für deine Antwort:**");
+  lines.push("1. Die Listen oben sind VOLLSTÄNDIG. Was oben steht, EXISTIERT. Was nicht oben steht, existiert NICHT für diesen Code.");
+  lines.push("2. Du DARFST NICHT behaupten, eine in der Liste oben stehende Variante existiere nicht (z.B. 'Tapes 65cm gibt es nicht', wenn Tapes 65cm oben gelistet ist — das wäre eine LÜGE).");
+  lines.push("3. Du DARFST KEINE Variante erfinden, die NICHT in der Liste oben steht.");
+  lines.push("4. Wenn die Kundin nach einer SPEZIFISCHEN Variante fragt (z.B. '85cm Tapes'): antworte FOKUSSIERT zu genau dieser Variante. Zähle NICHT alle anderen Varianten unnötig auf.");
   return lines.join("\n");
 }
 
@@ -166,4 +169,101 @@ export async function buildColorCodeContextHint(customerText: string): Promise<s
   if (codes.length === 0) return null;
   const matches = await lookupColorCodes(codes);
   return buildColorCodeHint(matches);
+}
+
+/**
+ * Erweiterter One-Shot-Helper: liefert Hint UND die Matches (für Output-Validator).
+ */
+export async function buildColorCodeContext(customerText: string): Promise<{ hint: string | null; matches: ColorCodeMatch[] }> {
+  const codes = detectColorCodes(customerText);
+  if (codes.length === 0) return { hint: null, matches: [] };
+  const matches = await lookupColorCodes(codes);
+  const hint = buildColorCodeHint(matches);
+  return { hint, matches };
+}
+
+/**
+ * Output-Negative-Claim-Validator.
+ *
+ * Erkennt falsche Negativ-Aussagen in der Bot-Antwort und korrigiert sie
+ * gegen die injizierten DB-Daten.
+ *
+ * Beispiel:
+ *   Bot sagt:    "Tapes 65cm gibt es nicht in 2T18A"
+ *   DB sagt:     2T18A Tapes 65cm EXISTIERT
+ *   → Sanitizer entfernt die Lüge.
+ *
+ * Architektur (siehe CHATBOT_ARCHITECTURE.md §1.1):
+ *   Pre-LLM-Inject war Schritt 1 (Daten sind im Prompt).
+ *   Output-Validator ist Schritt 2 (Bot hat trotzdem gelogen → korrigieren).
+ */
+export function validateNegativeClaims(text: string, matches: ColorCodeMatch[]): string {
+  if (!matches || matches.length === 0) return text;
+  let out = text;
+  // Sammle alle existierenden Variants pro Code für schnellen Lookup
+  const codeToVariantSet = new Map<string, Set<string>>();
+  for (const m of matches) {
+    if (!m.found || !m.variants) continue;
+    const set = new Set<string>();
+    for (const v of m.variants) {
+      // Normalisieren: "Tapes 65cm" → "tapes 65cm"
+      const key = `${v.method} ${v.length}`.toLowerCase().replace(/\s+/g, " ").trim();
+      set.add(key);
+      // Auch Method allein als Eintrag (für "Tapes in 65cm gibts nicht")
+      const methodOnly = v.method.toLowerCase().trim();
+      set.add(methodOnly);
+    }
+    codeToVariantSet.set(m.code.toUpperCase(), set);
+  }
+
+  // Patterns für falsche Negativ-Aussagen:
+  //   "Tapes 65cm gibt es nicht", "Tapes 65cm haben wir leider nicht",
+  //   "65cm existiert in der Tape-Variante nicht", "85cm Tapes haben wir leider nicht"
+  const NEGATIVE_CLAIM_PATTERNS: RegExp[] = [
+    // "<method> <length> ... (haben wir|gibt es|existiert) ... nicht"
+    /\b(Tapes|Bondings|Tressen|Weft|Clip[- ]?ins?|Ponytail|Genius\s+Weft|Classic\s+Tressen|Mini\s+Tapes)\b\s*(\d{2,3}\s*cm)?[^.\n!?]{0,80}\b(haben wir|gibt es|existiert|gibt's|hätten wir)\s+(leider\s+)?(in\s+(dieser\s+)?Farbe\s+)?nicht\b/gi,
+    // "<length> ... in der <method>-Variante ... nicht"
+    /\b(\d{2,3}\s*cm)\b[^.\n!?]{0,40}\bin\s+der\s+(Tape|Bondings?|Tressen|Weft|Clip|Ponytail|Mini\s*Tape)-?(Variante)?\b[^.\n!?]{0,40}\b(gibt es|existiert|haben wir)\s+(leider\s+)?(generell\s+)?nicht\b/gi,
+    // "<method> <length> haben wir leider nicht"
+    /\b(\d{2,3}\s*cm)\s+(Tapes|Bondings|Tressen|Weft|Clip[- ]?ins?|Ponytail|Mini\s+Tapes)\b[^.\n!?]{0,40}\b(haben wir|gibt es)\s+(leider\s+)?nicht\b/gi,
+  ];
+
+  // Helper: prüft ob Method+Length im DB-Set existiert (für einen der erwähnten Codes)
+  const methodLengthExists = (method: string, length: string | undefined): boolean => {
+    const methodNorm = method.toLowerCase().replace(/[- ]/g, " ").trim();
+    const lenNorm = length ? length.toLowerCase().replace(/\s+/g, "").trim() : "";
+    for (const set of codeToVariantSet.values()) {
+      // Genaues Method+Length-Match
+      if (lenNorm) {
+        for (const v of set) {
+          if (v.includes(methodNorm) && v.includes(lenNorm)) return true;
+        }
+      } else {
+        for (const v of set) {
+          if (v.includes(methodNorm)) return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  for (const pat of NEGATIVE_CLAIM_PATTERNS) {
+    out = out.replace(pat, (match) => {
+      // Extrahiere Method und Length aus dem Match
+      const methodMatch = match.match(/\b(Tapes|Bondings|Tressen|Weft|Clip[- ]?ins?|Ponytail|Genius\s+Weft|Classic\s+Tressen|Mini\s+Tapes|Tape|Bondings?)\b/i);
+      const lengthMatch = match.match(/\b(\d{2,3})\s*cm\b/i);
+      if (!methodMatch) return match;
+      const method = methodMatch[0];
+      const length = lengthMatch ? `${lengthMatch[1]}cm` : undefined;
+      if (methodLengthExists(method, length)) {
+        // FALSCHE NEGATIV-AUSSAGE — entferne ganzen Satz
+        console.warn(`[color-validator] FALSE NEGATIVE CLAIM stripped: "${match}" (method=${method} length=${length} EXISTS in DB)`);
+        return ""; // strip
+      }
+      return match;
+    });
+  }
+  // Mehrfache Newlines aufräumen
+  out = out.replace(/\n{3,}/g, "\n\n").replace(/[ \t]+\n/g, "\n").trim();
+  return out;
 }

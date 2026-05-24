@@ -600,14 +600,18 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   // Treffer als System-Block in den Prompt. Bot hat die Wahrheit dann
   // bereits im Kontext und KANN keine "kenne ich nicht"-Halluzination
   // mehr produzieren.
+  // Matches behalten wir, damit der Output-Negative-Claim-Validator
+  // nach dem LLM-Call die Bot-Antwort gegen die echten DB-Daten prüfen kann.
+  let colorCodeMatches: import("./intent-color-codes").ColorCodeMatch[] = [];
   {
     try {
-      const { buildColorCodeContextHint } = await import("./intent-color-codes");
+      const { buildColorCodeContext } = await import("./intent-color-codes");
       const userTxt = (lastUserMsgRow?.content as string | undefined) || "";
-      const hint = await buildColorCodeContextHint(userTxt);
+      const { hint, matches } = await buildColorCodeContext(userTxt);
+      colorCodeMatches = matches;
       if (hint) {
         systemPrompt += "\n\n" + hint + "\n";
-        console.log(`[respond] color-code-hint injected (session=${sessionId.slice(0,8)})`);
+        console.log(`[respond] color-code-hint injected (session=${sessionId.slice(0,8)}, codes=${matches.map(m=>m.code).join(",")})`);
       }
     } catch (e) {
       console.warn(`[respond] color-code-injector error:`, e);
@@ -1291,6 +1295,23 @@ KEINE Ausnahmen. Wenn unsicher: nur Planity-Link + freundliche Note. KURZ.`;
     const { enforceBusinessFacts } = await import("./intent-contact");
     const enforced = enforceBusinessFacts(finalText);
     finalText = enforced.text;
+  }
+
+  // SAFETY-NET color-code: Negative-Claim-Validator.
+  // Bot hat trotz injizierter Daten manchmal NEGATIVE Aussagen über
+  // Varianten gemacht, die laut DB existieren ("Tapes 65cm gibt es nicht").
+  // Hier strippen wir solche Lügen deterministisch.
+  if (colorCodeMatches.length > 0) {
+    try {
+      const { validateNegativeClaims } = await import("./intent-color-codes");
+      const before = finalText;
+      finalText = validateNegativeClaims(finalText, colorCodeMatches);
+      if (before !== finalText) {
+        console.warn(`[respond] negative-claim-validator stripped false claims (session=${sessionId.slice(0,8)})`);
+      }
+    } catch (e) {
+      console.warn(`[respond] negative-claim-validator error:`, e);
+    }
   }
 
   // SAFETY-NET 1: konkrete Lagerzahlen rausfiltern

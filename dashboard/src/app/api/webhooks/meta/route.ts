@@ -555,9 +555,15 @@ async function routeIncoming(opts: {
         .limit(1).maybeSingle();
       const questionCount = (lastBot?.content || "").match(/\?/g)?.length || 0;
       const customerMsgShort = (opts.text || "").trim().length <= 30;
-      // Erhöht: 45s (kurz) / 90s (normal). Customer braucht oft 1-2 Min um
-      // mehrere Nachrichten/Foto-Uploads zu schicken. Vorher 20/50s zu knapp.
-      const DEBOUNCE_MS = customerMsgShort ? 45_000 : 90_000;
+      // ECHTE Customer-Channels (Instagram/WhatsApp) brauchen großzügige Wartezeit:
+      // Kundin tippt + lädt Foto hoch + überlegt → oft 2-4 Min Streckung.
+      // Mit Latest-Wins-Guard kann der Debounce ruhig groß sein — wir antworten
+      // erst wenn die Kundin WIRKLICH fertig ist (max-msg-Lücke = DEBOUNCE).
+      //
+      //   - Kurze msg (<=30 Zeichen, oft "ok", "ja", "?"): 60s reicht
+      //   - Normal msg: 240s = 4 Minuten
+      // (Vercel Function Limit 300s → noch genug Buffer für Bot-Generation.)
+      const DEBOUNCE_MS = customerMsgShort ? 60_000 : 240_000;
       void questionCount; // bleibt vorgehalten falls wir später wieder differenzieren wollen
       console.log(`[meta-webhook] debounce ${DEBOUNCE_MS}ms (last bot ?-count=${questionCount}, customer-len=${(opts.text || "").length})`);
       await new Promise(r => setTimeout(r, DEBOUNCE_MS));

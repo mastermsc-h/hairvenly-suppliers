@@ -308,7 +308,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
           )}
           <CategorySelector sessionId={session.id} currentCategory={session.category} />
         </div>
-        <div className="flex gap-1 items-center [&>div.divider]:mx-1 [&>div.divider]:h-5 [&>div.divider]:w-px [&>div.divider]:bg-neutral-200">
+        <div className="flex gap-1 items-center flex-wrap [&>div.divider]:mx-1 [&>div.divider]:h-5 [&>div.divider]:w-px [&>div.divider]:bg-neutral-200">
           {/* Bot-Modus — klarer Dropdown-Button mit Pfeil, deutlich klickbar */}
           {session.status === "active" && (
             <div className="relative">
@@ -725,9 +725,9 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
       onClick={handleDelete}
       disabled={deleting}
       title="Nachricht aus Inbox entfernen (nur intern, IG bleibt unverändert)"
-      className="opacity-0 group-hover:opacity-100 transition text-neutral-300 hover:text-red-500 p-1"
+      className="opacity-30 group-hover:opacity-100 transition text-neutral-400 hover:text-red-500 p-1"
     >
-      <Trash2 size={12} />
+      <Trash2 size={13} />
     </button>
   );
 

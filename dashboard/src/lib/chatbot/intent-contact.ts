@@ -15,6 +15,7 @@ import { BUSINESS_CONFIG } from "./business-config";
 
 export type ContactIntent =
   | "address_or_location"  // "wo seid ihr?", "adresse?", "showroom?"
+  | "address_correction"   // "ich muss in die hans-bernhard?" → FALSCHE Adresse, korrigieren
   | "phone"                // "telefonnummer?", "rufnummer?"
   | "email"                // "email?", "mail?"
   | "opening_hours"        // "öffnungszeiten?", "wann habt ihr offen?"
@@ -41,6 +42,30 @@ export function detectContactIntent(userMessage: string): ContactIntent {
   // mit "Bestellung" oder "wann liefert ihr" sagt.)
   if (/\b(bestell|kauf|bezahl|farbe|tape|tresse|bonding|gramm|länge|cm|preis|kostet|haar|verlänger|verdicht)\b/i.test(t)) {
     return null;
+  }
+
+  // ADRESS-KORREKTUR: Kunde nennt eine FALSCHE Adresse und fragt nach Bestätigung
+  // ("muss ich in die hans-bernhard?", "ist es die parkallee?")
+  // Wenn der Kunde einen Straßennamen nennt, der NICHT die echte Adresse ist,
+  // muss der Bot KORRIGIEREN — nicht bestätigen mit "Genau, richtig 💕".
+  // Erkennung: Straßennamen-Pattern + Frage-Marker, und Name passt NICHT zu Config.
+  if (/\b(muss ich|fahre ich|komme ich|kommt man|ist das|sind das|ist es|seid ihr in|liegt das in|heißt es|in die)\b[^.\n]{0,40}\b(stra(ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee)\b/i.test(t) ||
+      /\b(stra(ß|ss)e|str\.?|allee|weg|platz|ring|gasse)\b[^.\n]{0,15}(richtig|stimmt|oder)\??/i.test(t)) {
+    // Extrahiere genannten Straßennamen (vereinfachte Heuristik)
+    const streetMatch = t.match(/\b([a-zäöüß][a-zäöüß-]{2,30})(?:[-\s])?(stra(?:ß|ss)e|str\.?|allee|weg|platz|ring|gasse|chaussee)\b/i);
+    if (streetMatch) {
+      const mentionedStreet = streetMatch[0].toLowerCase().replace(/\s+/g, "").replace(/ß/g, "ss").replace(/[-_]/g, "");
+      const realStreet = BUSINESS_CONFIG.street.toLowerCase().replace(/\s+/g, "").replace(/ß/g, "ss").replace(/[-_]/g, "");
+      // Wenn die genannte Straße NICHT mit der echten beginnt/übereinstimmt → Korrektur
+      if (!realStreet.includes(mentionedStreet.slice(0, 6)) && !mentionedStreet.includes(realStreet.slice(0, 6))) {
+        return "address_correction";
+      }
+    }
+    // PLZ-Check: nennt der Kunde eine FALSCHE PLZ?
+    const plzMatch = t.match(/\b(\d{5})\b/);
+    if (plzMatch && plzMatch[1] !== BUSINESS_CONFIG.postal_code) {
+      return "address_correction";
+    }
   }
 
   // ADRESSE / STANDORT / SHOWROOM
@@ -94,6 +119,16 @@ export function renderContactResponse(intent: ContactIntent): string {
         `${c.booking_note} Erreichbar über WhatsApp ${c.whatsapp_number} oder ${c.email}.`,
         "",
         "Kommst du aus der Gegend? 🤍",
+      ].join("\n");
+
+    case "address_correction":
+      // Kunde hat eine FALSCHE Adresse genannt — höflich korrigieren, NIE bestätigen
+      return [
+        `Fast 💕 — wir sind tatsächlich in der **${c.street}**, ${c.postal_code} ${c.city}.`,
+        "",
+        `🕒 ${c.opening_hours_text}`,
+        "",
+        "Magst du in Google Maps reinschauen? Dort findest du uns sofort.",
       ].join("\n");
 
     case "phone":

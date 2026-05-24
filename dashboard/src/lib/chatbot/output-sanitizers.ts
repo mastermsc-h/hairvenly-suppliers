@@ -249,6 +249,38 @@ export function emDashBrake(text: string): string {
  *   7. Em-Dash-Bremse zuletzt
  */
 /**
+ * Strip redundante Follow-up-Frage nach exhaustiver Auflistung.
+ *
+ * Wenn der Bot gerade eine Liste mit ≥3 Optionen ausgegeben hat (z.B. alle
+ * verfügbaren Längen/Methoden zu einer Farbe) und am Ende fragt
+ * "Welche Methode/Länge/Variante suchst du?" — diese Frage ist redundant,
+ * weil die Kundin die Optionen DIREKT vor sich sieht. Wir strippen sie.
+ *
+ * Architektur (siehe CHATBOT_ARCHITECTURE.md §1.1):
+ *   Bot soll nicht krampfhaft Folgefragen stellen, wenn die Antwort
+ *   bereits exhaustiv ist. Nur fragen wenn es den Verkauf konkret fördert.
+ */
+export function stripRedundantFollowupQuestion(text: string): string {
+  const lines = text.split("\n");
+  // Zähle Bullets / Listeneinträge
+  const bulletCount = lines.filter(l => /^\s*[-•*]\s+\S/.test(l) || /^\s*\d+\.\s+\S/.test(l)).length;
+  if (bulletCount < 3) return text;
+  // Suche redundante Schluss-Frage in den letzten 2 nicht-leeren Zeilen
+  const lastNonEmpty: number[] = [];
+  for (let i = lines.length - 1; i >= 0 && lastNonEmpty.length < 2; i--) {
+    if (lines[i].trim().length > 0) lastNonEmpty.push(i);
+  }
+  const REDUNDANT_FOLLOWUP = /^\s*(welche|welches)\s+(methode|länge|variante|farbe|kombination|option|davon)[^?]*\??\s*$/i;
+  for (const idx of lastNonEmpty) {
+    if (REDUNDANT_FOLLOWUP.test(lines[idx])) {
+      console.warn(`[sanitizer] stripping redundant follow-up question: "${lines[idx].trim()}"`);
+      lines[idx] = "";
+    }
+  }
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/**
  * Markdown-Strip — Persona-Regel "KEIN Markdown" deterministisch erzwingen.
  *
  * WhatsApp/Instagram rendern kein Markdown, also würden Kunden literal
@@ -291,6 +323,8 @@ export function applyAllOutputSanitizers(
   if (opts.colorUrlMap) out = autoAddColorUrls(out, opts.colorUrlMap);
   // URL-Limit VOR Markdown-Strip — limitUrls erkennt noch [Label](URL)-Form
   out = limitUrls(out, 3);
+  // Redundante Follow-up-Frage nach exhaustiver Liste strippen
+  out = stripRedundantFollowupQuestion(out);
   // Markdown-Strip ZULETZT (vor emDashBrake), damit alle vorherigen
   // Sanitizer ihre Pattern noch mit Markdown matchen können
   out = stripMarkdownFormatting(out);
