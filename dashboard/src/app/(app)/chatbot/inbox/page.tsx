@@ -355,8 +355,33 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   const { count: cntActive } = await svc.from("chat_sessions").select("id", { count: "exact", head: true }).eq("status", "active");
   const { count: cntClosed } = await svc.from("chat_sessions").select("id", { count: "exact", head: true }).eq("status", "closed");
 
+  // 🛑 KILL-SWITCH-Status für Banner
+  const { data: killSwitchSettings } = await svc
+    .from("chatbot_settings")
+    .select("proactive_generation_enabled")
+    .eq("id", 1)
+    .maybeSingle();
+  const proactiveDisabled = killSwitchSettings?.proactive_generation_enabled === false;
+
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-4">
+      {/* 🛑 Banner wenn proaktive Bot-Generierung deaktiviert ist */}
+      {proactiveDisabled && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 flex items-center gap-3">
+          <AlertTriangle size={18} className="text-amber-600 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-amber-900">
+              Proaktive Bot-Generierung deaktiviert
+            </div>
+            <div className="text-xs text-amber-800 mt-0.5">
+              Der Bot erstellt aktuell KEINE automatischen Entwürfe oder Auto-Antworten. Customer-Messages
+              erscheinen normal in der Inbox — pro Session manuell auf <strong>„Antwort generieren"</strong> klicken,
+              um eine Bot-Antwort zu bekommen. Wieder aktivieren: <code className="bg-amber-100 px-1 rounded">UPDATE chatbot_settings SET proactive_generation_enabled = true;</code>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Kompakter Header — Titel, Live-Counter, Aktionen in EINER Zeile */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">

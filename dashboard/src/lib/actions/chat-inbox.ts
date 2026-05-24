@@ -177,7 +177,13 @@ export async function setBotMode(sessionId: string, mode: "auto" | "selective_au
     if (openMsg) {
       const { data: existingDraft } = await svc.from("chat_drafts")
         .select("id").eq("session_id", sessionId).eq("status", "pending").maybeSingle();
-      if (!existingDraft) {
+      // 🛑 KILL-SWITCH-CHECK (gleicher Helper wie im Webhook).
+      // Wenn proaktive Generierung deaktiviert ist, KEIN Auto-Draft beim
+      // setBotMode-Switch — der User stellt nur den Modus um, soll keinen
+      // verstecktem LLM-Call auslösen.
+      const { isProactiveGenerationEnabled } = await import("@/lib/chatbot/settings");
+      const proactiveAllowed = await isProactiveGenerationEnabled();
+      if (!existingDraft && proactiveAllowed) {
         try {
           const { respondAsBot, splitLongMessage } = await import("@/lib/chatbot/respond");
           // Bei auto: direkt senden. Bei selective_auto: erstmal generieren,
@@ -306,7 +312,10 @@ export async function setBotMode(sessionId: string, mode: "auto" | "selective_au
         }
       }
 
-      if (openCustomerMsgs.length > 0) {
+      // 🛑 KILL-SWITCH-CHECK (Cluster-Detection-Pfad — auch proaktiv)
+      const { isProactiveGenerationEnabled: isProactive2 } = await import("@/lib/chatbot/settings");
+      const proactiveAllowed2 = await isProactive2();
+      if (openCustomerMsgs.length > 0 && proactiveAllowed2) {
         const triggerMsg = openCustomerMsgs[openCustomerMsgs.length - 1];
 
         try {

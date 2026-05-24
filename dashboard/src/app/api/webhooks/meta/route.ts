@@ -530,6 +530,17 @@ async function routeIncoming(opts: {
     }
   }
 
+  // 🛑 GLOBAL KILL-SWITCH (via lib/chatbot/settings.ts)
+  // User-Anweisung 2026-05-24: keine proaktiven Bot-Drafts.
+  // Manual-Trigger (Inbox "Antwort generieren") ist NICHT betroffen.
+  {
+    const { isProactiveGenerationEnabled } = await import("@/lib/chatbot/settings");
+    if (!(await isProactiveGenerationEnabled())) {
+      console.log(`[meta-webhook] PROACTIVE-DISABLED — skip bot session=${session.id.slice(0,8)}`);
+      return;
+    }
+  }
+
   if ((effectiveBotMode === "auto" || effectiveBotMode === "assisted" || effectiveBotMode === "selective_auto") && session.status === "active") {
     try {
       // ── SMART DEBOUNCE ──
