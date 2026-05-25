@@ -7,6 +7,7 @@ import CategorySelector from "./category-selector";
 import AddToWaitlistButton from "./add-to-waitlist-button";
 import TeamNotes from "./team-notes";
 import FollowupButton from "./followup-button";
+import LoadOlderMessagesButton from "./load-older-messages-button";
 import {
   takeoverSession,
   sendHumanMessage,
@@ -534,6 +535,8 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-neutral-50">
+        {/* "Ältere Nachrichten von Instagram laden" — über dem ersten msg */}
+        <LoadOlderMessagesButton sessionId={session.id} channel={session.channel} />
         {messages.length === 0 && (
           <div className="text-center text-neutral-400 mt-12 text-sm">Noch keine Nachrichten</div>
         )}
