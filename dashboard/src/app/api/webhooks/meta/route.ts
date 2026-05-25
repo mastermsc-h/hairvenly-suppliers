@@ -459,8 +459,40 @@ async function routeIncoming(opts: {
   const noTextWithAudio = customerSentAudio && (!opts.text || /^\[Audio\]$/i.test(opts.text.trim()));
   const noTextWithVideo = customerSentVideo && (!opts.text || /^\[Video\]$/i.test(opts.text.trim()));
   const noTextWithEphemeral = customerSentEphemeral && (!opts.text || /^\[Einmal-Foto/i.test(opts.text.trim()));
+
+  // 🧠 KONTEXT-CHECK: Audio/Video/Ephemeral-Bypass NUR feuern wenn die Kundin
+  // in den letzten 30 Min KEINE echte Text-Message geschrieben hat. Sonst
+  // ignoriert die statische "Bin nur ein Bot"-Antwort den ganzen vorherigen
+  // Kontext und wirkt wie ein dummer Bot, der nicht zuhört.
+  //
+  // Beispiel-Bug (User-Beobachtung 2026-05): Kundin schreibt 3 lange
+  // Textblöcke über ihre Bedürfnisse, schickt dann ein Video. Bot feuerte
+  // sofort "kann keine Videos hören" — ohne die 3 Textblöcke zu erwähnen.
+  let hasRecentTextContext = false;
+  if (noTextWithAudio || noTextWithVideo || noTextWithEphemeral) {
+    const thirtyMinAgo = new Date(Date.now() - 30 * 60_000).toISOString();
+    const { data: recentMsgs } = await svc
+      .from("chat_messages")
+      .select("content, attachments, created_at")
+      .eq("session_id", session.id)
+      .eq("role", "user")
+      .gt("created_at", thirtyMinAgo)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(10);
+    hasRecentTextContext = (recentMsgs || []).some(m => {
+      const txt = (m.content || "").trim();
+      // Echte Text-Message = nicht leer + nicht ein reines Attachment-Label
+      return txt.length > 5 && !/^\[(Audio|Video|Foto|Einmal-Foto)[^\]]*\]$/i.test(txt);
+    });
+    if (hasRecentTextContext) {
+      console.log(`[meta-webhook] media-bypass SKIPPED for session=${session.id.slice(0,8)} — Kundin hat in letzten 30 Min Text geschrieben, statische "kann kein Video hören"-Antwort wäre dumm. Mitarbeiterin soll manuell ran.`);
+    }
+  }
+
   if (
     (noTextWithAudio || noTextWithVideo || noTextWithEphemeral) &&
+    !hasRecentTextContext &&
     (botMode === "auto" || botMode === "selective_auto") &&
     session.status === "active"
   ) {
