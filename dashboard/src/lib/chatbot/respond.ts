@@ -631,25 +631,19 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   //
   // Themen-Topics nur wenn die letzte Kunden-Message passende Keywords hat:
   // farbberatung, preise, versand, zahlung, salon, pflege etc.
+  // CORE_TOPICS: immer im Prompt, unabhängig vom Customer-Text. Nur echte
+  // Topic-Kategorien (keine Title-Strings — die laufen jetzt via pinned=true,
+  // siehe Migration 0082).
   const CORE_TOPICS = new Set([
     "produkte", "allgemein",
-    "🔒 Interne Bezeichnungen — niemals zur Kundin",
-    "🔒 Color-Advice — niemals vollautonom",
-    "🔒 Foto/Video-Service der Tressen — wann der Bot zustimmen darf",
-    "✂️ Fokussiert antworten — eine Sache pro Message",
-    "✅ Standard-Eröffnung — Bot darf direkt autonom klären",
-    "🚨 Methoden die es in BEIDEN Linien gibt — niemals ausschließen",
-    "🎯 Methode-Existenz vs. Farb-Verfügbarkeit unterscheiden",
-    "🎤 Audio-/Video-Nachrichten — Bot kann nicht abhören",
-    "🕒 Wartezeit ehrlich kommunizieren — Öffnungszeiten",
-    "ETA-Ehrlichkeit — Liefertermin gehört zur Linie, in der das Produkt wirklich existiert",
   ]);
-  // Keyword-Topic-Map: welche Topics sind relevant je Keyword?
+  // Keyword-Topic-Map: welche zusätzlichen Topics laden wir je nach
+  // Customer-Keyword. Pinned FAQs werden ZUSÄTZLICH immer geladen.
   const TOPIC_BY_KEYWORD: Array<{ keywords: RegExp; topics: string[] }> = [
     { keywords: /\b(farbe|farbton|blond|braun|rot|asch|honig|kühl|warm|melt|color|nuance|haarfarbe|ansatz|#\d|balayage|ombré|solide|sträh|highlight)\b/i,
-      topics: ["farbberatung", "Farbberatung — Reihenfolge: erst Foto, dann Empfehlung", "Foto-Angebot der Kundin annehmen", "📸 Foto-Briefing für Farbmatching — Pflicht-Checkliste", "💆 Feines Haar — Genius Weft vs Classic Tressen Entscheidung"] },
+      topics: ["farbberatung"] },
     { keywords: /\b(preis|kosten|€|euro|kostet|teuer|günstig|bezahl|raten)\b/i,
-      topics: ["preise", "zahlung", "💶 Produktpreise vs. Salon-Dienstleistungspreise"] },
+      topics: ["preise", "zahlung"] },
     { keywords: /\b(versand|liefer|paket|dhl|hermes|kommt|wann.*da)\b/i,
       topics: ["versand"] },
     { keywords: /\b(termin|salon|laden|showroom|vorbei|öffnungs|vor.ort|planity|buchen)\b/i,
@@ -664,18 +658,8 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       topics: ["mythen"] },
     { keywords: /\b(kontakt|whatsapp|instagram|social|email)\b/i,
       topics: ["kontakt"] },
-    { keywords: /\b(tresse|weft|classic|genius|invisible|mikroring|einnäh|befestig)\b/i,
-      topics: [
-        "produkte",
-        "👶 Tressen: Classic vs Genius Weft (Invisible) — beide flexibel befestigbar",
-        "💆 Feines Haar — Genius Weft vs Classic Tressen Entscheidung",
-      ] },
-    { keywords: /\b(invisible.tape)\b/i,
-      topics: ["Invisible Tapes — Markteinführung August 2026"] },
-    { keywords: /\b(reply|antwort.*alt|story|zurück.*nachricht)\b/i,
-      topics: ["↩️ Reply auf alte Nachricht — Bot fragt freundlich nach"] },
-    { keywords: /\b(ephemeral|foto.*einmal|view.*once|wegklick)\b/i,
-      topics: ["📸 Einmal-Ansicht-Fotos — bitte normal schicken"] },
+    { keywords: /\b(lager|vorrätig|verfügbar|eta|liefer.*zeit)\b/i,
+      topics: ["lager"] },
   ];
   const lastUserText = (lastUserMsgRow?.content as string | undefined) || "";
   const wantedTopics = new Set<string>(CORE_TOPICS);
@@ -684,13 +668,28 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       for (const t of rule.topics) wantedTopics.add(t);
     }
   }
-  const { data: faqs } = await svc
-    .from("chatbot_faq")
-    .select("topic, question, answer")
-    .eq("active", true)
-    .in("topic", Array.from(wantedTopics))
-    .order("topic")
-    .order("order_idx");
+  // pinned=true werden IMMER geladen (unabhängig vom Topic-Filter) — erlaubt
+  // wichtige Verhaltensregeln + Anti-Verwechslungen ohne Topic-String-Tricks.
+  // 2 separate Queries (robuster als .or().in() Kombination):
+  //   1) pinned=true (immer dabei)
+  //   2) topic IN wantedTopics (dynamisch je Customer-Frage)
+  // Dedup über slug (gleiche FAQ kann sowohl pinned als auch im Topic sein).
+  const [{ data: pinnedFaqs }, { data: topicFaqs }] = await Promise.all([
+    svc.from("chatbot_faq")
+      .select("slug, topic, question, answer")
+      .eq("active", true)
+      .eq("pinned", true)
+      .order("topic").order("order_idx"),
+    svc.from("chatbot_faq")
+      .select("slug, topic, question, answer")
+      .eq("active", true)
+      .in("topic", Array.from(wantedTopics))
+      .order("topic").order("order_idx"),
+  ]);
+  const faqMap = new Map<string, { topic: string; question: string; answer: string }>();
+  for (const f of pinnedFaqs || []) faqMap.set(f.slug, { topic: f.topic, question: f.question, answer: f.answer });
+  for (const f of topicFaqs || []) if (!faqMap.has(f.slug)) faqMap.set(f.slug, { topic: f.topic, question: f.question, answer: f.answer });
+  const faqs = Array.from(faqMap.values());
   if (faqs && faqs.length > 0) {
     systemPrompt += "\n\n## 📚 WISSENSDATENBANK — feste Fakten und FAQ\n";
     systemPrompt += "Diese Fakten sind IMMER wahr und gelten unabhängig vom konkreten Gespräch. Bei Widerspruch zwischen einem Trainings-Beispiel und der Wissensdatenbank: die Wissensdatenbank gewinnt.\n\n";
