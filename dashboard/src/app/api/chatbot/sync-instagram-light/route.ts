@@ -71,23 +71,31 @@ export async function POST() {
       if (!existing) continue; // keine Session → existiert noch nicht, full-sync würde sie anlegen
 
       if (existing.ig_unread_count !== igUnread) {
-        await svc.from("chat_sessions")
-          .update({ ig_unread_count: igUnread })
-          .eq("id", existing.id);
-        updated++;
-        // Divergenz erkennen: IG sagt unread, Dashboard sagt "gesehen seit lange"
-        if (igUnread > 0 && existing.last_seen_by_agent_at &&
-            existing.last_customer_msg_at &&
-            new Date(existing.last_seen_by_agent_at) >= new Date(existing.last_customer_msg_at)) {
-          divergenceDetected++;
+        const update: Record<string, unknown> = { ig_unread_count: igUnread };
+
+        // VARIANTE B: IG sagt unread + Dashboard hatte "gesehen" älter als
+        // 10 Min → Session zurück in "Zu tun" durch last_seen_by_agent_at=null.
+        // 10-Min-Grace verhindert False-Reset direkt nach Dashboard-Aktion
+        // (Phase 1 mark_seen API könnte noch nicht propagiert sein).
+        if (igUnread > 0 && existing.last_seen_by_agent_at) {
+          const seenAge = Date.now() - new Date(existing.last_seen_by_agent_at).getTime();
+          const TEN_MIN_MS = 10 * 60 * 1000;
+          if (seenAge > TEN_MIN_MS) {
+            update.last_seen_by_agent_at = null;
+            divergenceDetected++;
+            console.log(`[sync-light] Session ${existing.id.slice(0,8)} → IG-unread reactivated (age=${Math.round(seenAge/60000)}min)`);
+          }
         }
+
+        await svc.from("chat_sessions").update(update).eq("id", existing.id);
+        updated++;
       }
     }
 
     return NextResponse.json({
       conversations_seen: convos.length,
       sessions_updated: updated,
-      divergence_detected: divergenceDetected,
+      sessions_reactivated_from_ig: divergenceDetected,
     });
   } catch (e) {
     console.error("[sync-light] uncaught:", e);
