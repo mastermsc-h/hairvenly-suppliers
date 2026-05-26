@@ -3,13 +3,14 @@
 import { useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Send, Trash2, MessageSquare, X, Edit3, Save, Bot, User } from "lucide-react";
+import { Send, Trash2, MessageSquare, X, Edit3, Save, Bot, User, CheckCircle2, AlertTriangle } from "lucide-react";
 import {
   sendReservationNotification,
   cancelReservation,
   updateReservationNotes,
   deleteReservation,
 } from "@/lib/actions/chat-reservations";
+import StructuredFormModal from "./structured-form-modal";
 
 export interface Reservation {
   id: string;
@@ -29,6 +30,11 @@ export interface Reservation {
   notification_message: string | null;
   cancel_reason: string | null;
   created_by_bot: boolean;
+  // Strukturierte Felder (Migration 0084)
+  line: "russisch" | "usbekisch" | null;
+  length_cm: number | null;
+  method_kind: string | null;
+  structured_complete: boolean;
 }
 
 export default function ReservationRow({
@@ -41,6 +47,7 @@ export default function ReservationRow({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [showNotify, setShowNotify] = useState(false);
+  const [showStructured, setShowStructured] = useState(false);
   const [editingNotes, setEditingNotes] = useState(false);
   const [notes, setNotes] = useState(r.notes ?? "");
   // Stock-Scan-Ergebnis pro Reservierung — wird via Custom Event vom
@@ -153,6 +160,30 @@ export default function ReservationRow({
               )}
             </div>
 
+            {/* Strukturierte Angaben (Linie/Länge/Methode) — nur bei aktiver Reservierung */}
+            {r.status === "waiting" && (
+              <div className="mt-1.5 flex items-center gap-2 flex-wrap text-xs">
+                {r.structured_complete ? (
+                  <button
+                    onClick={() => setShowStructured(true)}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-800 hover:bg-green-100"
+                    title="Strukturierte Angaben prüfen/bearbeiten"
+                  >
+                    <CheckCircle2 size={11} />
+                    {r.line === "russisch" ? "Russisch" : "Usbekisch"} · {r.length_cm}cm · {r.method_kind?.replace("_", " ")}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setShowStructured(true)}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 hover:bg-amber-100 font-medium"
+                    title="Linie / Länge / Methode wählen — danach nutzt der Lager-Matcher diese Angaben"
+                  >
+                    <AlertTriangle size={11} /> Angaben vervollständigen
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* ETA + Notes */}
             <div className="text-xs text-neutral-500 mt-1 space-y-0.5">
               {r.eta_hint && <div>⏱ Lieferung erwartet: {r.eta_hint}</div>}
@@ -240,6 +271,18 @@ export default function ReservationRow({
           reservation={r}
           onClose={() => setShowNotify(false)}
           onSent={() => { setShowNotify(false); router.refresh(); }}
+        />
+      )}
+      {showStructured && (
+        <StructuredFormModal
+          reservationId={r.id}
+          initial={{
+            line: r.line,
+            lengthCm: (r.length_cm ?? null) as 45 | 55 | 60 | 65 | 85 | null,
+            methodKind: (r.method_kind ?? null) as "tape" | "mini_tape" | "genius_weft" | "classic_weft" | "invisible_weft" | "bonding" | "clip" | "ponytail" | null,
+            color: r.color,
+          }}
+          onClose={() => setShowStructured(false)}
         />
       )}
     </>

@@ -3,6 +3,13 @@
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
+export type ReservationLine = "russisch" | "usbekisch";
+export type ReservationLengthCm = 45 | 55 | 60 | 65 | 85;
+export type ReservationMethodKind =
+  | "tape" | "mini_tape"
+  | "genius_weft" | "classic_weft" | "invisible_weft"
+  | "bonding" | "clip" | "ponytail";
+
 export interface ReservationInput {
   sessionId?: string;
   productName: string;
@@ -11,6 +18,61 @@ export interface ReservationInput {
   method?: string;
   etaHint?: string;
   notes?: string;
+  // Strukturierte Felder (Bot kann diese vorab aus Foto/Text ableiten,
+  // MA ergänzt fehlende via Modal)
+  line?: ReservationLine | null;
+  lengthCm?: ReservationLengthCm | null;
+  methodKind?: ReservationMethodKind | null;
+}
+
+/**
+ * Heuristisch line/length/method_kind aus Free-Text ableiten —
+ * fürs Bot-Tool gedacht, damit das Insert direkt strukturierte
+ * Felder mitbekommt soweit eindeutig erkennbar.
+ */
+function detectStructured(input: ReservationInput): {
+  line: ReservationLine | null;
+  length_cm: ReservationLengthCm | null;
+  method_kind: ReservationMethodKind | null;
+  structured_complete: boolean;
+} {
+  const text = [input.productName, input.method, input.color, input.notes].filter(Boolean).join(" ").toLowerCase();
+
+  // LINE
+  let line: ReservationLine | null = input.line ?? null;
+  if (!line) {
+    if (/\b(russisch|russische|russischer|russisches|glatt)\b/.test(text)) line = "russisch";
+    else if (/\b(usbekisch|usbekische|us\s+wellig|wellig|wellige)\b/.test(text)) line = "usbekisch";
+  }
+
+  // LENGTH
+  let length_cm: ReservationLengthCm | null = input.lengthCm ?? null;
+  if (!length_cm) {
+    const m = text.match(/\b(45|55|60|65|85)\s*cm\b/);
+    if (m) length_cm = parseInt(m[1], 10) as ReservationLengthCm;
+    // Wenn russisch und keine Länge → 60cm implicit
+    else if (line === "russisch") length_cm = 60;
+  }
+
+  // METHOD KIND
+  let method_kind: ReservationMethodKind | null = input.methodKind ?? null;
+  if (!method_kind) {
+    if (/\bmini[\s-]?tape/.test(text)) method_kind = "mini_tape";
+    else if (/\bgenius[\s-]?(weft|tresse|tressen)/.test(text)) method_kind = "genius_weft";
+    else if (/\bclassic[\s-]?(weft|tresse|tressen)/.test(text)) method_kind = "classic_weft";
+    else if (/\b(invisible|butterfly)[\s-]?(weft|tresse|tressen)/.test(text)) method_kind = "invisible_weft";
+    else if (/\bbonding/.test(text)) method_kind = "bonding";
+    else if (/\b(clip[\s-]?in|clip[\s-]?on|invisible[\s-]?clip)/.test(text)) method_kind = "clip";
+    else if (/\bponytail/.test(text)) method_kind = "ponytail";
+    else if (/\b(standard[\s-]?)?tape\b/.test(text)) method_kind = "tape";
+  }
+
+  return {
+    line,
+    length_cm,
+    method_kind,
+    structured_complete: !!(line && length_cm && method_kind),
+  };
 }
 
 /**
@@ -93,6 +155,9 @@ export async function createReservation(input: ReservationInput, createdByBot = 
   // MA findet richtigen Link selbst — besser als falscher Link.
   const validatedUrl = validateProductUrlAgainstMethod(input.productUrl, input.method);
 
+  // Strukturierte Felder ableiten (Bot/Free-Text-Heuristik)
+  const struct = detectStructured(input);
+
   const { data, error } = await svc.from("chat_reservations").insert({
     session_id:    input.sessionId || null,
     customer_name: session?.customer_name || null,
@@ -106,6 +171,10 @@ export async function createReservation(input: ReservationInput, createdByBot = 
     notes:         input.notes || null,
     status:        "waiting",
     created_by_bot: createdByBot,
+    line:          struct.line,
+    length_cm:     struct.length_cm,
+    method_kind:   struct.method_kind,
+    structured_complete: struct.structured_complete,
   }).select().single();
 
   if (error) throw new Error(error.message);
@@ -123,9 +192,40 @@ export async function createReservationManual(formData: FormData) {
     method:      (formData.get("method") as string) || undefined,
     etaHint:     (formData.get("eta_hint") as string) || undefined,
     notes:       (formData.get("notes") as string) || undefined,
+    line:        (formData.get("line") as ReservationLine) || undefined,
+    lengthCm:    formData.get("length_cm") ? (parseInt(formData.get("length_cm") as string, 10) as ReservationLengthCm) : undefined,
+    methodKind:  (formData.get("method_kind") as ReservationMethodKind) || undefined,
   };
   if (!input.productName?.trim()) throw new Error("Produktname fehlt");
   await createReservation(input, false);
+}
+
+/**
+ * Strukturierte Felder einer Reservierung nachträglich setzen/ergänzen
+ * (vom Modal "Angaben vervollständigen"). Setzt structured_complete=true
+ * wenn alle 3 strukturierten Felder gefüllt sind.
+ */
+export async function updateReservationStructured(
+  reservationId: string,
+  fields: {
+    line: ReservationLine | null;
+    lengthCm: ReservationLengthCm | null;
+    methodKind: ReservationMethodKind | null;
+    color?: string;
+  },
+) {
+  const svc = createServiceClient();
+  const complete = !!(fields.line && fields.lengthCm && fields.methodKind);
+  const update: Record<string, unknown> = {
+    line: fields.line,
+    length_cm: fields.lengthCm,
+    method_kind: fields.methodKind,
+    structured_complete: complete,
+  };
+  if (fields.color !== undefined) update.color = fields.color || null;
+  const { error } = await svc.from("chat_reservations").update(update).eq("id", reservationId);
+  if (error) throw new Error(error.message);
+  revalidatePath("/chatbot/reservations");
 }
 
 /**
@@ -242,7 +342,7 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
   const svc = createServiceClient();
   const { data: rows } = await svc
     .from("chat_reservations")
-    .select("id, product_name, color, method")
+    .select("id, product_name, color, method, line, length_cm, method_kind, structured_complete")
     .eq("status", "waiting");
 
   if (!rows || rows.length === 0) return [];
@@ -384,6 +484,90 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
     };
   };
 
+  // ── STRUKTURIERTER MATCH-HELPER ───────────────────────────────────────
+  // Wenn die Reservierung structured_complete=true ist (Linie + Länge +
+  // method_kind alle gesetzt), nutzen wir AUSSCHLIESSLICH diese 3 Felder
+  // + die Farbe für den Match. Keine Heuristik, keine Subtype-Inferenz.
+  // Single-Source-of-Truth, deterministisch.
+  const METHOD_KIND_RE: Record<string, RegExp> = {
+    tape:           /\bstandard\s+(russische|tape|usbekisch)|\b(?<!mini\s)tape(?:\s|s|$)/i,
+    mini_tape:      /\bmini[\s-]?tape/i,
+    genius_weft:    /\bgenius[\s-]?(weft|tresse|tressen)/i,
+    classic_weft:   /\bclassic[\s-]?(weft|tresse|tressen)/i,
+    invisible_weft: /\b(invisible|butterfly)[\s-]?(weft|tresse|tressen)/i,
+    bonding:        /\bbonding/i,
+    clip:           /\b(invisible|standard)?\s*clip[\s-]?(extension|ext|in)/i,
+    ponytail:       /\bponytail/i,
+  };
+  const structuredMatch = (
+    row: { collection?: string; product?: string; _line?: "russisch" | "usbekisch" },
+    res: { line: string | null; length_cm: number | null; method_kind: string | null; color: string | null },
+  ): boolean => {
+    const text = `${row.collection || ""} ${row.product || ""}`.toLowerCase();
+    // Line
+    if (res.line) {
+      const rowLine = row._line || extractLineFromText(row.collection || "");
+      if (!rowLine || rowLine !== res.line) return false;
+    }
+    // Length: explicit in text muss matchen; bei russisch impliziert 60cm
+    if (res.length_cm !== null) {
+      const productLengthMatch = text.match(LENGTH_CM_RE);
+      if (productLengthMatch) {
+        if (parseInt(productLengthMatch[1], 10) !== res.length_cm) return false;
+      } else {
+        // Keine Länge im Produkt → russisch=60 implicit
+        if (res.line === "russisch" && res.length_cm !== 60) return false;
+        // Usbekisch ohne explizite Länge im Produkt → kein Match (cm muss klar sein)
+        if (res.line === "usbekisch") return false;
+      }
+    }
+    // Method-Kind
+    if (res.method_kind) {
+      const re = METHOD_KIND_RE[res.method_kind];
+      if (re && !re.test(text)) return false;
+      // Cross-Method-Conflict: andere method_kinds dürfen NICHT matchen
+      // (z.B. wenn "tape" gewünscht, darf row kein "mini tape" oder "bonding" sein)
+      for (const [other, otherRe] of Object.entries(METHOD_KIND_RE)) {
+        if (other === res.method_kind) continue;
+        // Edge: tape vs mini_tape — tape soll nicht auf mini matchen
+        if (otherRe.test(text)) {
+          // Wenn die gewünschte method_kind im text dennoch klar matched, OK
+          if (re && re.test(text) && res.method_kind === "tape" && other === "mini_tape") {
+            // tape-Pattern soll nicht auf "mini tape"-Produkte fallen
+            return false;
+          }
+          // Generelle Cross-Method-Conflict: andere Method dominiert → reject
+          if (res.method_kind === "tape" && (other === "mini_tape" || other === "bonding" || other === "clip" || other === "ponytail")) return false;
+          if (res.method_kind === "mini_tape" && other === "tape") {
+            // tape-Pattern triggert auch bei "mini tape"-Produkten → OK
+            continue;
+          }
+          // Andere Methods sollten nicht überschneiden
+          if (["bonding","clip","ponytail","genius_weft","classic_weft","invisible_weft"].includes(res.method_kind) && other !== res.method_kind) {
+            return false;
+          }
+        }
+      }
+    }
+    // Color: tokens müssen alle als Substring vorkommen
+    if (res.color) {
+      const colorTokens = res.color.toLowerCase().split(/[\s\-_/]+/).filter(t => t.length > 1);
+      for (const ct of colorTokens) {
+        if (!text.includes(ct)) return false;
+      }
+      // Compound-Color-Guard auch hier: wenn haystack einen Modifier hat
+      // den die Reservierung nicht erwähnt → andere Farbe
+      const searchHasModifier = new Set(
+        modifierRegexes.filter(({ re }) => re.test(res.color || "")).map(({ mod }) => mod)
+      );
+      for (const { mod, re } of modifierRegexes) {
+        if (!re.test(text)) continue;
+        if (!searchHasModifier.has(mod)) return false;
+      }
+    }
+    return true;
+  };
+
   const results: StockCheckResult[] = [];
   for (const r of rows) {
     // SERVICE-ITEM-Check FRÜH (Klasse C) — "Farbring" etc. sind nicht im Lager
@@ -397,6 +581,46 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
       continue;
     }
 
+    // ── STRUKTURIERTER PFAD ─────────────────────────────────────────────
+    // Wenn MA die Maske komplett ausgefüllt hat (structured_complete=true),
+    // nutzen wir den deterministischen strukturierten Matcher und überspringen
+    // die Heuristik komplett.
+    const rWithStruct = r as typeof r & {
+      line?: "russisch" | "usbekisch" | null;
+      length_cm?: number | null;
+      method_kind?: string | null;
+      structured_complete?: boolean;
+    };
+    if (rWithStruct.structured_complete && rWithStruct.line && rWithStruct.length_cm && rWithStruct.method_kind) {
+      const structFields = {
+        line: rWithStruct.line,
+        length_cm: rWithStruct.length_cm,
+        method_kind: rWithStruct.method_kind,
+        color: r.color,
+      };
+      const sMatch = (row: { collection?: string; product?: string; _line?: "russisch" | "usbekisch" }) => structuredMatch(row, structFields);
+      const stockedS = allInventory.filter(row => sMatch(row) && row.quantity > 0);
+      if (stockedS.length > 0) {
+        results.push({ reservationId: r.id, productName: r.product_name, status: "in_stock", matchedProduct: stockedS[0].product });
+        continue;
+      }
+      const onTheWayS = unterwegs.filter(u => sMatch(u));
+      if (onTheWayS.length > 0) {
+        const eta = onTheWayS[0].perOrder?.[0]?.ankunft || "bald";
+        results.push({ reservationId: r.id, productName: r.product_name, status: "unterwegs", eta, matchedProduct: onTheWayS[0].product });
+        continue;
+      }
+      const oosS = nullbestand.filter(p => sMatch(p));
+      if (oosS.length > 0) {
+        results.push({ reservationId: r.id, productName: r.product_name, status: "out_of_stock", matchedProduct: oosS[0].product });
+        continue;
+      }
+      results.push({ reservationId: r.id, productName: r.product_name, status: "unknown", reason: "Strukturierter Match fand kein Produkt" });
+      continue;
+    }
+
+    // ── FALLBACK: HEURISTIK-PFAD ────────────────────────────────────────
+    // Reservierung hat noch keine strukturierten Felder → alter Free-Text-Match.
     const searchStr = [r.color, r.method, r.product_name].filter(Boolean).join(" ");
 
     // Gewicht-/Längen-Filter extrahieren (Klasse B)
