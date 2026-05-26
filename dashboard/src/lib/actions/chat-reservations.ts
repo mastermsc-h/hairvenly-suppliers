@@ -194,19 +194,19 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
   ]);
   const allInventory = [...ruSheet.rows, ...uzSheet.rows];
 
-  // STOP-Words: beschreibende Wörter die im Reservierungs-Namen vorkommen
-  // aber NICHT im Sheet-Produktnamen — sonst scheitert der AND-Match.
-  // Klasse A — Erweiterung 2026-05.
+  // STOP-Words: NUR reine Beschreiber, die KEINE Method/Subtype-Bedeutung haben.
+  // ⚠️ NICHT IN STOP (wichtig!): tape/tapes/extension/extensions/standard/mini/
+  //    genius/classic/invisible/bondings/tressen/clip/weft/ponytail — diese
+  //    Tokens unterscheiden Method×Subtype und MÜSSEN im Match drinbleiben,
+  //    sonst matched z.B. "Standard Tape" fälschlich gegen "Invisible Clip Extensions"
+  //    nur weil beide die gleiche Farbe haben. (Bug-Report 2026-05)
   const STOP = new Set([
     "und", "in", "die", "der", "das", "den", "ein", "eine", "mit", "für", "auf",
     "russisch", "russische", "russischer", "usbekisch", "usbekische", "usbekischer",
-    "tape", "tapes", "extension", "extensions",
     "us", "wellige", "wellig", "glatt", "glatte", "glatten",
-    "standard", "echthaar", "echte", "haar", "haare",
+    "echthaar", "echte", "haar", "haare",
     "braun", "braune", "brauner", "blond", "blonde", "blonder",
     "balayage", "ombre", "ombré", "solide",
-    // NICHT in STOP: "melt" gehört zu Eigennamen wie "Mocha Melt", "Ash Melt",
-    // "Cool Melt" — soll mit-matchen.
     "premium", "luxury",
   ]);
 
