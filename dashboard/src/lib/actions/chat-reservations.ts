@@ -14,6 +14,60 @@ export interface ReservationInput {
 }
 
 /**
+ * Validiert ob eine product_url konsistent zur method ist.
+ * Bug-Pattern: Bot speichert URL aus letztem get_available_colors-Tool-Result,
+ * die zu einer ANDEREN Method gehört als die in der Reservation gesetzte.
+ * Beispiel: method="Standard Tapes" + url=".../mini-tape-extensions..." → falsch.
+ *
+ * Returns die URL wenn konsistent, sonst null. Konservativ: bei Unsicherheit
+ * lieber null als falscher Link.
+ *
+ * NOTE: Keine Server-Action — private Helper (deshalb nicht exported, da
+ * "use server" Modul nur async exports erlaubt).
+ */
+function validateProductUrlAgainstMethod(
+  url: string | undefined,
+  method: string | undefined,
+): string | null {
+  if (!url) return null;
+  if (!method) return url; // ohne method-Info kein Check möglich, durchlassen
+  const m = method.toLowerCase();
+  const u = url.toLowerCase();
+
+  // Method-Klassifizierung
+  const isStandard = /\b(standard\s*tape|standard.tape)/i.test(method) && !/mini/i.test(method);
+  const isMini     = /mini\s*tape/i.test(method);
+  const isBonding  = /\bbonding/i.test(method);
+  const isTresse   = /\b(tresse|tressen|weft)/i.test(method) && !/clip/i.test(method);
+  const isClip     = /\b(clip[- ]?in|clip[- ]?on)/i.test(method);
+  const isPonytail = /\bponytail/i.test(method);
+
+  // URL-Slug-Klassifizierung
+  const urlHasMini     = /mini[- ]tape/i.test(url);
+  const urlHasStandard = /standard[- ]tape/i.test(url);
+  const urlHasBonding  = /bonding/i.test(url);
+  const urlHasTresse   = /(tresse|weft)/i.test(url) && !/clip/i.test(url);
+  const urlHasClip     = /clip[- ]?in|clip[- ]?ext/i.test(url);
+  const urlHasPonytail = /ponytail/i.test(url);
+  const urlHasTape     = /tape/i.test(url);
+
+  // Widerspruchs-Check
+  if (isStandard && urlHasMini) return null;          // Standard ≠ Mini
+  if (isMini && urlHasStandard) return null;          // Mini ≠ Standard
+  if (isBonding && !urlHasBonding && urlHasTape) return null;   // Bonding ≠ Tape
+  if (isTresse && (urlHasTape || urlHasClip || urlHasBonding)) return null;  // Tresse ≠ andere
+  if (isClip && (urlHasTape || urlHasBonding || urlHasTresse)) return null;  // Clip ≠ andere
+  if (isPonytail && !urlHasPonytail) return null;      // Ponytail muss Slug haben
+  // Wenn method "tape" sagt und url keinen "tape" hat → vermutlich falsche Kategorie
+  if (/\btape/i.test(method) && !urlHasTape && (urlHasBonding || urlHasClip || urlHasTresse)) {
+    return null;
+  }
+
+  void u; void m; // (lint) — Variables reserved for future synonym-checks
+  return url;
+}
+
+/**
  * Reservierung anlegen — wird vom Bot-Tool aufgerufen (create_reservation)
  * oder manuell vom Mitarbeiter. Session-Daten (channel, external_id, customer_name)
  * werden aus der Session gespiegelt, damit der spätere Notification-Versand
@@ -32,13 +86,20 @@ export async function createReservation(input: ReservationInput, createdByBot = 
     session = data;
   }
 
+  // URL-Method-Validator: Bot liefert manchmal URL aus dem letzten
+  // get_available_colors-Output, der zur FALSCHEN Method gehört.
+  // Beispiel-Bug (User-Report 2026-05): method="Standard Tapes" aber URL
+  // hat slug "...mini-tape...". Konservativ: bei Widerspruch URL droppen,
+  // MA findet richtigen Link selbst — besser als falscher Link.
+  const validatedUrl = validateProductUrlAgainstMethod(input.productUrl, input.method);
+
   const { data, error } = await svc.from("chat_reservations").insert({
     session_id:    input.sessionId || null,
     customer_name: session?.customer_name || null,
     channel:       session?.channel || null,
     external_id:   session?.external_id || null,
     product_name:  input.productName,
-    product_url:   input.productUrl || null,
+    product_url:   validatedUrl,
     color:         input.color || null,
     method:        input.method || null,
     eta_hint:      input.etaHint || null,
