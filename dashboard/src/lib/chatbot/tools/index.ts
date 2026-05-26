@@ -396,6 +396,62 @@ const getStockEta: ToolDef = {
       }
       const urlFor = (productName: string): string | null => urlMap.get(productName) || null;
 
+      // ── NEARBY-LENGTH-ALTERNATIVE-LOOKUP ────────────────────────────────
+      // User-Wunsch 2026-05-27: Wenn die gewünschte Länge ausverkauft ist und
+      // die Wartezeit >2 Wochen beträgt (oder gar kein ETA), soll der Bot
+      // automatisch eine NAHE Länge in derselben Farbe + Methode + Linie als
+      // Alternative anbieten. Beispiel: 4/27T24 65cm ausverkauft → 55cm
+      // (10cm kürzer) sofort verfügbar → Bot empfiehlt das proaktiv.
+      //
+      // Regeln:
+      //  - Nur aktiv wenn search EXPLIZIT eine Länge enthält (sonst gibt es
+      //    keine "Nachbar-Länge" — der Bot soll erst die Länge klären).
+      //  - Suche gleiche Farbe + Methode + Linie ohne den Längen-Token
+      //  - Filter qty>0, sortiere nach geringster cm-Differenz zur Soll-Länge
+      //  - Max 20cm Differenz (sonst nicht "nahe" genug)
+      let nearbyAlternative: { product: string; collection: string; length_cm: number; cm_diff: number; shopify_url: string | null } | null = null;
+      const requestedLengthMatch = search.match(/\b(\d{2,3})\s*cm\b/i);
+      if (requestedLengthMatch) {
+        const requestedCm = parseInt(requestedLengthMatch[1], 10);
+        const lengthTokenRe = /^\d{2,3}cm$/i;
+        const tokensWithoutLength = tokens.filter(t => !lengthTokenRe.test(t));
+        if (tokensWithoutLength.length > 0) {
+          const matchSameColor = buildMatcher(tokensWithoutLength);
+          const candidates = inventoryRows
+            .filter(r => matchSameColor(`${r.collection} ${r.product}`) && passesCompoundGuard(`${r.collection} ${r.product}`))
+            .filter(r => r.quantity > 0)
+            .map(r => {
+              const lenMatch = `${r.collection} ${r.product}`.match(/\b(\d{2,3})\s*cm\b/i);
+              const lenCm = lenMatch ? parseInt(lenMatch[1], 10) : null;
+              return { row: r, lenCm };
+            })
+            .filter(c => c.lenCm !== null && c.lenCm !== requestedCm)
+            .map(c => ({
+              ...c,
+              cmDiff: Math.abs((c.lenCm as number) - requestedCm),
+            }))
+            .filter(c => c.cmDiff <= 20)
+            .sort((a, b) => a.cmDiff - b.cmDiff);
+          if (candidates.length > 0) {
+            const best = candidates[0];
+            nearbyAlternative = {
+              product: best.row.product,
+              collection: best.row.collection,
+              length_cm: best.lenCm as number,
+              cm_diff: best.cmDiff,
+              shopify_url: best.row.url || urlFor(best.row.product) || null,
+            };
+          }
+        }
+      }
+      // Helper für "lange Wartezeit": mehr als 14 Tage von heute
+      const daysFromNow = (iso: string | null | undefined): number | null => {
+        if (!iso) return null;
+        const t = new Date(iso).getTime();
+        if (isNaN(t)) return null;
+        return Math.round((t - Date.now()) / (1000 * 60 * 60 * 24));
+      };
+
       // ── LENGTH-DISAMBIGUATION-GUARD ────────────────────────────────────
       // User-Bug 2026-05-27: Bot suchte "4/27t24" OHNE Länge. Matchte
       // 4/27T24 in 45cm/55cm/65cm/85cm + Bondings. 4 davon qty>0, nur die
@@ -554,6 +610,11 @@ const getStockEta: ToolDef = {
             shopify_url: urlFor(m.product),
           };
         });
+        // Nearby-Alternative nur anzeigen wenn ETA > 14 Tage (lange Wartezeit)
+        const earliestEtaIso = products[0]?.earliest_eta_iso;
+        const waitDays = daysFromNow(earliestEtaIso);
+        const longWait = waitDays !== null && waitDays > 14;
+        const includeAlternative = longWait && nearbyAlternative;
         return {
           output: JSON.stringify({
             status: "unterwegs",
@@ -563,23 +624,35 @@ const getStockEta: ToolDef = {
               "Es interessiert die Kundin nicht ob es eine oder mehrere Lieferungen gibt. " +
               "EIN Datum reicht. Keine 'erste Lieferung'-Phrasen! " +
               "URL-REGEL: Wenn du einen Produkt-Link postest, nimm AUSSCHLIESSLICH die " +
-              "shopify_url aus diesem Tool-Output. NIEMALS selbst URLs bauen oder raten.",
+              "shopify_url aus diesem Tool-Output. NIEMALS selbst URLs bauen oder raten." +
+              (includeAlternative
+                ? " ALTERNATIVE: Da die Wartezeit über 2 Wochen beträgt, biete der Kundin proaktiv die " +
+                  "Nachbar-Länge an, die in derselben Farbe SOFORT verfügbar ist (siehe 'nearby_alternative'-Feld). " +
+                  "Phrasierung: 'Falls du nicht so lange warten willst — wir hätten die Farbe in [X]cm sofort " +
+                  "verfügbar (nur [Y]cm kürzer/länger). Magst du die nehmen, oder lieber auf die [Soll-Länge] warten?'"
+                : ""),
             sheet_last_updated: lastUpdated,
             products,
+            ...(includeAlternative ? { nearby_alternative: nearbyAlternative } : {}),
           }),
         };
       }
 
       // C) Produkt ausverkauft (Nullbestand) ohne Nachschub
       if (inNullbestand.length > 0) {
+        // Bei "kein ETA" → IMMER Alternative anbieten falls Nachbar-Länge in Stock
         return {
           output: JSON.stringify({
             status: "out_of_stock_no_eta",
             message:
               "Aktuell ausverkauft, keine bestätigte Nachschub-Lieferung im System. " +
-              "Antworte ehrlich: 'leider noch kein bestätigtes Lieferdatum' und biete ggf. Alternative " +
-              "oder nutze transfer_to_human.",
+              "Antworte ehrlich: 'leider noch kein bestätigtes Lieferdatum'." +
+              (nearbyAlternative
+                ? " ALTERNATIVE: Biete proaktiv die Nachbar-Länge in derselben Farbe an (siehe 'nearby_alternative'-Feld). " +
+                  "Phrasierung: 'Wir hätten die Farbe in [X]cm sofort verfügbar (nur [Y]cm Unterschied) — magst du die nehmen?'"
+                : " Biete ggf. Alternative oder nutze transfer_to_human."),
             products_found: inNullbestand.slice(0, 3).map(p => `${p.product} (${p.collection})`),
+            ...(nearbyAlternative ? { nearby_alternative: nearbyAlternative } : {}),
           }),
         };
       }
@@ -629,13 +702,18 @@ const getStockEta: ToolDef = {
             message:
               "Produkt ist im Sortiment, aber AKTUELL AUSVERKAUFT (Bestand = 0). Es ist KEIN Nachschub " +
               "im Unterwegs-System eingetragen. Sag dem Kunden ehrlich: 'das ist gerade ausverkauft, " +
-              "kein bestätigtes Lieferdatum'. Schlag eine ECHTE ALTERNATIVE vor (andere Farbe, andere Methode, " +
-              "selbe Qualität) — niemals eskaliere wenn du selbst eine Alternative anbieten kannst. " +
-              "NIEMALS sagen 'haben wir sofort da' für diese Produkte!",
+              "kein bestätigtes Lieferdatum'." +
+              (nearbyAlternative
+                ? " ALTERNATIVE: Biete proaktiv die Nachbar-Länge in derselben Farbe an (siehe 'nearby_alternative'-Feld). " +
+                  "Phrasierung: 'Wir hätten sie in [X]cm sofort verfügbar (nur [Y]cm Unterschied) — magst du die nehmen?'"
+                : " Schlag eine ECHTE ALTERNATIVE vor (andere Farbe, andere Methode, selbe Qualität) — " +
+                  "niemals eskaliere wenn du selbst eine Alternative anbieten kannst.") +
+              " NIEMALS sagen 'haben wir sofort da' für diese Produkte!",
             products_out_of_stock: zeroStockMatches.slice(0, 3).map(r => ({
               product: r.product,
               collection: r.collection,
             })),
+            ...(nearbyAlternative ? { nearby_alternative: nearbyAlternative } : {}),
           }),
         };
       }
