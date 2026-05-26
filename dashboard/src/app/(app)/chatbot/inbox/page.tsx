@@ -779,6 +779,27 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                             Mitarbeiter benötigt!
                           </span>
                         )}
+                        {/* 📲 IG-DIVERGENZ-BADGE: IG sagt unread, Dashboard sagt schon gesehen
+                            → Mitarbeiterin hat in der IG-App was als "ungelesen" markiert
+                            (oder ein Dashboard-Action ist noch nicht zu Meta durchgekommen).
+                            Sanftes Sekundär-Signal — keine Alarm-Stufe. */}
+                        {(() => {
+                          const igUnread = (s as { ig_unread_count?: number | null }).ig_unread_count || 0;
+                          if (igUnread === 0) return null;
+                          // Nur als Divergenz zeigen, wenn Dashboard schon "gesehen" — sonst ist das ohnehin "wartet auf dich".
+                          const seenAt = (s as { last_seen_by_agent_at?: string | null }).last_seen_by_agent_at;
+                          const customerAt = (s as { last_customer_msg_at?: string | null }).last_customer_msg_at;
+                          const dashboardSeen = seenAt && customerAt && new Date(seenAt) >= new Date(customerAt);
+                          if (!dashboardSeen) return null;
+                          return (
+                            <span
+                              className="bg-sky-50 text-sky-700 border border-sky-200 text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5"
+                              title={`Auf Instagram noch ${igUnread} Nachricht${igUnread > 1 ? "en" : ""} ungelesen (im Dashboard bereits gesehen). Tipp: Im Dashboard "Erledigt" klicken — synchronisiert zu IG.`}
+                            >
+                              📱 IG ungelesen{igUnread > 1 ? ` (${igUnread})` : ""}
+                            </span>
+                          );
+                        })()}
                         {(() => {
                           const due = (s as { followup_due_at?: string | null }).followup_due_at;
                           const reason = (s as { followup_reason?: string | null }).followup_reason;

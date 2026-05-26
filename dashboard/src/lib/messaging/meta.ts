@@ -107,6 +107,41 @@ export async function sendWhatsAppMessage(
   }
 }
 
+/**
+ * Markiert eine Instagram-Conversation als gelesen via Meta `sender_actions: mark_seen`.
+ * Wird beim Dashboard-Action "Erledigt"/"Übernehmen"/Reply-gesendet aufgerufen,
+ * damit der IG-Unread-Counter auf der Customer-Seite (und in der IG-App) runtergeht.
+ *
+ * Fire-and-forget — blockt den Caller nicht. Fehler werden geloggt, nicht geworfen.
+ */
+export async function markInstagramSeen(recipientIgId: string): Promise<{ success: boolean; error?: string }> {
+  const token = process.env.META_PAGE_ACCESS_TOKEN;
+  const igUserId = process.env.META_INSTAGRAM_USER_ID;
+  if (!token || !igUserId) {
+    return { success: false, error: "META_PAGE_ACCESS_TOKEN or META_INSTAGRAM_USER_ID not set" };
+  }
+  const host = token.startsWith("IGAA") ? "https://graph.instagram.com" : "https://graph.facebook.com";
+  try {
+    const res = await fetch(`${host}/${GRAPH_VERSION}/${igUserId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        recipient: { id: recipientIgId },
+        sender_action: "mark_seen",
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      console.warn(`[meta] markInstagramSeen failed for ${recipientIgId.slice(0,8)}:`, data.error?.message || `HTTP ${res.status}`);
+      return { success: false, error: data.error?.message || `HTTP ${res.status}` };
+    }
+    return { success: true };
+  } catch (e) {
+    console.warn(`[meta] markInstagramSeen error:`, (e as Error).message);
+    return { success: false, error: (e as Error).message };
+  }
+}
+
 /** Resolved IGSID (Instagram-Scoped ID aus Webhook) zu Username + Full Name via Graph API */
 export async function getInstagramUserInfo(
   igsid: string,

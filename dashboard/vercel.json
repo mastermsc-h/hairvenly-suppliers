@@ -11,6 +11,10 @@
     {
       "path": "/api/chat/guardian/cron",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/chatbot/sync-instagram-light",
+      "schedule": "*/30 * * * *"
     }
   ]
 }

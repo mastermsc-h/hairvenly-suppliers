@@ -738,8 +738,30 @@ export async function markSessionUnread(sessionId: string) {
 export async function markSessionAsSeen(sessionId: string) {
   const svc = createServiceClient();
   await svc.from("chat_sessions")
-    .update({ last_seen_by_agent_at: new Date().toISOString() })
+    .update({
+      last_seen_by_agent_at: new Date().toISOString(),
+      ig_unread_count: 0, // optimistisches Lokales Update — Banner verschwindet sofort
+    })
     .eq("id", sessionId);
+
+  // 📲 IG-SYNC: sender_action=mark_seen zu Meta API, damit der IG-Counter
+  // auch in der Instagram-App runtergeht. Fire-and-forget, blockt nicht.
+  // User-Anweisung 2026-05: Dashboard ist Master. Bei Dashboard-Action
+  // soll IG automatisch nachziehen.
+  void (async () => {
+    const { data: sess } = await svc.from("chat_sessions")
+      .select("channel, external_id")
+      .eq("id", sessionId)
+      .maybeSingle();
+    if (sess?.channel === "instagram" && sess.external_id) {
+      const { markInstagramSeen } = await import("@/lib/messaging/meta");
+      const r = await markInstagramSeen(sess.external_id);
+      if (!r.success) {
+        console.warn(`[markSessionAsSeen] IG-mark_seen failed for session=${sessionId.slice(0,8)}: ${r.error}`);
+      }
+    }
+  })();
+
   revalidatePath("/chatbot/inbox");
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
