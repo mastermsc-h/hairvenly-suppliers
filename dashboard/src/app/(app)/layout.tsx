@@ -156,7 +156,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                   trailing={<ChatbotInboxBadge />}
                   items={[
                     { href: "/chatbot/inbox",         label: "Chat-Inbox" },
-                    { href: "/chatbot/reservations",  label: "Reservierungen" },
+                    { href: "/chatbot/reservations",  label: "Reservierungen (Produkte)" },
+                    { href: "/chatbot/appointments",  label: "Termin-Anfragen" },
                     { href: "/chatbot/guardian",      label: "Wächter (Alerts)" },
                     { href: "/chatbot/follow-ups",    label: "Follow-Ups" },
                     { href: "/chatbot/insights",   label: "Insights" },
