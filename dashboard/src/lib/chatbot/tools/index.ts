@@ -11,6 +11,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { createServiceClient } from "@/lib/supabase/server";
 import { calcPacks, type Method, type PriceRow } from "@/lib/chatbot/pricing";
 import { readDashboardAlerts, readInventorySheet } from "@/lib/stock-sheets";
+import { checkShopifyAvailabilityBulk } from "@/lib/chatbot/shopify-availability";
 
 export interface ToolContext {
   sessionId: string;
@@ -337,6 +338,82 @@ const getStockEta: ToolDef = {
         }
       }
       const urlFor = (productName: string): string | null => urlMap.get(productName) || null;
+
+      // ── SHOPIFY-LIVE-CHECK ─────────────────────────────────────────────
+      // User-Bug 2026-05-26: Sheet sagte qty>0, Shopify zeigte "Ausverkauft" auf
+      // derselben Produktseite. Sheet-vs-Shopify-Divergenz entsteht weil das
+      // Sheet physischen Lagerbestand zählt, Shopify aber sellable inventory
+      // (− Reservierungen − Pending Orders).
+      //
+      // Lösung: Bevor wir "auf Lager" sagen, prüfen wir Shopifys public
+      // /products/<handle>.js endpoint. Wenn Shopify "ausverkauft" sagt,
+      // wird die Row aus withStock entfernt — der Bot fällt dann auf die
+      // ETA oder "out_of_stock"-Antwort zurück.
+      //
+      // URL-Quelle: bevorzugt aus InventoryRow.url (Sheet-Spalte), Fallback
+      // auf urlMap (aus product_colors). Bei null URL: kein Check möglich,
+      // Sheet-Wert wird vertraut (alte Logik).
+      const urlForRow = (row: { product?: string; url?: string | null }): string | null => {
+        return row.url || (row.product ? urlFor(row.product) : null);
+      };
+      const rowsToCheck = [
+        ...inventoryMatches.filter(r => r.quantity > 0),
+        ...inUnterwegs,
+      ];
+      const urlsToCheck = rowsToCheck.map(urlForRow).filter((u): u is string => !!u);
+      let shopifyAvailability: Map<string, boolean | null> = new Map();
+      if (urlsToCheck.length > 0) {
+        try {
+          shopifyAvailability = await checkShopifyAvailabilityBulk(urlsToCheck);
+        } catch (e) {
+          console.warn("[get_stock_eta] shopify bulk check failed:", (e as Error).message);
+          // shopifyAvailability bleibt leer → alle Rows fallen auf Sheet-Logik zurück
+        }
+      }
+      // Filter: Row gilt als "wirklich verfügbar" wenn Shopify available=true sagt.
+      // available=false → raus. available=null (Check failed) → bleibt drin (Trust-the-Sheet-Fallback).
+      const shopifyConfirmsAvailable = (row: { product?: string; url?: string | null }): boolean => {
+        const url = urlForRow(row);
+        if (!url) return true; // keine URL → kein Check → trust sheet
+        const result = shopifyAvailability.get(url);
+        if (result === false) return false; // Shopify sagt klar nein → blocken
+        return true; // true oder null → durchlassen
+      };
+
+      // Apply filter: rows wo Shopify klar "ausverkauft" sagt fliegen raus.
+      // Diese Rows landen weder in withStock noch in unterwegs — sie werden
+      // implizit als ausverkauft behandelt.
+      const inventoryMatchesAfterShopify = inventoryMatches.filter(r => r.quantity === 0 || shopifyConfirmsAvailable(r));
+      const inUnterwegsAfterShopify = inUnterwegs.filter(u => shopifyConfirmsAvailable(u));
+      // Wenn Shopify ALLE inventory-Matches als ausverkauft markiert, packen
+      // wir sie als "out of stock" Hinweis in nullbestand-Liste, damit der
+      // Bot ehrlich antworten kann.
+      const inventoryShopifyOos = inventoryMatches.filter(r => r.quantity > 0 && !shopifyConfirmsAvailable(r));
+      if (inventoryShopifyOos.length > 0) {
+        console.log(`[get_stock_eta] SHOPIFY-OVERRIDE: ${inventoryShopifyOos.length} row(s) mit qty>0 sind laut Shopify ausverkauft: ${inventoryShopifyOos.map(r => r.product).slice(0,3).join(", ")}`);
+      }
+      // Variable-Aliasing: ab hier benutzen wir nur noch die gefilterten Listen
+      inventoryMatches = inventoryMatchesAfterShopify;
+      inUnterwegs = inUnterwegsAfterShopify;
+      // Wenn nach Shopify-Filter nichts mehr im inventory ist aber wir
+      // Shopify-OOS-Rows haben, sollen sie als "out_of_stock" auftauchen.
+      if (inventoryShopifyOos.length > 0 && inventoryMatches.filter(r => r.quantity > 0).length === 0) {
+        // Synthetische Nullbestand-Einträge ergänzen (für den Bot als OOS-Hinweis)
+        const sheetKey: "wellig" | "glatt" = isRussisch ? "glatt" : "wellig";
+        for (const r of inventoryShopifyOos) {
+          if (!inNullbestand.some(n => n.product === r.product)) {
+            inNullbestand.push({
+              product: r.product,
+              collection: r.collection,
+              variant: null,
+              lagerG: 0,
+              sheetKey,
+              unterwegsG: 0,
+              perOrder: [],
+            });
+          }
+        }
+      }
 
       // ENTSCHEIDUNGSBAUM:
 
