@@ -165,9 +165,10 @@ export async function updateReservationNotes(reservationId: string, notes: strin
 export interface StockCheckResult {
   reservationId: string;
   productName: string;
-  status: "in_stock" | "unterwegs" | "out_of_stock" | "unknown";
+  status: "in_stock" | "unterwegs" | "out_of_stock" | "unknown" | "service_item";
   eta?: string;
   matchedProduct?: string;
+  reason?: string;
 }
 
 /**
@@ -193,14 +194,37 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
   ]);
   const allInventory = [...ruSheet.rows, ...uzSheet.rows];
 
-  // Reuse get_stock_eta-Logik: Tokens bauen (color + method + base product_name),
-  // dann Substring-Match gegen die Sheet-Produktnamen.
+  // STOP-Words: beschreibende Wörter die im Reservierungs-Namen vorkommen
+  // aber NICHT im Sheet-Produktnamen — sonst scheitert der AND-Match.
+  // Klasse A — Erweiterung 2026-05.
+  const STOP = new Set([
+    "und", "in", "die", "der", "das", "den", "ein", "eine", "mit", "für", "auf",
+    "russisch", "russische", "russischer", "usbekisch", "usbekische", "usbekischer",
+    "tape", "tapes", "extension", "extensions",
+    "us", "wellige", "wellig", "glatt", "glatte", "glatten",
+    "standard", "echthaar", "echte", "haar", "haare",
+    "braun", "braune", "brauner", "blond", "blonde", "blonder",
+    "balayage", "ombre", "ombré", "solide", "melt",
+    "premium", "luxury",
+  ]);
+
+  // Service-Items (nicht Inventar) — Klasse C
+  const SERVICE_ITEM_RE = /^\s*(farbring|farbprobe|broschüre|broschuere|pflegeset|musterset|katalog|beratung|gutschein|voucher)\s*$/i;
+
+  // Gewicht-/Längen-Token aus Suchstring extrahieren (Klasse B):
+  // Sheet hat unitWeight als eigene Spalte, NICHT im Produktnamen → "150g"
+  // muss als separates Filter dienen, nicht als Substring-Token.
+  const GRAM_RE = /(\d{2,4})\s*g(?:ramm)?\b/i;
+  const LENGTH_CM_RE = /(\d{2,3})\s*cm\b/i;
+
   const tokenize = (s: string): string[] => {
-    const STOP = new Set(["und", "in", "die", "der", "das", "russisch", "russische", "usbekisch", "usbekische", "tape", "tapes", "extension", "extensions"]);
+    // Klasse D — Slash beibehalten ("4/27T24" als Farbcode, nicht zerlegen)
+    // Erlauben jetzt auch Slash und Bindestrich innerhalb von Tokens.
     return s
       .toLowerCase()
-      .replace(/[^a-z0-9äöüß\s]+/gi, " ")
+      .replace(/[^a-z0-9äöüß/\-\s]+/gi, " ")
       .split(/\s+/)
+      .map(t => t.replace(/^-+|-+$/g, ""))   // führende/abschließende "-" entfernen
       .filter(t => t && t.length > 1 && !STOP.has(t));
   };
   const matchTokens = (toks: string[]) => (text: string) => {
@@ -210,14 +234,55 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
 
   const results: StockCheckResult[] = [];
   for (const r of rows) {
-    const searchStr = [r.color, r.method, r.product_name].filter(Boolean).join(" ");
-    const tokens = tokenize(searchStr);
-    if (tokens.length === 0) {
-      results.push({ reservationId: r.id, productName: r.product_name, status: "unknown" });
+    // SERVICE-ITEM-Check FRÜH (Klasse C) — "Farbring" etc. sind nicht im Lager
+    if (SERVICE_ITEM_RE.test(r.product_name || "")) {
+      results.push({
+        reservationId: r.id,
+        productName: r.product_name,
+        status: "service_item",
+        reason: "Kein Inventar-Item — separat handhaben (Marketing/Service)",
+      });
       continue;
     }
-    const matcher = matchTokens(tokens);
-    const stocked = allInventory.filter(row => matcher(`${row.collection} ${row.product}`) && row.quantity > 0);
+
+    const searchStr = [r.color, r.method, r.product_name].filter(Boolean).join(" ");
+
+    // Gewicht-/Längen-Filter extrahieren (Klasse B)
+    let targetGrams: number | null = null;
+    let targetLengthCm: number | null = null;
+    const gMatch = searchStr.match(GRAM_RE);
+    if (gMatch) targetGrams = parseInt(gMatch[1], 10);
+    const lMatch = searchStr.match(LENGTH_CM_RE);
+    if (lMatch) targetLengthCm = parseInt(lMatch[1], 10);
+    // Gewicht- und Längen-Marker aus dem Suchstring entfernen — werden
+    // jetzt als separates Match-Kriterium gegen unitWeight bzw. Produktname behandelt.
+    const cleanedSearch = searchStr
+      .replace(GRAM_RE, " ")
+      .replace(LENGTH_CM_RE, " ");
+
+    const tokens = tokenize(cleanedSearch);
+    if (tokens.length === 0) {
+      results.push({ reservationId: r.id, productName: r.product_name, status: "unknown", reason: "Keine identifizierbaren Such-Tokens" });
+      continue;
+    }
+    const tokenMatch = matchTokens(tokens);
+
+    // Match-Helper: berücksichtigt zusätzlich Gewicht (gegen unitWeight)
+    // und Länge (Längenangabe im Produktnamen wenn vorhanden).
+    const fullMatch = (row: { collection?: string; product?: string; unitWeight?: number }) => {
+      const text = `${row.collection || ""} ${row.product || ""}`;
+      if (!tokenMatch(text)) return false;
+      // Gewicht muss passen falls angegeben (±0g, exakt — typische Werte sind 100/150/225)
+      if (targetGrams !== null && row.unitWeight && Math.abs(row.unitWeight - targetGrams) > 5) return false;
+      // Länge ist oft im Produktnamen ("65cm") — wenn angegeben, muss matchen
+      if (targetLengthCm !== null) {
+        const productLengthMatch = text.match(LENGTH_CM_RE);
+        if (productLengthMatch && parseInt(productLengthMatch[1], 10) !== targetLengthCm) return false;
+      }
+      return true;
+    };
+
+    const stocked = allInventory.filter(row => fullMatch(row) && row.quantity > 0);
     if (stocked.length > 0) {
       results.push({
         reservationId: r.id,
@@ -227,7 +292,7 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
       });
       continue;
     }
-    const onTheWay = unterwegs.filter(u => matcher(`${u.collection} ${u.product}`));
+    const onTheWay = unterwegs.filter(u => fullMatch(u));
     if (onTheWay.length > 0) {
       const eta = onTheWay[0].perOrder?.[0]?.ankunft || "bald";
       results.push({
@@ -239,7 +304,7 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
       });
       continue;
     }
-    const oos = nullbestand.filter(p => matcher(`${p.collection} ${p.product}`));
+    const oos = nullbestand.filter(p => fullMatch(p));
     if (oos.length > 0) {
       results.push({
         reservationId: r.id,

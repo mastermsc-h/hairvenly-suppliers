@@ -42,6 +42,7 @@ export default function StockCheckButton() {
   const onWay   = results?.filter(r => r.status === "unterwegs") ?? [];
   const oos     = results?.filter(r => r.status === "out_of_stock") ?? [];
   const unknown = results?.filter(r => r.status === "unknown") ?? [];
+  const serviceItems = results?.filter(r => r.status === "service_item") ?? [];
 
   return (
     <div className="space-y-3">
@@ -114,6 +115,22 @@ export default function StockCheckButton() {
               <ul className="space-y-1 text-xs text-neutral-700">
                 {oos.map(r => (
                   <li key={r.reservationId}>{r.productName}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {serviceItems.length > 0 && (
+            <div className="rounded-lg bg-purple-50 border border-purple-200 p-3">
+              <div className="flex items-center gap-2 text-purple-800 font-semibold mb-1.5">
+                <HelpCircle size={14} /> Service-Items / kein Inventar ({serviceItems.length})
+              </div>
+              <ul className="space-y-1 text-xs text-purple-900">
+                {serviceItems.map(r => (
+                  <li key={r.reservationId}>
+                    <strong>{r.productName}</strong>
+                    {r.reason && <span className="text-purple-700"> · {r.reason}</span>}
+                  </li>
                 ))}
               </ul>
             </div>
