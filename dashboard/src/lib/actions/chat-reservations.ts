@@ -253,7 +253,22 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
     readInventorySheet("Russisch - GLATT"),
     readInventorySheet("Usbekisch - WELLIG"),
   ]);
-  const allInventory = [...ruSheet.rows, ...uzSheet.rows];
+  // 🔑 LINE-AWARENESS: jede Inventory-Row trägt jetzt ihre Linie aus dem
+  // Sheet-Namen — verhindert falsche Cross-Line-Matches (z.B. "Mocha Melt
+  // US Wellige Tape" matchte fälschlich "MOCHAMELT STANDARD RUSSISCHE TAPE").
+  type LineTaggedRow = (typeof ruSheet.rows)[number] & { _line: "russisch" | "usbekisch" };
+  const allInventory: LineTaggedRow[] = [
+    ...ruSheet.rows.map(r => ({ ...r, _line: "russisch" as const })),
+    ...uzSheet.rows.map(r => ({ ...r, _line: "usbekisch" as const })),
+  ];
+
+  // Line-Extraction aus Sheet-Row (für unterwegs/nullbestand die collection-Strings haben)
+  const extractLineFromText = (text: string): "russisch" | "usbekisch" | null => {
+    const t = text.toLowerCase();
+    if (/\b(russisch|russische|glatt|glatte|ru\s*glatt)\b/.test(t)) return "russisch";
+    if (/\b(usbekisch|usbekische|wellig|wellige|us\s*wellig)\b/.test(t)) return "usbekisch";
+    return null;
+  };
 
   // STOP-Words: NUR reine Beschreiber, die KEINE Method/Subtype-Bedeutung haben.
   // ⚠️ NICHT IN STOP (wichtig!): tape/tapes/extension/extensions/standard/mini/
@@ -369,6 +384,11 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
     const subtypeSrc = `${r.method || ""} ${r.product_name || ""}`;
     const wants = classifySubtype(subtypeSrc);
 
+    // 🔑 LINE-Extraction aus Reservierung: explizite Schlüsselworte
+    // ("us wellige", "russisch", etc.) → Filter auf gleiche Linie im Sheet.
+    // Wenn KEINE Linie genannt → unspecified, matched gegen beide Linien.
+    const reservationLine = extractLineFromText(searchStr);
+
     // "standard" ist DEFAULT-Subtype → strip aus tokens (sonst scheitert
     // Match gegen Usbekisch-Sheet wo die Collection nur "Tapes Wellig" heißt,
     // kein "Standard"-Prefix). Bei wantsMini/Genius/Classic/Invisible bleibt
@@ -383,14 +403,16 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
     }
     const tokenMatch = matchTokens(tokens, wants);
 
-    // Match-Helper: berücksichtigt zusätzlich Gewicht (gegen unitWeight)
-    // und Länge (Längenangabe im Produktnamen wenn vorhanden).
-    const fullMatch = (row: { collection?: string; product?: string; unitWeight?: number }) => {
+    // Match-Helper: berücksichtigt Tokens + Subtype + Gewicht + Länge + Linie
+    const fullMatch = (row: { collection?: string; product?: string; unitWeight?: number; _line?: "russisch" | "usbekisch" }) => {
       const text = `${row.collection || ""} ${row.product || ""}`;
+      // 🔑 LINIEN-FILTER: wenn Reservierung explizite Linie hat, MUSS row dazu passen
+      if (reservationLine) {
+        const rowLine = row._line || extractLineFromText(row.collection || "");
+        if (rowLine && rowLine !== reservationLine) return false;
+      }
       if (!tokenMatch(text)) return false;
-      // Gewicht muss passen falls angegeben (±0g, exakt — typische Werte sind 100/150/225)
       if (targetGrams !== null && row.unitWeight && Math.abs(row.unitWeight - targetGrams) > 5) return false;
-      // Länge ist oft im Produktnamen ("65cm") — wenn angegeben, muss matchen
       if (targetLengthCm !== null) {
         const productLengthMatch = text.match(LENGTH_CM_RE);
         if (productLengthMatch && parseInt(productLengthMatch[1], 10) !== targetLengthCm) return false;
