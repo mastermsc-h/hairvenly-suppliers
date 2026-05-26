@@ -281,28 +281,59 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
   const LENGTH_CM_RE = /(\d{2,3})\s*cm\b/i;
 
   const tokenize = (s: string): string[] => {
-    // Slash bleibt im Token ("4/27T24" als Farbcode), Bindestrich wird zu
-    // Space gesplittet — "Clip-Ins" → ["clip", "ins"] (sonst matched es
-    // nicht gegen Sheet-Eintrag "Clip In Extensions").
     return s
       .toLowerCase()
       .replace(/[^a-z0-9äöüß/\s\-]+/gi, " ")
       .split(/[\s\-]+/)
       .filter(t => t && t.length > 1 && !STOP.has(t));
   };
-  // Match-Helper mit Plural-Toleranz: "ins" matched auch "in",
-  // "bondings" matched auch "bonding" etc. Wichtig weil Sheet-Namen
-  // oft Singular und Reservierungs-Namen oft Plural sind.
-  const matchTokens = (toks: string[]) => (text: string) => {
+
+  // Subtype-Awareness: "Standard Tapes" ist DEFAULT — Sheet-Collections im
+  // Usbekisch-Bereich heißen nur "Tapes Wellig 65cm" (ohne expliziten
+  // "Standard"-Prefix). Wir strippen "standard" aus tokens UND verlangen
+  // dass haystack KEINEN expliziten anderen Subtype enthält
+  // (Mini/Genius/Classic/Invisible). So matched Standard ↔ ungenanntes
+  // Subtype, ohne fälschlich Mini/Genius zu treffen.
+  const classifySubtype = (s: string | undefined): {
+    wantsMini: boolean; wantsGenius: boolean; wantsClassic: boolean; wantsInvisible: boolean; wantsDefault: boolean;
+  } => {
+    const txt = (s || "").toLowerCase();
+    const wantsMini = /\bmini\b/.test(txt);
+    const wantsGenius = /\bgenius\b/.test(txt);
+    const wantsClassic = /\bclassic\b/.test(txt);
+    const wantsInvisible = /\b(invisible|butterfly)\b/.test(txt);
+    return {
+      wantsMini, wantsGenius, wantsClassic, wantsInvisible,
+      wantsDefault: !wantsMini && !wantsGenius && !wantsClassic && !wantsInvisible,
+    };
+  };
+
+  // Match-Helper mit Plural-Toleranz + Subtype-Conflict-Check
+  const matchTokens = (toks: string[], wants: ReturnType<typeof classifySubtype>) => (text: string) => {
     const hay = text.toLowerCase();
-    return toks.every(t => {
-      if (hay.includes(t)) return true;
-      // Trailing "s" (Plural) → akzeptiere Singular
-      if (t.length > 2 && t.endsWith("s") && hay.includes(t.slice(0, -1))) return true;
-      // Trailing "en" (deutsch-Plural: Tressen→Tress) — selten relevant, defensiv
-      if (t.length > 3 && t.endsWith("en") && hay.includes(t.slice(0, -2))) return true;
+    // Token-Substring-Check (mit Plural-Toleranz)
+    for (const t of toks) {
+      if (hay.includes(t)) continue;
+      if (t.length > 2 && t.endsWith("s") && hay.includes(t.slice(0, -1))) continue;
+      if (t.length > 3 && t.endsWith("en") && hay.includes(t.slice(0, -2))) continue;
       return false;
-    });
+    }
+    // Subtype-Conflict-Check: haystack-Subtype muss zu wants passen
+    const hayMini = /\bmini[\s-]?tape/i.test(text);
+    const hayGenius = /\bgenius\b/i.test(text);
+    const hayClassic = /\bclassic\b/i.test(text);
+    // ⚠️ Wichtig: Bei Clip-Extensions ist "Invisible" Marken-Bestandteil (alle
+    // Hairvenly-Clip-Ins heißen "Invisible Clip Extensions"), KEIN Subtype.
+    // Bei Tape/Tresse/Bonding hingegen IST "Invisible" ein echter Subtype
+    // (Invisible Wefts / Butterfly Wefts).
+    // → Invisible-Subtype-Check nur wenn search NICHT explizit Clip ist.
+    const searchIsClip = toks.some(t => /^clip$/i.test(t)) || toks.some(t => /^ins$/i.test(t));
+    const hayInvisible = /\b(invisible|butterfly)\b/i.test(text);
+    if (wants.wantsMini !== hayMini) return false;
+    if (wants.wantsGenius !== hayGenius) return false;
+    if (wants.wantsClassic !== hayClassic) return false;
+    if (!searchIsClip && wants.wantsInvisible !== hayInvisible) return false;
+    return true;
   };
 
   const results: StockCheckResult[] = [];
@@ -333,12 +364,24 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
       .replace(GRAM_RE, " ")
       .replace(LENGTH_CM_RE, " ");
 
-    const tokens = tokenize(cleanedSearch);
+    // Subtype-Klassifizierung: basiert auf method UND product_name, weil
+    // manche Reservierungen den Subtype nur im product_name haben.
+    const subtypeSrc = `${r.method || ""} ${r.product_name || ""}`;
+    const wants = classifySubtype(subtypeSrc);
+
+    // "standard" ist DEFAULT-Subtype → strip aus tokens (sonst scheitert
+    // Match gegen Usbekisch-Sheet wo die Collection nur "Tapes Wellig" heißt,
+    // kein "Standard"-Prefix). Bei wantsMini/Genius/Classic/Invisible bleibt
+    // der explizite Subtype-Token natürlich im Set.
+    let tokens = tokenize(cleanedSearch);
+    if (wants.wantsDefault) {
+      tokens = tokens.filter(t => t !== "standard");
+    }
     if (tokens.length === 0) {
       results.push({ reservationId: r.id, productName: r.product_name, status: "unknown", reason: "Keine identifizierbaren Such-Tokens" });
       continue;
     }
-    const tokenMatch = matchTokens(tokens);
+    const tokenMatch = matchTokens(tokens, wants);
 
     // Match-Helper: berücksichtigt zusätzlich Gewicht (gegen unitWeight)
     // und Länge (Längenangabe im Produktnamen wenn vorhanden).
