@@ -451,6 +451,15 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
       if (targetLengthCm !== null) {
         const productLengthMatch = text.match(LENGTH_CM_RE);
         if (productLengthMatch && parseInt(productLengthMatch[1], 10) !== targetLengthCm) return false;
+        // RUSSISCH-IMPLICIT: Russisch-Tapes/Bondings/Wefts haben KEIN "60cm" im
+        // Produktnamen (Convention). Wenn Reservierung explizit z.B. 65cm fordert
+        // UND row ist russisch → ist immer 60cm → reject.
+        // (User-Bug 2026-05-27: "NORVEGIAN Standard Tapes 65cm" matchte fälschlich
+        //  "#NORVEGIAN STANDARD RUSSISCHE TAPE EXTENSIONS GLATT" — das ist 60cm.)
+        if (!productLengthMatch) {
+          const rowLine = row._line || extractLineFromText(row.collection || "");
+          if (rowLine === "russisch" && targetLengthCm !== 60) return false;
+        }
       }
       return true;
     };
