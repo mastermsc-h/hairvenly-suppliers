@@ -397,18 +397,18 @@ const getStockEta: ToolDef = {
       const urlFor = (productName: string): string | null => urlMap.get(productName) || null;
 
       // ── NEARBY-LENGTH-ALTERNATIVE-LOOKUP ────────────────────────────────
-      // User-Wunsch 2026-05-27: Wenn die gewünschte Länge ausverkauft ist und
-      // die Wartezeit >2 Wochen beträgt (oder gar kein ETA), soll der Bot
-      // automatisch eine NAHE Länge in derselben Farbe + Methode + Linie als
-      // Alternative anbieten. Beispiel: 4/27T24 65cm ausverkauft → 55cm
-      // (10cm kürzer) sofort verfügbar → Bot empfiehlt das proaktiv.
+      // User-Wunsch 2026-05-27: Wenn die gewünschte Länge ausverkauft / unterwegs
+      // ist, soll der Bot automatisch eine NAHE Länge in derselben Farbe +
+      // Methode + Linie als Alternative anbieten — unabhängig von der ETA.
+      // Beispiel: 4/27T24 65cm ausverkauft → 55cm (10cm kürzer) sofort verfügbar
+      // → Bot empfiehlt das proaktiv.
       //
       // Regeln:
       //  - Nur aktiv wenn search EXPLIZIT eine Länge enthält (sonst gibt es
       //    keine "Nachbar-Länge" — der Bot soll erst die Länge klären).
       //  - Suche gleiche Farbe + Methode + Linie ohne den Längen-Token
       //  - Filter qty>0, sortiere nach geringster cm-Differenz zur Soll-Länge
-      //  - Max 20cm Differenz (sonst nicht "nahe" genug)
+      //  - Max 10cm Differenz (sonst nicht "nahe" genug — User-Vorgabe)
       let nearbyAlternative: { product: string; collection: string; length_cm: number; cm_diff: number; shopify_url: string | null } | null = null;
       const requestedLengthMatch = search.match(/\b(\d{2,3})\s*cm\b/i);
       if (requestedLengthMatch) {
@@ -430,7 +430,7 @@ const getStockEta: ToolDef = {
               ...c,
               cmDiff: Math.abs((c.lenCm as number) - requestedCm),
             }))
-            .filter(c => c.cmDiff <= 20)
+            .filter(c => c.cmDiff <= 10)
             .sort((a, b) => a.cmDiff - b.cmDiff);
           if (candidates.length > 0) {
             const best = candidates[0];
@@ -444,13 +444,6 @@ const getStockEta: ToolDef = {
           }
         }
       }
-      // Helper für "lange Wartezeit": mehr als 14 Tage von heute
-      const daysFromNow = (iso: string | null | undefined): number | null => {
-        if (!iso) return null;
-        const t = new Date(iso).getTime();
-        if (isNaN(t)) return null;
-        return Math.round((t - Date.now()) / (1000 * 60 * 60 * 24));
-      };
 
       // ── LENGTH-DISAMBIGUATION-GUARD ────────────────────────────────────
       // User-Bug 2026-05-27: Bot suchte "4/27t24" OHNE Länge. Matchte
@@ -610,11 +603,9 @@ const getStockEta: ToolDef = {
             shopify_url: urlFor(m.product),
           };
         });
-        // Nearby-Alternative nur anzeigen wenn ETA > 14 Tage (lange Wartezeit)
-        const earliestEtaIso = products[0]?.earliest_eta_iso;
-        const waitDays = daysFromNow(earliestEtaIso);
-        const longWait = waitDays !== null && waitDays > 14;
-        const includeAlternative = longWait && nearbyAlternative;
+        // Nearby-Alternative immer anzeigen wenn vorhanden (User-Vorgabe
+        // 2026-05-27: unabhängig vom ETA — egal ob 3 Tage oder 4 Wochen
+        // Wartezeit, eine sofort verfügbare Nachbar-Länge ist immer nützlich).
         return {
           output: JSON.stringify({
             status: "unterwegs",
@@ -625,15 +616,15 @@ const getStockEta: ToolDef = {
               "EIN Datum reicht. Keine 'erste Lieferung'-Phrasen! " +
               "URL-REGEL: Wenn du einen Produkt-Link postest, nimm AUSSCHLIESSLICH die " +
               "shopify_url aus diesem Tool-Output. NIEMALS selbst URLs bauen oder raten." +
-              (includeAlternative
-                ? " ALTERNATIVE: Da die Wartezeit über 2 Wochen beträgt, biete der Kundin proaktiv die " +
-                  "Nachbar-Länge an, die in derselben Farbe SOFORT verfügbar ist (siehe 'nearby_alternative'-Feld). " +
-                  "Phrasierung: 'Falls du nicht so lange warten willst — wir hätten die Farbe in [X]cm sofort " +
+              (nearbyAlternative
+                ? " ALTERNATIVE: Biete der Kundin proaktiv die Nachbar-Länge an, die in derselben Farbe " +
+                  "SOFORT verfügbar ist (siehe 'nearby_alternative'-Feld). " +
+                  "Phrasierung: 'Falls du nicht warten willst — wir hätten die Farbe in [X]cm sofort " +
                   "verfügbar (nur [Y]cm kürzer/länger). Magst du die nehmen, oder lieber auf die [Soll-Länge] warten?'"
                 : ""),
             sheet_last_updated: lastUpdated,
             products,
-            ...(includeAlternative ? { nearby_alternative: nearbyAlternative } : {}),
+            ...(nearbyAlternative ? { nearby_alternative: nearbyAlternative } : {}),
           }),
         };
       }
