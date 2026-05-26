@@ -403,12 +403,11 @@ const getStockEta: ToolDef = {
       // Beispiel: 4/27T24 65cm ausverkauft → 55cm (10cm kürzer) sofort verfügbar
       // → Bot empfiehlt das proaktiv.
       //
-      // Regeln:
-      //  - Nur aktiv wenn search EXPLIZIT eine Länge enthält (sonst gibt es
-      //    keine "Nachbar-Länge" — der Bot soll erst die Länge klären).
-      //  - Suche gleiche Farbe + Methode + Linie ohne den Längen-Token
-      //  - Filter qty>0, sortiere nach geringster cm-Differenz zur Soll-Länge
-      //  - Max 10cm Differenz (sonst nicht "nahe" genug — User-Vorgabe)
+      // ASYMMETRISCHER cm-Cap (User-Vorgabe 2026-05-27):
+      //   - Längere Variante (kann trimmen lassen): bis +20cm OK
+      //     z.B. Kundin will 65cm → 85cm-Variante (20cm zu lang) ist akzeptabel
+      //   - Kürzere Variante (kein Material nachfügen): max -10cm
+      //     z.B. Kundin will 65cm → 55cm OK, 45cm zu drastisch
       let nearbyAlternative: { product: string; collection: string; length_cm: number; cm_diff: number; shopify_url: string | null } | null = null;
       const requestedLengthMatch = search.match(/\b(\d{2,3})\s*cm\b/i);
       if (requestedLengthMatch) {
@@ -428,9 +427,16 @@ const getStockEta: ToolDef = {
             .filter(c => c.lenCm !== null && c.lenCm !== requestedCm)
             .map(c => ({
               ...c,
+              signedDiff: (c.lenCm as number) - requestedCm,
               cmDiff: Math.abs((c.lenCm as number) - requestedCm),
             }))
-            .filter(c => c.cmDiff <= 10)
+            .filter(c => {
+              // Längere Länge: bis +20cm OK (Kundin trimmt nach)
+              // Kürzere Länge: bis -10cm OK (mehr Verlust ist drastisch)
+              if (c.signedDiff > 0) return c.signedDiff <= 20;
+              if (c.signedDiff < 0) return c.signedDiff >= -10;
+              return false;
+            })
             .sort((a, b) => a.cmDiff - b.cmDiff);
           if (candidates.length > 0) {
             const best = candidates[0];
