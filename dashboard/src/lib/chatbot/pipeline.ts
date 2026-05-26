@@ -71,6 +71,46 @@ export function detectCustomerAskedForPhotos(customerText: string): boolean {
  * Jeder neue Pre-LLM-Injector wird HIER eingebaut. Beide Pipelines
  * erben den Schutz automatisch.
  */
+/**
+ * Detect: hat die letzte Bot-/MA-Nachricht der Kundin eine Warteliste
+ * angeboten ("Magst du, dass ich dich auf die Benachrichtigungsliste setze")
+ * UND ist die aktuelle Kundinnen-Message ein klares JA?
+ *
+ * Wenn ja, soll der Bot SOFORT das create_reservation Tool aufrufen statt
+ * nur einen Bestätigungstext zu schreiben (ohne Tool-Call wäre die
+ * Warteliste-Versprechung leer).
+ */
+export function detectWaitlistConfirmation(
+  customerText: string,
+  lastBotMessage: string | null | undefined,
+): boolean {
+  if (!customerText || !lastBotMessage) return false;
+  // Bot/MA hat Warteliste angeboten?
+  const offerPattern = /\b(benachrichtigungsliste|warteliste|bescheid\s+geben|melden\s+uns?(\s+sobald)?|notiere\s+(ich\s+)?dich|merke\s+ich\s+(mir|für\s+dich)\s+vor)\b/i;
+  if (!offerPattern.test(lastBotMessage)) return false;
+  // Kundinnen-Antwort ist klares JA?
+  // (kurz, affirmativ, keine offene Rückfrage)
+  const t = customerText.trim().toLowerCase().replace(/[💕❤🩷✨🥰😊👍🙂🙏]/g, "").trim();
+  if (t.length > 60) return false;  // zu lang → enthält wahrscheinlich neue Anfrage
+  if (/\?/.test(t)) return false;   // Rückfrage, kein klares Ja
+  const yesPatterns = [
+    /^j+a+\b/i,                                  // "ja", "jaaa"
+    /^gerne\b/i,
+    /^perfekt\b/i,
+    /^super\b/i,
+    /^okay?\b/i,
+    /^klar\b/i,
+    /^bitte\b/i,
+    /\boh\s+ja\b/i,
+    /\bwäre\s+(super|gut|toll|nice|cool)\b/i,
+    /\bsehr\s+gerne\b/i,
+    /\bauf\s+jeden\s+fall\b/i,
+    /\bja\s+(bitte|gerne|super)/i,
+    /\b(yes|ok|okidoki|deal)\b/i,
+  ];
+  return yesPatterns.some(p => p.test(t));
+}
+
 export async function applyPreLlmContext(
   systemPrompt: string,
   customerText: string,
@@ -78,7 +118,12 @@ export async function applyPreLlmContext(
    * Optional: letzte N Customer-Messages aus Session-History (für Folge-Fragen,
    * wo der relevante Keyword/Code nur in früheren Messages stand).
    */
-  recentCustomerHistory?: string[]
+  recentCustomerHistory?: string[],
+  /**
+   * Optional: letzte Bot-/MA-Nachricht — für Waitlist-Confirmation-Detection
+   * (Bot bot Warteliste an, Kundin sagt ja → instruiere create_reservation).
+   */
+  lastBotMessage?: string | null,
 ): Promise<{
   /** Unveränderter stable systemPrompt — geht in den GECACHTEN Block */
   systemPrompt: string;
@@ -116,6 +161,25 @@ export async function applyPreLlmContext(
     }
   } catch (e) {
     console.warn("[pipeline] color-code-injector error:", e);
+  }
+
+  // ── 📋 WAITLIST-CONFIRMATION-INJECTOR ───────────────────────────
+  // Bot hat in der letzten Nachricht Warteliste/Benachrichtigung angeboten,
+  // Kundin hat JA gesagt → der Bot MUSS jetzt das create_reservation Tool
+  // aufrufen. Ohne dieses Hint vergisst der LLM manchmal den Tool-Call und
+  // schreibt nur "Hab ich notiert" — die Reservierung existiert dann gar
+  // nicht in der DB. User-Bug 2026-05-27.
+  if (detectWaitlistConfirmation(customerText, lastBotMessage)) {
+    dynamicHint += "\n\n🚨 WAITLIST-CONFIRMATION DETECTED:\n" +
+      "Die Kundin hat soeben ZUGESTIMMT zu deinem Warteliste-Angebot " +
+      "(\"" + (lastBotMessage || "").slice(0, 120).replace(/"/g, "'") + "...\").\n" +
+      "DU MUSST JETZT das `create_reservation` Tool aufrufen — mit den Produkten/" +
+      "Farben/Längen aus dem bisherigen Verlauf. Wenn mehrere Farben besprochen " +
+      "wurden: alle in EINEM Tool-Call über das products-Array. " +
+      "Nach erfolgreichem Tool-Call antworte SEHR KURZ: " +
+      "'Hab ich notiert — wir melden uns sobald sie da sind 💕'. " +
+      "OHNE Tool-Call ist diese Bestätigung eine LEERE Zusage, die nirgends " +
+      "gespeichert wird. NICHT vergessen!\n";
   }
 
   // ── 📦 STOCK-INJECTOR (TODO) — wenn gebaut, dynamicHint ergänzen

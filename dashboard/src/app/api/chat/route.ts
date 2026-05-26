@@ -294,7 +294,17 @@ export async function POST(req: NextRequest) {
     .map(r => (r.content as string | null) || "")
     .filter(t => t.length > 0)
     .reverse();
-  const preLlm = await applyPreLlmContext(systemPrompt, body.message, recentTexts);
+  // Letzte Bot-/MA-Nachricht für Waitlist-Confirmation-Detection
+  const { data: lastBotMsg } = await supabase
+    .from("chat_messages")
+    .select("content")
+    .eq("session_id", session.id)
+    .in("role", ["assistant", "human_agent"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const lastBotText = (lastBotMsg?.content as string | null) || null;
+  const preLlm = await applyPreLlmContext(systemPrompt, body.message, recentTexts, lastBotText);
   systemPrompt = preLlm.systemPrompt;
   // Pipeline returnt dynamicHint jetzt separat — hier (Web-Chat) hängen wir
   // ihn ans Ende des Prompts. Web-Chat hat heute kein eigenes Cache-Setup,

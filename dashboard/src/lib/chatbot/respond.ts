@@ -612,7 +612,18 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       .map(r => (r.content as string | null) || "")
       .filter(t => t.length > 0)
       .reverse();
-    const pre = await applyPreLlmContext(systemPrompt, userTxt, recentTexts);
+    // Letzte Bot-/MA-Nachricht für Waitlist-Confirmation-Detection
+    const { data: lastBotRow } = await svc
+      .from("chat_messages")
+      .select("content")
+      .eq("session_id", sessionId)
+      .in("role", ["assistant", "human_agent"])
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const lastBotText = (lastBotRow?.content as string | null) || null;
+    const pre = await applyPreLlmContext(systemPrompt, userTxt, recentTexts, lastBotText);
     systemPrompt = pre.systemPrompt;          // unverändert (stable)
     colorCodeDynamicHint = pre.dynamicHint;   // dynamic, separat
     pipelineCtx = pre.ctx;
