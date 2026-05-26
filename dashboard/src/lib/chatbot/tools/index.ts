@@ -173,12 +173,22 @@ const getStockEta: ToolDef = {
       "Prüft live im Lager-System wann ausverkaufte Produkte wieder verfügbar sind. " +
       "Liest aus dem Google Sheet 'Stock Calculation' und gibt die ETA der bestellten Auslandsware zurück. " +
       "Nutze IMMER bei Fragen wie 'wann ist X wieder da?'.\n\n" +
-      "**WICHTIG für die Suche:** Übergib NUR die produktrelevanten Keywords — NIEMALS die ganze Frage. " +
+      "**WICHTIG für die Suche:** Übergib NUR die produktrelevanten Keywords — NIEMALS die ganze Frage.\n" +
       "Beispiele:\n" +
       "  - Kunde: 'Wann kommen die russischen Tapes in Ebony wieder rein?' → search: 'ebony russisch tape'\n" +
       "  - Kunde: 'Habt ihr Pearl White 65cm vorrätig?' → search: 'pearl white 65cm'\n" +
       "  - Kunde: 'Wann ist Honey Bonding wieder da?' → search: 'honey bonding'\n" +
-      "Maximal 3–4 Keywords: Farbe + Methode + ggf. Länge. Keine Frage-Wörter wie 'wann', 'wieder', 'rein'.",
+      "Maximal 3–4 Keywords: Farbe + Methode + ggf. Länge. Keine Frage-Wörter wie 'wann', 'wieder', 'rein'.\n\n" +
+      "⚠️ LÄNGE IST PFLICHT wenn aus Foto-Caption, URL oder Text erkennbar! " +
+      "Bestände unterscheiden sich PRO LÄNGE (45cm/55cm/65cm/85cm/60cm) — wenn du die Länge weglässt, bekommst du " +
+      "evtl. Treffer aus ALLEN Längen vermischt und kannst dich nicht auf einen Stock-Status festlegen. " +
+      "Beispiele:\n" +
+      "  - Foto-Caption '#4/27T24 US WELLIGE TAPE EXTENSIONS 65CM' → search: '4/27t24 tape 65cm'\n" +
+      "  - URL '.../tape-extensions-65cm' → search MUSS '65cm' enthalten\n" +
+      "  - Kunde tippt '4/27T24 in 55cm' → search: '4/27t24 tape 55cm'\n" +
+      "Wenn KEINE Länge bekannt: frag die Kundin VORHER, statt zu raten.\n\n" +
+      "⚠️ FARBE/FARB-CODE IST PFLICHT. Suchen wie 'wellig tape 65cm' oder 'russisch bondings' OHNE Farbe " +
+      "werden vom Tool abgelehnt (status: search_too_broad).",
     input_schema: {
       type: "object",
       properties: {
@@ -385,6 +395,76 @@ const getStockEta: ToolDef = {
         }
       }
       const urlFor = (productName: string): string | null => urlMap.get(productName) || null;
+
+      // ── LENGTH-DISAMBIGUATION-GUARD ────────────────────────────────────
+      // User-Bug 2026-05-27: Bot suchte "4/27t24" OHNE Länge. Matchte
+      // 4/27T24 in 45cm/55cm/65cm/85cm + Bondings. 4 davon qty>0, nur die
+      // 65cm-Variante qty=0. Bot sagte "auf Lager" basierend auf 45/55cm,
+      // aber URL und ETA waren für 65cm. Kundin las "auf Lager", Shopify
+      // (65cm) zeigte "Ausverkauft" — Vertrauensbruch.
+      //
+      // Lösung: Wenn matched-products mehrere distinkte Längen haben UND
+      // die Suche keine explizite Länge nennt, status=multi_length_results
+      // mit per-Länge-Aufschlüsselung. Bot muss Kundin nach Länge fragen
+      // ODER per-Länge antworten — KEINE Cross-Length-Aussage mehr.
+      const extractLength = (text: string): string | null => {
+        const m = text.match(/\b(\d{2,3})\s*cm\b/i);
+        return m ? `${m[1]}cm` : null;
+      };
+      const searchHasExplicitLength = /\b\d{2,3}\s*cm\b/i.test(search);
+      if (!searchHasExplicitLength) {
+        // Sammle alle Längen aus allen 3 Listen
+        const allMatchedTexts = [
+          ...inventoryMatches.map(r => `${r.collection} ${r.product}`),
+          ...inUnterwegs.map(m => `${m.collection} ${m.product}`),
+          ...inNullbestand.map(p => `${p.collection} ${p.product}`),
+        ];
+        const lengths = new Set<string>();
+        for (const t of allMatchedTexts) {
+          const len = extractLength(t);
+          if (len) lengths.add(len);
+        }
+        // >1 distinkte Länge gefunden → Bot muss Kundin nach Länge fragen
+        // (oder selber aus Foto/Caption ableiten — falls Foto-Caption Länge
+        // hatte aber Bot sie nicht im search übergeben hat)
+        if (lengths.size > 1) {
+          // Per-Länge-Aufschlüsselung mit Stock-Status
+          const perLength: Record<string, { in_stock: string[]; unterwegs: { product: string; eta: string }[]; oos: string[] }> = {};
+          for (const r of inventoryMatches) {
+            const len = extractLength(`${r.collection} ${r.product}`) || "unknown";
+            if (!perLength[len]) perLength[len] = { in_stock: [], unterwegs: [], oos: [] };
+            (r.quantity > 0 ? perLength[len].in_stock : perLength[len].oos).push(r.product);
+          }
+          for (const m of inUnterwegs) {
+            const len = extractLength(`${m.collection} ${m.product}`) || "unknown";
+            if (!perLength[len]) perLength[len] = { in_stock: [], unterwegs: [], oos: [] };
+            const eta = m.perOrder?.[0]?.ankunft || "bald";
+            perLength[len].unterwegs.push({ product: m.product, eta });
+          }
+          for (const p of inNullbestand) {
+            const len = extractLength(`${p.collection} ${p.product}`) || "unknown";
+            if (!perLength[len]) perLength[len] = { in_stock: [], unterwegs: [], oos: [] };
+            perLength[len].oos.push(p.product);
+          }
+          console.warn(`[get_stock_eta] MULTI_LENGTH_RESULTS — search="${search}" lengths=${[...lengths].join(",")}`);
+          return {
+            output: JSON.stringify({
+              status: "multi_length_results",
+              message:
+                "WICHTIG: Diese Farbe gibt es in mehreren Längen mit UNTERSCHIEDLICHEM Stock-Status. " +
+                "Du DARFST NICHT pauschal 'auf Lager' oder 'ausverkauft' sagen — der Stock unterscheidet sich pro Länge. " +
+                "Wenn die Kundin eine konkrete Länge erwähnt hat (z.B. im Foto-Caption '65CM', im Text 'für 65cm', " +
+                "oder Produkt-URL '.../tape-extensions-65cm'), rufe get_stock_eta ERNEUT auf mit Länge im search " +
+                "(z.B. '4/27t24 65cm tape'). " +
+                "Wenn keine Länge bekannt: frag die Kundin: 'In welcher Länge brauchst du das?'. " +
+                "Du kannst per-Länge die Aufschlüsselung unten sehen, aber GIB sie NICHT direkt an die Kundin durch.",
+              per_length: perLength,
+              available_lengths: [...lengths].sort(),
+              searched_for: search,
+            }),
+          };
+        }
+      }
 
       // ENTSCHEIDUNGSBAUM:
 
