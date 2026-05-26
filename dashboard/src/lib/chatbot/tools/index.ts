@@ -205,6 +205,54 @@ const getStockEta: ToolDef = {
         };
       }
 
+      // ── SEARCH-TOO-BROAD-GUARD ────────────────────────────────────────────
+      // User-Bug 2026-05-26: Bot rief get_stock_eta zweimal auf — einmal mit
+      // konkreter Farbe (z.B. "4/27t24"), einmal mit reiner Methode/Länge
+      // ("wellig tape 65cm"). Der zweite Call matchte ALLE Wellig-65cm-Tapes,
+      // viele mit qty>0 → Tool returnte "in_stock". Bot kombinierte dann
+      // beide Results zu „4/27T24 ist auf Lager + ETA 25.06", obwohl Sheet
+      // klar qty=0 für 4/27T24 sagt.
+      //
+      // Lösung: Wenn die Such-Tokens AUSSCHLIESSLICH aus Methode/Linie/Länge/
+      // Material/Subtype bestehen (kein Farb-Identifier) → search_too_broad
+      // zurück. Bot MUSS dann mit Farbname oder Farb-Code (z.B. "4/27T24",
+      // "5P18A") erneut suchen.
+      const BROAD_NOISE = new Set([
+        // Methods
+        "tape", "tapes", "bonding", "bondings", "weft", "wefts", "clip", "clips",
+        "tresse", "tressen", "extension", "extensions",
+        // Line / texture
+        "russisch", "russische", "russischer", "russisches", "russischen", "ru",
+        "usbekisch", "usbekische", "usbekischer", "usbekisches", "us",
+        "wellige", "wellig", "welliges", "glatt", "glatte", "glatten", "glattes",
+        // Subtype
+        "standard", "mini", "genius", "classic", "invisible", "butterfly",
+        // Material / Produktart
+        "echthaar", "echte", "haar", "haare", "premium", "luxury", "keratin",
+        "ponytail", "ponytails",
+        // Pure Deskriptoren (KEINE branded color modifier — smoky/macadamia/cherry
+        // bleiben absichtlich draussen!)
+        "braun", "braune", "brauner", "blond", "blonde", "blonder",
+      ]);
+      const NUMERIC_RE = /^\d+(cm|g|gr|gramm)?$/i;
+      const hasColorIdentifier = tokens.some(t =>
+        !BROAD_NOISE.has(t) && !NUMERIC_RE.test(t)
+      );
+      if (!hasColorIdentifier) {
+        console.warn(`[get_stock_eta] SEARCH_TOO_BROAD — tokens=${JSON.stringify(tokens)} hat keinen Farb-Identifier`);
+        return {
+          output: JSON.stringify({
+            status: "search_too_broad",
+            message:
+              "Such-Begriff ist zu allgemein — er enthält nur Methode/Länge/Linie, keine konkrete Farbe oder Farb-Code. " +
+              "Bitte ZWINGEND erneut mit Farbname (z.B. 'ebony') oder Farb-Code (z.B. '4/27T24', '5P18A', '3T8A') suchen. " +
+              "OHNE Farb-Identifier bekommst du gleichzeitig 30+ Treffer und kannst keine valide Antwort zur Kundin geben. " +
+              "Wenn du die Farbe nicht kennst: frag die Kundin nach Farbcode/Foto, NICHT raten.",
+            received_tokens: tokens,
+          }),
+        };
+      }
+
       const isRussisch = /\bruss/.test(search);
       const isUsbekisch = /\busbek/.test(search);
 
