@@ -204,7 +204,9 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
     "us", "wellige", "wellig", "glatt", "glatte", "glatten",
     "standard", "echthaar", "echte", "haar", "haare",
     "braun", "braune", "brauner", "blond", "blonde", "blonder",
-    "balayage", "ombre", "ombré", "solide", "melt",
+    "balayage", "ombre", "ombré", "solide",
+    // NICHT in STOP: "melt" gehört zu Eigennamen wie "Mocha Melt", "Ash Melt",
+    // "Cool Melt" — soll mit-matchen.
     "premium", "luxury",
   ]);
 
@@ -218,18 +220,28 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
   const LENGTH_CM_RE = /(\d{2,3})\s*cm\b/i;
 
   const tokenize = (s: string): string[] => {
-    // Klasse D — Slash beibehalten ("4/27T24" als Farbcode, nicht zerlegen)
-    // Erlauben jetzt auch Slash und Bindestrich innerhalb von Tokens.
+    // Slash bleibt im Token ("4/27T24" als Farbcode), Bindestrich wird zu
+    // Space gesplittet — "Clip-Ins" → ["clip", "ins"] (sonst matched es
+    // nicht gegen Sheet-Eintrag "Clip In Extensions").
     return s
       .toLowerCase()
-      .replace(/[^a-z0-9äöüß/\-\s]+/gi, " ")
-      .split(/\s+/)
-      .map(t => t.replace(/^-+|-+$/g, ""))   // führende/abschließende "-" entfernen
+      .replace(/[^a-z0-9äöüß/\s\-]+/gi, " ")
+      .split(/[\s\-]+/)
       .filter(t => t && t.length > 1 && !STOP.has(t));
   };
+  // Match-Helper mit Plural-Toleranz: "ins" matched auch "in",
+  // "bondings" matched auch "bonding" etc. Wichtig weil Sheet-Namen
+  // oft Singular und Reservierungs-Namen oft Plural sind.
   const matchTokens = (toks: string[]) => (text: string) => {
     const hay = text.toLowerCase();
-    return toks.every(t => hay.includes(t));
+    return toks.every(t => {
+      if (hay.includes(t)) return true;
+      // Trailing "s" (Plural) → akzeptiere Singular
+      if (t.length > 2 && t.endsWith("s") && hay.includes(t.slice(0, -1))) return true;
+      // Trailing "en" (deutsch-Plural: Tressen→Tress) — selten relevant, defensiv
+      if (t.length > 3 && t.endsWith("en") && hay.includes(t.slice(0, -2))) return true;
+      return false;
+    });
   };
 
   const results: StockCheckResult[] = [];
