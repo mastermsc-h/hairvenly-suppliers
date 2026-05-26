@@ -254,9 +254,10 @@ CHAT (chronologisch, letzte Nachricht ist relevant):
   let inserted = 0;
   for (const s of sessions) {
     // Letzten ~5 Messages laden — als Kontext für die KI-Klassifikation.
+    // attachments mitziehen, um Instagram-Interactions (story_mention etc.) zu erkennen.
     const { data: ctxMsgs } = await svc
       .from("chat_messages")
-      .select("content, created_at, role")
+      .select("content, created_at, role, attachments")
       .eq("session_id", s.id)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
@@ -266,6 +267,25 @@ CHAT (chronologisch, letzte Nachricht ist relevant):
     if (ctxMsgs[0].role !== "user") continue;
 
     const lastUserText = ctxMsgs[0].content || "";
+
+    // INSTAGRAM-INTERACTION-FILTER (User-Befund 2026-05): wenn die letzte
+    // user-Message NUR eine Story-Erwähnung / Post-Share / Reel-Share / Reaction
+    // ist (kein echter Text, keine Bild-Frage), braucht es keine Antwort —
+    // das ist eine soziale Interaktion, kein Anliegen.
+    // Sibling: gleiche Logik gilt auch für ig_post, ig_reel, share, reaction.
+    const INTERACTION_ONLY_TYPES = new Set([
+      "story_mention", "ig_post", "ig_reel", "share", "reaction", "story_reply",
+    ]);
+    const lastAtts = (ctxMsgs[0].attachments || []) as Array<{ type?: string }>;
+    const isOnlyInstagramInteraction =
+      lastAtts.length > 0 &&
+      lastAtts.every(a => INTERACTION_ONLY_TYPES.has(a.type || "")) &&
+      /^\[?(Foto|Bild|Video|Audio)\]?$/i.test(lastUserText.trim());
+    if (isOnlyInstagramInteraction) {
+      console.log(`[guardian/long_wait] Session ${s.id.slice(0,8)} → IG-interaction only (${lastAtts.map(a=>a.type).join(",")}), kein Alert`);
+      continue;
+    }
+
     // Sehr kurze Floskeln direkt rausfiltern — kein KI-Call nötig
     if (isObviouslyTrivial(lastUserText)) continue;
 
