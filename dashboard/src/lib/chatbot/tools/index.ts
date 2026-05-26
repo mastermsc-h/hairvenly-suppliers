@@ -227,8 +227,10 @@ const getStockEta: ToolDef = {
       // Deklinationen ("dunkelbraun" → "dunkelbraune") und zusammengesetzten
       // Wörtern ("schwarz" → "tiefschwarz", "mocha" → "mochamelt" als eigene
       // Farbe... obwohl letzteres je nach Suche evtl. nicht gewollt ist).
-      // Das TAUPE/SMOKY-TAUPE-Problem wird stattdessen im Output-Sanitizer
-      // gefangen (stripColorUrlMismatch).
+      // Das TAUPE/SMOKY-TAUPE-Problem wird durch den COMPOUND-COLOR-GUARD
+      // unten gefangen (Output-Sanitizer fängt nur URL-Mismatch, nicht aber
+      // den Fall dass der Bot „SMOKY TAUPE" mit korrekter SMOKY-URL ausgibt
+      // obwohl die Kundin nur „TAUPE" suchte).
       const buildMatcher = (toks: string[]) => (text: string) => {
         const hay = text.toLowerCase();
         return toks.every(t => hay.includes(t));
@@ -236,6 +238,42 @@ const getStockEta: ToolDef = {
       const matchTokens = buildMatcher(tokens);
       const looseTokens = tokens.filter(t => !NUMERIC_LENGTH_GRAM.test(t));
       const matchLoose = buildMatcher(looseTokens);
+
+      // ── COMPOUND-COLOR-GUARD ────────────────────────────────────────────
+      // Aus product_colors automatisch detektiert (siehe scripts/tmp/build-
+      // modifiers-v2.mjs): wenn der Produktname EINEN dieser Modifier-Tokens
+      // als Wort enthält und der Search-String diesen Modifier NICHT enthält,
+      // ist es eine ANDERE Farbe — Match ablehnen.
+      //
+      //   "smoky"     → SMOKY TAUPE  (vs. TAUPE)
+      //   "macadamia" → MACADAMIA GLOW (vs. GLOW)
+      //   "cherry"    → CHERRY RED (vs. RED)
+      //   "3t"        → 3T PEARL WHITE (vs. PEARL WHITE)
+      //   "5m"        → 5M/SILVER (vs. SILVER)
+      //
+      // Wenn neue Compound-Farben dazukommen: script erneut laufen lassen
+      // und Liste hier ergänzen.
+      const COMPOUND_MODIFIERS = ["smoky", "macadamia", "cherry", "3t", "5m"];
+      const modifierRegexes = COMPOUND_MODIFIERS.map(m => ({
+        mod: m,
+        // Word-Boundary: matched "smoky" in "#smoky", " smoky ", "/smoky/", aber NICHT
+        // in "smokyfoo" (kein Boundary nach y). Für Modifier wie "3t" greift derselbe
+        // Pattern (3 ist Word-Char, t ist Word-Char, Boundary an Anfang+Ende reicht).
+        re: new RegExp(`(^|[^a-z0-9])${m}([^a-z0-9]|$)`, "i"),
+      }));
+      const searchHasModifier = new Set(
+        modifierRegexes.filter(({ re }) => re.test(search)).map(({ mod }) => mod)
+      );
+      const passesCompoundGuard = (text: string): boolean => {
+        for (const { mod, re } of modifierRegexes) {
+          if (!re.test(text)) continue;
+          if (!searchHasModifier.has(mod)) {
+            // Haystack hat Compound-Modifier, Search nicht → andere Farbe
+            return false;
+          }
+        }
+        return true;
+      };
 
       // 1) Lade Dashboard (Unterwegs + Nullbestand)
       const { unterwegs, nullbestand, lastUpdated } = await readDashboardAlerts();
@@ -247,9 +285,10 @@ const getStockEta: ToolDef = {
       const inventoryRows = (await Promise.all(sheets.map(s => readInventorySheet(s))))
         .flatMap(r => r.rows.map(row => ({ ...row, _sheet: r === undefined ? "" : "" })));
 
-      let inventoryMatches = inventoryRows.filter(r => matchTokens(`${r.collection} ${r.product}`));
-      let inUnterwegs = unterwegs.filter(item => matchTokens(`${item.collection} ${item.product}`));
-      let inNullbestand = nullbestand.filter(item => matchTokens(`${item.collection} ${item.product}`));
+      const matchAndGuard = (text: string) => matchTokens(text) && passesCompoundGuard(text);
+      let inventoryMatches = inventoryRows.filter(r => matchAndGuard(`${r.collection} ${r.product}`));
+      let inUnterwegs = unterwegs.filter(item => matchAndGuard(`${item.collection} ${item.product}`));
+      let inNullbestand = nullbestand.filter(item => matchAndGuard(`${item.collection} ${item.product}`));
 
       // FALLBACK: wenn strict 0 Treffer hat UND wir haben Längen/Gramm-Tokens entfernt,
       // versuche nochmal loose. Beispiel: Bot sucht "RAW 60cm 225g Clip" — Produktname
@@ -262,9 +301,10 @@ const getStockEta: ToolDef = {
         looseTokens.length > 0 &&
         looseTokens.length < tokens.length
       ) {
-        inventoryMatches = inventoryRows.filter(r => matchLoose(`${r.collection} ${r.product}`));
-        inUnterwegs = unterwegs.filter(item => matchLoose(`${item.collection} ${item.product}`));
-        inNullbestand = nullbestand.filter(item => matchLoose(`${item.collection} ${item.product}`));
+        const matchLooseAndGuard = (text: string) => matchLoose(text) && passesCompoundGuard(text);
+        inventoryMatches = inventoryRows.filter(r => matchLooseAndGuard(`${r.collection} ${r.product}`));
+        inUnterwegs = unterwegs.filter(item => matchLooseAndGuard(`${item.collection} ${item.product}`));
+        inNullbestand = nullbestand.filter(item => matchLooseAndGuard(`${item.collection} ${item.product}`));
         console.log(`[get_stock_eta] loose-fallback aktiviert (Tokens: ${JSON.stringify(tokens)} → ${JSON.stringify(looseTokens)}), Treffer: inv=${inventoryMatches.length}, unterwegs=${inUnterwegs.length}, null=${inNullbestand.length}`);
       }
 

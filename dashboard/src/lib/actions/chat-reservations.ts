@@ -323,8 +323,30 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
     };
   };
 
-  // Match-Helper mit Plural-Toleranz + Subtype-Conflict-Check
-  const matchTokens = (toks: string[], wants: ReturnType<typeof classifySubtype>) => (text: string) => {
+  // ── COMPOUND-COLOR-GUARD ──────────────────────────────────────────────
+  // Aus product_colors automatisch detektiert (siehe scripts/tmp/build-
+  // modifiers-v2.mjs): Modifier-Token, die einen anderen Farbnamen schaffen.
+  //   smoky     → SMOKY TAUPE  (vs. TAUPE)
+  //   macadamia → MACADAMIA GLOW (vs. GLOW)
+  //   cherry    → CHERRY RED (vs. RED)
+  //   3t        → 3T PEARL WHITE (vs. PEARL WHITE)
+  //   5m        → 5M/SILVER (vs. SILVER)
+  // Bei neuen Compound-Farben: script erneut laufen lassen, Liste ergänzen.
+  const COMPOUND_MODIFIERS = ["smoky", "macadamia", "cherry", "3t", "5m"];
+  const modifierRegexes = COMPOUND_MODIFIERS.map(m => ({
+    mod: m,
+    re: new RegExp(`(^|[^a-z0-9])${m}([^a-z0-9]|$)`, "i"),
+  }));
+
+  // Match-Helper mit Plural-Toleranz + Subtype-Conflict-Check + Compound-Guard
+  const matchTokens = (toks: string[], wants: ReturnType<typeof classifySubtype>, searchText: string) => {
+    // searchHasModifier: hat der Reservierungs-String selbst diesen Modifier?
+    // Wir vergleichen das ORIGINAL-text (nicht die Tokens), damit auch
+    // "Smoky Taupe" als "smoky" detektiert wird (in Tokens steht ja "smoky" + "taupe").
+    const searchHasModifier = new Set(
+      modifierRegexes.filter(({ re }) => re.test(searchText)).map(({ mod }) => mod)
+    );
+    return (text: string) => {
     const hay = text.toLowerCase();
     // Token-Substring-Check (mit Plural-Toleranz)
     for (const t of toks) {
@@ -332,6 +354,16 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
       if (t.length > 2 && t.endsWith("s") && hay.includes(t.slice(0, -1))) continue;
       if (t.length > 3 && t.endsWith("en") && hay.includes(t.slice(0, -2))) continue;
       return false;
+    }
+    // COMPOUND-COLOR-GUARD: wenn haystack einen Modifier-Token enthält,
+    // den die Reservierung NICHT erwähnt → ANDERE Farbe → Reject.
+    // Gilt auch UMGEKEHRT: wenn Reservierung "SMOKY TAUPE" sagt aber row
+    // nur "TAUPE" → searchHas={smoky}, hay enthält nicht "smoky" → kein
+    // Reject hier, aber matchTokens scheitert eh weil "smoky"-Token in
+    // toks fehlt im hay. Symmetrie durch Token-Match.
+    for (const { mod, re } of modifierRegexes) {
+      if (!re.test(text)) continue;
+      if (!searchHasModifier.has(mod)) return false;
     }
     // Subtype-Conflict-Check: haystack-Subtype muss zu wants passen
     const hayMini = /\bmini[\s-]?tape/i.test(text);
@@ -349,6 +381,7 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
     if (wants.wantsClassic !== hayClassic) return false;
     if (!searchIsClip && wants.wantsInvisible !== hayInvisible) return false;
     return true;
+    };
   };
 
   const results: StockCheckResult[] = [];
@@ -401,7 +434,9 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
       results.push({ reservationId: r.id, productName: r.product_name, status: "unknown", reason: "Keine identifizierbaren Such-Tokens" });
       continue;
     }
-    const tokenMatch = matchTokens(tokens, wants);
+    // searchStr ist der Original-Reservierungs-Text (Farbe + Method + Name),
+    // den der Compound-Guard analysiert um Modifier-Tokens zu erkennen.
+    const tokenMatch = matchTokens(tokens, wants, searchStr);
 
     // Match-Helper: berücksichtigt Tokens + Subtype + Gewicht + Länge + Linie
     const fullMatch = (row: { collection?: string; product?: string; unitWeight?: number; _line?: "russisch" | "usbekisch" }) => {
