@@ -164,25 +164,29 @@ export async function setBotMode(sessionId: string, mode: "auto" | "selective_au
   // sofort Bot generieren + senden (analog zu Webhook-Trigger), damit die
   // Kundin nicht warten muss bis sie nochmal schreibt.
   if (mode === "auto" || mode === "selective_auto") {
-    // Klassifikation nachholen falls fehlt
-    (async () => {
-      try {
+    // Klassifikation nachholen falls fehlt — SYNCHRON, weil granularer
+    // Kill-Switch unten die category als Whitelist-Lookup braucht.
+    let triggerCategory: string | null = null;
+    try {
+      const { data: cur } = await svc.from("chat_sessions").select("category").eq("id", sessionId).single();
+      if (cur?.category) {
+        triggerCategory = cur.category as string;
+      } else {
         const { classifySession } = await import("@/lib/chatbot/classify");
-        const { data: cur } = await svc.from("chat_sessions").select("category").eq("id", sessionId).single();
-        if (!cur?.category) await classifySession(sessionId);
-      } catch {}
-    })();
+        triggerCategory = (await classifySession(sessionId)) || null;
+      }
+    } catch {}
 
     const openMsg = await findOpenCustomerMsg();
     if (openMsg) {
       const { data: existingDraft } = await svc.from("chat_drafts")
         .select("id").eq("session_id", sessionId).eq("status", "pending").maybeSingle();
-      // 🛑 KILL-SWITCH-CHECK (gleicher Helper wie im Webhook).
-      // Wenn proaktive Generierung deaktiviert ist, KEIN Auto-Draft beim
-      // setBotMode-Switch — der User stellt nur den Modus um, soll keinen
-      // verstecktem LLM-Call auslösen.
+      // 🛑 GRANULAR KILL-SWITCH (gleicher Helper wie im Webhook).
+      // Bei deaktiviertem Master-Switch werden nur "safe" Categories
+      // (availability/general/pricing/order_status) zugelassen. Risky
+      // Categories warten weiter auf Mitarbeiter-Click.
       const { isProactiveGenerationEnabled } = await import("@/lib/chatbot/settings");
-      const proactiveAllowed = await isProactiveGenerationEnabled();
+      const proactiveAllowed = await isProactiveGenerationEnabled(triggerCategory);
       if (!existingDraft && proactiveAllowed) {
         try {
           const { respondAsBot, splitLongMessage } = await import("@/lib/chatbot/respond");
@@ -260,14 +264,18 @@ export async function setBotMode(sessionId: string, mode: "auto" | "selective_au
   }
 
   if (mode === "assisted") {
-    // Klassifikation nachholen falls noch keine (fire-and-forget)
-    (async () => {
-      try {
+    // Klassifikation nachholen falls noch keine — SYNCHRON, weil granularer
+    // Kill-Switch unten die category als Whitelist-Lookup braucht.
+    let assistedTriggerCategory: string | null = null;
+    try {
+      const { data: cur } = await svc.from("chat_sessions").select("category").eq("id", sessionId).single();
+      if (cur?.category) {
+        assistedTriggerCategory = cur.category as string;
+      } else {
         const { classifySession } = await import("@/lib/chatbot/classify");
-        const { data: cur } = await svc.from("chat_sessions").select("category").eq("id", sessionId).single();
-        if (!cur?.category) await classifySession(sessionId);
-      } catch {}
-    })();
+        assistedTriggerCategory = (await classifySession(sessionId)) || null;
+      }
+    } catch {}
 
     // Schon ein pending Draft? Dann nichts tun.
     const { data: existingDraft } = await svc
@@ -312,9 +320,10 @@ export async function setBotMode(sessionId: string, mode: "auto" | "selective_au
         }
       }
 
-      // 🛑 KILL-SWITCH-CHECK (Cluster-Detection-Pfad — auch proaktiv)
+      // 🛑 GRANULAR KILL-SWITCH (Cluster-Detection-Pfad — auch proaktiv).
+      // Bei deaktiviertem Master-Switch nur safe Categories (siehe settings.ts).
       const { isProactiveGenerationEnabled: isProactive2 } = await import("@/lib/chatbot/settings");
-      const proactiveAllowed2 = await isProactive2();
+      const proactiveAllowed2 = await isProactive2(assistedTriggerCategory);
       if (openCustomerMsgs.length > 0 && proactiveAllowed2) {
         const triggerMsg = openCustomerMsgs[openCustomerMsgs.length - 1];
 

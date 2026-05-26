@@ -411,14 +411,21 @@ async function routeIncoming(opts: {
     session.status = "active";
   }
 
-  // Auto-Klassifikation der Session (fire-and-forget) — bei jedem Eingang erneut
-  // damit sich die Kategorie an aktuelle Themen anpasst.
-  (async () => {
-    try {
-      const { classifySession } = await import("@/lib/chatbot/classify");
-      await classifySession(session.id);
-    } catch (e) { console.warn("[meta-webhook] classify fail:", (e as Error).message); }
-  })();
+  // Auto-Klassifikation der Session — bei jedem Eingang erneut, damit sich die
+  // Kategorie an aktuelle Themen anpasst. SYNCHRON awaited, weil der granulare
+  // Kill-Switch (siehe weiter unten) die category braucht, um zu entscheiden ob
+  // proaktive Bot-Generierung erlaubt ist (Whitelist: availability/general/
+  // pricing/order_status). Ohne aktuelle Category würde der Kill-Switch sonst
+  // konservativ blockieren und der Bot würde nie antworten.
+  // Haiku-Call ist schnell (~300-600ms) — kein nennenswerter Webhook-Delay.
+  let sessionCategory: string | null = (session as { category?: string | null }).category ?? null;
+  try {
+    const { classifySession } = await import("@/lib/chatbot/classify");
+    const cat = await classifySession(session.id);
+    if (cat) sessionCategory = cat;
+  } catch (e) {
+    console.warn("[meta-webhook] classify fail:", (e as Error).message);
+  }
 
   // Letzte gespeicherte User-Message holen — als Trigger für ggf. Entwurf
   const { data: lastUserMsg } = await svc.from("chat_messages")
@@ -562,13 +569,16 @@ async function routeIncoming(opts: {
     }
   }
 
-  // 🛑 GLOBAL KILL-SWITCH (via lib/chatbot/settings.ts)
-  // User-Anweisung 2026-05-24: keine proaktiven Bot-Drafts.
-  // Manual-Trigger (Inbox "Antwort generieren") ist NICHT betroffen.
+  // 🛑 GRANULAR KILL-SWITCH (via lib/chatbot/settings.ts)
+  // User-Anweisung 2026-05-26: Bot antwortet nur bei "ungefährlichen" Categories
+  // automatisch (availability/general/pricing/order_status). Bei riskanten
+  // (color_advice/gewerbe/appointment/complaint/partnership) bleibt es bei
+  // Mitarbeiter-Click. Manual-Trigger (Inbox "Antwort generieren") ist NICHT
+  // betroffen — der schreibt direkt, nicht über diesen Pfad.
   {
     const { isProactiveGenerationEnabled } = await import("@/lib/chatbot/settings");
-    if (!(await isProactiveGenerationEnabled())) {
-      console.log(`[meta-webhook] PROACTIVE-DISABLED — skip bot session=${session.id.slice(0,8)}`);
+    if (!(await isProactiveGenerationEnabled(sessionCategory))) {
+      console.log(`[meta-webhook] PROACTIVE-DISABLED (category=${sessionCategory ?? "none"}) — skip bot session=${session.id.slice(0,8)}`);
       return;
     }
   }
