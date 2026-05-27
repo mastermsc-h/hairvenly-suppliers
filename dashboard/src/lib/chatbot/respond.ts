@@ -380,7 +380,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-05-27.fact-based-validator.v2";
+const RESPOND_CODE_VERSION = "2026-05-27.fokus-letzte-frage.v3";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
@@ -541,6 +541,13 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += "- 📏 Bei NICHT-EXISTIERENDER Kombo (z.B. 'Latte Balayage 55cm' — Latte Balayage existiert nur in Russisch glatt 60cm):\n";
   systemPrompt += "  Sag die Wahrheit was wir HABEN, nicht 'X in 55cm ist ausverkauft' erfinden. Beispiel: 'Latte Balayage haben wir nur in 60cm Russisch glatt — Mini Tapes ca. 30.05., Standard Tapes ca. 04.07. wieder rein.'\n";
   systemPrompt += "- 🚨 KEINE PROAKTIVEN FARB-ALTERNATIVEN: Schlage NIE selbstständig andere Farben vor, solange die Kundin nicht EXPLIZIT nach Alternativen fragt ('habt ihr was Ähnliches?'). 'Vielen Dank' oder 'dringend' reichen nicht.\n";
+  systemPrompt += "- 🎯 FOKUS auf die LETZTE Kunden-Frage — keine Re-Erwähnung alter Themen:\n";
+  systemPrompt += "  • Wenn die Kundin in ihrer LETZTEN Nachricht eine spezifische Sache fragt (z.B. 'wann ist die Farbe wieder da?' + Foto-Anhang, oder 'kommt X bald?'), antworte AUSSCHLIESSLICH zu diesem einen Produkt.\n";
+  systemPrompt += "  • Bringe NICHT proaktiv Updates zu anderen Farben/Produkten ein, die in EARLIER Messages besprochen wurden. Auch wenn dir das Tool weitere Daten zurückgegeben hat — die sind nicht angefordert.\n";
+  systemPrompt += "  • AUSNAHME nur wenn die Kundin in DIESER Nachricht explizit nach mehreren fragt ('was ist mit den anderen?', 'wie ist der Stand bei allen Farben?').\n";
+  systemPrompt += "  • ❌ FALSCH: Kundin fragt zu Butter Cream → Bot antwortet zu Butter Cream UND erwähnt unaufgefordert 5P18A (war vor 8 Tagen besprochen).\n";
+  systemPrompt += "  • ✅ RICHTIG: Kundin fragt zu Butter Cream → 'Die Butter Cream Bondings kommen ca. 30.05. wieder. Magst du auf die Warteliste?' — KEIN Wort über andere Farben.\n";
+  systemPrompt += "  • Bei 'die Farbe' / 'das Produkt' / 'sie' / 'es' in der letzten Nachricht: bezieht sich auf das was die Kundin GERADE gesendet hat (Foto, Link, oder vorherige Nachricht in derselben Eingabe-Sequenz) — NICHT auf älteres Gespräch.\n";
   systemPrompt += "- 🔒 NIEMALS Lieferanten-Namen erwähnen: Amanda, Eyfel, Ebru, China, etc. Das sind INTERNE Codes. Kundin spricht IMMER von der Haarqualität (Russisch glatt / Usbekisch wellig).\n";
   systemPrompt += "- 🔗 WICHTIG: Wenn du eine konkrete Farbe (COLDNESS, ASH MELT, FROSTY, CAPPUCCINO etc.) empfiehlst oder nennst, packe IMMER die passende Shopify-URL direkt hinter den Farbnamen. Niemals einen Farbnamen 'nackt' lassen. Die Kundin muss DIREKT klicken und das Produkt sehen können — sonst muss sie selbst suchen.\n";
   systemPrompt += "  Wenn dir aus dem Tool-Output keine URL bekannt ist, NICHT die Farbe nennen.\n";
