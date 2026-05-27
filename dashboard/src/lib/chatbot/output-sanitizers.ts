@@ -333,26 +333,36 @@ export function stripMarkdownFormatting(text: string): string {
 }
 
 /**
- * Strukturelle Validierung: Length × Line-Konsistenz.
+ * Strukturelle Validierung: Methode × Linie × Länge gegen echte DB.
  *
- * Physikalisch existierende Kombos:
- *   - Russisch glatt = NUR 60cm
- *   - Usbekisch wellig = 45/55/65/85cm (KEIN 60cm)
+ * Physikalisch existierende Kombos (Stand 2026-05-27, aus product_methods +
+ * product_lengths in der DB):
  *
- * Wenn der Bot diese physikalischen Constraints verletzt (z.B. „Mini Tapes
- * 55cm russisch glatt" — gibt's nicht), strippen wir die problematische
- * Zeile/Satz aus dem Output. Prompt-Engineering-Regeln „NIE erfinden" wurden
- * mehrfach ignoriert — strukturelle Validation ist die einzige zuverlässige
- * Lösung.
+ *   RUSSISCH GLATT (Amanda) — alle 60cm:
+ *     - Bondings, Standard Tapes, Minitapes, Classic Weft, Invisible Weft,
+ *       Genius Weft, Clip-ins (100/150/225g), Ponytail
  *
- * Pattern-Detection:
- *   - Suche nach Sätzen/Bullet-Points, die GLEICHZEITIG enthalten:
- *     (a) explizite Länge in cm (45/55/65/85/60)
- *     (b) Linien-Indikator (russisch/glatt oder usbekisch/wellig)
- *   - Wenn die Kombo unmöglich ist → Zeile strippen
+ *   USBEKISCH WELLIG (Eyfel):
+ *     - Tapes: 45/55/65/85cm
+ *     - Bondings: 65/85cm (KEIN 45/55!)
+ *     - Classic Tressen: 65cm (NICHT „Classic Weft")
+ *     - Genius Weft: 65cm
+ *     - Ponytail: 65cm
  *
- * Conservative: nur Sätze die BEIDE haben werden gestrippt. Andere Sätze
- * bleiben unverändert.
+ * Validator-Klassen (jede strippt die ganze Zeile):
+ *   1. Russisch + 45/55/65/85cm → unmöglich (Russisch ist nur 60cm)
+ *   2. Usbekisch + 60cm → unmöglich
+ *   3. „Mini Tapes/Minitapes" + Usbekisch → Mini Tapes existieren nur in Russisch
+ *   4. „Classic Tressen" + Russisch → Russisch hat „Classic Weft", nicht Tressen
+ *   5. „Classic Weft" oder „Invisible Weft" + Usbekisch → existieren nur Russisch
+ *   6. Usbekisch Bondings + 45/55cm → Usbekisch Bondings nur 65/85cm
+ *
+ * Conservative-Prinzip: nur Zeilen mit klaren Constraint-Verletzungen werden
+ * gestrippt. Bei Unsicherheit (nur eines der Anker) → keine Aktion.
+ *
+ * Prompt-Engineering hat 4 Iterationen lang versagt — strukturelle Validation
+ * ist die einzige zuverlässige Lösung, weil sie deterministisch auf dem Output
+ * läuft, nicht auf der LLM-Compliance.
  */
 export function stripImpossibleLengthLineCombos(text: string): string {
   const lines = text.split(/\n/);
@@ -360,32 +370,62 @@ export function stripImpossibleLengthLineCombos(text: string): string {
   let stripped = 0;
   for (const line of lines) {
     const lower = line.toLowerCase();
-    // Find any cm mention
-    const cmMatches = [...lower.matchAll(/\b(\d{2,3})\s*cm\b/g)];
-    if (cmMatches.length === 0) {
-      kept.push(line);
-      continue;
-    }
-    // Line-Indikatoren
+    // Line-Indikatoren (immer prüfen — auch wenn keine cm-Angabe da ist)
     const hasRussisch = /\b(russisch|russische|russischen|russischer|russisches|russisch[\s-]?glatt|glatt(e|en|es|er)?)\b/i.test(lower);
     const hasUsbekisch = /\b(usbekisch|usbekische|usbekisches|usbekischer|usbekischen|us[\s-]?wellig|wellig(e|es|en|er)?)\b/i.test(lower);
+
     let impossible = false;
-    for (const m of cmMatches) {
-      const cm = parseInt(m[1], 10);
-      // Russisch glatt + 45/55/65/85cm = unmöglich
-      if (hasRussisch && [45, 55, 65, 85].includes(cm)) {
-        impossible = true;
-        console.warn(`[sanitizer] IMPOSSIBLE_COMBO: russisch glatt + ${cm}cm in line: "${line.slice(0, 100)}"`);
-        break;
-      }
-      // Usbekisch wellig + 60cm = unmöglich
-      if (hasUsbekisch && cm === 60) {
-        impossible = true;
-        console.warn(`[sanitizer] IMPOSSIBLE_COMBO: usbekisch wellig + ${cm}cm in line: "${line.slice(0, 100)}"`);
-        break;
+    let reason = "";
+
+    // Klasse 3: Mini Tapes + Usbekisch — Mini Tapes existieren nur in Russisch glatt
+    if (hasUsbekisch && /\b(mini[\s-]?tape|minitape)/i.test(lower)) {
+      impossible = true;
+      reason = "Mini Tapes + Usbekisch (Mini Tapes existieren nur in Russisch glatt)";
+    }
+    // Klasse 4: Classic Tressen + Russisch — Russisch hat „Classic Weft", nicht Tressen
+    if (!impossible && hasRussisch && /\bclassic[\s-]?tresse/i.test(lower)) {
+      impossible = true;
+      reason = "Classic Tressen + Russisch (Russisch hat Classic Weft, nicht Tressen)";
+    }
+    // Klasse 5a: Classic Weft + Usbekisch
+    if (!impossible && hasUsbekisch && /\bclassic[\s-]?weft/i.test(lower)) {
+      impossible = true;
+      reason = "Classic Weft + Usbekisch (gibt's nur in Russisch glatt)";
+    }
+    // Klasse 5b: Invisible Weft + Usbekisch
+    if (!impossible && hasUsbekisch && /\binvisible[\s-]?weft/i.test(lower)) {
+      impossible = true;
+      reason = "Invisible Weft + Usbekisch (gibt's nur in Russisch glatt)";
+    }
+
+    // Längen-Checks (Klassen 1, 2, 6)
+    if (!impossible) {
+      const cmMatches = [...lower.matchAll(/\b(\d{2,3})\s*cm\b/g)];
+      for (const m of cmMatches) {
+        const cm = parseInt(m[1], 10);
+        // Klasse 1: Russisch + 45/55/65/85cm
+        if (hasRussisch && [45, 55, 65, 85].includes(cm)) {
+          impossible = true;
+          reason = `Russisch + ${cm}cm (Russisch ist nur 60cm)`;
+          break;
+        }
+        // Klasse 2: Usbekisch + 60cm
+        if (hasUsbekisch && cm === 60) {
+          impossible = true;
+          reason = `Usbekisch + ${cm}cm (Usbekisch ist 45/55/65/85cm)`;
+          break;
+        }
+        // Klasse 6: Usbekisch Bondings + 45/55cm
+        if (hasUsbekisch && /\bbonding/i.test(lower) && [45, 55].includes(cm)) {
+          impossible = true;
+          reason = `Usbekisch Bondings + ${cm}cm (Usbekisch Bondings nur 65/85cm)`;
+          break;
+        }
       }
     }
+
     if (impossible) {
+      console.warn(`[sanitizer] IMPOSSIBLE_COMBO: ${reason} in line: "${line.slice(0, 100)}"`);
       stripped++;
       continue;
     }
