@@ -33,6 +33,71 @@ export type ContactIntent =
  * WICHTIG: konservativ matchen — lieber unsicher → null und LLM lassen,
  * als false-positive ein Template feuern wenn die Kundin was anderes will.
  */
+/**
+ * Klassen-basiertes Detection-Modell statt Keyword-Race.
+ *
+ * Architektur-Rationale (siehe CHATBOT_ARCHITECTURE.md §1 + Sibling-Sweep):
+ * Vorher war das Modul ein Keyword-Race — "wer zuerst matched, gewinnt".
+ * Bei generischen Verben wie `kommen`, `schicken`, `dauert`, `ankommen`
+ * (mehrdeutig: Lieferung vs. Vorbeikommen) gab es zwangsläufig false-positives.
+ *
+ * Strukturelles Modell:
+ *   - hasProductContext(t): Klassen-Aufzählung aller Pattern die auf
+ *     Produkt-/Bestell-/Lieferungs-Diskussion hindeuten. Wenn irgendeine
+ *     Klasse matched → Contact-Bypass blockiert, LLM darf antworten.
+ *   - Strong contact-keywords (adresse, öffnungszeit, vorbeikommen) — nur
+ *     diese starten den Bypass.
+ *   - Schwache/mehrdeutige Verben wie bare "kommen" sind KEIN Bypass-Trigger.
+ *
+ * Klassen die hasProductContext erkennt:
+ *   1. Numerische Einheiten     → cm/g/gramm mit Ziffer-Präfix
+ *   2. Längen-Adjektive          → länger/kürzer/länge (immer Produkt-Bezug)
+ *   3. Methode-Wörter            → tape/bonding/weft/tresse/clip/ponytail
+ *   4. Farbe-Indikatoren         → "farbe" + Codes wie 4/27T24, 3A, P4/6
+ *   5. Mengen-/Pack-Wörter       → packung/päckchen/pakete/stück
+ *   6. Liefer-Verben             → wann + kommt/kommen/sind/da/rein/an
+ *   7. Bestand-/Stock-Wörter     → verfügbar/vorrätig/lager/nachschub/ausverkauft
+ *   8. Transaktion               → bestell/kauf/bezahl/preis/kostet/liefer
+ *   9. Reservierung/Warteliste   → warteliste/reservier/benachrichtig
+ *
+ * Sibling-Sweep: jede neue Bug-Klasse die wir sehen wird HIER ergänzt — nicht
+ * mehr im Adress-Regex selber. So bleibt das Modell pflegbar.
+ */
+function hasProductContext(t: string): boolean {
+  // 1. Numerische Einheiten — Word-Boundary-Bug bei \bcm\b (Ziffer+c = beide \w),
+  //    deshalb explicit \d+\s?cm
+  if (/\d+\s?cm\b/i.test(t)) return true;
+  if (/\d+\s?g(?:ramm)?\b/i.test(t)) return true;
+  if (/\d+\s?(?:kg|kilo)\b/i.test(t)) return true;
+  // 2. Längen-Adjektive (Produkt-Bezug)
+  if (/\b(länge|länger|kürzer|länger|laenger)\b/i.test(t)) return true;
+  // 3. Methode-Wörter (Singular + Plural)
+  if (/\b(tape|tapes|bonding|bondings|weft|wefts|tresse|tressen|clip|clips|ponytail|ponytails|extension|extensions)\b/i.test(t)) return true;
+  if (/\b(mini[\s-]?tape|genius[\s-]?weft|classic[\s-]?weft|invisible[\s-]?(weft|clip)|butterfly[\s-]?weft|standard[\s-]?tape)\b/i.test(t)) return true;
+  // 4. Farb-Indikatoren
+  if (/\bfarbe\b/i.test(t)) return true;
+  // Farb-Codes: 4/27T24, 3A, 5P18A, P4/6, 3T8A, #2A
+  if (/#?\b\d+[a-z]+\d*[a-z]*\b/i.test(t)) return true;
+  if (/\b[a-z]\d+\/\d+[a-z]*\b/i.test(t)) return true;
+  if (/\b\d+\/\d+[a-z]*\d*\b/i.test(t)) return true;
+  // 5. Mengen-/Pack-Wörter
+  if (/\b(\d+\s+)?(packung\w*|päckchen|paket\w*|stück|paar)\b/i.test(t)) return true;
+  // 6. Liefer-Verben — "wann kommt/kommen/sind/da", "wann liefert", "wann ist da"
+  if (/\bwann\s+(?:kommt|kommen|sind|ist|liefer|wieder)/i.test(t)) return true;
+  if (/\b(?:kommt|kommen)\s+(?:rein|an|wieder|am|die|der|das)\b/i.test(t)) return true;
+  if (/\b(?:ankommen|ankommt|reinkommen|reinkommt)\b/i.test(t)) return true;
+  if (/\b(dauert|wartezeit|lieferzeit)\b/i.test(t)) return true;
+  // 7. Bestand-/Stock-Wörter
+  if (/\b(verfügbar|vorrätig|lager|lagernd|nachschub|ausverkauft|sortiment)\b/i.test(t)) return true;
+  // 8. Transaktion
+  if (/\b(bestell|kauf|bezahl|preis|kostet|liefer|versand|porto|rabatt|gewerbe)\b/i.test(t)) return true;
+  // 9. Reservierung / Warteliste / Benachrichtigung
+  if (/\b(warteliste|reservier|benachrichtig|bescheid\s+(geben|sagen))\b/i.test(t)) return true;
+  // 10. Haar-/Body-Wörter (impliziert Beratungskontext → Produkt)
+  if (/\b(haar|haare|verlänger|verdicht|ansatz|spitzen|volumen|dünn|dick|locken|wellig|glatt)\b/i.test(t)) return true;
+  return false;
+}
+
 export function detectContactIntent(userMessage: string): ContactIntent {
   if (!userMessage) return null;
   const t = userMessage.toLowerCase().trim();
@@ -41,23 +106,12 @@ export function detectContactIntent(userMessage: string): ContactIntent {
   // Kontext der nicht nur Kontakt-Info will.
   if (t.length < 6 || t.length > 250) return null;
 
-  // Wenn eine konkrete Produkt-/Bestell-Frage drin steckt: KEIN Contact-Intent,
-  // sondern normal Bot. (Vermeidet false-positives wenn jemand "Adresse" zusammen
-  // mit "Bestellung" oder "wann liefert ihr" sagt.)
-  //
-  // Bug-Fix 2026-05-27: \bcm\b matched NICHT in "55cm" weil zwischen Ziffer und
-  // 'c' kein Word-Boundary ist (beide \w). Daher \d+\s?cm explicit. Plus mehr
-  // Längen-/Lieferungs-Indikatoren ("länger", "kürzer", "liefer", "kommt rein
-  // /an", "wann kommt"). Das verhindert dass Sätze wie "kommen die in 55cm auch
-  // länger an?" (Lieferungs-Frage über Tape-Variante) fälschlich als Adress-
-  // Anfrage interpretiert werden.
-  if (
-    /\b(bestell|kauf|bezahl|farbe|tape|tapes|tresse|tressen|bonding|bondings|weft|wefts|clip|clips|gramm|länge|länger|kürzer|preis|kostet|haar|verlänger|verdicht|liefer|kommt\s+(?:rein|an|in\b|wieder|am)|kommen\s+(?:rein|an|in\b|wieder|am)|wann\s+(?:kommt|kommen|sind|ist)|verfügbar|vorrätig|nachschub|lager)\b/i.test(t)
-    || /\d+\s?cm\b/i.test(t)
-    || /\d+\s?g(?:ramm)?\b/i.test(t)
-  ) {
-    return null;
-  }
+  // ── KLASSEN-BASIERTER PRODUKT-KONTEXT-GUARD ─────────────────────
+  // Wenn IRGENDEINE Produkt-/Bestell-/Lieferungs-Pattern-Klasse matched,
+  // ist das KEIN Contact-Intent → LLM antworten lassen. Siehe Funktions-
+  // Dokumentation oben für die 10 Klassen. Neue Bug-Klassen werden DORT
+  // ergänzt, nicht im Adress-Regex selber.
+  if (hasProductContext(t)) return null;
 
   // ─── REIHENFOLGE (wichtig!) ─────────────────────────────────────
   // Spezifischere Intents zuerst (Korrekturen vor generischen Lookups),
