@@ -357,6 +357,27 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   const HANDOFF_DAY_RE = /\b(montag|dienstag|mittwoch|donnerstag|freitag|morgen)\b[^.\n]{0,30}\b(früh|ab\s+10|10\s*uhr|ankommt)/i;
   const isInTodo = (s: typeof combinedSessions[number]) => {
     if (s.status === "closed") return false;
+
+    // ── EXPLIZIT-ERLEDIGT-OVERRIDE ─────────────────────────────────────
+    // Wenn die MA "Erledigt" geklickt hat (markSessionAsSeen → last_seen
+    // deutlich nach last_message), überschreibt das ALLE In-Todo-Trigger.
+    // Schwelle 5s vermeidet Race-Condition bei sendHumanMessage (wo
+    // last_message + last_seen ~simultan gesetzt werden).
+    // User-Bug 2026-05-27: "wenn ich chats manuell auf erledigt setze,
+    // sollen die aus 'zu tun' verschwinden" — auch wenn Grace oder
+    // Handoff-Promise sonst greifen würden.
+    const seenAt = s.last_seen_by_agent_at;
+    const lastMsgAt = s.last_message_at;
+    if (seenAt && lastMsgAt) {
+      const seenAtMs = new Date(seenAt).getTime();
+      const lastMsgMs = new Date(lastMsgAt).getTime();
+      // Sentinel-Check: wenn seenAt vor 2000 → "Nicht erledigt"-Flag, NICHT skippen
+      const isSentinel = new Date(seenAt).getFullYear() < 2000;
+      if (!isSentinel && seenAtMs - lastMsgMs > 5000) {
+        return false; // ← manuell erledigt, raus aus Zu-tun
+      }
+    }
+
     if (pendingDraftSet.has(s.id)) return true;
     if (unreadMap[s.id]) return true;
     // 🏢 B2B-AUTOBOT-WARNING: Gewerbe-Session + Bot hat autonom geantwortet
