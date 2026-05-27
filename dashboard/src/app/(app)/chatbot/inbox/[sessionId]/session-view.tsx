@@ -73,6 +73,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
   const [input, setInput] = useState("");
   const [isPending, startTransition] = useTransition();
   const [suggesting, setSuggesting] = useState(false);
+  const [polishing, setPolishing] = useState(false);
   const [andResume, setAndResume] = useState(false);
   const [modeSwitching, setModeSwitching] = useState<null | "auto" | "selective_auto" | "assisted" | "off">(null);
   const [generating, setGenerating] = useState(false);
@@ -169,6 +170,44 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
       alert(`Fehler: ${(e as Error).message}`);
     } finally {
       setSuggesting(false);
+    }
+  }
+
+  /**
+   * Polish-Modus: MA hat einen Entwurf mit Klammer-Anweisungen geschrieben
+   * (z.B. „... schau mal [füge hier den link ein]"). KI:
+   *  - korrigiert Grammatik
+   *  - führt die Klammer-Anweisungen aus (Tool-Lookups für URLs etc.)
+   *  - gibt polierten Text zurück
+   * Voraussetzung: input darf nicht leer sein.
+   */
+  async function handlePolish() {
+    if (polishing) return;
+    const draft = input.trim();
+    if (!draft) {
+      alert("Schreib erst einen Entwurf — die KI poliert dann den Text und führt deine [Klammer-Anweisungen] aus.");
+      return;
+    }
+    setPolishing(true);
+    try {
+      const res = await fetch("/api/chat/polish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: session.id, draftText: draft }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(`Polieren fehlgeschlagen: ${err.error}`);
+        return;
+      }
+      const data = await res.json();
+      if (data.polished) {
+        setInput(data.polished);
+      }
+    } catch (e) {
+      alert(`Fehler: ${(e as Error).message}`);
+    } finally {
+      setPolishing(false);
     }
   }
 
@@ -590,19 +629,27 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
                   handleSend(andResume);
                 }
               }}
-              placeholder="Antwort als Mitarbeiterin schreiben… (Enter = senden, Shift+Enter = neue Zeile)"
+              placeholder='Antwort als Mitarbeiterin schreiben… (Enter = senden, Shift+Enter = neue Zeile). Tipp: schreib z.B. "[füge link ein]" — die KI ersetzt das beim Polieren.'
               rows={Math.max(2, Math.min(8, (input.match(/\n/g)?.length || 0) + 2))}
               className="flex-1 rounded-xl border border-neutral-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none"
-              disabled={isPending || suggesting}
+              disabled={isPending || suggesting || polishing}
             />
             <div className="flex flex-col gap-1.5">
               <button
                 onClick={handleSuggest}
-                disabled={suggesting || isPending}
-                title="Bot generiert einen Antwort-Vorschlag"
+                disabled={suggesting || polishing || isPending}
+                title="KI generiert von Grund auf einen Antwort-Vorschlag (ohne deine Eingabe)"
                 className="bg-purple-600 text-white rounded-xl px-3 py-2 hover:bg-purple-700 disabled:opacity-40 inline-flex items-center gap-1 text-xs font-medium"
               >
                 <Sparkles size={12} /> {suggesting ? "Denkt…" : "Vorschlag"}
+              </button>
+              <button
+                onClick={handlePolish}
+                disabled={polishing || suggesting || isPending || !input.trim()}
+                title={'KI verbessert DEINEN Entwurf: Grammatik, Stil — und führt [Klammer-Anweisungen] aus, z.B. "[füge hier den link ein]". Voraussetzung: schreib zuerst einen Entwurf.'}
+                className="bg-indigo-600 text-white rounded-xl px-3 py-2 hover:bg-indigo-700 disabled:opacity-40 inline-flex items-center gap-1 text-xs font-medium"
+              >
+                <Wand2 size={12} /> {polishing ? "Poliert…" : "Polieren"}
               </button>
               <button
                 onClick={() => handleSend(andResume)}
