@@ -420,8 +420,16 @@ const getStockEta: ToolDef = {
             .filter(r => matchSameColor(`${r.collection} ${r.product}`) && passesCompoundGuard(`${r.collection} ${r.product}`))
             .filter(r => r.quantity > 0)
             .map(r => {
-              const lenMatch = `${r.collection} ${r.product}`.match(/\b(\d{2,3})\s*cm\b/i);
-              const lenCm = lenMatch ? parseInt(lenMatch[1], 10) : null;
+              const text = `${r.collection} ${r.product}`;
+              const lenMatch = text.match(/\b(\d{2,3})\s*cm\b/i);
+              let lenCm: number | null = lenMatch ? parseInt(lenMatch[1], 10) : null;
+              // RUSSISCH-IMPLICIT: Russisch-Glatt-Produkte tragen keine cm-Angabe
+              // im Namen (Convention) — die Länge ist immer 60cm. User-Bug
+              // 2026-05-27: Bot übersah Latte Balayage 60cm Russisch glatt als
+              // Alternative zu 55cm-Anfrage, weil lenCm=null → rausgefiltert.
+              if (lenCm === null && (/\bruss/i.test(text) || /\bglatt/i.test(text))) {
+                lenCm = 60;
+              }
               return { row: r, lenCm };
             })
             .filter(c => c.lenCm !== null && c.lenCm !== requestedCm)
@@ -612,6 +620,12 @@ const getStockEta: ToolDef = {
         // Nearby-Alternative immer anzeigen wenn vorhanden (User-Vorgabe
         // 2026-05-27: unabhängig vom ETA — egal ob 3 Tage oder 4 Wochen
         // Wartezeit, eine sofort verfügbare Nachbar-Länge ist immer nützlich).
+        //
+        // PHRASIERUNGS-REGEL (User-Vorgabe 2026-05-27): bei <=5cm länger ist
+        // die Alternative PRAKTISCH IDENTISCH — der Friseur kürzt das beim
+        // Einarbeiten. Bot soll NICHT „leider haben wir 55cm nicht" als
+        // Opener machen, sondern direkt mit der verfügbaren Variante starten.
+        const altLongerTiny = nearbyAlternative && (nearbyAlternative.length_cm - (requestedLengthMatch ? parseInt(requestedLengthMatch[1], 10) : 0)) > 0 && nearbyAlternative.cm_diff <= 5;
         return {
           output: JSON.stringify({
             status: "unterwegs",
@@ -623,10 +637,17 @@ const getStockEta: ToolDef = {
               "URL-REGEL: Wenn du einen Produkt-Link postest, nimm AUSSCHLIESSLICH die " +
               "shopify_url aus diesem Tool-Output. NIEMALS selbst URLs bauen oder raten." +
               (nearbyAlternative
-                ? " ALTERNATIVE: Biete der Kundin proaktiv die Nachbar-Länge an, die in derselben Farbe " +
-                  "SOFORT verfügbar ist (siehe 'nearby_alternative'-Feld). " +
-                  "Phrasierung: 'Falls du nicht warten willst — wir hätten die Farbe in [X]cm sofort " +
-                  "verfügbar (nur [Y]cm kürzer/länger). Magst du die nehmen, oder lieber auf die [Soll-Länge] warten?'"
+                ? (altLongerTiny
+                    ? " ⭐ ALTERNATIVE-LEAD (WICHTIG): nearby_alternative ist nur ≤5cm LÄNGER — das ist praktisch identisch, " +
+                      "der Friseur kürzt das beim Einarbeiten problemlos. STELL DIE VERFÜGBARE LÄNGE ALS PRIMÄRE LÖSUNG dar, " +
+                      "NICHT als Notlösung. Beispiel: 'Latte Balayage hätten wir in 60cm sofort da [URL] — das ist nur " +
+                      "5cm länger, der Friseur kürzt das beim Einarbeiten auf 55cm. Soll ich dir das vorbereiten? " +
+                      "Falls du genau 55cm willst: kommt als Mini Tape ca. 30.05. wieder.' " +
+                      "❌ VERBOTEN: 'leider haben wir 55cm nicht' / 'gibt es bei uns nicht' / 'kommt nur in [andere Länge]'. " +
+                      "Diese Formulierungen sind apologetisch und falsch — die Differenz ist irrelevant."
+                    : " ALTERNATIVE: Biete der Kundin proaktiv die Nachbar-Länge an, die in derselben Farbe SOFORT verfügbar ist " +
+                      "(siehe 'nearby_alternative'-Feld). Phrasierung: 'Falls du nicht warten willst — wir hätten die Farbe in " +
+                      "[X]cm sofort verfügbar (nur [Y]cm kürzer/länger). Magst du die nehmen, oder lieber auf die [Soll-Länge] warten?'")
                 : ""),
             sheet_last_updated: lastUpdated,
             products,
