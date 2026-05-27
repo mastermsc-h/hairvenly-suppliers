@@ -626,6 +626,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
       ) : session.status === "active" && pendingDraft ? (
         <DraftBox
           draft={pendingDraft}
+          sessionId={session.id}
           onDone={() => router.refresh()}
         />
       ) : session.status === "active" ? (
@@ -900,9 +901,11 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
 
 function DraftBox({
   draft,
+  sessionId,
   onDone,
 }: {
   draft: { id: string; original_text: string; created_at: string };
+  sessionId: string;
   onDone: () => void;
 }) {
   const [text, setText] = useState(draft.original_text);
@@ -910,7 +913,7 @@ function DraftBox({
   const [showNote, setShowNote] = useState(false);
   const [refineInput, setRefineInput] = useState("");
   const [refineLog, setRefineLog] = useState<string[]>([]);
-  const [busy, setBusy] = useState<"send" | "grammar" | "discard" | "refine" | null>(null);
+  const [busy, setBusy] = useState<"send" | "grammar" | "discard" | "refine" | "force" | null>(null);
   // Aktueller Stand vs Original: zeigt ob editiert
   const wasEdited = text.trim() !== draft.original_text.trim();
   const hasNote = note.trim().length > 0;
@@ -1014,6 +1017,25 @@ function DraftBox({
     }
   }
 
+  async function handleForceRegenerate() {
+    if (busy) return;
+    setBusy("force");
+    try {
+      // generateDraftOnDemand mit force=true: verwirft aktuellen Draft und
+      // erzeugt einen frischen mit dem aktuell deployten Code.
+      const r = await generateDraftOnDemand(sessionId, { force: true });
+      if (!r.ok) {
+        alert(`Frisch-Generieren fehlgeschlagen: ${friendlyErrorMessage(r.reason || "Unbekannter Fehler")}`);
+      } else {
+        onDone();
+      }
+    } catch (e) {
+      alert(`Frisch-Generieren fehlgeschlagen: ${friendlyErrorMessage((e as Error).message)}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <div
       className="border-t-2 border-blue-200 bg-blue-50/60 flex flex-col relative"
@@ -1112,11 +1134,21 @@ function DraftBox({
             disabled={busy !== null || !refineInput.trim()}
             className="bg-purple-600 text-white rounded-lg px-3 py-1.5 hover:bg-purple-700 disabled:opacity-40 inline-flex items-center gap-1 text-xs font-medium whitespace-nowrap"
           >
-            <RotateCcw size={11} /> {busy === "refine" ? "Schreibt…" : "Neu generieren"}
+            <RotateCcw size={11} /> {busy === "refine" ? "Schreibt…" : "Mit Feedback neu"}
+          </button>
+          <button
+            type="button"
+            onClick={handleForceRegenerate}
+            disabled={busy !== null}
+            title="Verwirft diesen Entwurf und generiert mit dem aktuell deployten Code neu. Nutze das nach Deploy-Updates."
+            className="bg-blue-600 text-white rounded-lg px-3 py-1.5 hover:bg-blue-700 disabled:opacity-40 inline-flex items-center gap-1 text-xs font-medium whitespace-nowrap"
+          >
+            <Sparkles size={11} /> {busy === "force" ? "Frisch…" : "Frisch (neuer Code)"}
           </button>
         </div>
         <div className="text-[10px] text-purple-500">
-          Bot bekommt den ganzen Chat-Verlauf + alle bisherigen Feedbacks und schreibt die Antwort neu. Beim finalen Senden landen alle deine Kommentare als Lern-Hinweis im Training.
+          „Mit Feedback neu": Bot bekommt den ganzen Chat-Verlauf + dein Feedback und schreibt neu (Feedback landet im Training).
+          „Frisch": verwirft den Entwurf und lässt den Bot mit aktuell deployten Code neu generieren — ohne Feedback. Nutze das nach Code-Deploys.
         </div>
       </div>
 

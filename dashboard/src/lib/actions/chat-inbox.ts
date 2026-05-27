@@ -627,7 +627,10 @@ export async function refineDraftWithFeedback(
  *  - keine offenen Kundennachrichten da sind (Bot hätte nichts zu antworten)
  *  - bereits ein pending Draft existiert (UI sollte den Button verstecken)
  */
-export async function generateDraftOnDemand(sessionId: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+export async function generateDraftOnDemand(
+  sessionId: string,
+  opts: { force?: boolean } = {},
+): Promise<{ ok: true } | { ok: false; reason: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
@@ -642,6 +645,10 @@ export async function generateDraftOnDemand(sessionId: string): Promise<{ ok: tr
   }
 
   // Bereits ein Draft offen?
+  // User-Bug 2026-05-27: nach Deploy mit neuem Code zeigte UI immer noch den
+  // alten Draft (mit altem Code generiert), weil generateDraftOnDemand stumm
+  // abbrach wenn ein pending Draft existierte. Mit `force: true` wird der alte
+  // Draft als cancelled markiert und ein neuer generiert.
   const { data: existing } = await svc
     .from("chat_drafts")
     .select("id")
@@ -649,7 +656,16 @@ export async function generateDraftOnDemand(sessionId: string): Promise<{ ok: tr
     .eq("status", "pending")
     .limit(1)
     .maybeSingle();
-  if (existing) return { ok: false, reason: "Es liegt bereits ein offener Entwurf vor." };
+  if (existing) {
+    if (!opts.force) {
+      return { ok: false, reason: "Es liegt bereits ein offener Entwurf vor." };
+    }
+    // Force-Regenerate: alten Draft als discarded markieren, dann neuen erstellen
+    await svc.from("chat_drafts")
+      .update({ status: "discarded" })
+      .eq("id", existing.id);
+    console.log(`[generateDraftOnDemand] FORCE — discarded old draft ${existing.id.slice(0,8)} for session ${sessionId.slice(0,8)}`);
+  }
 
   // Letzte (nicht gelöschte) Message holen — egal von wem.
   const { data: lastMsg } = await svc

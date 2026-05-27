@@ -378,8 +378,13 @@ interface RespondOptions {
  * Generiert Bot-Antwort für eine Session basierend auf bisherigem Verlauf,
  * speichert sie als assistant-Message in chat_messages.
  */
+// CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
+// Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
+const RESPOND_CODE_VERSION = "2026-05-27.contact-intent-class-based.v1";
+
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
+  console.log(`[respond] CODE_VERSION=${RESPOND_CODE_VERSION} session=${sessionId.slice(0,8)} assisted=${opts.assisted ?? false}`);
 
   // Session laden — inkl. category für Skip-Check
   const { data: session } = await svc
