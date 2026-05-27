@@ -555,32 +555,36 @@ async function routeIncoming(opts: {
   }
 
   // ── AUTO-RESPOND-OVERRIDE für Standard-Eröffnungen ──
-  // Auch bei bot_mode='off' antworten wir automatisch wenn die Kundennachricht
-  // ein klares Standard-Muster ist: generische Info-Anfrage ohne Kontext,
-  // oder Farbberatungs-Wunsch ohne Foto. In beiden Fällen reagiert der Bot
-  // mit einem höflichen Opener der die Konversation für den Menschen vorbereitet.
+  // Standard-Muster (Begrüßung ohne Anliegen / Farbberatungs-Wunsch ohne Foto)
+  // werden auto-beantwortet, EGAL was bot_mode oder Kill-Switch sagen.
+  // Begründung: das sind günstige Template-artige Vorbereitungs-Antworten
+  // (Foto-Bitte etc.), die der MA Zeit sparen, ohne reale Kosten zu generieren.
+  // User-Anweisung 2026-05-27: "Autobot kann bei den besprochenen Themen
+  // automatisch antworten — Farbberatung-Vorbereitung."
   let effectiveBotMode = botMode;
   let autoOverrideType: "intro" | "color_no_photo" | null = null;
-  if (botMode === "off" && session.status === "active") {
+  if (session.status === "active") {
     autoOverrideType = detectAutoRespondType(opts.text, opts.attachments || []);
     if (autoOverrideType) {
       effectiveBotMode = "auto";
-      console.log(`[meta-webhook] auto-respond override (${autoOverrideType}) for session ${session.id} despite mode=off`);
+      console.log(`[meta-webhook] auto-respond override (${autoOverrideType}) for session ${session.id} — bot_mode=${botMode}`);
     }
   }
 
   // 🛑 GRANULAR KILL-SWITCH (via lib/chatbot/settings.ts)
   // User-Anweisung 2026-05-26: Bot antwortet nur bei "ungefährlichen" Categories
-  // automatisch (availability/general/pricing/order_status). Bei riskanten
-  // (color_advice/gewerbe/appointment/complaint/partnership) bleibt es bei
-  // Mitarbeiter-Click. Manual-Trigger (Inbox "Antwort generieren") ist NICHT
-  // betroffen — der schreibt direkt, nicht über diesen Pfad.
-  {
+  // automatisch. AUSNAHME 2026-05-27: autoOverrideType (intro / color_no_photo)
+  // umgeht den Kill-Switch — das sind kontrollierte Vorbereitungs-Antworten
+  // (Foto-Bitte etc.), die immer durchlaufen dürfen.
+  // Manual-Trigger (Inbox "Antwort generieren") ist NICHT betroffen.
+  if (!autoOverrideType) {
     const { isProactiveGenerationEnabled } = await import("@/lib/chatbot/settings");
     if (!(await isProactiveGenerationEnabled(sessionCategory))) {
       console.log(`[meta-webhook] PROACTIVE-DISABLED (category=${sessionCategory ?? "none"}) — skip bot session=${session.id.slice(0,8)}`);
       return;
     }
+  } else {
+    console.log(`[meta-webhook] kill-switch BYPASSED — autoOverrideType=${autoOverrideType} ist kontrollierte Vorbereitungs-Antwort`);
   }
 
   if ((effectiveBotMode === "auto" || effectiveBotMode === "assisted" || effectiveBotMode === "selective_auto") && session.status === "active") {
