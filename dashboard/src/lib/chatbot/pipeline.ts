@@ -107,6 +107,17 @@ export function detectWaitlistConfirmation(
     /\bauf\s+jeden\s+fall\b/i,
     /\bja\s+(bitte|gerne|super)/i,
     /\b(yes|ok|okidoki|deal)\b/i,
+    // Order-Intent-Phrasen — die Kundin signalisiert „ich will sie haben"
+    // (Sibling-Sweep 2026-05-27: ohne diese Patterns blieb create_reservation
+    //  bei Sätzen wie "Bestelle mir die dann direkt" aus)
+    /\bbestell[\s\w]{0,10}\bmir\b/i,             // "bestelle mir", "bestell mir"
+    /\b(nehm|nimm)[\s\w]{0,5}\sich\b/i,          // "nehm ich", "nimm ich"
+    /\bkauf[\sw]*\sich\b/i,                       // "kaufe ich", "kauf ich"
+    /\bmöcht[a-z]*\s+(sie|die|ich)\b.{0,20}\b(kauf|bestell|haben|nehm)/i,
+    /\bsetz(\sdu|t\sdu)?\s+mich\s+(drauf|auf\s+die\s+liste)/i, // "setz mich drauf"
+    /\bgib\s+(mir|bescheid)/i,                   // "gib mir bescheid"
+    /\bhalt\s+mich\s+auf\s+dem\s+laufenden/i,
+    /\bbenachrichtig\s+mich/i,
   ];
   return yesPatterns.some(p => p.test(t));
 }

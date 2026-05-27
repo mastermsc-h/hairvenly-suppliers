@@ -983,6 +983,15 @@ async function triggerBotResponse(
     console.log(`[meta-webhook] selective_auto → ${finalMode} (category=${sessForCheck?.category}, confident=${confident})`);
   }
 
+  // WAITLIST-PROMISE-OHNE-TOOL-CALL → IMMER zu Draft umwandeln (auch wenn
+  // mode=auto). Begründung: Bot hat Warteliste versprochen aber nicht
+  // angelegt — autobot-send würde der Kundin eine leere Zusage geben.
+  // Draft → MA sieht es, klickt manuell den Warteliste-Button im Header.
+  if (result.needsManualReview) {
+    console.warn(`[meta-webhook] FORCING-DRAFT session=${sessionId.slice(0,8)} — ${result.manualReviewReason}`);
+    finalMode = "assisted";
+  }
+
   if (finalMode === "assisted") {
     // Entwurf in chat_drafts speichern — NICHT senden
     const svc = createServiceClient();

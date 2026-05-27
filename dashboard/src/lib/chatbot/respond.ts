@@ -366,6 +366,11 @@ interface RespondResult {
   toolResults?: { tool_use_id: string; content: string }[];
   /** ID des gerade gespeicherten assistant-Eintrags — Caller updated external_id (MID) nach Versand */
   insertedMessageId?: string;
+  /** True wenn Bot etwas behauptet hat (Reservierung/Waitlist), das Tool aber nicht
+   *  ausgeführt wurde. Caller (Webhook) sollte dann NICHT autobot-senden, sondern als
+   *  Draft handlen, damit die MA's das Tool manuell auslösen kann. */
+  needsManualReview?: boolean;
+  manualReviewReason?: string;
   error?: string;
 }
 
@@ -380,7 +385,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-05-27.fokus-letzte-frage.v3";
+const RESPOND_CODE_VERSION = "2026-05-27.waitlist-promise-validator.v4";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
@@ -2038,6 +2043,25 @@ KEINE Ausnahmen. Wenn unsicher → Frage stellen, NICHT raten.`;
   // Mitarbeiterin/Kundin nervös. Überzählige werden gestrippt.
   finalText = limitUrls(finalText, 3);
 
+  // ── WAITLIST-PROMISE-VALIDATOR ────────────────────────────────────────
+  // User-Bug 2026-05-27: Bot sagte "Du bist jetzt auf der Benachrichtigungsliste"
+  // ohne create_reservation aufzurufen → leere Zusage.
+  //
+  // Wenn das Pattern erkannt wird aber create_reservation NICHT in toolCalls
+  // steht: needsManualReview-Flag setzen. Der Caller (Webhook) muss dann
+  // statt autobot-send einen Draft erzeugen, damit die MA's das Tool manuell
+  // auslösen können (Header-Button "Warteliste").
+  const waitlistClaimRe = /\b(auf\s+(die\s+)?(benachrichtigungs|warte|notification)liste|notier[t\s]|merke\s+(ich\s+)?mir|setz[\s\w]*\s+(dich|euch)\s+(auf|drauf)|melden\s+uns?\s+sobald|bescheid\s+(geben|sagen)\s+sobald)\b/i;
+  const hasWaitlistClaim = waitlistClaimRe.test(finalText);
+  const hasCreateReservation = allToolCalls.some(c => c.name === "create_reservation");
+  let needsManualReview = false;
+  let manualReviewReason: string | undefined;
+  if (hasWaitlistClaim && !hasCreateReservation) {
+    console.warn(`[respond] WAITLIST-PROMISE-WITHOUT-TOOL session=${sessionId.slice(0,8)} — Bot verspricht Liste, aber kein create_reservation`);
+    needsManualReview = true;
+    manualReviewReason = "Bot hat Warteliste versprochen, aber NICHT als Reservierung angelegt. Webhook sollte das zu einem Draft umwandeln statt autobot-zu-senden.";
+  }
+
   // Im assisted-Modus: NICHT in chat_messages speichern — der Caller speichert
   // erst nach Mitarbeiter-Approval ggf. die korrigierte Version.
   let insertedMessageId: string | undefined;
@@ -2062,5 +2086,7 @@ KEINE Ausnahmen. Wenn unsicher → Frage stellen, NICHT raten.`;
     toolCalls: allToolCalls,
     toolResults: allToolResults,
     insertedMessageId,
+    needsManualReview,
+    manualReviewReason,
   };
 }
