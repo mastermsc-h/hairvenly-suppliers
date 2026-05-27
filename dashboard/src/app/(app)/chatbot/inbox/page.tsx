@@ -220,12 +220,17 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   // wurde seitdem angelegt. User-Wunsch 2026-05-27: fetten "Mitarbeiter
   // benötigt — Warteliste vergessen!"-Badge zeigen, falls die MA's das
   // Anlegen vergessen UND der Bot's Auto-Create-Pfad nicht griff.
-  if (sessionIds.length > 0) {
-    // msgs ist DESC (newest first). Per Session: letzte user msg + bot/agent msg davor.
-    const bySession = new Map<string, Array<{ role: string; content: string | null; created_at: string }>>();
-    const msgsAll = (await (async () => {
+  //
+  // ⚠️ DEFENSIVE WRAPPER: dieser Detector darf NIE die Inbox crashen, wenn
+  // er fehlschlägt — die Badge ist Nice-to-Have, die Inbox-Anzeige ist
+  // kritisch. Daher gesamter Block in try/catch, Fehler werden geloggt
+  // aber bubblen nicht nach oben.
+  try {
+    if (sessionIds.length > 0) {
+      // msgs ist DESC (newest first). Per Session: letzte user msg + bot/agent msg davor.
+      const bySession = new Map<string, Array<{ role: string; content: string | null; created_at: string }>>();
       const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      const { data } = await svc
+      const { data: msgsAllRaw } = await svc
         .from("chat_messages")
         .select("session_id, role, content, created_at")
         .in("session_id", sessionIds)
@@ -233,55 +238,60 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         .gte("created_at", cutoff)
         .order("created_at", { ascending: false })
         .limit(5000);
-      return data || [];
-    })()) as Array<{ session_id: string; role: string; content: string | null; created_at: string }>;
-    for (const m of msgsAll) {
-      const arr = bySession.get(m.session_id) ?? [];
-      arr.push({ role: m.role, content: m.content, created_at: m.created_at });
-      bySession.set(m.session_id, arr);
-    }
-    // Patterns (gleiches Pattern wie in pipeline.ts detectWaitlistConfirmation)
-    const offerRe = /\b(benachrichtigungsliste|warteliste|bescheid\s+geben|melden\s+uns?(\s+sobald)?|notiere\s+(ich\s+)?dich|merke\s+ich\s+(mir|für\s+dich)\s+vor)\b/i;
-    const yesPatterns = [
-      /^j+a+\b/i, /^gerne\b/i, /^perfekt\b/i, /^super\b/i, /^okay?\b/i, /^klar\b/i, /^bitte\b/i,
-      /\boh\s+ja\b/i, /\bwäre\s+(super|gut|toll|nice|cool)\b/i, /\bsehr\s+gerne\b/i,
-      /\bauf\s+jeden\s+fall\b/i, /\bja\s+(bitte|gerne|super)/i, /\b(yes|ok|okidoki|deal)\b/i,
-    ];
-    const isAffirmative = (t: string): boolean => {
-      const x = t.trim().toLowerCase().replace(/[💕❤🩷✨🥰😊👍🙂🙏]/g, "").trim();
-      if (x.length === 0 || x.length > 60) return false;
-      if (/\?/.test(x)) return false;
-      return yesPatterns.some(p => p.test(x));
-    };
-    const candidates: { sessionId: string; userYesAt: string }[] = [];
-    for (const [sessId, sessionMsgs] of bySession) {
-      // DESC: index 0 = neueste
-      const lastUserIdx = sessionMsgs.findIndex(m => m.role === "user");
-      if (lastUserIdx === -1) continue;
-      const lastUser = sessionMsgs[lastUserIdx];
-      if (!isAffirmative(lastUser.content || "")) continue;
-      // Nächste ältere Bot/MA-Message
-      const prevBot = sessionMsgs.slice(lastUserIdx + 1).find(m => m.role === "assistant" || m.role === "human_agent");
-      if (!prevBot) continue;
-      if (!offerRe.test(prevBot.content || "")) continue;
-      candidates.push({ sessionId: sessId, userYesAt: lastUser.created_at });
-    }
-    // DB-Check: existiert eine Reservierung seit dem Ja?
-    if (candidates.length > 0) {
-      const { data: reservations } = await svc
-        .from("chat_reservations")
-        .select("session_id, requested_at")
-        .in("session_id", candidates.map(c => c.sessionId));
-      for (const c of candidates) {
-        const hasReservationSinceYes = (reservations || []).some(r =>
-          r.session_id === c.sessionId && r.requested_at >= c.userYesAt
-        );
-        if (!hasReservationSinceYes) {
-          const st = stats[c.sessionId] ??= { botCount: 0, humanCount: 0, autobotCount: 0 };
-          st.waitlistConfirmedPendingReservation = true;
+      const msgsAll = (msgsAllRaw || []) as Array<{ session_id: string; role: string; content: string | null; created_at: string }>;
+      for (const m of msgsAll) {
+        const arr = bySession.get(m.session_id) ?? [];
+        arr.push({ role: m.role, content: m.content, created_at: m.created_at });
+        bySession.set(m.session_id, arr);
+      }
+      // Patterns (gleiches Pattern wie in pipeline.ts detectWaitlistConfirmation)
+      const offerRe = /\b(benachrichtigungsliste|warteliste|bescheid\s+geben|melden\s+uns?(\s+sobald)?|notiere\s+(ich\s+)?dich|merke\s+ich\s+(mir|für\s+dich)\s+vor)\b/i;
+      const yesPatterns = [
+        /^j+a+\b/i, /^gerne\b/i, /^perfekt\b/i, /^super\b/i, /^okay?\b/i, /^klar\b/i, /^bitte\b/i,
+        /\boh\s+ja\b/i, /\bwäre\s+(super|gut|toll|nice|cool)\b/i, /\bsehr\s+gerne\b/i,
+        /\bauf\s+jeden\s+fall\b/i, /\bja\s+(bitte|gerne|super)/i, /\b(yes|ok|okidoki|deal)\b/i,
+      ];
+      const isAffirmative = (t: string): boolean => {
+        const x = t.trim().toLowerCase().replace(/[💕❤🩷✨🥰😊👍🙂🙏]/g, "").trim();
+        if (x.length === 0 || x.length > 60) return false;
+        if (/\?/.test(x)) return false;
+        return yesPatterns.some(p => p.test(x));
+      };
+      const candidates: { sessionId: string; userYesAt: string }[] = [];
+      for (const [sessId, sessionMsgs] of bySession) {
+        // DESC: index 0 = neueste
+        const lastUserIdx = sessionMsgs.findIndex(m => m.role === "user");
+        if (lastUserIdx === -1) continue;
+        const lastUser = sessionMsgs[lastUserIdx];
+        if (!isAffirmative(lastUser.content || "")) continue;
+        // Nächste ältere Bot/MA-Message
+        const prevBot = sessionMsgs.slice(lastUserIdx + 1).find(m => m.role === "assistant" || m.role === "human_agent");
+        if (!prevBot) continue;
+        if (!offerRe.test(prevBot.content || "")) continue;
+        candidates.push({ sessionId: sessId, userYesAt: lastUser.created_at });
+      }
+      // DB-Check: existiert eine Reservierung seit dem Ja?
+      if (candidates.length > 0) {
+        const { data: reservations } = await svc
+          .from("chat_reservations")
+          .select("session_id, requested_at")
+          .in("session_id", candidates.map(c => c.sessionId));
+        for (const c of candidates) {
+          const hasReservationSinceYes = (reservations || []).some(r =>
+            r.session_id === c.sessionId && r.requested_at >= c.userYesAt
+          );
+          if (!hasReservationSinceYes) {
+            if (!stats[c.sessionId]) {
+              stats[c.sessionId] = { botCount: 0, humanCount: 0, autobotCount: 0 };
+            }
+            stats[c.sessionId].waitlistConfirmedPendingReservation = true;
+          }
         }
       }
     }
+  } catch (e) {
+    console.error("[inbox] waitlist-pending-detector crashed (non-fatal):", e);
+    // Inbox-Anzeige läuft trotzdem weiter — nur der Badge fehlt evtl.
   }
 
   // Pending Drafts pro Session — kritisch für "Zu tun"-Filter.
