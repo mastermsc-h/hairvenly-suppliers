@@ -332,6 +332,71 @@ export function stripMarkdownFormatting(text: string): string {
   return out;
 }
 
+/**
+ * Strukturelle Validierung: Length × Line-Konsistenz.
+ *
+ * Physikalisch existierende Kombos:
+ *   - Russisch glatt = NUR 60cm
+ *   - Usbekisch wellig = 45/55/65/85cm (KEIN 60cm)
+ *
+ * Wenn der Bot diese physikalischen Constraints verletzt (z.B. „Mini Tapes
+ * 55cm russisch glatt" — gibt's nicht), strippen wir die problematische
+ * Zeile/Satz aus dem Output. Prompt-Engineering-Regeln „NIE erfinden" wurden
+ * mehrfach ignoriert — strukturelle Validation ist die einzige zuverlässige
+ * Lösung.
+ *
+ * Pattern-Detection:
+ *   - Suche nach Sätzen/Bullet-Points, die GLEICHZEITIG enthalten:
+ *     (a) explizite Länge in cm (45/55/65/85/60)
+ *     (b) Linien-Indikator (russisch/glatt oder usbekisch/wellig)
+ *   - Wenn die Kombo unmöglich ist → Zeile strippen
+ *
+ * Conservative: nur Sätze die BEIDE haben werden gestrippt. Andere Sätze
+ * bleiben unverändert.
+ */
+export function stripImpossibleLengthLineCombos(text: string): string {
+  const lines = text.split(/\n/);
+  const kept: string[] = [];
+  let stripped = 0;
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    // Find any cm mention
+    const cmMatches = [...lower.matchAll(/\b(\d{2,3})\s*cm\b/g)];
+    if (cmMatches.length === 0) {
+      kept.push(line);
+      continue;
+    }
+    // Line-Indikatoren
+    const hasRussisch = /\b(russisch|russische|russischen|russischer|russisches|russisch[\s-]?glatt|glatt(e|en|es|er)?)\b/i.test(lower);
+    const hasUsbekisch = /\b(usbekisch|usbekische|usbekisches|usbekischer|usbekischen|us[\s-]?wellig|wellig(e|es|en|er)?)\b/i.test(lower);
+    let impossible = false;
+    for (const m of cmMatches) {
+      const cm = parseInt(m[1], 10);
+      // Russisch glatt + 45/55/65/85cm = unmöglich
+      if (hasRussisch && [45, 55, 65, 85].includes(cm)) {
+        impossible = true;
+        console.warn(`[sanitizer] IMPOSSIBLE_COMBO: russisch glatt + ${cm}cm in line: "${line.slice(0, 100)}"`);
+        break;
+      }
+      // Usbekisch wellig + 60cm = unmöglich
+      if (hasUsbekisch && cm === 60) {
+        impossible = true;
+        console.warn(`[sanitizer] IMPOSSIBLE_COMBO: usbekisch wellig + ${cm}cm in line: "${line.slice(0, 100)}"`);
+        break;
+      }
+    }
+    if (impossible) {
+      stripped++;
+      continue;
+    }
+    kept.push(line);
+  }
+  if (stripped > 0) {
+    console.warn(`[sanitizer] stripImpossibleLengthLineCombos: ${stripped} Zeile(n) gestrippt`);
+  }
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 export function applyAllOutputSanitizers(
   text: string,
   opts: { customerAskedForPhotos?: boolean; colorUrlMap?: Map<string, string> } = {}
@@ -339,6 +404,10 @@ export function applyAllOutputSanitizers(
   let out = text;
   out = stripSelfReferentialDisclaimer(out);
   out = stripProactivePhotoOffer(out, opts.customerAskedForPhotos === true);
+  // 🚨 STRUKTURELLER VALIDATOR: physikalisch unmögliche Längen-Linien-
+  // Kombinationen rausstrippen (z.B. „Mini Tapes 55cm russisch glatt").
+  // Greift FRÜH, damit nachfolgende Sanitizer auf bereinigtem Text laufen.
+  out = stripImpossibleLengthLineCombos(out);
   out = scrubWeekendTrap(out);
   out = scrubClosedHandover(out);
   out = scrubSupplierNames(out);
