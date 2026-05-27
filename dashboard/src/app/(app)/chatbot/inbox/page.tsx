@@ -359,15 +359,20 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   const HIGH_WAIT_MS = 24 * 60 * 60 * 1000;  // 24h
   const NORMAL_WAIT_MS = 1 * 60 * 60 * 1000; // 1h
   for (const s of combinedSessions) {
+    // MANUELLE PRIORITÄT überstimmt Auto-Compute (User-Wunsch 2026-05-27)
+    const sExt = s as { manual_priority?: string | null; human_only?: boolean; category?: string | null; last_customer_msg_at?: string | null };
+    if (sExt.manual_priority === "high" || sExt.manual_priority === "normal" || sExt.manual_priority === "low") {
+      priorityMap[s.id] = sExt.manual_priority as Priority;
+      continue;
+    }
     const us = uiStatusMap[s.id];
     if (us !== "todo_unread" && us !== "todo_draft") {
       priorityMap[s.id] = "low";
       continue;
     }
     const st = stats[s.id];
-    const sExt = s as { human_only?: boolean; category?: string | null; last_customer_msg_at?: string | null };
 
-    // HIGH-Trigger
+    // HIGH-Trigger (Auto-Mode)
     if (sExt.human_only) { priorityMap[s.id] = "high"; continue; }
     if (st?.lastUserHasPhoto) { priorityMap[s.id] = "high"; continue; }
     if (st?.waitlistConfirmedPendingReservation) { priorityMap[s.id] = "high"; continue; }
