@@ -161,6 +161,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                     { href: "/chatbot/guardian",      label: "Wächter (Alerts)" },
                     { href: "/chatbot/follow-ups",    label: "Follow-Ups" },
                     { href: "/chatbot/insights",   label: "Insights" },
+                    { href: "/chatbot/costs",      label: "Kosten" },
                     { href: "/chatbot",            label: "Wissensdatenbank", exact: true },
                     { href: "/chatbot/chat-wissen", label: "Chat-Wissen (3300)" },
                     { href: "/chatbot/strategies", label: "Strategien" },
