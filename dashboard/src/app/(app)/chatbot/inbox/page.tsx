@@ -428,10 +428,13 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
       return ta.localeCompare(tb); // ASC = älteste zuerst
     });
   } else if (onlyUnread) {
-    // Default im Unread-Modus: neueste Kunden-Message oben
+    // Instagram-Style (User-Wunsch 2026-05-28): jede Interaktion bringt die
+    // Session nach oben — Customer-Msg, Bot-Antwort, MA-Antwort. Daher nach
+    // last_message_at sortieren (wird bei jeder Message aktualisiert), nicht
+    // nach last_customer_msg_at.
     filteredSessions = filteredSessions.slice().sort((a, b) => {
-      const ta = a.last_customer_msg_at || a.last_message_at || "";
-      const tb = b.last_customer_msg_at || b.last_message_at || "";
+      const ta = a.last_message_at || a.last_customer_msg_at || "";
+      const tb = b.last_message_at || b.last_customer_msg_at || "";
       return tb.localeCompare(ta);
     });
   }
