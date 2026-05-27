@@ -44,7 +44,18 @@ export function detectContactIntent(userMessage: string): ContactIntent {
   // Wenn eine konkrete Produkt-/Bestell-Frage drin steckt: KEIN Contact-Intent,
   // sondern normal Bot. (Vermeidet false-positives wenn jemand "Adresse" zusammen
   // mit "Bestellung" oder "wann liefert ihr" sagt.)
-  if (/\b(bestell|kauf|bezahl|farbe|tape|tresse|bonding|gramm|länge|cm|preis|kostet|haar|verlänger|verdicht)\b/i.test(t)) {
+  //
+  // Bug-Fix 2026-05-27: \bcm\b matched NICHT in "55cm" weil zwischen Ziffer und
+  // 'c' kein Word-Boundary ist (beide \w). Daher \d+\s?cm explicit. Plus mehr
+  // Längen-/Lieferungs-Indikatoren ("länger", "kürzer", "liefer", "kommt rein
+  // /an", "wann kommt"). Das verhindert dass Sätze wie "kommen die in 55cm auch
+  // länger an?" (Lieferungs-Frage über Tape-Variante) fälschlich als Adress-
+  // Anfrage interpretiert werden.
+  if (
+    /\b(bestell|kauf|bezahl|farbe|tape|tapes|tresse|tressen|bonding|bondings|weft|wefts|clip|clips|gramm|länge|länger|kürzer|preis|kostet|haar|verlänger|verdicht|liefer|kommt\s+(?:rein|an|in\b|wieder|am)|kommen\s+(?:rein|an|in\b|wieder|am)|wann\s+(?:kommt|kommen|sind|ist)|verfügbar|vorrätig|nachschub|lager)\b/i.test(t)
+    || /\d+\s?cm\b/i.test(t)
+    || /\d+\s?g(?:ramm)?\b/i.test(t)
+  ) {
     return null;
   }
 
@@ -141,7 +152,10 @@ export function detectContactIntent(userMessage: string): ContactIntent {
   }
 
   // ── ADRESSE / STANDORT / SHOWROOM ────────────────────────────────
-  if (/\b(wo (seid|sitzt|finde|find)|adresse|standort|showroom|laden|studio|vor.ort|wo kann ich|kommen|vorbeikommen|vorbeischauen)\b/i.test(t)) {
+  // Bug-Fix 2026-05-27: bare "kommen" raus — matched bei "kommen die in 55cm"
+  // (Lieferungs-Frage, kein Adress-Wunsch). vorbeikommen/vorbeischauen sind
+  // weiterhin drin und decken den echten Use-Case ab.
+  if (/\b(wo (seid|sitzt|finde|find|euer\s+)|adresse|standort|showroom|laden\b|studio|vor.ort|wo kann ich|vorbeikommen|vorbeischauen|hin\s*fahren|hin\s*kommen)\b/i.test(t)) {
     return "address_or_location";
   }
 
