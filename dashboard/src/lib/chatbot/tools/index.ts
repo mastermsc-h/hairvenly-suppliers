@@ -617,42 +617,20 @@ const getStockEta: ToolDef = {
             shopify_url: urlFor(m.product),
           };
         });
-        // Nearby-Alternative immer anzeigen wenn vorhanden (User-Vorgabe
-        // 2026-05-27: unabhängig vom ETA — egal ob 3 Tage oder 4 Wochen
-        // Wartezeit, eine sofort verfügbare Nachbar-Länge ist immer nützlich).
-        //
-        // PHRASIERUNGS-REGEL (User-Vorgabe 2026-05-27): bei <=5cm länger ist
-        // die Alternative PRAKTISCH IDENTISCH — der Friseur kürzt das beim
-        // Einarbeiten. Bot soll NICHT „leider haben wir 55cm nicht" als
-        // Opener machen, sondern direkt mit der verfügbaren Variante starten.
-        const altLongerTiny = nearbyAlternative && (nearbyAlternative.length_cm - (requestedLengthMatch ? parseInt(requestedLengthMatch[1], 10) : 0)) > 0 && nearbyAlternative.cm_diff <= 5;
         return {
           output: JSON.stringify({
             status: "unterwegs",
             message:
               "Produkt ist unterwegs. Verwende NUR 'earliest_eta' für die Antwort und formuliere weich: " +
               "z.B. 'ca. Ende Mai, also etwa 30.05.' — NIEMALS sagen 'erste Lieferung' oder 'zweite Lieferung'! " +
-              "Es interessiert die Kundin nicht ob es eine oder mehrere Lieferungen gibt. " +
-              "EIN Datum reicht. Keine 'erste Lieferung'-Phrasen! " +
+              "EIN Datum reicht. " +
               "URL-REGEL: Wenn du einen Produkt-Link postest, nimm AUSSCHLIESSLICH die " +
-              "shopify_url aus diesem Tool-Output. NIEMALS selbst URLs bauen oder raten." +
-              (nearbyAlternative
-                ? (altLongerTiny
-                    ? " ⭐ ALTERNATIVE-LEAD (WICHTIG): nearby_alternative ist nur ≤5cm LÄNGER. Nenne die TATSÄCHLICH verfügbare " +
-                      "Länge konkret — aber ohne Drama um die Differenz. Sachlich, ehrlich, beiläufig. " +
-                      "✅ RICHTIG: 'Latte Balayage hätten wir in 60cm sofort da [URL]. Magst du 4 Packungen?' " +
-                      "(Länge wird genannt, kein Vergleich zur 55cm-Anfrage, keine Entschuldigung.) " +
-                      "❌ VERBOTEN: 'in 55cm nicht da' / 'leider nicht' / 'kommt nur in 60cm' / 'nur 5cm länger' / " +
-                      "'Friseur kürzt' / 'ist nur ein bisschen länger' / 'Latte Balayage hätten wir sofort verfügbar' " +
-                      "(ohne Länge ist eine implizite Lüge — Kundin denkt es ist genau ihre 55cm). " +
-                      "Die Länge MUSS konkret stehen, aber ohne Vergleich. Falls Kundin selbst die Differenz anspricht " +
-                      "('warum 60cm statt 55cm?'), DANN kurz erklären — nicht proaktiv."
-                    : " ALTERNATIVE: Biete der Kundin proaktiv die Nachbar-Länge an, die in derselben Farbe SOFORT verfügbar ist " +
-                      "(siehe 'nearby_alternative'-Feld). Phrasierung: 'Falls du nicht warten willst — wir hätten die Farbe in " +
-                      "[X]cm sofort verfügbar (nur [Y]cm kürzer/länger). Magst du die nehmen, oder lieber auf die [Soll-Länge] warten?'")
-                : ""),
+              "shopify_url aus diesem Tool-Output. NIEMALS selbst URLs bauen oder raten.",
             sheet_last_updated: lastUpdated,
             products,
+            // nearby_alternative wird mit zurückgegeben, aber NICHT mehr aktiv in
+            // der Tool-Message für "biete an" beworben — Bot soll Produkt-Daten
+            // selbst interpretieren und nur die echte Lieferzeit nennen.
             ...(nearbyAlternative ? { nearby_alternative: nearbyAlternative } : {}),
           }),
         };

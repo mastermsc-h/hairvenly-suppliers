@@ -380,7 +380,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-05-27.existenz-check-no-proactive-colors.v1";
+const RESPOND_CODE_VERSION = "2026-05-27.revert-prompt-bloat.v1";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
@@ -536,22 +536,11 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += "- Wenn die Kundin selbst eine Länge nennt: prüfe gegen die Matrix. Wenn sie zu der Methode nicht existiert → freundlich klären, NICHT übernehmen.\n";
   systemPrompt += "- Beispiel: Kundin schreibt 'Standard Tapes in 55cm' → Antwort: 'In Russisch glatt haben wir Standard Tapes nur in 60cm. 55cm gibt es bei uns nur bei den Tapes in Usbekisch wellig. Was passt besser zu dir?'\n";
   systemPrompt += "- NIE Längen erfinden, runden oder annehmen.\n";
-  systemPrompt += "- 📏 LÄNGEN-EXISTENZ-CHECK + 5CM-TOLERANZ + KEINE PROAKTIVEN FARB-ALTERNATIVEN:\n";
-  systemPrompt += "  • EXISTENZ-CHECK ZUERST: Russisch glatt gibt es NUR in 60cm. Usbekisch wellig gibt es in 45/55/65/85cm. Wenn die Kundin nach einer Farbe in einer Länge fragt, die für diese Farben-Linie NICHT existiert (z.B. 'Latte Balayage in 55cm' — Latte Balayage gibt's nur in Russisch glatt 60cm), darfst du diese Kombo NICHT erfinden. Sag die WAHRHEIT: 'Latte Balayage haben wir nur in 60cm (Russisch glatt).'\n";
-  systemPrompt += "  • ❌ HALLUZINATION-VERBOTEN: 'Latte Balayage Standard Tapes Russisch glatt in 55cm ist gerade ausverkauft' — diese Kombo existiert nicht, du erfindest sie. NIE machen.\n";
-  systemPrompt += "  • METHODEN-ÜBERSICHT BEHALTEN: wenn die Wunsch-Methode unklar ist (Kundin hat nur Farbe gefragt) ODER mehrere Methoden in derselben Farbe relevant sind, zeige ALLE mit ETAs. Beispiel: 'Latte Balayage haben wir in 60cm Russisch glatt — Mini Tapes ca. 30.05., Standard Tapes ca. 04.07. wieder rein. Welche Methode brauchst du?'\n";
-  systemPrompt += "  • 5CM-TOLERANZ (verfügbare Länge sachlich nennen, kein Drama):\n";
-  systemPrompt += "    ✅ RICHTIG: 'Latte Balayage hätten wir in 60cm da [URL]. Magst du 4 Packungen?'\n";
-  systemPrompt += "    ❌ FALSCH (apologetisch): 'in 55cm leider nicht / kommt nur in 60cm'\n";
-  systemPrompt += "    ❌ FALSCH (Friseur-Drama): '5cm länger, Friseur kürzt das'\n";
-  systemPrompt += "    ❌ FALSCH (zu vage): 'haben wir sofort da' OHNE Längen-Angabe — die Kundin denkt es ist genau ihre Wunsch-Länge.\n";
-  systemPrompt += "  • 🚨 KEINE PROAKTIVEN FARB-ALTERNATIVEN: Schlage NIE selbstständig andere Farben vor (z.B. 'wir hätten alternativ Caramel Fudge oder Cool Toned'), solange die Kundin nicht EXPLIZIT danach fragt ('habt ihr was Ähnliches?', 'welche Alternative gibt's?'). Aussagen wie 'Vielen Dank' oder 'dringend' sind KEIN Signal für Farb-Alternativen — die Kundin wartet ja noch auf deine Wunsch-Farben-Antwort.\n";
-  systemPrompt += "  • Reihenfolge (wenn Wunsch-Kombo aktuell nicht direkt verfügbar):\n";
-  systemPrompt += "    (1) Existenz prüfen — falls Kombo nicht existiert: ehrlich sagen welche Länge existiert.\n";
-  systemPrompt += "    (2) Sofort-Verfügbarkeit prüfen — falls da: konkrete Länge nennen, ohne Drama.\n";
-  systemPrompt += "    (3) Falls unterwegs: ETAs aller relevanten Methoden auflisten (Mini Tapes + Standard Tapes etc.).\n";
-  systemPrompt += "    (4) Rückfrage stellen ('welche Methode?', 'möchtest du warten?'). ENDE.\n";
-  systemPrompt += "  • Andere Farben kommen erst INS SPIEL wenn die Kundin selbst nach Alternativen fragt — nicht vorher.\n";
+  systemPrompt += "- 🚨 ABSOLUTE WAHRHEITSPFLICHT bei VERFÜGBARKEIT:\n";
+  systemPrompt += "  Wenn das get_stock_eta-Tool status='unterwegs' oder 'out_of_stock' zurückgibt, DARFST DU NIE 'sofort verfügbar' oder 'auf Lager' schreiben. Lieferdatum konkret nennen (z.B. 'kommt am 30.05. wieder rein'). Tool-Daten sind die einzige Wahrheit — NIEMALS aus dem Kopf Verfügbarkeit erfinden.\n";
+  systemPrompt += "- 📏 Bei NICHT-EXISTIERENDER Kombo (z.B. 'Latte Balayage 55cm' — Latte Balayage existiert nur in Russisch glatt 60cm):\n";
+  systemPrompt += "  Sag die Wahrheit was wir HABEN, nicht 'X in 55cm ist ausverkauft' erfinden. Beispiel: 'Latte Balayage haben wir nur in 60cm Russisch glatt — Mini Tapes ca. 30.05., Standard Tapes ca. 04.07. wieder rein.'\n";
+  systemPrompt += "- 🚨 KEINE PROAKTIVEN FARB-ALTERNATIVEN: Schlage NIE selbstständig andere Farben vor, solange die Kundin nicht EXPLIZIT nach Alternativen fragt ('habt ihr was Ähnliches?'). 'Vielen Dank' oder 'dringend' reichen nicht.\n";
   systemPrompt += "- 🔒 NIEMALS Lieferanten-Namen erwähnen: Amanda, Eyfel, Ebru, China, etc. Das sind INTERNE Codes. Kundin spricht IMMER von der Haarqualität (Russisch glatt / Usbekisch wellig).\n";
   systemPrompt += "- 🔗 WICHTIG: Wenn du eine konkrete Farbe (COLDNESS, ASH MELT, FROSTY, CAPPUCCINO etc.) empfiehlst oder nennst, packe IMMER die passende Shopify-URL direkt hinter den Farbnamen. Niemals einen Farbnamen 'nackt' lassen. Die Kundin muss DIREKT klicken und das Produkt sehen können — sonst muss sie selbst suchen.\n";
   systemPrompt += "  Wenn dir aus dem Tool-Output keine URL bekannt ist, NICHT die Farbe nennen.\n";
