@@ -724,10 +724,11 @@ const getStockEta: ToolDef = {
               "im Unterwegs-System eingetragen. Sag dem Kunden ehrlich: 'das ist gerade ausverkauft, " +
               "kein bestätigtes Lieferdatum'." +
               (nearbyAlternative
-                ? " ALTERNATIVE: Biete proaktiv die Nachbar-Länge in derselben Farbe an (siehe 'nearby_alternative'-Feld). " +
-                  "Phrasierung: 'Wir hätten sie in [X]cm sofort verfügbar (nur [Y]cm Unterschied) — magst du die nehmen?'"
-                : " Schlag eine ECHTE ALTERNATIVE vor (andere Farbe, andere Methode, selbe Qualität) — " +
-                  "niemals eskaliere wenn du selbst eine Alternative anbieten kannst.") +
+                ? " ALTERNATIVE: Nenne die Nachbar-Länge in derselben Farbe konkret (siehe 'nearby_alternative'-Feld). " +
+                  "Phrasierung: 'Wir hätten sie in [X]cm sofort verfügbar — magst du die nehmen?' " +
+                  "(KEINE Differenz-Erklärung. KEINE proaktiven Farb-Alternativen.)"
+                : " Frage zurück was die Kundin als Nächstes braucht — NIE proaktiv andere Farben vorschlagen, " +
+                  "solange die Kundin nicht explizit nach Alternativen fragt.") +
               " NIEMALS sagen 'haben wir sofort da' für diese Produkte!",
             products_out_of_stock: zeroStockMatches.slice(0, 3).map(r => ({
               product: r.product,
