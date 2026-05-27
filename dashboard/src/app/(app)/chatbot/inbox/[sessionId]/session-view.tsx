@@ -4,7 +4,6 @@ import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown, AlertTriangle, Mail, CornerUpLeft } from "lucide-react";
 import CategorySelector from "./category-selector";
-import PrioritySelector from "./priority-selector";
 import AddToWaitlistButton from "./add-to-waitlist-button";
 import TeamNotes from "./team-notes";
 import FollowupButton from "./followup-button";
@@ -16,7 +15,6 @@ import {
   closeSession,
   deleteSession,
   setSessionAvatar,
-  setSessionPriority,
   setBotMode,
   approveDraft,
   discardDraft,
@@ -63,7 +61,6 @@ interface Props {
     followup_reason?: string | null;
     category: null | "availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "general";
     assigned_name: string | null;
-    manual_priority: "high" | "normal" | "low" | null;
   };
   initialMessages: Message[];
   avatarOptions: string[];
@@ -350,8 +347,6 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             </div>
           )}
           <CategorySelector sessionId={session.id} currentCategory={session.category} />
-          {/* Manuelle Priorität — überstimmt Auto-Compute in der Inbox */}
-          <PrioritySelector sessionId={session.id} current={session.manual_priority} />
         </div>
         <div className="flex gap-1 items-center flex-wrap [&>div.divider]:mx-1 [&>div.divider]:h-5 [&>div.divider]:w-px [&>div.divider]:bg-neutral-200">
           {/* Bot-Modus — klarer Dropdown-Button mit Pfeil, deutlich klickbar */}

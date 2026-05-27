@@ -107,21 +107,6 @@ export async function setSessionAvatar(sessionId: string, avatarName: string) {
   revalidatePath("/chatbot/inbox");
 }
 
-/**
- * Manuelle Priorität setzen — überstimmt Auto-Computed-Priorität in der Inbox.
- * priority="auto" oder null → zurück auf Auto-Mode (Server berechnet aus Triggern).
- */
-export async function setSessionPriority(
-  sessionId: string,
-  priority: "high" | "normal" | "low" | "auto" | null,
-) {
-  const svc = createServiceClient();
-  const dbValue = priority === "auto" || priority === null ? null : priority;
-  await svc.from("chat_sessions").update({ manual_priority: dbValue }).eq("id", sessionId);
-  revalidatePath(`/chatbot/inbox/${sessionId}`);
-  revalidatePath("/chatbot/inbox");
-}
-
 /** Toggle Bot-Auto-Reply für eine Session */
 export async function toggleBotAutoReply(sessionId: string, enabled: boolean) {
   const svc = createServiceClient();

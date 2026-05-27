@@ -21,7 +21,7 @@ export default async function ChatSessionPage({ params }: PageProps) {
     .select(`
       id, channel, customer_name, customer_full_name, status, assigned_to, bot_signature_name,
       bot_auto_reply, bot_mode, human_only, team_notes, team_notes_updated_at, team_notes_updated_by,
-      followup_due_at, followup_reason, external_id, category, manual_priority,
+      followup_due_at, followup_reason, external_id, category,
       last_message_at, created_at,
       assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email),
       team_notes_profile:profiles!chat_sessions_team_notes_updated_by_fkey(display_name,email)
@@ -105,7 +105,6 @@ export default async function ChatSessionPage({ params }: PageProps) {
             const p = session.assigned_profile as unknown as { display_name?: string; email?: string } | null;
             return p?.display_name || p?.email || null;
           })(),
-          manual_priority: ((session as { manual_priority?: "high" | "normal" | "low" | null }).manual_priority) ?? null,
         }}
         avatarOptions={(avatars || []).map(a => a.name)}
         pendingDraft={pendingDraft ? {
