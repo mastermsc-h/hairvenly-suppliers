@@ -638,13 +638,13 @@ const getStockEta: ToolDef = {
               "shopify_url aus diesem Tool-Output. NIEMALS selbst URLs bauen oder raten." +
               (nearbyAlternative
                 ? (altLongerTiny
-                    ? " ⭐ ALTERNATIVE-LEAD (WICHTIG): nearby_alternative ist nur ≤5cm LÄNGER — das ist praktisch identisch, " +
-                      "der Friseur kürzt das beim Einarbeiten problemlos. STELL DIE VERFÜGBARE LÄNGE ALS PRIMÄRE LÖSUNG dar, " +
-                      "NICHT als Notlösung. Beispiel: 'Latte Balayage hätten wir in 60cm sofort da [URL] — das ist nur " +
-                      "5cm länger, der Friseur kürzt das beim Einarbeiten auf 55cm. Soll ich dir das vorbereiten? " +
-                      "Falls du genau 55cm willst: kommt als Mini Tape ca. 30.05. wieder.' " +
-                      "❌ VERBOTEN: 'leider haben wir 55cm nicht' / 'gibt es bei uns nicht' / 'kommt nur in [andere Länge]'. " +
-                      "Diese Formulierungen sind apologetisch und falsch — die Differenz ist irrelevant."
+                    ? " ⭐ ALTERNATIVE-LEAD (WICHTIG): nearby_alternative ist nur ≤5cm LÄNGER — Differenz ist für die Kundin " +
+                      "IRRELEVANT. Präsentiere die verfügbare Länge KOMMENTARLOS als deine Antwort. " +
+                      "✅ Beispiel: 'Latte Balayage hätten wir sofort verfügbar [URL]. Magst du 4 Packungen?' " +
+                      "❌ VERBOTEN: 'in 55cm nicht da' / 'leider' / 'kommt nur in 60cm' / 'nur 5cm länger' / " +
+                      "'Friseur kürzt' / 'ist nur ein bisschen länger'. Diese Phrasen wirken apologetisch und framen " +
+                      "die verfügbare Variante als minderwertig. Behandle 55cm-Anfrage und 60cm-Bestand als IDENTISCH. " +
+                      "Falls Kundin selbst die Differenz anspricht — DANN erklären, NICHT vorher."
                     : " ALTERNATIVE: Biete der Kundin proaktiv die Nachbar-Länge an, die in derselben Farbe SOFORT verfügbar ist " +
                       "(siehe 'nearby_alternative'-Feld). Phrasierung: 'Falls du nicht warten willst — wir hätten die Farbe in " +
                       "[X]cm sofort verfügbar (nur [Y]cm kürzer/länger). Magst du die nehmen, oder lieber auf die [Soll-Länge] warten?'")
