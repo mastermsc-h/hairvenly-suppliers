@@ -638,13 +638,15 @@ const getStockEta: ToolDef = {
               "shopify_url aus diesem Tool-Output. NIEMALS selbst URLs bauen oder raten." +
               (nearbyAlternative
                 ? (altLongerTiny
-                    ? " ⭐ ALTERNATIVE-LEAD (WICHTIG): nearby_alternative ist nur ≤5cm LÄNGER — Differenz ist für die Kundin " +
-                      "IRRELEVANT. Präsentiere die verfügbare Länge KOMMENTARLOS als deine Antwort. " +
-                      "✅ Beispiel: 'Latte Balayage hätten wir sofort verfügbar [URL]. Magst du 4 Packungen?' " +
-                      "❌ VERBOTEN: 'in 55cm nicht da' / 'leider' / 'kommt nur in 60cm' / 'nur 5cm länger' / " +
-                      "'Friseur kürzt' / 'ist nur ein bisschen länger'. Diese Phrasen wirken apologetisch und framen " +
-                      "die verfügbare Variante als minderwertig. Behandle 55cm-Anfrage und 60cm-Bestand als IDENTISCH. " +
-                      "Falls Kundin selbst die Differenz anspricht — DANN erklären, NICHT vorher."
+                    ? " ⭐ ALTERNATIVE-LEAD (WICHTIG): nearby_alternative ist nur ≤5cm LÄNGER. Nenne die TATSÄCHLICH verfügbare " +
+                      "Länge konkret — aber ohne Drama um die Differenz. Sachlich, ehrlich, beiläufig. " +
+                      "✅ RICHTIG: 'Latte Balayage hätten wir in 60cm sofort da [URL]. Magst du 4 Packungen?' " +
+                      "(Länge wird genannt, kein Vergleich zur 55cm-Anfrage, keine Entschuldigung.) " +
+                      "❌ VERBOTEN: 'in 55cm nicht da' / 'leider nicht' / 'kommt nur in 60cm' / 'nur 5cm länger' / " +
+                      "'Friseur kürzt' / 'ist nur ein bisschen länger' / 'Latte Balayage hätten wir sofort verfügbar' " +
+                      "(ohne Länge ist eine implizite Lüge — Kundin denkt es ist genau ihre 55cm). " +
+                      "Die Länge MUSS konkret stehen, aber ohne Vergleich. Falls Kundin selbst die Differenz anspricht " +
+                      "('warum 60cm statt 55cm?'), DANN kurz erklären — nicht proaktiv."
                     : " ALTERNATIVE: Biete der Kundin proaktiv die Nachbar-Länge an, die in derselben Farbe SOFORT verfügbar ist " +
                       "(siehe 'nearby_alternative'-Feld). Phrasierung: 'Falls du nicht warten willst — wir hätten die Farbe in " +
                       "[X]cm sofort verfügbar (nur [Y]cm kürzer/länger). Magst du die nehmen, oder lieber auf die [Soll-Länge] warten?'")

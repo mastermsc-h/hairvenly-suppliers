@@ -380,7 +380,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-05-27.5cm-no-comment.v1";
+const RESPOND_CODE_VERSION = "2026-05-27.5cm-concrete-length.v1";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
@@ -536,12 +536,17 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += "- Wenn die Kundin selbst eine Länge nennt: prüfe gegen die Matrix. Wenn sie zu der Methode nicht existiert → freundlich klären, NICHT übernehmen.\n";
   systemPrompt += "- Beispiel: Kundin schreibt 'Standard Tapes in 55cm' → Antwort: 'In Russisch glatt haben wir Standard Tapes nur in 60cm. 55cm gibt es bei uns nur bei den Tapes in Usbekisch wellig. Was passt besser zu dir?'\n";
   systemPrompt += "- NIE Längen erfinden, runden oder annehmen.\n";
-  systemPrompt += "- 📏 5CM-TOLERANZ — Längen-Differenzen NICHT thematisieren:\n";
-  systemPrompt += "  • Wenn die Wunsch-Länge nicht direkt verfügbar ist, aber eine ≤5cm LÄNGERE Variante in derselben Farbe SOFORT da ist → präsentiere diese KOMMENTARLOS als deine Antwort. Erwähne NICHT die 5cm Differenz, NICHT 'der Friseur kürzt', NICHT 'nur ein bisschen länger'. Behandle 55cm-Anfrage und 60cm-Bestand als IDENTISCH.\n";
-  systemPrompt += "  • ❌ FALSCH (apologetisch): 'Latte Balayage in 55cm gibt es bei uns leider nicht — die Tapes in dieser Farbe kommen nur in Russisch glatt 60cm.'\n";
-  systemPrompt += "  • ❌ AUCH FALSCH (Differenz unnötig erklärt): 'Latte Balayage hätten wir in 60cm sofort da — das ist nur 5cm länger, der Friseur kürzt das beim Einarbeiten.' Die Kundin will nichts über die 5cm wissen — wirkt als wäre 60cm minderwertig.\n";
-  systemPrompt += "  • ✅ RICHTIG (kommentarlos): 'Latte Balayage hätten wir sofort verfügbar [URL]. Magst du 4 Packungen?' — KEINE Längen-Erwähnung. Falls die Kundin selbst nachfragt warum 60cm statt 55cm, DANN kurz erklären — aber nicht proaktiv.\n";
-  systemPrompt += "  • Reihenfolge: (1) verfügbare nahe Variante als ANTWORT (ohne Differenz-Hinweis), (2) ETA der exakten Variante NUR wenn Kundin nach genauer Länge fragt, (3) andere Farbe sofort verfügbar bei Dringlichkeit. NICHT umgekehrt.\n";
+  systemPrompt += "- 📏 5CM-TOLERANZ — verfügbare Länge ehrlich + sachlich nennen:\n";
+  systemPrompt += "  • Wenn die Wunsch-Länge der Kundin nicht direkt verfügbar ist, aber eine ≤5cm LÄNGERE Variante in derselben Farbe sofort da → nenne die TATSÄCHLICH verfügbare Länge konkret. Aber: kein Drama um die Differenz, kein 'leider', kein 'Friseur kürzt'. Einfach sachlich.\n";
+  systemPrompt += "  • ❌ FALSCH (apologetisch, dwelling): 'Latte Balayage in 55cm gibt es bei uns leider nicht — die Tapes in dieser Farbe kommen nur in Russisch glatt 60cm.'\n";
+  systemPrompt += "  • ❌ AUCH FALSCH (Differenz unnötig erklärt): 'Latte Balayage hätten wir in 60cm sofort da — das ist nur 5cm länger, der Friseur kürzt das beim Einarbeiten.'\n";
+  systemPrompt += "  • ❌ AUCH FALSCH (zu vage, Kundin denkt 55cm verfügbar): 'Latte Balayage hätten wir sofort verfügbar [URL].' OHNE Längen-Angabe lügt das implizit — die Kundin denkt es ist genau ihre 55cm da.\n";
+  systemPrompt += "  • ✅ RICHTIG (konkret, sachlich): 'Latte Balayage hätten wir in 60cm sofort da [URL]. Magst du 4 Packungen?' — die Länge wird beiläufig genannt, ohne Vergleich oder Entschuldigung.\n";
+  systemPrompt += "  • Reihenfolge bei nicht-direkt-verfügbarer Wunsch-Länge:\n";
+  systemPrompt += "    (1) WENN ≤5cm-längere Variante sofort da → diese mit KONKRETER Länge als Antwort (z.B. 'in 60cm da'). KEIN Wort über die Differenz.\n";
+  systemPrompt += "    (2) WENN keine Sofort-Verfügbarkeit nahebei → nenne ETA der Wunsch-Länge konkret ('die 55cm kommt am 25.06.').\n";
+  systemPrompt += "    (3) DANN erst Alternativen (z.B. andere Farbe sofort verfügbar bei Dringlichkeit).\n";
+  systemPrompt += "  • Falls die Kundin selbst die Längen-Differenz anspricht ('warum 60cm statt 55cm?'), DANN kurz erklären — aber nicht proaktiv.\n";
   systemPrompt += "- 🔒 NIEMALS Lieferanten-Namen erwähnen: Amanda, Eyfel, Ebru, China, etc. Das sind INTERNE Codes. Kundin spricht IMMER von der Haarqualität (Russisch glatt / Usbekisch wellig).\n";
   systemPrompt += "- 🔗 WICHTIG: Wenn du eine konkrete Farbe (COLDNESS, ASH MELT, FROSTY, CAPPUCCINO etc.) empfiehlst oder nennst, packe IMMER die passende Shopify-URL direkt hinter den Farbnamen. Niemals einen Farbnamen 'nackt' lassen. Die Kundin muss DIREKT klicken und das Produkt sehen können — sonst muss sie selbst suchen.\n";
   systemPrompt += "  Wenn dir aus dem Tool-Output keine URL bekannt ist, NICHT die Farbe nennen.\n";
