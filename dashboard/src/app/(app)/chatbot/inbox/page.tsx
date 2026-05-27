@@ -17,9 +17,10 @@ interface PageProps {
 }
 
 const SORT_OPTIONS: Record<string, { label: string; emoji: string }> = {
-  newest:          { label: "Neueste zuerst",      emoji: "🆕" },
-  longest_waiting: { label: "Am längsten wartend", emoji: "⏱" },
-  oldest:          { label: "Älteste zuerst",      emoji: "📜" },
+  priority:        { label: "Priorität (HOCH zuerst)", emoji: "🔥" },
+  newest:          { label: "Neueste zuerst",          emoji: "🆕" },
+  longest_waiting: { label: "Am längsten wartend",     emoji: "⏱" },
+  oldest:          { label: "Älteste zuerst",          emoji: "📜" },
 };
 
 const PAGE_SIZE = 50;
@@ -97,7 +98,11 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   // Legacy-Mappings für alte URLs (?unread=1, ?show=closed) — alles auf view normalisieren
   const onlyUnread     = view === "todo" || params.unread === "1";
   const showClosed     = view === "done" || params.show === "closed" || filter === "closed";
-  const sortMode       = params.sort && SORT_OPTIONS[params.sort] ? params.sort : "newest";
+  const hasExplicitSort = !!(params.sort && SORT_OPTIONS[params.sort]);
+  // Smart default: in "Zu tun"-Tab → priority, sonst → newest
+  const sortMode       = hasExplicitSort
+    ? params.sort!
+    : (view === "todo" ? "priority" : "newest");
   // Pagination: max 50 pro "Klick", über "Weitere laden" wird der Limit erhöht
   const limit = Math.min(Math.max(Number(params.limit) || PAGE_SIZE, PAGE_SIZE), 1000);
 
@@ -333,6 +338,51 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   }
   const totalUnreadCount = combinedSessions.filter(s => unreadMap[s.id]).length;
 
+  // ── PRIORITY-BERECHNUNG ────────────────────────────────────────────
+  // Pro Session: high / normal / low. Wird sowohl für Visual als auch
+  // für Sortierung im "Zu tun"-Tab benutzt.
+  //
+  // HIGH-Signale (irgendeines reicht):
+  //   - human_only=true (MA hat explizit als "Mitarbeiter benötigt" markiert)
+  //   - Kundin hat Foto + wartet (Bot kann nicht beurteilen)
+  //   - Waitlist vergessen (waitlistConfirmedPendingReservation)
+  //   - Kategorie complaint (Reklamation immer prio)
+  //   - Kategorie gewerbe + Autobot bereits aktiv (B2B-Risiko)
+  //   - > 24h wartet (alte Anfrage, dringend)
+  //
+  // NORMAL: 1-24h wartet
+  // LOW: < 1h wartet (frisch)
+  //
+  // Sessions die NICHT in todo_unread/todo_draft sind → low (Sortierung egal).
+  type Priority = "high" | "normal" | "low";
+  const priorityMap: Record<string, Priority> = {};
+  const HIGH_WAIT_MS = 24 * 60 * 60 * 1000;  // 24h
+  const NORMAL_WAIT_MS = 1 * 60 * 60 * 1000; // 1h
+  for (const s of combinedSessions) {
+    const us = uiStatusMap[s.id];
+    if (us !== "todo_unread" && us !== "todo_draft") {
+      priorityMap[s.id] = "low";
+      continue;
+    }
+    const st = stats[s.id];
+    const sExt = s as { human_only?: boolean; category?: string | null; last_customer_msg_at?: string | null };
+
+    // HIGH-Trigger
+    if (sExt.human_only) { priorityMap[s.id] = "high"; continue; }
+    if (st?.lastUserHasPhoto) { priorityMap[s.id] = "high"; continue; }
+    if (st?.waitlistConfirmedPendingReservation) { priorityMap[s.id] = "high"; continue; }
+    if (sExt.category === "complaint") { priorityMap[s.id] = "high"; continue; }
+    if (sExt.category === "gewerbe" && (st?.autobotCount || 0) > 0) { priorityMap[s.id] = "high"; continue; }
+
+    // Zeit-basiert
+    const waitMs = sExt.last_customer_msg_at
+      ? Date.now() - new Date(sExt.last_customer_msg_at).getTime()
+      : 0;
+    if (waitMs > HIGH_WAIT_MS) { priorityMap[s.id] = "high"; continue; }
+    if (waitMs > NORMAL_WAIT_MS) { priorityMap[s.id] = "normal"; continue; }
+    priorityMap[s.id] = "low";
+  }
+
   // Filter nach Mode: pure_bot = nur Bot hat geantwortet, with_human = Mensch hat reingeschrieben,
   // autobot_active = mindestens eine autonom-vom-Bot-gesendete Nachricht (auto_sent=true)
   let filteredSessions = combinedSessions;
@@ -393,10 +443,27 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   }
 
   // Sortierung — explizit per ?sort= überschreibbar.
+  // "priority" → HIGH zuerst, dann NORMAL, dann LOW (innerhalb der Stufe: älteste zuerst).
+  //              Default im "Zu tun"-Tab.
   // "longest_waiting" / "oldest" → ASC (älteste zuerst).
   // "newest" → DESC nach last_customer_msg_at (im Unread-Modus) bzw.
   //            last_message_at (in der Gesamtansicht — Default aus der DB).
-  if (sortMode === "longest_waiting" || sortMode === "oldest") {
+  const priorityRank: Record<string, number> = { high: 0, normal: 1, low: 2 };
+  const sortByPriority = (sessions: typeof filteredSessions) =>
+    sessions.slice().sort((a, b) => {
+      const ra = priorityRank[priorityMap[a.id] || "low"];
+      const rb = priorityRank[priorityMap[b.id] || "low"];
+      if (ra !== rb) return ra - rb;
+      // Gleiche Prio → älteste Kunden-Message zuerst (= am längsten gewartet)
+      const ta = a.last_customer_msg_at || "";
+      const tb = b.last_customer_msg_at || "";
+      return ta.localeCompare(tb);
+    });
+
+  if (sortMode === "priority") {
+    // Im "Zu tun"-Tab ist das der Default (ohne explizite Sort-Wahl)
+    filteredSessions = sortByPriority(filteredSessions);
+  } else if (sortMode === "longest_waiting" || sortMode === "oldest") {
     filteredSessions = filteredSessions.slice().sort((a, b) => {
       const ta = (sortMode === "longest_waiting"
         ? a.last_customer_msg_at
@@ -534,7 +601,8 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
           if (channelFilter !== "all" && paramToRemove !== "channel") next.set("channel", channelFilter);
           if (categoryFilter !== "all" && paramToRemove !== "category") next.set("category", categoryFilter);
           if (searchQuery) next.set("q", searchQuery);
-          if (sortMode !== "newest" && paramToRemove !== "sort") next.set("sort", sortMode);
+          // Nur EXPLIZITE Sort-Wahl in URL behalten (impliziter Default je nach Tab nicht)
+          if (hasExplicitSort && paramToRemove !== "sort") next.set("sort", sortMode);
           return `/chatbot/inbox?${next.toString()}`;
         };
         if (channelFilter !== "all") activeChips.push({ label: CHANNEL_LABELS[channelFilter] || channelFilter, clearHref: buildClear("channel") });
@@ -542,7 +610,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
           const cat = CATEGORY_LABELS[categoryFilter];
           activeChips.push({ label: cat ? `${cat.emoji} ${cat.label}` : categoryFilter, clearHref: buildClear("category") });
         }
-        if (sortMode !== "newest" && SORT_OPTIONS[sortMode]) {
+        if (hasExplicitSort && SORT_OPTIONS[sortMode]) {
           activeChips.push({ label: `${SORT_OPTIONS[sortMode].emoji} ${SORT_OPTIONS[sortMode].label}`, clearHref: buildClear("sort") });
         }
         const activeCount = activeChips.length;
@@ -789,20 +857,55 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                               📝 Entwurf bereit
                             </span>
                           );
-                          if (us === "todo_unread") return (
-                            <span
-                              className="group/wait inline-flex items-center gap-1 cursor-default"
-                              title="Wartet auf dich — Kundin hat geschrieben, niemand hat geantwortet"
-                            >
-                              <span className="relative inline-flex">
-                                <span className="w-2.5 h-2.5 rounded-full bg-pink-500 ring-2 ring-amber-300" />
-                                <span className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-pink-500 animate-ping opacity-40" />
+                          if (us === "todo_unread") {
+                            const prio = priorityMap[s.id] || "low";
+                            if (prio === "high") {
+                              // 🔴 HOCH — pinkrot pulse + Text IMMER sichtbar
+                              return (
+                                <span
+                                  className="inline-flex items-center gap-1.5 cursor-default"
+                                  title="HOHE PRIO: wartet schon lange, hat Foto, Reklamation, Gewerbe-Risiko oder ist als 'Mitarbeiter benötigt' markiert"
+                                >
+                                  <span className="relative inline-flex">
+                                    <span className="w-3 h-3 rounded-full bg-pink-600 ring-2 ring-pink-300" />
+                                    <span className="absolute inset-0 w-3 h-3 rounded-full bg-pink-600 animate-ping opacity-60" />
+                                  </span>
+                                  <span className="text-pink-700 font-bold text-[10px] uppercase tracking-wide">
+                                    Wartet — HOHE PRIO
+                                  </span>
+                                </span>
+                              );
+                            }
+                            if (prio === "normal") {
+                              // 🟡 NORMAL — amber, sanftes pulse, Text on-hover
+                              return (
+                                <span
+                                  className="group/wait inline-flex items-center gap-1 cursor-default"
+                                  title="Wartet auf dich (normale Priorität — 1-24h wartend)"
+                                >
+                                  <span className="relative inline-flex">
+                                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                                    <span className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping opacity-30" />
+                                  </span>
+                                  <span className="max-w-0 group-hover/wait:max-w-[120px] overflow-hidden whitespace-nowrap transition-[max-width] duration-300 ease-out text-amber-700 font-semibold text-[10px] uppercase tracking-wide">
+                                    <span className="pl-0.5">Wartet</span>
+                                  </span>
+                                </span>
+                              );
+                            }
+                            // ⚪ NIEDRIG — grau, kein pulse, Text on-hover
+                            return (
+                              <span
+                                className="group/wait inline-flex items-center gap-1 cursor-default"
+                                title="Wartet auf dich (frisch — unter 1h)"
+                              >
+                                <span className="w-2 h-2 rounded-full bg-neutral-400" />
+                                <span className="max-w-0 group-hover/wait:max-w-[100px] overflow-hidden whitespace-nowrap transition-[max-width] duration-300 ease-out text-neutral-600 text-[10px] uppercase tracking-wide">
+                                  <span className="pl-0.5">Wartet</span>
+                                </span>
                               </span>
-                              <span className="max-w-0 group-hover/wait:max-w-[140px] overflow-hidden whitespace-nowrap transition-[max-width] duration-300 ease-out text-pink-700 font-bold text-[10px] uppercase tracking-wide">
-                                <span className="pl-0.5">Wartet auf dich</span>
-                              </span>
-                            </span>
-                          );
+                            );
+                          }
                           if (us === "autobot") return (
                             <span className="bg-green-100 text-green-800 border border-green-300 text-[10px] font-medium px-1.5 py-0.5 rounded-full" title="Bot hat autonom geantwortet — gegenchecken empfohlen">
                               🤖 Bot hat geantwortet
