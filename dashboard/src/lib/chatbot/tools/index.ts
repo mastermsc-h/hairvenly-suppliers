@@ -11,6 +11,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { createServiceClient } from "@/lib/supabase/server";
 import { calcPacks, type Method, type PriceRow } from "@/lib/chatbot/pricing";
 import { readDashboardAlerts, readInventorySheet } from "@/lib/stock-sheets";
+import { BUSINESS_CONFIG } from "@/lib/chatbot/business-config";
 
 export interface ToolContext {
   sessionId: string;
@@ -1252,7 +1253,7 @@ const getSalonServicePrice: ToolDef = {
       "Nutze es wenn Kundin nach Service-Preisen fragt ('was kostet einarbeiten?', " +
       "'wie viel kostet eine Verlängerung?', 'was kostet Bondings 100g?'). " +
       "Optional Filter nach Service-Begriff (z.B. 'bonding', 'tape', 'balayage'). " +
-      "Bot soll am Ende immer auch auf Planity verweisen: https://www.planity.com/de-DE/hairvenly-28217-bremen",
+      `Bot soll am Ende immer auch auf ${BUSINESS_CONFIG.booking_provider_name} verweisen: ${BUSINESS_CONFIG.planity_url}`,
     input_schema: {
       type: "object",
       properties: {
@@ -1306,7 +1307,7 @@ const getSalonServicePrice: ToolDef = {
       return {
         output: JSON.stringify({
           status: "not_found",
-          message: "Kein passender Service gefunden. Verweise die Kundin auf Planity für die volle Preisliste: https://www.planity.com/de-DE/hairvenly-28217-bremen",
+          message: `Kein passender Service gefunden. Verweise die Kundin auf ${BUSINESS_CONFIG.booking_provider_name} für die volle Preisliste: ${BUSINESS_CONFIG.planity_url}`,
         }),
       };
     }
@@ -1324,10 +1325,12 @@ const getSalonServicePrice: ToolDef = {
         count: services.length,
         message:
           "Nenne der Kundin den/die relevanten Preise KURZ und KLAR — max. 2-3 Services pro Antwort. " +
-          "Füge IMMER am Ende den Planity-Link hinzu für 'alle Preise + Termin buchen': " +
-          "https://www.planity.com/de-DE/hairvenly-28217-bremen — formuliere natürlich, nicht wie Liste.",
+          `Füge IMMER am Ende den ${BUSINESS_CONFIG.booking_provider_name}-Link hinzu für 'alle Preise + Termin buchen': ` +
+          `${BUSINESS_CONFIG.planity_url} — formuliere natürlich, nicht wie Liste.`,
         services,
-        planity_link: "https://www.planity.com/de-DE/hairvenly-28217-bremen",
+        // Key bleibt "booking_link" — Tool-Output ist nicht prompt-cached
+        booking_link: BUSINESS_CONFIG.planity_url,
+        booking_provider: BUSINESS_CONFIG.booking_provider_name,
       }),
     };
   },

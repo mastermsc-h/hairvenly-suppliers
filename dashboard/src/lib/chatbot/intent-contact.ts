@@ -22,7 +22,7 @@ export type ContactIntent =
   | "email_correction"     // "info@hairvenli.de richtig?" → falsche Email
   | "opening_hours"        // "öffnungszeiten?", "wann habt ihr offen?"
   | "hours_correction"     // "ihr habt bis 19 Uhr offen, oder?" → falsche Stunden
-  | "appointment"          // "termin buchen?", "wann frei?" → Planity-Verweis
+  | "appointment"          // "termin buchen?", "wann frei?" → Buchungs-Link (Treatwell)
   | "general_contact"      // "wie erreiche ich euch?"
   | null;
 
@@ -213,7 +213,7 @@ export function detectContactIntent(userMessage: string): ContactIntent {
     return "address_or_location";
   }
 
-  // ── APPOINTMENT — Terminanfrage → deterministischer Planity-Verweis
+  // ── APPOINTMENT — Terminanfrage → deterministischer Buchungs-Link-Verweis (Treatwell)
   if (/\b(termin\w*|buchung|buchen|verfügbar.+(termin|datum|uhr)|wann.+frei|frei.+(termin|uhrzeit)|reservier\w*)/i.test(t)) {
     return "appointment";
   }
@@ -286,7 +286,7 @@ export function renderContactResponse(intent: ContactIntent): string {
       ].join("\n");
 
     case "appointment":
-      // Termin-Anfrage → Planity-Verweis (wir haben keinen Kalender-API-Zugriff)
+      // Termin-Anfrage → Buchungs-Link (Treatwell, vorher Planity)
       return [
         "Klar 💕 — Termine kannst du direkt online buchen, dort siehst du live alle freien Slots:",
         "",

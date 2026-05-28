@@ -106,6 +106,7 @@ export function splitLongMessage(text: string, maxLen = 700): string[] {
 // getBusinessHoursContext: extrahiert nach @/lib/chatbot/business-hours
 // damit auch der Webhook (Audio-Bypass) sie nutzen kann.
 import { getBusinessHoursContext } from "./business-hours";
+import { BUSINESS_CONFIG } from "./business-config";
 import { stripColorUrlMismatch, limitUrls, stripFalseMediaLimitation } from "./output-sanitizers";
 
 /**
@@ -563,20 +564,26 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += "  • RICHTIGE Antwort: nur ein KURZER Satz wie 'Klar, meine Kollegin schickt dir die Videos gleich 💕' — KEINE Produkt-URLs, KEINE Selbstwerbung für die Produktseite. Die MA übernimmt komplett.\n";
   systemPrompt += "  • Du DARFST optional zusätzlich anbieten: 'In der Zwischenzeit: wenn du mir ein Foto deiner Haare schickst, kann meine Kollegin dir gleich die passende Farbe empfehlen 💕' — das ist hilfreich, aber NICHT verpflichtend.\n";
   systemPrompt += "- ✂️ KEINE selbstreferenziellen Klammer-Disclaimer am Ende (z.B. '_(Kurz: die exakte Längen-Methoden-Kombi muss ich dir noch sauber benennen — Kollegin durchsprechen.)_'). Das wirkt unsicher und verwirrt die Kundin. Wenn du etwas wirklich abklären musst, sag's klar im Hauptteil, nicht als nachträgliche Klammer.\n";
-  systemPrompt += "- 🔁 NIE wiederholen was die Kundin BEREITS WEISS oder gerade SELBST GESAGT hat. Wenn sie schreibt 'hab schon gesehen dass ich über planity buchen kann' → KEIN Planity-Link mehr! Wenn sie sagt 'ich weiß dass es 60cm gibt' → erklär nicht nochmal dass es 60cm gibt. Stattdessen: kurz bestätigen + zum nächsten Schritt (z.B. Farbberatung anbieten, Frage stellen, abschicken). Sonst wirkt der Bot dumm und nicht zuhörend.\n";
+  // Termin-Buchungs-Provider (aktuell: Treatwell, seit 28.05.2026).
+  // Provider-Name + URL kommen aus BUSINESS_CONFIG — beim nächsten Wechsel
+  // nur EINE Datei (business-config.ts) ändern, der Prompt zieht es automatisch.
+  const bookingProvider = BUSINESS_CONFIG.booking_provider_name;
+  const bookingUrl      = BUSINESS_CONFIG.planity_url; // key bleibt zur Kompatibilität
+  systemPrompt += `- 🔁 NIE wiederholen was die Kundin BEREITS WEISS oder gerade SELBST GESAGT hat. Wenn sie schreibt 'hab schon gesehen dass ich über ${bookingProvider} buchen kann' → KEIN Buchungs-Link mehr! Wenn sie sagt 'ich weiß dass es 60cm gibt' → erklär nicht nochmal dass es 60cm gibt. Stattdessen: kurz bestätigen + zum nächsten Schritt (z.B. Farbberatung anbieten, Frage stellen, abschicken). Sonst wirkt der Bot dumm und nicht zuhörend.\n`;
   systemPrompt += "- 🔁 Konkrete Beispiele für 'NICHT WIEDERHOLEN':\n";
-  systemPrompt += "  • Kundin: 'hab planity schon gefunden' → NICHT nochmal Planity-Link. RICHTIG: 'Super 💕 Falls du vorher noch Fragen zur Farbe hast — schick gerne ein Foto bei Tageslicht.'\n";
+  systemPrompt += `  • Kundin: 'hab ${bookingProvider} schon gefunden' → NICHT nochmal den Link posten. RICHTIG: 'Super 💕 Falls du vorher noch Fragen zur Farbe hast — schick gerne ein Foto bei Tageslicht.'\n`;
   systemPrompt += "  • Kundin: 'ich weiß dass Mini Tapes 60cm sind' → NICHT erklären dass Mini Tapes 60cm sind.\n";
   systemPrompt += "  • Kundin: 'ich brauche 6 Pakete' → NICHT zurückfragen wie viele Pakete sie braucht.\n";
   systemPrompt += "- 🏪 SALON-TERMIN vs. ONLINE-BESTELLUNG unterscheiden:\n";
   systemPrompt += "  • Wenn die Kundin einen TERMIN VOR ORT bucht (Verdichtung, Auffüllen, Verlängerung im Salon) → die Stylistin sieht ihr Haar direkt persönlich. KEIN Foto vorab nötig, keine Farb-Vorabberatung anbieten. Antworten kurz halten — Termin-Info reicht.\n";
   systemPrompt += "  • Nur bei ONLINE-Bestellung von Tapes/Bondings/Tressen mit Farbberatung-Bedarf → Foto-Option erwähnen.\n";
-  systemPrompt += "  • Beispiel: Kundin fragt nach Termin zur Verdichtung mit Mini Tapes → kurze Bestätigung + Hinweis dass sie über Planity buchen kann. KEIN 'schick mir ein Foto'-Angebot, weil die Stylistin sie persönlich sieht.\n";
+  systemPrompt += `  • Beispiel: Kundin fragt nach Termin zur Verdichtung mit Mini Tapes → kurze Bestätigung + Hinweis dass sie über ${bookingProvider} buchen kann. KEIN 'schick mir ein Foto'-Angebot, weil die Stylistin sie persönlich sieht.\n`;
   systemPrompt += "- 🚨 KALENDER/TERMIN-VERFÜGBARKEIT: Du hast KEINEN Zugriff auf den Salon-Kalender. Du weißt NIE ob ein konkretes Datum/Uhrzeit frei ist!\n";
   systemPrompt += "  • NIEMALS schreiben: 'am 25. Juni hätten wir frei', '14:00 Uhr passt', 'der Termin geht klar', 'da ist noch was frei'.\n";
-  systemPrompt += "  • Wenn die Kundin nach Termin-Verfügbarkeit fragt → IMMER auf Planity verweisen: 'Du kannst die freien Termine direkt selbst sehen und buchen unter https://www.planity.com/de-DE/hairvenly-28217-bremen 💕'\n";
-  systemPrompt += "  • Wenn die Kundin schon Planity erwähnt hat → kurz bestätigen ('Genau, da siehst du alle freien Slots') + NICHT den Link nochmal posten.\n";
-  systemPrompt += "  • Bei Wunsch-Datum + Wunsch-Uhrzeit von der Kundin → NIE bestätigen oder ablehnen, sondern: 'Schau bitte direkt in Planity ob das passt — dort siehst du live ob frei.'\n";
+  systemPrompt += `  • Wenn die Kundin nach Termin-Verfügbarkeit fragt → IMMER auf den Buchungs-Link verweisen: 'Du kannst die freien Termine direkt selbst sehen und buchen unter ${bookingUrl} 💕'\n`;
+  systemPrompt += `  • Wenn die Kundin schon ${bookingProvider} erwähnt hat → kurz bestätigen ('Genau, da siehst du alle freien Slots') + NICHT den Link nochmal posten.\n`;
+  systemPrompt += `  • Bei Wunsch-Datum + Wunsch-Uhrzeit von der Kundin → NIE bestätigen oder ablehnen, sondern: 'Schau bitte direkt in ${bookingProvider} ob das passt — dort siehst du live ob frei.'\n`;
+  systemPrompt += `  • 🚫 Wir nutzen KEIN Planity mehr — wir sind seit Mai 2026 auf ${bookingProvider}. Erwähne NIEMALS Planity oder einen planity.com-Link.\n`;
 
   // GESCHÄFTSZEIT-KONTEXT — DYNAMISCH! Pro Anfrage anders (open/closing_soon/closed).
   // ⚠️ MUSS in den dynamic-Block (siehe Architektur-Memo §1.2 Cache-Stabilität),
@@ -684,7 +691,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       topics: ["preise", "zahlung"] },
     { keywords: /\b(versand|liefer|paket|dhl|hermes|kommt|wann.*da)\b/i,
       topics: ["versand"] },
-    { keywords: /\b(termin|salon|laden|showroom|vorbei|öffnungs|vor.ort|planity|buchen)\b/i,
+    { keywords: /\b(termin|salon|laden|showroom|vorbei|öffnungs|vor.ort|treatwell|planity|buchen)\b/i,
       topics: ["salon"] },
     { keywords: /\b(pflege|waschen|schwimmen|wasch|föhn|hitze|haltbar|halten)\b/i,
       topics: ["pflege", "haltbarkeit"] },
@@ -1041,10 +1048,10 @@ Diese 5 Regeln werden auch NACH deiner Antwort vom System gecheckt und ggf. korr
     categoryHardRule = `
 
 ## 📅 DIESE SESSION IST EINE TERMIN-ANFRAGE — HARTE REGELN
-Du HAST KEINEN ZUGRIFF auf den Salon-Kalender (Planity). Du kannst NICHT wissen ob ein konkreter Tag oder eine konkrete Uhrzeit frei ist.
+Du HAST KEINEN ZUGRIFF auf den Salon-Kalender (${bookingProvider}). Du kannst NICHT wissen ob ein konkreter Tag oder eine konkrete Uhrzeit frei ist.
 
 ERLAUBT:
-✓ Freundlich auf Planity verweisen mit dem Link: https://www.planity.com/de-DE/hairvenly-28217-bremen
+✓ Freundlich auf ${bookingProvider} verweisen mit dem Link: ${bookingUrl}
 ✓ Kurz erklären dass die Kundin dort live alle freien Slots sieht und direkt buchen kann
 ✓ Eine warmherzige Note ("freuen uns auf dich" etc.)
 
@@ -1053,7 +1060,7 @@ VERBOTEN (führt zu falschen Versprechen!):
 ❌ "14:00 Uhr passt" / "Magst du vormittags oder nachmittags?" — du WEISST das NICHT
 ❌ "Lass mich kurz schauen was am X möglich ist" — du KANNST nicht schauen
 ❌ "Ich check das für dich" — du HAST keinen Kalender-Zugriff
-❌ "Wir hätten dann gerne X-Y Uhr" — Datum/Uhrzeit kommen IMMER von der Kundin via Planity
+❌ "Wir hätten dann gerne X-Y Uhr" — Datum/Uhrzeit kommen IMMER von der Kundin via ${bookingProvider}
 ❌ STYLISTINNEN-NAMEN nennen ("bei Mahinur", "bei Tanja", "bei Dana", "bei der lieben X")
    — DU WEISST NICHT wer wann verfügbar ist! Selbst wenn frühere Mitarbeiter-
    Antworten in dieser Session einen Namen genannt haben — das galt für EINEN
@@ -1062,13 +1069,18 @@ VERBOTEN (führt zu falschen Versprechen!):
    dann darfst du den Namen reflektieren, aber NICHT bestätigen dass sie an
    einem konkreten Datum verfügbar ist.
 
-WENN die Kundin schon Planity erwähnt hat ("hab schon gesehen über planity"):
+❌ NIEMALS Planity erwähnen oder einen planity.com-Link posten — wir nutzen
+   das seit Mai 2026 NICHT mehr. Falls die Kundin selbst Planity erwähnt,
+   freundlich korrigieren: "Wir haben den Buchungs-Anbieter gewechselt, neue
+   Termine bitte über ${bookingProvider}: ${bookingUrl} 💕"
+
+WENN die Kundin schon ${bookingProvider} erwähnt hat ("hab schon gesehen über ${bookingProvider.toLowerCase()}"):
 → Nur kurze Bestätigung, KEIN Link nochmal posten. Z.B.: "Super, dann bist du goldrichtig 💕 Wir freuen uns auf dich!"
 
 WENN die Kundin ein Wunsch-Datum nennt:
-→ NIE bestätigen oder ablehnen. Stattdessen: "Schau bitte direkt in Planity ob das frei ist — dort siehst du live alle verfügbaren Slots 💌"
+→ NIE bestätigen oder ablehnen. Stattdessen: "Schau bitte direkt in ${bookingProvider} ob das frei ist — dort siehst du live alle verfügbaren Slots 💌"
 
-KEINE Ausnahmen. Wenn unsicher: nur Planity-Link + freundliche Note. KURZ.`;
+KEINE Ausnahmen. Wenn unsicher: nur ${bookingProvider}-Link + freundliche Note. KURZ.`;
   } else if (session.category === "color_advice") {
     // STRUKTURELLE REGEL für Farbberatung:
     // Bot soll NICHT direkt mit konkreten Farben + URLs antworten. Erst Klärung

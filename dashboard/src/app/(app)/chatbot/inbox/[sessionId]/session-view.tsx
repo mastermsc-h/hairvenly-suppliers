@@ -841,7 +841,7 @@ function friendlyErrorMessage(raw: string): string {
   if (!raw) return "Unbekannter Fehler";
   const r = raw.toLowerCase();
   if (r.includes("skip_appointment_no_calendar_access")) {
-    return "⚠️ Bot kann keinen Termin-Entwurf erstellen — wir haben noch keinen Kalender-Zugriff (Planity). Bitte direkt selbst antworten mit dem Planity-Link.";
+    return "⚠️ Bot kann keinen Termin-Entwurf erstellen — wir haben noch keinen Kalender-Zugriff (Treatwell). Bitte direkt selbst antworten mit dem Treatwell-Link.";
   }
   if (r.includes("session not found")) return "Session nicht gefunden — neu laden.";
   if (r.includes("session not active")) return "Diese Session ist nicht mehr aktiv.";
