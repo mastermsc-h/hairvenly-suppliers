@@ -840,7 +840,8 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 return (
                   <li
                     key={s.id}
-                    className={`group relative ${baseLi} ${effectiveBg}`}
+                    id={`session-${s.id}`}
+                    className={`group relative ${baseLi} ${effectiveBg} scroll-mt-24`}
                   >
                     {/* Hover-Buttons rechts oben — alle drei je nach Status:
                         - Grüner Haken (Erledigt): wenn Session im Unread-Filter

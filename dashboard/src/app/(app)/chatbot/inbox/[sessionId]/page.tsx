@@ -21,9 +21,13 @@ export default async function ChatSessionPage({ params, searchParams }: PageProp
   // exakten Inbox-Zustand wiederherstellt.
   const backRaw = (sp.back || "").trim();
   // Defensive: keine fremden URLs zulassen — nur Query-Param-Form akzeptieren.
-  const backInboxHref = /^[A-Za-z0-9_\-=&%.+]*$/.test(backRaw) && backRaw.length > 0
+  // Plus #session-<id>-Hash, damit die Inbox direkt zur Karte zurückspringt,
+  // die vorher angeklickt wurde (User-Wunsch 2026-05-28: nicht jedes Mal nach
+  // unten scrollen müssen).
+  const backInboxBase = /^[A-Za-z0-9_\-=&%.+]*$/.test(backRaw) && backRaw.length > 0
     ? `/chatbot/inbox?${backRaw}`
     : "/chatbot/inbox";
+  const backInboxHref = `${backInboxBase}#session-${sessionId}`;
 
   const svc = createServiceClient();
   const { data: session } = await svc
