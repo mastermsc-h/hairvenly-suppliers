@@ -65,7 +65,7 @@ export function detectColorCodes(text: string): string[] {
 export type ColorCodeMatch = {
   code: string;
   found: boolean;
-  variants?: Array<{ method: string; line: string; length: string }>;
+  variants?: Array<{ method: string; line: string; length: string; url?: string | null }>;
 };
 
 /**
@@ -104,6 +104,7 @@ export async function lookupColorCodes(codes: string[]): Promise<ColorCodeMatch[
     }
     type Row = {
       name_hairvenly: string;
+      shopify_url?: string | null;
       length?: { value?: number; unit?: string; method?: { name?: string; supplier?: { name?: string } | null } | null } | null;
     };
     const variants = (data as unknown as Row[]).map((r) => {
@@ -118,7 +119,7 @@ export async function lookupColorCodes(codes: string[]): Promise<ColorCodeMatch[
           : "Sonstige";
       const methodName = r.length?.method?.name || "—";
       const lengthVal = r.length?.value ? `${r.length.value}${r.length.unit || "cm"}` : "";
-      return { method: methodName, line, length: lengthVal };
+      return { method: methodName, line, length: lengthVal, url: r.shopify_url ?? null };
     });
     results.push({ code, found: true, variants });
   }
@@ -135,17 +136,41 @@ export function buildColorCodeHint(matches: ColorCodeMatch[]): string | null {
   lines.push("## 🎨 FARBCODE-LOOKUP (deterministisch aus DB — VOLLSTÄNDIG & VERBINDLICH)");
   lines.push("");
   lines.push("Die Kundin hat folgende Farbcode-Tokens erwähnt. Die Listen unten sind VOLLSTÄNDIG aus der DB.");
+  // Sammele ALLE Shopify-URLs aus allen Codes (für die harte URL-Regel)
+  const allUrls = new Set<string>();
+  for (const m of matches) {
+    if (m.found && m.variants) {
+      for (const v of m.variants) {
+        if (v.url) allUrls.add(v.url);
+      }
+    }
+  }
+
   for (const m of matches) {
     if (m.found && m.variants && m.variants.length > 0) {
       lines.push("");
       lines.push(`**${m.code}** existiert in genau diesen Varianten (VOLLSTÄNDIGE LISTE, ${m.variants.length} Stück):`);
-      const byLine = new Map<string, Set<string>>();
+      // Pro Variant eine Zeile mit URL daneben (wenn vorhanden) — der Bot
+      // soll genau diese URL nutzen, nicht selbst basteln.
+      type GroupEntry = { label: string; url: string | null };
+      const byLine = new Map<string, GroupEntry[]>();
       for (const v of m.variants) {
-        if (!byLine.has(v.line)) byLine.set(v.line, new Set());
-        byLine.get(v.line)!.add(`${v.method} ${v.length}`.trim());
+        const label = `${v.method} ${v.length}`.trim();
+        if (!byLine.has(v.line)) byLine.set(v.line, []);
+        const arr = byLine.get(v.line)!;
+        if (!arr.some(e => e.label === label && e.url === (v.url ?? null))) {
+          arr.push({ label, url: v.url ?? null });
+        }
       }
-      for (const [line, vars] of byLine) {
-        lines.push(`  - ${line}: ${Array.from(vars).join(", ")}`);
+      for (const [line, entries] of byLine) {
+        lines.push(`  - ${line}:`);
+        for (const e of entries) {
+          if (e.url) {
+            lines.push(`    • ${e.label} → ${e.url}`);
+          } else {
+            lines.push(`    • ${e.label}`);
+          }
+        }
       }
     } else {
       lines.push("");
@@ -158,6 +183,13 @@ export function buildColorCodeHint(matches: ColorCodeMatch[]): string | null {
   lines.push("2. Du DARFST NICHT behaupten, eine in der Liste oben stehende Variante existiere nicht (z.B. 'Tapes 65cm gibt es nicht', wenn Tapes 65cm oben gelistet ist — das wäre eine LÜGE).");
   lines.push("3. Du DARFST KEINE Variante erfinden, die NICHT in der Liste oben steht.");
   lines.push("4. Wenn die Kundin nach einer SPEZIFISCHEN Variante fragt (z.B. '85cm Tapes'): antworte FOKUSSIERT zu genau dieser Variante. Zähle NICHT alle anderen Varianten unnötig auf.");
+  if (allUrls.size > 0) {
+    lines.push("5. **URL-REGEL (KRITISCH):** Wenn du einen Produkt-Link postest, MUSST du EXAKT eine der oben gelisteten URLs verwenden. Du DARFST KEINE URLs erfinden, NICHT aus Wörtern zusammenbauen, NICHT abkürzen, NICHT modifizieren. Erfundene URLs werden vom System automatisch entfernt — also poste lieber gar keinen Link als einen erfundenen.");
+    lines.push("   ERLAUBTE URLs für diese Anfrage:");
+    for (const u of allUrls) lines.push(`     • ${u}`);
+  } else {
+    lines.push("5. **URL-REGEL:** Für die oben genannten Codes liegt KEINE Shopify-URL in der DB. Poste KEINEN Link. Erfundene Links werden vom System automatisch entfernt.");
+  }
   return lines.join("\n");
 }
 

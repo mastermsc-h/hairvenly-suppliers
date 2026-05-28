@@ -185,6 +185,23 @@ WICHTIG:
 
     newText = applyAllOutputSanitizers(newText, { customerAskedForPhotos, colorUrlMap });
 
+    // 🛡 URL-VALIDATOR — strippt JEDE Produkt-URL, die nicht in product_colors
+    // existiert. Deterministisch, cached. Auch im Refine-Pfad aktiv, damit
+    // MA-Refreshes keine erfundenen URLs durchlassen.
+    try {
+      const { stripNonexistentProductUrls } = await import("./url-validator");
+      const urlChecked = await stripNonexistentProductUrls(newText);
+      if (urlChecked.strippedCount > 0) {
+        console.warn(
+          `[refine] URL-VALIDATOR stripped ${urlChecked.strippedCount} invented URL(s):`,
+          urlChecked.invalidUrls
+        );
+        newText = urlChecked.text;
+      }
+    } catch (e) {
+      console.warn("[refine] url-validator error:", (e as Error).message);
+    }
+
     return { success: true, text: newText };
   } catch (e) {
     return { success: false, error: (e as Error).message };

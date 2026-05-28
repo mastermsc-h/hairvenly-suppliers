@@ -484,6 +484,26 @@ export async function POST(req: NextRequest) {
         }
         finalText = sanitized.text;
 
+        // 🛡 URL-VALIDATOR — strippt erfundene Produkt-URLs (siehe url-validator.ts).
+        // Async, daher hier als separater Step nach applyPostLlmSanitizers.
+        try {
+          const { stripNonexistentProductUrls } = await import("@/lib/chatbot/url-validator");
+          const urlChecked = await stripNonexistentProductUrls(finalText);
+          if (urlChecked.strippedCount > 0) {
+            console.warn(
+              `[chat/route] URL-VALIDATOR stripped ${urlChecked.strippedCount} invented URL(s):`,
+              urlChecked.invalidUrls
+            );
+            finalText = urlChecked.text;
+            controller.enqueue(sse({
+              type: "text_replace",
+              fullText: finalText,
+            }));
+          }
+        } catch (e) {
+          console.warn("[chat/route] url-validator error:", (e as Error).message);
+        }
+
         // Assistant-Antwort speichern (Volltext, sanitized)
         await supabase.from("chat_messages").insert({
           session_id:   session.id,

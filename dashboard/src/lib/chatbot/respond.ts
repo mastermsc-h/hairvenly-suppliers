@@ -385,7 +385,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-05-27.waitlist-promise-validator.v4";
+const RESPOND_CODE_VERSION = "2026-05-28.url-validator.v1";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
@@ -1396,6 +1396,23 @@ KEINE Ausnahmen. Wenn unsicher → Frage stellen, NICHT raten.`;
       console.warn(`[respond] post-llm pipeline modified text (session=${sessionId.slice(0,8)})`);
     }
     finalText = sanitized.text;
+
+    // 🛡 URL-VALIDATOR — strippt JEDE hairvenly.de/products-URL, die nicht
+    // in product_colors.shopify_url existiert. Deterministischer Schutz
+    // gegen LLM-erfundene URLs. Async wegen DB-Lookup (5min gecacht).
+    try {
+      const { stripNonexistentProductUrls } = await import("./url-validator");
+      const urlChecked = await stripNonexistentProductUrls(finalText);
+      if (urlChecked.strippedCount > 0) {
+        console.warn(
+          `[respond] URL-VALIDATOR stripped ${urlChecked.strippedCount} invented URL(s) (session=${sessionId.slice(0,8)}):`,
+          urlChecked.invalidUrls
+        );
+        finalText = urlChecked.text;
+      }
+    } catch (e) {
+      console.warn("[respond] url-validator error:", (e as Error).message);
+    }
   }
 
   // SAFETY-NET 1stock: konkrete Lagerzahlen rausfiltern (respond-spezifisch,
