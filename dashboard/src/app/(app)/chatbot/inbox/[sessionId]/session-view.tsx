@@ -65,9 +65,16 @@ interface Props {
   initialMessages: Message[];
   avatarOptions: string[];
   pendingDraft: { id: string; original_text: string; created_at: string } | null;
+  /**
+   * Ziel für post-Aktion-Redirects (Close / Delete). Enthält den
+   * zurückkonstruierten Inbox-Zustand (View/Filter/Sort/Unread-Toggle), damit
+   * die MA nach „Erledigt" oder „Löschen" wieder im gleichen Tab landet.
+   * Default: /chatbot/inbox.
+   */
+  backInboxHref?: string;
 }
 
-export default function ChatSessionView({ session, initialMessages, avatarOptions, pendingDraft }: Props) {
+export default function ChatSessionView({ session, initialMessages, avatarOptions, pendingDraft, backInboxHref = "/chatbot/inbox" }: Props) {
   const router = useRouter();
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState("");
@@ -221,7 +228,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
   async function handleClose() {
     startTransition(async () => {
       await closeSession(session.id);
-      router.push("/chatbot/inbox");
+      router.push(backInboxHref);
     });
   }
 
@@ -256,7 +263,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
     if (!confirm("Diese Session komplett löschen (mit allen Nachrichten)? Kann nicht rückgängig gemacht werden.")) return;
     startTransition(async () => {
       await deleteSession(session.id);
-      router.push("/chatbot/inbox");
+      router.push(backInboxHref);
     });
   }
 

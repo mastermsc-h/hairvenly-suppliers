@@ -7,13 +7,23 @@ import ChatSessionView from "./session-view";
 
 interface PageProps {
   params: Promise<{ sessionId: string }>;
+  searchParams: Promise<{ back?: string }>;
 }
 
 export const dynamic = "force-dynamic";
 
-export default async function ChatSessionPage({ params }: PageProps) {
+export default async function ChatSessionPage({ params, searchParams }: PageProps) {
   await requireProfile();
   const { sessionId } = await params;
+  const sp = await searchParams;
+  // back-Query (URL-encoded): wird vom Inbox-Listing mitgegeben und enthält
+  // view/mode/filter/sort/unread_only/limit, damit der "Zurück"-Link den
+  // exakten Inbox-Zustand wiederherstellt.
+  const backRaw = (sp.back || "").trim();
+  // Defensive: keine fremden URLs zulassen — nur Query-Param-Form akzeptieren.
+  const backInboxHref = /^[A-Za-z0-9_\-=&%.+]*$/.test(backRaw) && backRaw.length > 0
+    ? `/chatbot/inbox?${backRaw}`
+    : "/chatbot/inbox";
 
   const svc = createServiceClient();
   const { data: session } = await svc
@@ -73,7 +83,7 @@ export default async function ChatSessionPage({ params }: PageProps) {
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-4">
       <Link
-        href="/chatbot/inbox"
+        href={backInboxHref}
         className="inline-flex items-center gap-1 text-sm text-neutral-500 hover:text-neutral-900"
       >
         <ArrowLeft size={14} />
@@ -157,6 +167,7 @@ export default async function ChatSessionPage({ params }: PageProps) {
             };
           });
         })()}
+        backInboxHref={backInboxHref}
       />
     </div>
   );

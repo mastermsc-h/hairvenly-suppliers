@@ -458,6 +458,23 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   const hasMore = totalAfterFilters > limit;
   filteredSessions = filteredSessions.slice(0, limit);
 
+  // BACK-NAVIGATION-STATE: bauen einen Query-String, der den AKTUELLEN
+  // Inbox-Zustand komplett repräsentiert (View/Mode/Filter/Sort/Suche/
+  // Unread-Toggle/Limit). Den hängen wir an jeden Session-Detail-Link als
+  // ?back=…, damit die Detail-Page einen "Zurück"-Link mit denselben Params
+  // bauen kann. Der MA landet exakt da wo er weg ist — kein „verlorener"
+  // Zu-tun + Ungelesen + Sort-Zustand mehr.
+  const backQueryParts = new URLSearchParams();
+  if (view !== "todo")          backQueryParts.set("view", view);
+  if (mode !== "all")           backQueryParts.set("mode", mode);
+  if (channelFilter !== "all")  backQueryParts.set("channel", channelFilter);
+  if (categoryFilter !== "all") backQueryParts.set("category", categoryFilter);
+  if (searchQuery)              backQueryParts.set("q", searchQuery);
+  if (sortMode !== "newest")    backQueryParts.set("sort", sortMode);
+  if (unreadOnly)               backQueryParts.set("unread_only", "1");
+  if (limit !== PAGE_SIZE)      backQueryParts.set("limit", String(limit));
+  const backQuery = backQueryParts.toString();
+
   const pureBotCount   = combinedSessions.filter(s => (stats[s.id]?.humanCount || 0) === 0).length;
   const withHumanCount = combinedSessions.filter(s => (stats[s.id]?.humanCount || 0) > 0).length;
 
@@ -842,7 +859,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         customerName={(s as { customer_full_name?: string | null }).customer_full_name || s.customer_name || null}
                       />
                     </div>
-                    <Link href={`/chatbot/inbox/${s.id}`} className={`block ${onlyUnread ? "p-5" : "p-4"} pr-14`}>
+                    <Link href={`/chatbot/inbox/${s.id}${backQuery ? `?back=${encodeURIComponent(backQuery)}` : ""}`} className={`block ${onlyUnread ? "p-5" : "p-4"} pr-14`}>
                       {/* Customer-Name oben + Status-Badges links / IG-App-Hinweis rechts */}
                       <div className={`flex items-center gap-2 ${onlyUnread ? "mb-2.5" : "mb-1.5"}`}>
                         <User size={14} className="text-neutral-400" />
