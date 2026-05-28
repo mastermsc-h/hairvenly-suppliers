@@ -56,6 +56,52 @@ export function stripProactivePhotoOffer(text: string, customerAskedForPhotos: b
 }
 
 /**
+ * Erkennt + strippt die FALSCHE Behauptung "wir können dir aus technischen
+ * Gründen hier keine Fotos/Videos schicken" (oder Varianten). Diese Aussage
+ * ist eine Lüge — wir KÖNNEN sehr wohl Fotos/Videos via IG/WhatsApp senden,
+ * die MA macht das einfach manuell. Der Bot soll sich nicht selber raus-
+ * reden, wenn die Kundin explizit nach Produktbildern fragt.
+ *
+ * User-Bug 2026-05-28: "wir hatten dieses thema schon! wenn der kunde
+ * explizit nach weiteren fotos oder videos fragt, dann können wir das
+ * natürlich schicken. was für aus technischen gründen nicht schicken
+ * können — was soll dieser schwachsinn?"
+ *
+ * Returns: { text, stripped } — stripped=true wenn etwas entfernt wurde,
+ * damit der Caller `needsManualReview` setzen kann (= Draft statt Auto-Send,
+ * MA korrigiert die Antwort).
+ */
+export function stripFalseMediaLimitation(text: string): { text: string; stripped: boolean } {
+  // Pattern: kombiniert "aus technischen Gründen" / "hier" / "leider"
+  // mit Medien-Versand-Negation. Sehr spezifisch, damit echte Aussagen
+  // (z.B. "wir können hier nicht den Termin bestätigen" → ok) durchgehen.
+  const patterns: RegExp[] = [
+    // "wir können dir aus technischen Gründen hier keine Videos/Fotos schicken"
+    /(^|\n)[^\n]*\b(?:leider\s+)?(?:können\s+wir|kann\s+ich|kann\s+(?:dir|euch))\b[^\n]{0,80}\b(?:aus\s+technischen\s+gründen|technisch|hier)\b[^\n]{0,80}\b(?:keine?|leider\s+keine?)\b\s*(fotos?|videos?|bilder|medien)\b[^\n]*(\n|$)/gi,
+    // "das ist hier nicht möglich" + Medien-Bezug in nahem Kontext
+    /(^|\n)[^\n]*\b(?:das|leider)\b[^\n]{0,30}\b(?:ist\s+(?:hier\s+)?nicht\s+möglich|nicht\s+möglich\s+hier|geht\s+(?:hier\s+)?nicht)\b[^\n]{0,50}\b(fotos?|videos?|bilder)\b[^\n]*(\n|$)/gi,
+    // "wir haben keine Möglichkeit … Fotos/Videos zu schicken"
+    /(^|\n)[^\n]*\b(?:wir|ich)\b[^\n]{0,30}\b(?:haben?|hätten)\s+(?:leider\s+)?keine?\s+(?:möglichkeit|option)\b[^\n]{0,80}\b(fotos?|videos?|bilder)\b[^\n]*(\n|$)/gi,
+    // "leider können wir hier keine Fotos/Videos"
+    /(^|\n)[^\n]*\bleider\b[^\n]{0,40}\b(?:können\s+wir|kann\s+ich)\b[^\n]{0,30}\bhier\b[^\n]{0,30}\b(?:keine?)\b\s*(fotos?|videos?|bilder)\b[^\n]*(\n|$)/gi,
+  ];
+  let out = text;
+  let strippedAny = false;
+  for (const p of patterns) {
+    const before = out;
+    out = out.replace(p, "\n");
+    if (out !== before) strippedAny = true;
+  }
+  if (strippedAny) {
+    console.warn(`[sanitizer] FALSE-MEDIA-LIMITATION stripped — bot behauptete fälschlich "können keine Fotos/Videos schicken"`);
+  }
+  return {
+    text: out.replace(/\n{3,}/g, "\n\n").trim(),
+    stripped: strippedAny,
+  };
+}
+
+/**
  * Lieferanten-Namen (Amanda, Eyfel, Ebru, China) durch Haarqualität ersetzen.
  */
 export function scrubSupplierNames(text: string): string {

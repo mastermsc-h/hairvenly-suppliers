@@ -106,7 +106,7 @@ export function splitLongMessage(text: string, maxLen = 700): string[] {
 // getBusinessHoursContext: extrahiert nach @/lib/chatbot/business-hours
 // damit auch der Webhook (Audio-Bypass) sie nutzen kann.
 import { getBusinessHoursContext } from "./business-hours";
-import { stripColorUrlMismatch, limitUrls } from "./output-sanitizers";
+import { stripColorUrlMismatch, limitUrls, stripFalseMediaLimitation } from "./output-sanitizers";
 
 /**
  * Entfernt / ersetzt interne Lagerzahlen aus dem Bot-Output.
@@ -385,7 +385,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-05-28.color-rec-force-draft.v1";
+const RESPOND_CODE_VERSION = "2026-05-28.media-limitation-strip.v1";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
@@ -557,6 +557,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += "- 🔗 WICHTIG: Wenn du eine konkrete Farbe (COLDNESS, ASH MELT, FROSTY, CAPPUCCINO etc.) empfiehlst oder nennst, packe IMMER die passende Shopify-URL direkt hinter den Farbnamen. Niemals einen Farbnamen 'nackt' lassen. Die Kundin muss DIREKT klicken und das Produkt sehen können — sonst muss sie selbst suchen.\n";
   systemPrompt += "  Wenn dir aus dem Tool-Output keine URL bekannt ist, NICHT die Farbe nennen.\n";
   systemPrompt += "- 🚫 NIEMALS proaktiv 'extra Fotos/Videos' anbieten — auch nicht via Übergabe ('Magst du, dass unsere Farb-Expertin dir extra Fotos schickt?'). Das ist ein heikler Service, den nur die Stylistin selektiv vergibt. Nur reaktiv erlaubt, wenn die Kundin EXPLIZIT um Fotos/Videos fragt.\n";
+  systemPrompt += "- 📷 WENN die Kundin EXPLIZIT um Fotos/Videos einer Farbe bittet (z.B. 'könnt ihr mir die Videos schicken', 'habt ihr Fotos von der Farbe?', 'wie sieht das in real life aus?'): DU DARFST NIEMALS behaupten, das ginge 'aus technischen Gründen' nicht — das wäre eine LÜGE (wir können sehr wohl Fotos/Videos schicken via IG/WhatsApp). Sag stattdessen kurz: 'Klar, meine Kollegin schickt dir die Videos gleich 💕' und nichts weiter — die MA übernimmt von dort. ODER verlinke die Shopify-Produktseite (dort sind oft schon Videos): 'Auf der Produktseite siehst du auch ein Video — schau gerne mal: <URL>'. NIEMALS 'aus technischen Gründen' / 'leider können wir hier keine' / 'das ist hier nicht möglich' erfinden.\n";
   systemPrompt += "- ✂️ KEINE selbstreferenziellen Klammer-Disclaimer am Ende (z.B. '_(Kurz: die exakte Längen-Methoden-Kombi muss ich dir noch sauber benennen — Kollegin durchsprechen.)_'). Das wirkt unsicher und verwirrt die Kundin. Wenn du etwas wirklich abklären musst, sag's klar im Hauptteil, nicht als nachträgliche Klammer.\n";
   systemPrompt += "- 🔁 NIE wiederholen was die Kundin BEREITS WEISS oder gerade SELBST GESAGT hat. Wenn sie schreibt 'hab schon gesehen dass ich über planity buchen kann' → KEIN Planity-Link mehr! Wenn sie sagt 'ich weiß dass es 60cm gibt' → erklär nicht nochmal dass es 60cm gibt. Stattdessen: kurz bestätigen + zum nächsten Schritt (z.B. Farbberatung anbieten, Frage stellen, abschicken). Sonst wirkt der Bot dumm und nicht zuhörend.\n";
   systemPrompt += "- 🔁 Konkrete Beispiele für 'NICHT WIEDERHOLEN':\n";
@@ -2094,6 +2095,23 @@ KEINE Farbnamen nennen — die MA macht das.`;
     console.warn(`[respond] WAITLIST-PROMISE-WITHOUT-TOOL session=${sessionId.slice(0,8)} — Bot verspricht Liste, aber kein create_reservation`);
     needsManualReview = true;
     manualReviewReason = "Bot hat Warteliste versprochen, aber NICHT als Reservierung angelegt. Webhook sollte das zu einem Draft umwandeln statt autobot-zu-senden.";
+  }
+
+  // ── FALSE-MEDIA-LIMITATION-DETECTOR ─────────────────────────────────
+  // User-Anweisung 2026-05-28: wenn die Kundin EXPLIZIT um Fotos/Videos
+  // einer Farbe bittet, DARF der Bot NICHT lügen "können wir aus technischen
+  // Gründen hier nicht schicken". Wir strippen den Satz UND force-Draft —
+  // die MA soll die Videos selbst raussuchen / verlinken.
+  {
+    const mediaCheck = stripFalseMediaLimitation(finalText);
+    if (mediaCheck.stripped) {
+      console.warn(`[respond] FALSE-MEDIA-LIMITATION-STRIPPED session=${sessionId.slice(0,8)} — Bot behauptete fälschlich keine Medien senden zu können`);
+      finalText = mediaCheck.text;
+      if (!needsManualReview) {
+        needsManualReview = true;
+        manualReviewReason = "Bot hat fälschlich 'können aus technischen Gründen keine Fotos/Videos schicken' behauptet. Wir KÖNNEN Medien senden (MA macht das manuell). Antwort wird als Draft gespeichert, damit die MA die Videos / Shopify-Links selbst raussucht.";
+      }
+    }
   }
 
   // ── COLOR-RECOMMENDATION-DETECTOR ───────────────────────────────────
