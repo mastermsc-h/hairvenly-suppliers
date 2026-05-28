@@ -607,18 +607,22 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
         />
       </div>
 
-      {/* WARTELISTE-BANNER: zeigt aktive Reservierungen dieser Session, damit
-          die MA sofort sieht "diese Kundin wartet auf X" — plus Storno-Button
-          direkt im Chat (kein Umweg über /chatbot/reservations).
-          User-Wunsch 2026-05-28. */}
+      {/* WARTELISTE-BANNER: kompakter Einzeiler, aufklappbar.
+          Zeigt schnell "diese Kundin wartet auf X" — Details + Storno-Button
+          erscheinen erst nach Klick (kein Platz-Klau, wenn man sie nicht
+          braucht). User-Wunsch 2026-05-28: "ruhig ein einzeiler, aufklappbar". */}
       {activeReservations.length > 0 && (
-        <div className="px-5 py-2.5 border-b border-amber-200 bg-amber-50">
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-xs font-semibold text-amber-900 uppercase tracking-wide">
-              🔔 Auf Warteliste ({activeReservations.length})
+        <details className="group border-b border-amber-200 bg-amber-50 [&[open]]:bg-amber-50">
+          <summary className="list-none cursor-pointer select-none px-5 py-1.5 flex items-center gap-2 text-xs hover:bg-amber-100/60 transition">
+            <span className="font-semibold text-amber-900">🔔 Auf Warteliste · {activeReservations.length}</span>
+            <span className="text-amber-800/80 truncate flex-1 min-w-0">
+              {activeReservations
+                .map(r => r.product_name)
+                .join(" · ")}
             </span>
-          </div>
-          <div className="space-y-1.5">
+            <span className="text-amber-700 group-open:rotate-90 transition-transform">›</span>
+          </summary>
+          <div className="px-5 pb-2.5 pt-1 space-y-1.5">
             {activeReservations.map(r => {
               const requestedAtStr = r.requested_at
                 ? new Date(r.requested_at).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" })
@@ -678,7 +682,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
               );
             })}
           </div>
-        </div>
+        </details>
       )}
 
       {/* Messages */}
