@@ -166,6 +166,23 @@ async function handleInstagramOrMessenger(m: MessagingItem, source: "instagram" 
   const attachments = (m.message?.attachments || []).map(a => ({
     type: a.type, url: a.payload?.url || "",
   }));
+
+  // STORY-REPLY: Instagram füllt message.reply_to.story.{id,url} wenn die
+  // Kundin auf eine Story antwortet (Text-Reply auf Story-Sticker). Das ist
+  // NICHT in attachments[], sondern in reply_to. Ohne den Kontext sieht der
+  // MA nur "Heii ich hätte interesse" und versteht nicht worauf sie sich
+  // bezieht. Wir hängen die Story als synthetische "story_reply"-Attachment an,
+  // damit die UI eine Vorschau zeigen kann (User-Wunsch 2026-05-28).
+  //
+  // Hinweis: Meta-CDN-URLs sind signed + zeitlich begrenzt (~24-48h). Für
+  // dauerhafte Persistenz müsste man die URL beim Empfang in Supabase
+  // Storage spiegeln (separater Task).
+  const replyToStory = (m.message as { reply_to?: { story?: { id?: string; url?: string } } } | undefined)?.reply_to?.story;
+  if (replyToStory?.url) {
+    attachments.push({ type: "story_reply", url: replyToStory.url });
+    console.log(`[meta-webhook] story-reply detected (story_id=${replyToStory.id || "?"}) — attached for UI preview`);
+  }
+
   const hasText = !!m.message?.text;
   const hasAttachments = attachments.length > 0;
   // FIX: vorher droppten wir Foto-only-DMs. Jetzt: durchlassen wenn Text ODER Anhang da

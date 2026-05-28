@@ -28,6 +28,10 @@ interface GraphMessage {
   from?: { id: string; username?: string; name?: string };
   message?: string;
   attachments?: { data?: { image_data?: { url?: string }; file_url?: string; type?: string }[] };
+  // Story-Reply (Kundin antwortet auf unsere Story per Sticker-Reply).
+  // Graph API liefert das auf Request hin als `story` Object.
+  story?: { id?: string; url?: string };
+  shares?: { data?: { id?: string }[] };
 }
 interface GraphPaging { next?: string; cursors?: { before?: string; after?: string } }
 interface GraphMessagesEdge { data?: GraphMessage[]; paging?: GraphPaging }
@@ -99,8 +103,10 @@ export async function POST(req: NextRequest) {
       });
     } else {
       // Erster Backfill — nutze die conversation-node mit messages-edge
+      // Wir holen story{id,url} mit dazu, damit Story-Reply-Vorschauen auch in
+      // backgefillten Sessions erscheinen (User-Wunsch 2026-05-28).
       messagesUrl = `${host}/${GRAPH_VERSION}/${convoId}` +
-        `?fields=messages.limit(${BACKFILL_LIMIT}){id,created_time,from,message,attachments}` +
+        `?fields=messages.limit(${BACKFILL_LIMIT}){id,created_time,from,message,attachments,story}` +
         `&access_token=${encodeURIComponent(token)}`;
     }
 
@@ -146,6 +152,12 @@ export async function POST(req: NextRequest) {
         type: a.type || (a.image_data ? "image" : "file"),
         url: a.image_data?.url || a.file_url || "",
       })).filter(a => a.url);
+      // Story-Reply: Graph API liefert `story` Object wenn die Kundin auf
+      // unsere Story geantwortet hat. Als synthetische Attachment hängen
+      // damit UI-Vorschau greift (gleicher Mechanismus wie im Live-Webhook).
+      if (m.story?.url) {
+        attachments.push({ type: "story_reply", url: m.story.url });
+      }
       const content = m.message || (attachments.length > 0 ? "[Foto]" : "");
       if (!content && attachments.length === 0) continue;
       await svc.from("chat_messages").insert({

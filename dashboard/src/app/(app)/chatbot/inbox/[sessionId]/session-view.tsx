@@ -865,8 +865,43 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
           })()}
           {msg.attachments?.length > 0 && (
             <div className="flex gap-1.5 mt-1 flex-wrap">
-              {msg.attachments.map((a, i) =>
-                a.type === "image" && a.url ? (
+              {msg.attachments.map((a, i) => {
+                // Story-Mention oder Story-Reply → kleine Vorschau MIT Label,
+                // damit der MA sofort sieht: "ah, sie antwortet auf unsere
+                // Story." (User-Wunsch 2026-05-28: aus dem Nichts schwer zu
+                // deuten).
+                const isStory = a.type === "story_mention" || a.type === "story_reply";
+                if (isStory && a.url) {
+                  const label = a.type === "story_reply" ? "Antwort auf Story" : "Story-Mention";
+                  return (
+                    <div key={i} className="flex flex-col gap-1 max-w-[200px]">
+                      <span className="text-[10px] text-purple-700 bg-purple-50 border border-purple-200 rounded-full px-2 py-0.5 self-start inline-flex items-center gap-1">
+                        <span>📸</span>{label}
+                      </span>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={a.url}
+                        alt={label}
+                        onClick={() => onImageClick?.(a.url)}
+                        onError={(e) => {
+                          // Meta-Story-URLs laufen nach 24-48h ab — Fallback-Text
+                          const t = e.currentTarget as HTMLImageElement;
+                          t.style.display = "none";
+                          const next = t.nextElementSibling as HTMLElement | null;
+                          if (next) next.style.display = "flex";
+                        }}
+                        className="max-h-48 max-w-[200px] rounded-xl border border-purple-200 shadow-sm cursor-zoom-in hover:shadow-md transition object-cover"
+                      />
+                      <div
+                        style={{ display: "none" }}
+                        className="items-center gap-1 text-[11px] text-neutral-500 italic px-2 py-2 border border-dashed border-neutral-200 rounded-lg max-w-[200px]"
+                      >
+                        Story-Vorschau abgelaufen (IG-Link nur ~24-48h gültig)
+                      </div>
+                    </div>
+                  );
+                }
+                return a.type === "image" && a.url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     key={i}
@@ -879,8 +914,8 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
                   <a key={i} href={a.url} target="_blank" rel="noopener" className="text-xs text-blue-600 underline">
                     📎 {a.type}
                   </a>
-                )
-              )}
+                );
+              })}
             </div>
           )}
           <div className="text-[10px] text-neutral-400 mt-0.5">Kunde · {time}</div>
