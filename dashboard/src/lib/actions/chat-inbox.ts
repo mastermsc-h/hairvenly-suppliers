@@ -827,12 +827,42 @@ export async function markSessionUnread(sessionId: string) {
  */
 export async function markSessionAsSeen(sessionId: string) {
   const svc = createServiceClient();
+
+  // 🛡 ROBUST-DONE: explizites "Erledigt" muss IMMER aus "Zu tun" rausfallen,
+  // auch wenn die MA innerhalb von Sekunden nach einer neuen Customer-Message
+  // klickt. Die isInTodo-Logik prüft: seenAt > lastMsg + 5s. Damit das auch
+  // bei super-schnellem Klick zuverlässig greift, setzen wir seenAt auf
+  // max(now, last_message_at + 10s). Bei normaler Verzögerung (Sekunden nach
+  // Customer-Msg) ist das nur ~6 Sek "in der Zukunft" — egal für die UI.
+  // Plus: bei manueller "Erledigt"-Aktion verwerfen wir auch jeden pending
+  // Draft, sonst zeigt die Inbox-Karte weiter "📝 Entwurf wartet" obwohl die
+  // MA das Thema abgehakt hat.
+  // User-Wunsch 2026-05-28: "wenn ich einen chat manuell auf erledigt setze,
+  // soll er von 'Zu tun' verschwinden".
+  const { data: cur } = await svc
+    .from("chat_sessions")
+    .select("last_message_at")
+    .eq("id", sessionId)
+    .maybeSingle();
+  const nowMs = Date.now();
+  const lastMsgMs = cur?.last_message_at ? new Date(cur.last_message_at).getTime() : 0;
+  const seenMs = Math.max(nowMs, lastMsgMs + 10_000); // mind. 10s nach last_message_at
+  const seenIso = new Date(seenMs).toISOString();
+
   await svc.from("chat_sessions")
     .update({
-      last_seen_by_agent_at: new Date().toISOString(),
+      last_seen_by_agent_at: seenIso,
       ig_unread_count: 0, // optimistisches Lokales Update — Banner verschwindet sofort
     })
     .eq("id", sessionId);
+
+  // Pending Drafts dieser Session verwerfen — sonst bleibt der Chat als
+  // "Entwurf wartet" im todo-Filter (defensiver Sekundär-Effekt).
+  await svc
+    .from("chat_drafts")
+    .update({ status: "discarded" })
+    .eq("session_id", sessionId)
+    .eq("status", "pending");
 
   // 📲 IG-SYNC: sender_action=mark_seen zu Meta API, damit der IG-Counter
   // auch in der Instagram-App runtergeht. Fire-and-forget, blockt nicht.
