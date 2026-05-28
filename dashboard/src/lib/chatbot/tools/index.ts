@@ -491,36 +491,70 @@ const getStockEta: ToolDef = {
         // (oder selber aus Foto/Caption ableiten — falls Foto-Caption Länge
         // hatte aber Bot sie nicht im search übergeben hat)
         if (lengths.size > 1) {
-          // Per-Länge-Aufschlüsselung mit Stock-Status
-          const perLength: Record<string, { in_stock: string[]; unterwegs: { product: string; eta: string }[]; oos: string[] }> = {};
+          // Per-Länge-Aufschlüsselung mit Stock-Status, ETA und shopify_url.
+          // Frühestes ETA-Datum statt erstes perOrder-Item (User-Bug
+          // 2026-05-28: vorher kam "Anfang Juni" statt "25.06.2026" weil
+          // die perOrder-Reihenfolge zufällig war).
+          const earliestDe = (m: { perOrder?: { ankunft?: string }[] }): string => {
+            if (!m.perOrder || m.perOrder.length === 0) return "bald";
+            const dated = m.perOrder.map(o => {
+              const dm = (o.ankunft || "").match(/(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/);
+              if (!dm) return { iso: null as string | null, text: o.ankunft || "" };
+              const [, d, mo, y] = dm;
+              const yy = y.length === 2 ? `20${y}` : y;
+              return {
+                iso: `${yy}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`,
+                text: `${d.padStart(2, "0")}.${mo.padStart(2, "0")}.${yy}`,
+              };
+            });
+            dated.sort((a, b) => (a.iso || "9999").localeCompare(b.iso || "9999"));
+            return dated[0]?.text || dated[0]?.iso || "bald";
+          };
+          type PerLengthBucket = {
+            in_stock: { product: string; shopify_url: string | null }[];
+            unterwegs: { product: string; eta: string; shopify_url: string | null }[];
+            oos: { product: string; shopify_url: string | null }[];
+          };
+          const perLength: Record<string, PerLengthBucket> = {};
+          const ensure = (len: string): PerLengthBucket => {
+            if (!perLength[len]) perLength[len] = { in_stock: [], unterwegs: [], oos: [] };
+            return perLength[len];
+          };
           for (const r of inventoryMatches) {
             const len = extractLength(`${r.collection} ${r.product}`) || "unknown";
-            if (!perLength[len]) perLength[len] = { in_stock: [], unterwegs: [], oos: [] };
-            (r.quantity > 0 ? perLength[len].in_stock : perLength[len].oos).push(r.product);
+            const bucket = ensure(len);
+            const entry = { product: r.product, shopify_url: urlFor(r.product) };
+            (r.quantity > 0 ? bucket.in_stock : bucket.oos).push(entry);
           }
           for (const m of inUnterwegs) {
             const len = extractLength(`${m.collection} ${m.product}`) || "unknown";
-            if (!perLength[len]) perLength[len] = { in_stock: [], unterwegs: [], oos: [] };
-            const eta = m.perOrder?.[0]?.ankunft || "bald";
-            perLength[len].unterwegs.push({ product: m.product, eta });
+            ensure(len).unterwegs.push({
+              product: m.product,
+              eta: earliestDe(m),
+              shopify_url: urlFor(m.product),
+            });
           }
           for (const p of inNullbestand) {
             const len = extractLength(`${p.collection} ${p.product}`) || "unknown";
-            if (!perLength[len]) perLength[len] = { in_stock: [], unterwegs: [], oos: [] };
-            perLength[len].oos.push(p.product);
+            ensure(len).oos.push({ product: p.product, shopify_url: urlFor(p.product) });
           }
           console.warn(`[get_stock_eta] MULTI_LENGTH_RESULTS — search="${search}" lengths=${[...lengths].join(",")}`);
           return {
             output: JSON.stringify({
               status: "multi_length_results",
               message:
-                "WICHTIG: Diese Farbe gibt es in mehreren Längen mit UNTERSCHIEDLICHEM Stock-Status. " +
+                "Diese Farbe existiert in mehreren Längen mit UNTERSCHIEDLICHEM Stock-Status. " +
                 "Du DARFST NICHT pauschal 'auf Lager' oder 'ausverkauft' sagen — der Stock unterscheidet sich pro Länge. " +
-                "Wenn die Kundin eine konkrete Länge erwähnt hat (z.B. im Foto-Caption '65CM', im Text 'für 65cm', " +
-                "oder Produkt-URL '.../tape-extensions-65cm'), rufe get_stock_eta ERNEUT auf mit Länge im search " +
-                "(z.B. '4/27t24 65cm tape'). " +
-                "Wenn keine Länge bekannt: frag die Kundin: 'In welcher Länge brauchst du das?'. " +
-                "Du kannst per-Länge die Aufschlüsselung unten sehen, aber GIB sie NICHT direkt an die Kundin durch.",
+                "\n\n**SO ANTWORTEST DU JETZT:**\n" +
+                "1. Wenn die Kundin eine konkrete Länge erwähnt hat (Text/Foto-Caption/URL): " +
+                "   nutze per_length[<länge>] für deine Antwort — DU HAST DIE DATEN UNTEN. " +
+                "   Beispiel: per_length['55cm'] hat .in_stock / .unterwegs[].eta / .oos. " +
+                "   Wenn .unterwegs nicht leer ist, nenne das konkrete ETA-Datum (z.B. 'kommt ca. 25.06.2026 wieder'). " +
+                "   NIEMALS schwammig '2-8 Wochen' sagen wenn ein konkretes ETA in den Daten steht.\n" +
+                "2. Wenn KEINE Länge erkennbar ist: frag die Kundin kurz 'in welcher Länge?'. " +
+                "   Zähle die anderen Längen NICHT proaktiv auf — die Kundin sucht eine bestimmte.\n" +
+                "3. URL: nimm AUSSCHLIESSLICH die shopify_url aus diesem Output für die konkrete Länge. " +
+                "   NIEMALS URLs selbst zusammenbauen oder raten.",
               per_length: perLength,
               available_lengths: [...lengths].sort(),
               searched_for: search,

@@ -385,7 +385,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-05-28.url-validator.v1";
+const RESPOND_CODE_VERSION = "2026-05-28.stock-eta-inject.v1";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();

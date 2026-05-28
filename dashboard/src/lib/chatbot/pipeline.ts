@@ -24,6 +24,7 @@
  */
 
 import { buildColorCodeContext, validateNegativeClaims, type ColorCodeMatch } from "./intent-color-codes";
+import { buildStockEtaContext } from "./intent-stock-eta";
 import { enforceBusinessFacts } from "./intent-contact";
 import { applyAllOutputSanitizers } from "./output-sanitizers";
 
@@ -172,6 +173,22 @@ export async function applyPreLlmContext(
     }
   } catch (e) {
     console.warn("[pipeline] color-code-injector error:", e);
+  }
+
+  // ── 📦 STOCK+ETA-INJECTOR ──────────────────────────────────────
+  // Für jeden detected Color-Code: aktuellen Lager-/ETA-Status aus dem
+  // Dashboard-Sheet mit-injecten. Damit kennt der Bot konkrete ETAs
+  // (z.B. "25.06.2026") und muss nicht selber 2-8-Wochen-Antworten
+  // erfinden oder das get_stock_eta-Tool nachträglich aufrufen.
+  if (ctx.colorCodeMatches.length > 0) {
+    try {
+      const stockHint = await buildStockEtaContext(ctx.colorCodeMatches, detectionBuffer);
+      if (stockHint) {
+        dynamicHint += "\n\n" + stockHint + "\n";
+      }
+    } catch (e) {
+      console.warn("[pipeline] stock-eta-injector error:", e);
+    }
   }
 
   // ── 📋 WAITLIST-CONFIRMATION-INJECTOR ───────────────────────────
