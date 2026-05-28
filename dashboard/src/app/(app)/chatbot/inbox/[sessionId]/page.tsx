@@ -70,6 +70,16 @@ export default async function ChatSessionPage({ params, searchParams }: PageProp
     .limit(1)
     .maybeSingle();
 
+  // Aktive Wartelisten-Reservierungen für diese Session — als Banner in der
+  // Session-View anzeigen, damit die MA sieht "die Kundin ist auf der Liste
+  // für X" und ggf. direkt stornieren kann (User-Wunsch 2026-05-28).
+  const { data: activeReservations } = await svc
+    .from("chat_reservations")
+    .select("id, product_name, product_url, color, method, eta_hint, notes, requested_at, status")
+    .eq("session_id", sessionId)
+    .eq("status", "waiting")
+    .order("requested_at", { ascending: false });
+
   const { data: messages } = await svc
     .from("chat_messages")
     .select(`
@@ -122,6 +132,16 @@ export default async function ChatSessionPage({ params, searchParams }: PageProp
           original_text: pendingDraft.original_text,
           created_at: pendingDraft.created_at,
         } : null}
+        activeReservations={(activeReservations || []).map(r => ({
+          id: r.id,
+          product_name: r.product_name,
+          product_url: r.product_url ?? null,
+          color: r.color ?? null,
+          method: r.method ?? null,
+          eta_hint: r.eta_hint ?? null,
+          notes: r.notes ?? null,
+          requested_at: r.requested_at ?? null,
+        }))}
         initialMessages={(() => {
           const msgs = messages ?? [];
           // Lookup-Map external_id → { id, role, content } für Reply-Threading.

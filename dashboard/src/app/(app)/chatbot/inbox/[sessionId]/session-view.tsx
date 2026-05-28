@@ -27,6 +27,7 @@ import {
   toggleHumanOnly,
   deleteMessage,
 } from "@/lib/actions/chat-inbox";
+import { cancelReservation } from "@/lib/actions/chat-reservations";
 
 interface Message {
   id: string;
@@ -72,9 +73,23 @@ interface Props {
    * Default: /chatbot/inbox.
    */
   backInboxHref?: string;
+  /**
+   * Aktive Wartelisten-Reservierungen dieser Session (status = waiting).
+   * Werden als Info-Banner unter dem Header gezeigt mit Storno-Button.
+   */
+  activeReservations?: Array<{
+    id: string;
+    product_name: string;
+    product_url: string | null;
+    color: string | null;
+    method: string | null;
+    eta_hint: string | null;
+    notes: string | null;
+    requested_at: string | null;
+  }>;
 }
 
-export default function ChatSessionView({ session, initialMessages, avatarOptions, pendingDraft, backInboxHref = "/chatbot/inbox" }: Props) {
+export default function ChatSessionView({ session, initialMessages, avatarOptions, pendingDraft, backInboxHref = "/chatbot/inbox", activeReservations = [] }: Props) {
   const router = useRouter();
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState("");
@@ -264,6 +279,19 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
     startTransition(async () => {
       await deleteSession(session.id);
       router.push(backInboxHref);
+    });
+  }
+
+  async function handleCancelReservation(reservationId: string, productName: string) {
+    const reason = prompt(`Warteliste-Reservierung für "${productName}" wirklich löschen?\n\nOptional: Grund eingeben (z.B. "Kundin hat anderweitig bestellt").`, "");
+    if (reason === null) return; // Abbrechen
+    startTransition(async () => {
+      try {
+        await cancelReservation(reservationId, reason || undefined);
+        router.refresh();
+      } catch (e) {
+        alert(`Fehler beim Stornieren: ${(e as Error).message}`);
+      }
     });
   }
 
@@ -578,6 +606,80 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
           author={session.team_notes_author ?? null}
         />
       </div>
+
+      {/* WARTELISTE-BANNER: zeigt aktive Reservierungen dieser Session, damit
+          die MA sofort sieht "diese Kundin wartet auf X" — plus Storno-Button
+          direkt im Chat (kein Umweg über /chatbot/reservations).
+          User-Wunsch 2026-05-28. */}
+      {activeReservations.length > 0 && (
+        <div className="px-5 py-2.5 border-b border-amber-200 bg-amber-50">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-xs font-semibold text-amber-900 uppercase tracking-wide">
+              🔔 Auf Warteliste ({activeReservations.length})
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            {activeReservations.map(r => {
+              const requestedAtStr = r.requested_at
+                ? new Date(r.requested_at).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" })
+                : null;
+              return (
+                <div
+                  key={r.id}
+                  className="flex items-start justify-between gap-3 bg-white/70 rounded-lg px-3 py-2 border border-amber-200/60"
+                >
+                  <div className="flex-1 min-w-0 text-sm">
+                    <div className="font-medium text-neutral-900 flex flex-wrap items-baseline gap-x-2">
+                      {r.product_url ? (
+                        <a
+                          href={r.product_url}
+                          target="_blank"
+                          rel="noopener"
+                          className="text-amber-900 hover:underline"
+                          title="Produkt im Shop ansehen"
+                        >
+                          {r.product_name}
+                        </a>
+                      ) : (
+                        <span>{r.product_name}</span>
+                      )}
+                      {requestedAtStr && (
+                        <span className="text-[11px] font-normal text-neutral-500">
+                          seit {requestedAtStr}
+                        </span>
+                      )}
+                    </div>
+                    {(r.color || r.method) && (
+                      <div className="text-xs text-neutral-600 mt-0.5">
+                        {[r.color, r.method].filter(Boolean).join(" · ")}
+                      </div>
+                    )}
+                    {r.eta_hint && (
+                      <div className="text-xs text-neutral-600 mt-0.5">
+                        ETA: {r.eta_hint}
+                      </div>
+                    )}
+                    {r.notes && (
+                      <div className="text-xs text-neutral-500 italic mt-0.5 truncate" title={r.notes}>
+                        „{r.notes}"
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCancelReservation(r.id, r.product_name)}
+                    disabled={isPending}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-rose-700 hover:bg-rose-100 border border-rose-200 transition shrink-0"
+                    title="Reservierung löschen / stornieren"
+                  >
+                    <Trash2 size={11} /> Stornieren
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-neutral-50">

@@ -307,6 +307,13 @@ export async function cancelReservation(reservationId: string, reason?: string) 
   if (!user) throw new Error("Not authenticated");
 
   const svc = createServiceClient();
+  // Session-Id vorab holen, damit wir die Session-Page mit-revalidieren
+  // können (Banner im Chat soll sofort verschwinden).
+  const { data: existing } = await svc
+    .from("chat_reservations")
+    .select("session_id")
+    .eq("id", reservationId)
+    .maybeSingle();
   await svc.from("chat_reservations").update({
     status:        "cancelled",
     cancelled_at:  new Date().toISOString(),
@@ -314,6 +321,10 @@ export async function cancelReservation(reservationId: string, reason?: string) 
     cancel_reason: reason || null,
   }).eq("id", reservationId);
   revalidatePath("/chatbot/reservations");
+  if (existing?.session_id) {
+    revalidatePath(`/chatbot/inbox/${existing.session_id}`);
+    revalidatePath("/chatbot/inbox");
+  }
 }
 
 /** Notizen aktualisieren */
