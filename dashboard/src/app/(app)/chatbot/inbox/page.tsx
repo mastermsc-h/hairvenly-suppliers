@@ -13,7 +13,7 @@ import DefaultBotModeToggle from "./default-bot-mode-toggle";
 import ClassifyBackfillButton from "./classify-backfill-button";
 
 interface PageProps {
-  searchParams: Promise<{ status?: string; mode?: string; channel?: string; category?: string; q?: string; unread?: string; limit?: string; sort?: string; show?: string; view?: string }>;
+  searchParams: Promise<{ status?: string; mode?: string; channel?: string; category?: string; q?: string; unread?: string; unread_only?: string; limit?: string; sort?: string; show?: string; view?: string }>;
 }
 
 const SORT_OPTIONS: Record<string, { label: string; emoji: string }> = {
@@ -97,6 +97,11 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   // Legacy-Mappings für alte URLs (?unread=1, ?show=closed) — alles auf view normalisieren
   const onlyUnread     = view === "todo" || params.unread === "1";
   const showClosed     = view === "done" || params.show === "closed" || filter === "closed";
+  // Optionaler "nur ungelesen"-Toggle, der INNERHALB des aktuellen Tabs nochmal
+  // auf unread-Sessions verengt. Anders als view=todo (das auch Drafts, kürzlich-
+  // beantwortete und Handoff-Promises drinhat) zeigt das hier ausschließlich
+  // unbeantwortete Customer-Messages.
+  const unreadOnly     = params.unread_only === "1";
   const sortMode       = params.sort && SORT_OPTIONS[params.sort] ? params.sort : "newest";
   // Pagination: max 50 pro "Klick", über "Weitere laden" wird der Limit erhöht
   const limit = Math.min(Math.max(Number(params.limit) || PAGE_SIZE, PAGE_SIZE), 1000);
@@ -413,6 +418,14 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     // view === "all" → keine zusätzliche Filterung (showClosed steuert closed-Anzeige)
   }
 
+  // Optionaler Sekundär-Filter: "nur ungelesen" verengt innerhalb des aktuellen
+  // Tabs auf Sessions, in denen die Kundin geschrieben hat und niemand
+  // geantwortet hat. Greift in jedem View (todo / autobot / all / done) — auch
+  // wenn die Suche aktiv ist (sonst hätte die Suche keinen Sinn mehr).
+  if (unreadOnly) {
+    filteredSessions = filteredSessions.filter(s => unreadMap[s.id]);
+  }
+
   // Sortierung — explizit per ?sort= überschreibbar.
   // "longest_waiting" / "oldest" → ASC (älteste zuerst).
   // "newest" → DESC nach last_customer_msg_at (im Unread-Modus) bzw.
@@ -511,6 +524,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
           if (channelFilter !== "all") next.set("channel",  channelFilter);
           if (categoryFilter !== "all") next.set("category", categoryFilter);
           if (searchQuery)             next.set("q",        searchQuery);
+          if (unreadOnly)              next.set("unread_only", "1");
           return `/chatbot/inbox?${next.toString()}`;
         };
         const TAB = (key: string, label: string, count: number, color: string) => (
@@ -526,12 +540,49 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
             </span>
           </Link>
         );
+        // Toggle "nur ungelesen" — verengt INNERHALB des aktuellen Tabs auf
+        // unread-Sessions. Greift in JEDEM Tab; in den Tabs wo ohnehin alles
+        // ungelesen ist (z.B. Zu tun verengt sich nur leicht) ist die Wirkung
+        // klein. Counter zeigt wie viele ungelesene im aktuellen Tab existieren.
+        const unreadInView = combinedSessions.filter(s => {
+          if (!unreadMap[s.id]) return false;
+          if (view === "todo")    return isInTodo(s);
+          if (view === "autobot") return s.status !== "closed" && (stats[s.id]?.autobotCount || 0) > 0;
+          if (view === "done")    return s.status === "closed";
+          return s.status !== "closed";
+        }).length;
+        const unreadHref = (() => {
+          const next = new URLSearchParams();
+          if (view !== "todo")          next.set("view", view);
+          if (mode !== "all")           next.set("mode", mode);
+          if (channelFilter !== "all")  next.set("channel", channelFilter);
+          if (categoryFilter !== "all") next.set("category", categoryFilter);
+          if (searchQuery)              next.set("q", searchQuery);
+          if (!unreadOnly)              next.set("unread_only", "1");
+          // Wenn unreadOnly bereits aktiv → Param weglassen = toggle off
+          return `/chatbot/inbox?${next.toString()}`;
+        })();
         return (
           <div className="flex items-center gap-1.5 flex-wrap">
             {TAB("todo",    "🟡 Zu tun",          todoCount,    "bg-pink-600 text-white border-pink-600")}
             {TAB("autobot", "🤖 Autobot-Check",   autobotCount, "bg-green-600 text-white border-green-600")}
             {TAB("all",     "📂 Alle aktiven",    allCount,     "bg-neutral-900 text-white border-neutral-900")}
             {TAB("done",    "✓ Erledigt",         doneCount,    "bg-neutral-600 text-white border-neutral-600")}
+            {/* Sekundär-Toggle: zeige nur ungelesene innerhalb des aktuellen Tabs */}
+            <Link
+              href={unreadHref}
+              title={unreadOnly ? "Filter \"nur ungelesen\" aktiv — klicken zum Ausschalten" : "Nur ungelesene Sessions im aktuellen Tab anzeigen"}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium transition border ${
+                unreadOnly
+                  ? "bg-amber-500 text-white border-amber-500 shadow-sm"
+                  : "bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-50"
+              }`}
+            >
+              {unreadOnly ? "● Nur ungelesen" : "○ Nur ungelesen"}
+              <span className={`text-xs px-1.5 py-0.5 rounded-full ${unreadOnly ? "bg-white/30 text-white" : "bg-neutral-100 text-neutral-600"}`}>
+                {unreadInView}
+              </span>
+            </Link>
           </div>
         );
       })()}
@@ -559,6 +610,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
           if (categoryFilter !== "all" && paramToRemove !== "category") next.set("category", categoryFilter);
           if (searchQuery) next.set("q", searchQuery);
           if (sortMode !== "newest" && paramToRemove !== "sort") next.set("sort", sortMode);
+          if (unreadOnly && paramToRemove !== "unread_only") next.set("unread_only", "1");
           return `/chatbot/inbox?${next.toString()}`;
         };
         if (channelFilter !== "all") activeChips.push({ label: CHANNEL_LABELS[channelFilter] || channelFilter, clearHref: buildClear("channel") });
@@ -607,6 +659,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         ...(c !== "all" ? { channel: c } : {}),
                         ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
                         ...(searchQuery ? { q: searchQuery } : {}),
+                        ...(unreadOnly ? { unread_only: "1" } : {}),
                       }).toString()}`}
                       className={`px-2.5 py-1 rounded-full transition ${
                         channelFilter === c ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
@@ -627,6 +680,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                       ...(mode !== "all" ? { mode } : {}),
                       ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
                       ...(searchQuery ? { q: searchQuery } : {}),
+                      ...(unreadOnly ? { unread_only: "1" } : {}),
                     }).toString()}`}
                     className={`px-2.5 py-1 rounded-full transition ${
                       categoryFilter === "all" ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
@@ -642,6 +696,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                           ...(mode !== "all" ? { mode } : {}),
                           ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
                           ...(searchQuery ? { q: searchQuery } : {}),
+                          ...(unreadOnly ? { unread_only: "1" } : {}),
                           category: key,
                         }).toString()}`}
                         className={`px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition ${
@@ -666,6 +721,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         ...(channelFilter !== "all" ? { channel: channelFilter } : {}),
                         ...(categoryFilter !== "all" ? { category: categoryFilter } : {}),
                         ...(searchQuery ? { q: searchQuery } : {}),
+                        ...(unreadOnly ? { unread_only: "1" } : {}),
                         ...(key !== "newest" ? { sort: key } : {}),
                       }).toString()}`}
                       className={`px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition ${
@@ -1140,6 +1196,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 if (categoryFilter !== "all") next.set("category", categoryFilter);
                 if (searchQuery)              next.set("q",        searchQuery);
                 if (!onlyUnread)              next.set("unread",   "0");
+                if (unreadOnly)               next.set("unread_only", "1");
                 next.set("limit", String(limit + PAGE_SIZE));
                 return `/chatbot/inbox?${next.toString()}`;
               })()}
