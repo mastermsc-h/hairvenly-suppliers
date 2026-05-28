@@ -33,6 +33,7 @@ const CATEGORY_LABELS: Record<string, { label: string; emoji: string }> = {
   order_status: { label: "Bestellstatus", emoji: "🚚" },
   gewerbe:      { label: "Gewerbe",       emoji: "💼" },
   partnership:  { label: "Partnership",   emoji: "🤝" },
+  models:       { label: "Modelle",       emoji: "📸" },
   general:      { label: "Sonstiges",     emoji: "💬" },
 };
 
@@ -812,9 +813,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 // wird. Badge-Border greift dieselbe Farbfamilie auf (visuelle Klammer).
                 interface CatVis { box: string; tint: string; badge: string; }
                 const CATEGORY_VISUAL: Record<string, CatVis> = {
-                  gewerbe:       { box: "border-l-amber-200", tint: "bg-amber-50/30", badge: "bg-amber-50 text-amber-700 border-amber-200" },
-                  availability:  { box: "border-l-sky-200",   tint: "bg-sky-50/30",   badge: "bg-sky-50 text-sky-700 border-sky-200" },
-                  color_advice:  { box: "border-l-pink-200",  tint: "bg-pink-50/30",  badge: "bg-pink-50 text-pink-700 border-pink-200" },
+                  gewerbe:       { box: "border-l-amber-200",  tint: "bg-amber-50/30",  badge: "bg-amber-50 text-amber-700 border-amber-200" },
+                  availability:  { box: "border-l-sky-200",    tint: "bg-sky-50/30",    badge: "bg-sky-50 text-sky-700 border-sky-200" },
+                  color_advice:  { box: "border-l-pink-200",   tint: "bg-pink-50/30",   badge: "bg-pink-50 text-pink-700 border-pink-200" },
+                  models:        { box: "border-l-purple-200", tint: "bg-purple-50/30", badge: "bg-purple-50 text-purple-700 border-purple-200" },
                 };
                 // Default-Visual: Box + Badge in neutralem Grau, aber linker
                 // Strich leicht grün (emerald-200) als sanfter Akzent.

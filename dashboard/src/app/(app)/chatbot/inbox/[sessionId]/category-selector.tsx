@@ -14,12 +14,13 @@ const LABELS: Record<SessionCategory, { label: string; emoji: string }> = {
   order_status: { label: "Bestellstatus", emoji: "🚚" },
   gewerbe:      { label: "Gewerbe",       emoji: "💼" },
   partnership:  { label: "Partnership",   emoji: "🤝" },
+  models:       { label: "Modelle",       emoji: "📸" },
   general:      { label: "Sonstiges",     emoji: "💬" },
 };
 
 const ORDER: SessionCategory[] = [
   "availability", "pricing", "color_advice", "appointment",
-  "complaint", "order_status", "gewerbe", "partnership", "general",
+  "complaint", "order_status", "gewerbe", "partnership", "models", "general",
 ];
 
 export default function CategorySelector({

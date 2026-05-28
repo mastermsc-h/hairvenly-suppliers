@@ -110,7 +110,7 @@ export default async function ChatSessionPage({ params, searchParams }: PageProp
           followup_reason: (session as { followup_reason?: string | null }).followup_reason ?? null,
           bot_auto_reply: session.bot_auto_reply ?? false,
           bot_mode: (session.bot_mode ?? (session.bot_auto_reply ? "auto" : "off")) as "auto" | "selective_auto" | "assisted" | "off",
-          category: session.category as null | "availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "general",
+          category: session.category as null | "availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "models" | "general",
           assigned_name: (() => {
             const p = session.assigned_profile as unknown as { display_name?: string; email?: string } | null;
             return p?.display_name || p?.email || null;

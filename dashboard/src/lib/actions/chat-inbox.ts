@@ -907,7 +907,7 @@ export async function setGlobalDefaultBotMode(mode: "auto" | "assisted" | "off")
 
 export type SessionCategory =
   "availability" | "pricing" | "color_advice" | "appointment"
-  | "complaint" | "order_status" | "gewerbe" | "partnership" | "general";
+  | "complaint" | "order_status" | "gewerbe" | "partnership" | "models" | "general";
 
 /** Manuelles Override der Kategorie (Mitarbeiter korrigiert Bot-Klassifikation).
  *  Setzt zusätzlich category_manual=true, damit der Auto-Klassifizierer

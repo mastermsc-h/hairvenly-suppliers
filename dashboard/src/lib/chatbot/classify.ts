@@ -16,6 +16,7 @@ export type Category =
   | "order_status"
   | "gewerbe"
   | "partnership"
+  | "models"
   | "general";
 
 const CATEGORY_DESC: Record<Category, string> = {
@@ -27,6 +28,7 @@ const CATEGORY_DESC: Record<Category, string> = {
   order_status:  "Bestellstatus — 'wo ist meine Bestellung?', Tracking, Versand-Probleme, Bestellung nicht angekommen, Rechnungsfragen",
   gewerbe:       "Gewerbe / B2B-Kundin — Friseurin/Salon will Extensions kaufen, Gewerbenachweis, Netto-Preise, Wiederverkäufer-Anfrage, 'ich bin Friseurin und möchte für meinen Salon bestellen'",
   partnership:   "Partnership / Lieferanten-Outreach von Drittanbietern — 'we sell hair extensions to you', Kooperations-Spam, externe Firmen die UNS etwas verkaufen wollen, Jobsuche/Mitarbeitersuche ('eleman ariyormusunuz')",
+  models:        "Modelle / Model-Anfragen — Personen die als Haarmodell für Fotoshooting / Vorher-Nachher / Social-Media-Content arbeiten möchten ('ich würde gerne als Modell …'), Casting-Anfragen, Modelsuche-Antwort, vergünstigte Behandlung gegen Foto-Rechte, 'sucht ihr Modelle?'",
   general:       "Sonstiges / unklar — NUR verwenden wenn wirklich keine der anderen Kategorien passt (z.B. reine Begrüßung ohne Anliegen, 'Dankeschön', unverständliche Nachricht)",
 };
 
@@ -88,6 +90,7 @@ WICHTIGE REGELN:
 - Bei "kann ich vorbeikommen" / "im Laden" / "Showroom" → appointment
 - Bei "we have hair to sell" / "eleman ariyor" / Friseur-Outreach → partnership
 - Bei konkretem Beratungswunsch zur Verlängerung → color_advice
+- Bei "ich würde gerne Modell sein" / "sucht ihr Modelle" / Casting-Anfrage → models
 
 Antworte AUSSCHLIESSLICH mit dem Kategorie-Key in Kleinbuchstaben (z.B. "availability") — kein Erklärtext, keine Anführungszeichen, kein Punkt.`,
       messages: [{ role: "user", content: userText }],
@@ -104,7 +107,7 @@ Antworte AUSSCHLIESSLICH mit dem Kategorie-Key in Kleinbuchstaben (z.B. "availab
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
       .map(b => b.text).join("").trim().toLowerCase();
 
-    const valid: Category[] = ["availability","pricing","color_advice","appointment","complaint","order_status","gewerbe","partnership","general"];
+    const valid: Category[] = ["availability","pricing","color_advice","appointment","complaint","order_status","gewerbe","partnership","models","general"];
     const cat = valid.find(v => out.includes(v)) || "general";
     await svc.from("chat_sessions").update({ category: cat }).eq("id", sessionId);
     return cat;

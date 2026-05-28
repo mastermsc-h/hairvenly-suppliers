@@ -59,7 +59,7 @@ interface Props {
     team_notes_author?: string | null;
     followup_due_at?: string | null;
     followup_reason?: string | null;
-    category: null | "availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "general";
+    category: null | "availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "models" | "general";
     assigned_name: string | null;
   };
   initialMessages: Message[];
