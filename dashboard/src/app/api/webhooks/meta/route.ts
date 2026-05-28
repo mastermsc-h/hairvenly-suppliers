@@ -476,6 +476,14 @@ async function routeIncoming(opts: {
   // Textblöcke über ihre Bedürfnisse, schickt dann ein Video. Bot feuerte
   // sofort "kann keine Videos hören" — ohne die 3 Textblöcke zu erwähnen.
   let hasRecentTextContext = false;
+  // 🆕 RAPPORT-CHECK (User-Wunsch 2026-05-28): Audio/Video-Bypass darf nicht
+  // als Erstantwort feuern — wirkt aus dem Nichts. Nur OK wenn der Bot in
+  // dieser Session schon mal autonom geantwortet hat (= Rapport mit der Kundin
+  // existiert). Sonst soll die MA übernehmen.
+  // Einmal-Foto bleibt ausgenommen, da bei Einmal-Ansicht JEDE Sekunde zählt
+  // (Foto wird verschluckt) — da ist die Bot-Antwort selbst beim Erstkontakt
+  // wertvoll.
+  let hasPriorAutobotMessage = false;
   if (noTextWithAudio || noTextWithVideo || noTextWithEphemeral) {
     const thirtyMinAgo = new Date(Date.now() - 30 * 60_000).toISOString();
     const { data: recentMsgs } = await svc
@@ -495,11 +503,35 @@ async function routeIncoming(opts: {
     if (hasRecentTextContext) {
       console.log(`[meta-webhook] media-bypass SKIPPED for session=${session.id.slice(0,8)} — Kundin hat in letzten 30 Min Text geschrieben, statische "kann kein Video hören"-Antwort wäre dumm. Mitarbeiterin soll manuell ran.`);
     }
+    // Rapport-Check nur für Audio/Video, nicht für Einmal-Foto
+    if (noTextWithAudio || noTextWithVideo) {
+      const { data: priorAutobot } = await svc
+        .from("chat_messages")
+        .select("id")
+        .eq("session_id", session.id)
+        .eq("role", "assistant")
+        .eq("auto_sent", true)
+        .is("deleted_at", null)
+        .limit(1)
+        .maybeSingle();
+      hasPriorAutobotMessage = !!priorAutobot?.id;
+      if (!hasPriorAutobotMessage) {
+        console.log(`[meta-webhook] media-bypass SKIPPED for session=${session.id.slice(0,8)} — kein vorheriger Autobot-Kontakt (Erstantwort wäre aus dem Nichts). Mitarbeiterin soll manuell ran.`);
+      }
+    }
   }
+
+  // Effektive Bedingung für Bypass-Feuer:
+  //  - Audio/Video: braucht Rapport (vorheriger Autobot-Kontakt)
+  //  - Einmal-Foto: feuert auch beim Erstkontakt (Zeit ist kritisch)
+  const mediaBypassAllowed =
+    noTextWithEphemeral ||
+    ((noTextWithAudio || noTextWithVideo) && hasPriorAutobotMessage);
 
   if (
     (noTextWithAudio || noTextWithVideo || noTextWithEphemeral) &&
     !hasRecentTextContext &&
+    mediaBypassAllowed &&
     (botMode === "auto" || botMode === "selective_auto") &&
     session.status === "active"
   ) {
@@ -520,8 +552,17 @@ async function routeIncoming(opts: {
         reply = `Hallöchen Liebes 💕\n\nDein Foto wurde als Einmal-Ansicht geschickt — ich kann es leider nicht sehen 🥲 Und unsere Stylistin später auch nicht, weil das Bild nach dem Versand verschwindet.\n\nMagst du es einfach als ganz normales Foto noch mal schicken? Dann kann unsere Farb-Expertin es sich in Ruhe anschauen und dir eine passende Empfehlung geben ✨\n\n${handoffTime} 💌`;
         logType = "Einmal-Foto";
       } else {
+        // Kürzere Audio/Video-Antwort (User-Anweisung 2026-05-28):
+        // - "Bin nur ein süßer kleiner Bot…"-Teil raus (zu viel)
+        // - "kann ich" → "können wir" (weniger Bot-Outing)
+        // - "sofort" raus
+        // - Kollegin-Zeile raus (greift sowieso nur wenn Rapport schon da ist)
+        // Voraussetzung dafür ist der Rapport-Check oben — diese Antwort
+        // kommt nur, wenn der Autobot in dieser Session schon mal aktiv war.
         const mediaWord = noTextWithAudio ? "Audios" : "Videos";
-        reply = `Hallöchen 💕\n\nBin nur ein süßer kleiner Bot 🤖 und noch am Lernen — ${mediaWord} kann ich leider noch nicht abhören 🥲\n\nMagst du mir kurz aufschreiben worum's geht? Dann helfe ich dir sofort weiter ✨\n\n${handoffTime} 💌`;
+        reply = `Hallöchen 💕\n\n${mediaWord} können wir derzeit leider nicht abhören 🥲\n\nMagst du mir kurz aufschreiben worum's geht? Dann helfe ich dir weiter ✨`;
+        // handoffTime intentionally not used hier — Rapport ist bereits da
+        void handoffTime;
         logType = noTextWithAudio ? "Audio" : "Video";
       }
 
