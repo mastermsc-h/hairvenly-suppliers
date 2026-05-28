@@ -91,6 +91,39 @@ export async function resumeBot(sessionId: string) {
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
 
+/**
+ * Tauscht die Avatar-Signatur in den letzten Zeilen eines Textes aus.
+ *
+ * Pattern für Signaturen am Ende von Bot-Antworten:
+ *   "/Ava von <NAME>"  →  "/Ava von <NEW>"
+ *   "Ava von <NAME>"   →  "Ava von <NEW>"
+ *   Standalone "<NAME>" als letzte/vorletzte Zeile  →  "<NEW>"
+ *
+ * Wir suchen NUR in den letzten 5 Zeilen, damit "<NAME>" mid-text (z.B.
+ * wenn die Kundin den Bot-Namen erwähnt) nicht versehentlich ersetzt wird.
+ */
+function swapSignatureInDraft(text: string, oldName: string, newName: string): string {
+  if (!text || !oldName || !newName || oldName === newName) return text;
+  const lines = text.split("\n");
+  const startIdx = Math.max(0, lines.length - 5);
+  const escapedOld = oldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Pattern (case-insensitive Match auf Name-Wort, exakt):
+  //   - Ava von <OLD>  → Ava von <NEW>
+  //   - /Ava von <OLD> → /Ava von <NEW>
+  //   - eine Zeile die NUR aus <OLD> (+ optional Slash davor / Emojis dahinter) besteht
+  const phraseRe = new RegExp(`(\\/?\\s*Ava\\s+von\\s+)${escapedOld}\\b`, "gi");
+  const standaloneRe = new RegExp(`^(\\s*\\/?\\s*)${escapedOld}(\\s*[^\\w\\n]*\\s*)$`, "i");
+  for (let i = startIdx; i < lines.length; i++) {
+    const before = lines[i];
+    let after = before.replace(phraseRe, `$1${newName}`);
+    if (after === before) {
+      after = before.replace(standaloneRe, `$1${newName}$2`);
+    }
+    lines[i] = after;
+  }
+  return lines.join("\n");
+}
+
 /** Setzt den Avatar (Bot-Signatur) für eine Session */
 export async function setSessionAvatar(sessionId: string, avatarName: string) {
   const svc = createServiceClient();
@@ -102,7 +135,39 @@ export async function setSessionAvatar(sessionId: string, avatarName: string) {
     .eq("active", true)
     .maybeSingle();
   if (!avatar) throw new Error(`Avatar "${avatarName}" nicht aktiv oder nicht gefunden`);
+  // OLD Signature merken — wir wollen pending Drafts so umschreiben, dass die
+  // Signatur den NEUEN Avatar nutzt (User-Bug 2026-05-28: Avatar gewechselt,
+  // Draft hatte aber noch die alte Signatur, was nach Senden falsch wirkt).
+  const { data: oldSession } = await svc
+    .from("chat_sessions")
+    .select("bot_signature_name")
+    .eq("id", sessionId)
+    .maybeSingle();
+  const oldName: string | null = oldSession?.bot_signature_name || null;
+
   await svc.from("chat_sessions").update({ bot_signature_name: avatarName }).eq("id", sessionId);
+
+  // Pending Drafts retro-rewriten — nur Signatur tauschen, Inhalt bleibt.
+  if (oldName && oldName !== avatarName) {
+    const { data: pendingDrafts } = await svc
+      .from("chat_drafts")
+      .select("id, original_text, edited_text")
+      .eq("session_id", sessionId)
+      .eq("status", "pending");
+    for (const d of pendingDrafts || []) {
+      const updates: { original_text?: string; edited_text?: string } = {};
+      const newOriginal = swapSignatureInDraft(d.original_text || "", oldName, avatarName);
+      if (newOriginal !== d.original_text) updates.original_text = newOriginal;
+      if (d.edited_text) {
+        const newEdited = swapSignatureInDraft(d.edited_text, oldName, avatarName);
+        if (newEdited !== d.edited_text) updates.edited_text = newEdited;
+      }
+      if (Object.keys(updates).length > 0) {
+        await svc.from("chat_drafts").update(updates).eq("id", d.id);
+        console.log(`[setSessionAvatar] swapped signature ${oldName}→${avatarName} in draft ${d.id}`);
+      }
+    }
+  }
   revalidatePath(`/chatbot/inbox/${sessionId}`);
   revalidatePath("/chatbot/inbox");
 }
