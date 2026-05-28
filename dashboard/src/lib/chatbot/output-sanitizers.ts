@@ -84,6 +84,13 @@ export function stripFalseMediaLimitation(text: string): { text: string; strippe
     /(^|\n)[^\n]*\b(?:wir|ich)\b[^\n]{0,30}\b(?:haben?|hätten)\s+(?:leider\s+)?keine?\s+(?:möglichkeit|option)\b[^\n]{0,80}\b(fotos?|videos?|bilder)\b[^\n]*(\n|$)/gi,
     // "leider können wir hier keine Fotos/Videos"
     /(^|\n)[^\n]*\bleider\b[^\n]{0,40}\b(?:können\s+wir|kann\s+ich)\b[^\n]{0,30}\bhier\b[^\n]{0,30}\b(?:keine?)\b\s*(fotos?|videos?|bilder)\b[^\n]*(\n|$)/gi,
+    // FALSCH-Behauptung: Videos auf Shopify-Produktseiten (es gibt keine!)
+    // "Auf den Produktseiten sind Videos" / "im Shop sind Videos" / "Produktseite hat ein Video"
+    /(^|\n)[^\n]*\b(?:auf\s+(?:der|den)\s+produktseiten?|im\s+shop|auf\s+den\s+shop[\s-]?seiten?|produktseiten?[^\n]{0,20}(?:hat|haben|enthält|enthalten|zeigen?|zeigt))\b[^\n]{0,120}\bvideo[s]?\b[^\n]*(\n|$)/gi,
+    // "siehst du die Farbe in Bewegung" / "wie die Farbe in echt wirkt" mit Shop/Produkt-Bezug
+    /(^|\n)[^\n]*\b(?:siehst|sieht\s+man)\s+du?\b[^\n]{0,40}\b(?:farbe[n]?|haar[e]?)\b[^\n]{0,40}\bin\s+(?:bewegung|echt|real)\b[^\n]*(\n|$)/gi,
+    // "Dort siehst du jeweils, wie die Farben im echten Licht wirken" — Shop-Werbung mit Medien-Hint
+    /(^|\n)[^\n]*\bdort\s+(?:siehst|sieht\s+man)\b[^\n]{0,60}\b(?:farbe[n]?|im\s+(?:echten\s+)?licht|in\s+bewegung)\b[^\n]*(\n|$)/gi,
   ];
   let out = text;
   let strippedAny = false;

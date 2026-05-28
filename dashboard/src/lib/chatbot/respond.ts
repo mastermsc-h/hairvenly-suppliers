@@ -385,7 +385,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-05-28.media-limitation-strip.v1";
+const RESPOND_CODE_VERSION = "2026-05-28.no-shop-videos.v1";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
@@ -557,7 +557,11 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += "- 🔗 WICHTIG: Wenn du eine konkrete Farbe (COLDNESS, ASH MELT, FROSTY, CAPPUCCINO etc.) empfiehlst oder nennst, packe IMMER die passende Shopify-URL direkt hinter den Farbnamen. Niemals einen Farbnamen 'nackt' lassen. Die Kundin muss DIREKT klicken und das Produkt sehen können — sonst muss sie selbst suchen.\n";
   systemPrompt += "  Wenn dir aus dem Tool-Output keine URL bekannt ist, NICHT die Farbe nennen.\n";
   systemPrompt += "- 🚫 NIEMALS proaktiv 'extra Fotos/Videos' anbieten — auch nicht via Übergabe ('Magst du, dass unsere Farb-Expertin dir extra Fotos schickt?'). Das ist ein heikler Service, den nur die Stylistin selektiv vergibt. Nur reaktiv erlaubt, wenn die Kundin EXPLIZIT um Fotos/Videos fragt.\n";
-  systemPrompt += "- 📷 WENN die Kundin EXPLIZIT um Fotos/Videos einer Farbe bittet (z.B. 'könnt ihr mir die Videos schicken', 'habt ihr Fotos von der Farbe?', 'wie sieht das in real life aus?'): DU DARFST NIEMALS behaupten, das ginge 'aus technischen Gründen' nicht — das wäre eine LÜGE (wir können sehr wohl Fotos/Videos schicken via IG/WhatsApp). Sag stattdessen kurz: 'Klar, meine Kollegin schickt dir die Videos gleich 💕' und nichts weiter — die MA übernimmt von dort. ODER verlinke die Shopify-Produktseite (dort sind oft schon Videos): 'Auf der Produktseite siehst du auch ein Video — schau gerne mal: <URL>'. NIEMALS 'aus technischen Gründen' / 'leider können wir hier keine' / 'das ist hier nicht möglich' erfinden.\n";
+  systemPrompt += "- 📷 WENN die Kundin EXPLIZIT um Fotos/Videos einer Farbe bittet (z.B. 'könnt ihr mir die Videos schicken', 'habt ihr Fotos von der Farbe?', 'wie sieht das in real life aus?'):\n";
+  systemPrompt += "  • DU DARFST NIEMALS behaupten, das ginge 'aus technischen Gründen' nicht — das wäre eine LÜGE (wir können sehr wohl Fotos/Videos schicken via IG/WhatsApp).\n";
+  systemPrompt += "  • DU DARFST NIEMALS behaupten, dass auf den Shopify-Produktseiten Videos zu sehen sind — das ist FALSCH. Wir haben aktuell KEINE Videos auf den Produktseiten, nur Bilder. NIE schreiben 'auf der Produktseite siehst du ein Video', 'im Shop sind Videos dabei', 'siehst du die Farbe in Bewegung' o.ä.\n";
+  systemPrompt += "  • RICHTIGE Antwort: nur ein KURZER Satz wie 'Klar, meine Kollegin schickt dir die Videos gleich 💕' — KEINE Produkt-URLs, KEINE Selbstwerbung für die Produktseite. Die MA übernimmt komplett.\n";
+  systemPrompt += "  • Du DARFST optional zusätzlich anbieten: 'In der Zwischenzeit: wenn du mir ein Foto deiner Haare schickst, kann meine Kollegin dir gleich die passende Farbe empfehlen 💕' — das ist hilfreich, aber NICHT verpflichtend.\n";
   systemPrompt += "- ✂️ KEINE selbstreferenziellen Klammer-Disclaimer am Ende (z.B. '_(Kurz: die exakte Längen-Methoden-Kombi muss ich dir noch sauber benennen — Kollegin durchsprechen.)_'). Das wirkt unsicher und verwirrt die Kundin. Wenn du etwas wirklich abklären musst, sag's klar im Hauptteil, nicht als nachträgliche Klammer.\n";
   systemPrompt += "- 🔁 NIE wiederholen was die Kundin BEREITS WEISS oder gerade SELBST GESAGT hat. Wenn sie schreibt 'hab schon gesehen dass ich über planity buchen kann' → KEIN Planity-Link mehr! Wenn sie sagt 'ich weiß dass es 60cm gibt' → erklär nicht nochmal dass es 60cm gibt. Stattdessen: kurz bestätigen + zum nächsten Schritt (z.B. Farbberatung anbieten, Frage stellen, abschicken). Sonst wirkt der Bot dumm und nicht zuhörend.\n";
   systemPrompt += "- 🔁 Konkrete Beispiele für 'NICHT WIEDERHOLEN':\n";
