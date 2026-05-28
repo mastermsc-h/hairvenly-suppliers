@@ -995,6 +995,18 @@ async function triggerBotResponse(
   if (finalMode === "assisted") {
     // Entwurf in chat_drafts speichern — NICHT senden
     const svc = createServiceClient();
+    // 🛡 SAFETY: wenn der Webhook auto→assisted umgeschaltet hat (z.B. via
+    // needsManualReview von respond.ts), wurde die Message evtl. SCHON in
+    // chat_messages gespeichert (respond.ts speichert immer wenn !assisted).
+    // Wir löschen sie jetzt soft (deleted_at setzen) — sonst hätte die Inbox
+    // beide Einträge: scheinbar-gesendete Message + zusätzlicher Draft.
+    if (result.insertedMessageId) {
+      await svc
+        .from("chat_messages")
+        .update({ deleted_at: new Date().toISOString() })
+        .eq("id", result.insertedMessageId);
+      console.log(`[meta-webhook] soft-deleted respond-inserted message ${result.insertedMessageId} (force-draft)`);
+    }
     await svc.from("chat_drafts").insert({
       session_id:    sessionId,
       original_text: result.text,

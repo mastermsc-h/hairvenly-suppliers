@@ -385,7 +385,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-05-28.stock-eta-inject.v1";
+const RESPOND_CODE_VERSION = "2026-05-28.color-rec-force-draft.v1";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
@@ -1091,27 +1091,44 @@ Wenn EINES dieser drei Dinge unklar ist:
 → Stelle die EINE wichtigste fehlende Frage. Nicht alle auf einmal.
 → KEINE Produkte/URLs/Farbcodes nennen. NICHT get_available_colors aufrufen.
 
-PRIO 2 — ERST WENN alle drei Punkte klar sind:
-→ get_available_colors mit method + supplier_line aufrufen
-→ Konkrete Farben mit URLs vorschlagen (max 3-5 Stück, FOKUSSIERT)
+PRIO 2 — AUCH WENN alle drei Punkte klar sind:
+→ KEINE eigenständige Farbempfehlung mit konkreten Farbnamen + URLs.
+→ Farbempfehlung ist STYLISTINNEN-VERANTWORTUNG (Mitarbeiter-Aufgabe).
+→ Wenn alle Klärungsfragen beantwortet sind: KURZ bestätigen und ankündigen
+  dass die Stylistin die Farbe sucht. Beispiel:
+    "Perfekt 💕 — bei glattem Eigenhaar passen unsere Russisch-glatt Tapes
+     in 55cm super zu dir. Meine Kollegin schaut sich dein Foto jetzt an
+     und sucht dir die passenden Farben raus — sie meldet sich gleich
+     mit konkreten Vorschlägen 🩷"
+→ KEINE konkreten Farbnamen (BUTTERSCOTCH, DESERT, etc.) nennen.
+→ KEINE Produkt-URLs posten.
+→ KEIN get_available_colors aufrufen (Token-Verschwendung, wenn's eh die MA macht).
 
 PRIO 3 — STIL:
 ✓ Foto-Analyse (Farbton, Helligkeit, Übergänge) ist immer OK — das ist Vorbereitung
 ✓ Fragen kurz und warm formulieren
-❌ NIEMALS direkt zu "hier sind 5 passende Farben" springen ohne Struktur+Methode+Länge
-❌ NIEMALS Bondings für glattes Haar UND wellige Linie gleichzeitig zeigen — das ist Schrott
+✓ Klärungs-Frage stellen und auf Stylistin verweisen
+❌ NIEMALS direkt zu "hier sind 5 passende Farben" springen — auch nicht nach
+   Klärung. Farbempfehlung ist NICHT deine Aufgabe (User-Anweisung 2026-05-28).
+❌ NIEMALS Bondings für glattes Haar UND wellige Linie gleichzeitig zeigen.
 
-BEISPIEL RICHTIG:
+BEISPIEL RICHTIG (Klärungs-Phase):
 Kundin: "Habt ihr diese Farbe? [Foto]"
 → "Danke für dein Foto 💕 Ich sehe einen Balayage-Look mit eisig-platin am Ansatz
-  und warmen beige-honig-Spitzen — wirklich schön. Damit ich dir die passenden
-  Farben raussuchen kann: ist dein Eigenhaar eher glatt oder wellig?"
+  und warmen beige-honig-Spitzen — wirklich schön. Damit unsere Stylistin dir die
+  passenden Farben raussuchen kann: ist dein Eigenhaar eher glatt oder wellig?"
 
-BEISPIEL FALSCH (was heute passiert ist):
-Kundin: "Habt ihr diese Farbe?"
-→ Bot listet sofort 5 Bondings-Farben mit URLs ohne zu wissen ob Eigenhaar glatt/wellig ist.
+BEISPIEL RICHTIG (nach Klärung):
+Kundin: "Hab glatte Tapes drin, möchte gerne wellige in Balayage."
+→ "Perfekt 💕 — also Usbekisch-wellige Tapes. Meine Kollegin schaut sich dein
+  Foto jetzt genauer an und meldet sich gleich mit den passenden Farb-Vorschlägen 🩷"
 
-KEINE Ausnahmen. Wenn unsicher → Frage stellen, NICHT raten.`;
+BEISPIEL FALSCH (was heute 2026-05-28 passiert ist):
+→ Bot listet selbständig BUTTERSCOTCH / DESERT / CARAMEL FUDGE mit URLs.
+   Falsch: Farbempfehlung ist MA-Aufgabe, nicht Bot-Aufgabe.
+
+KEINE Ausnahmen. Wenn unsicher → Frage stellen, NICHT raten.
+KEINE Farbnamen nennen — die MA macht das.`;
   }
 
   // systemPromptVariable enthält ALLE dynamischen Inhalte, die pro Anfrage
@@ -2077,6 +2094,48 @@ KEINE Ausnahmen. Wenn unsicher → Frage stellen, NICHT raten.`;
     console.warn(`[respond] WAITLIST-PROMISE-WITHOUT-TOOL session=${sessionId.slice(0,8)} — Bot verspricht Liste, aber kein create_reservation`);
     needsManualReview = true;
     manualReviewReason = "Bot hat Warteliste versprochen, aber NICHT als Reservierung angelegt. Webhook sollte das zu einem Draft umwandeln statt autobot-zu-senden.";
+  }
+
+  // ── COLOR-RECOMMENDATION-DETECTOR ───────────────────────────────────
+  // User-Anweisung 2026-05-28: Autobot soll NIEMALS selbständig konkrete
+  // Farben empfehlen — Farbempfehlung ist eine MA-Entscheidung
+  // (Stylistin-Verantwortung). Vorbereitungs-Antworten (Foto-Bitte,
+  // Methode/Länge klären) bleiben automatisch erlaubt.
+  //
+  // Heuristik (zählt nur als "Empfehlung" wenn beides erfüllt):
+  //   (a) ≥ 2 konkrete Farbnamen in CAPS am Zeilenanfang  (BUTTERSCOTCH, DESERT, …)
+  //       ODER ≥ 2 hairvenly.de/products/-URLs (oft 1 URL pro Farbe)
+  //   (b) Antwort enthält Beschreibungs-Verben (Ombré, Verlauf, Balayage,
+  //       warm, passt, Strähnen, Look) → klare Empfehlung statt nur Hinweis
+  //
+  // Sibling-Sweep:
+  //   - 1 einziger Farbvorschlag in Pre-Vorbereitungs-Antwort → kein
+  //     Draft-Force (oft "z.B. ASH BLOND, wenn du's eher kühl magst")
+  //   - Komplette Vorbereitungs-Antwort ohne Farbnamen → kein Draft-Force
+  //   - Bot listet Farben als Frage "magst du A oder B?" → DRAFT-Force
+  //     (das ist auch Empfehlung)
+  if (!needsManualReview) {
+    const lines = finalText.split(/\n/);
+    // (a-1) CAPS-Color-Names am Zeilenanfang (mind. 4 Großbuchstaben am Stück
+    //       am Anfang einer Zeile, danach Trennzeichen — , — - usw.)
+    const capsColorRe = /^\s*([A-ZÄÖÜ][A-ZÄÖÜ\s\-_/]{3,40})\s*[—–\-,:](?!\s*$)/;
+    let capsColorCount = 0;
+    for (const ln of lines) {
+      if (capsColorRe.test(ln)) capsColorCount++;
+    }
+    // (a-2) Product-URL-Count
+    const urlMatches = finalText.match(/https?:\/\/(?:www\.)?hairvenly\.de\/products\//gi) || [];
+    const urlCount = urlMatches.length;
+    // (b) Beschreibungs-Verben / Adjektive die "Empfehlung" signalisieren
+    const recommendVerbs = /\b(ombré|ombre|verlauf|balayage|strähn|highlight|warm|kühl|aschig|karamell|honey|passt\s+(super|gut|perfekt)|empfehl|bilden\s+sich|mischen|harmonieren|akzent)\b/i;
+    const hasDescriptors = recommendVerbs.test(finalText);
+
+    const isMultiColorList = capsColorCount >= 2 || urlCount >= 2;
+    if (isMultiColorList && hasDescriptors) {
+      console.warn(`[respond] COLOR-RECOMMENDATION-DETECTED session=${sessionId.slice(0,8)} — capsColors=${capsColorCount} urls=${urlCount} → forcing draft`);
+      needsManualReview = true;
+      manualReviewReason = "Bot hat eigenständig konkrete Farben empfohlen — Farbempfehlung ist Mitarbeiter-Aufgabe (Stylistin-Verantwortung). Antwort wird als Draft gespeichert, nicht automatisch gesendet.";
+    }
   }
 
   // Im assisted-Modus: NICHT in chat_messages speichern — der Caller speichert
