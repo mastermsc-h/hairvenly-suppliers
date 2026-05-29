@@ -966,12 +966,66 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     if (openUsrDesc.length > 0) {
       const orderedOldestFirst = openUsrDesc.slice().reverse();
 
-      // Werktags-Stunden seit der jüngsten offenen Frage bis jetzt
-      const youngestT = new Date(orderedOldestFirst[orderedOldestFirst.length - 1].created_at).getTime();
+      // 🕐 STALE-CLUSTER-DETEKTION (User-Bug 2026-05-29): Wenn zwischen zwei
+      // unbeantworteten Customer-Messages ein Zeit-Gap > 12h liegt, gehören
+      // die NICHT mehr zum selben Anliegen. Beispiel: "Heyy ich bin auf dem
+      // Weg verspäte mich" (26.05) + Foto heute (29.05) → 3 Tage Gap → die
+      // alte Verspätungs-Nachricht ist erledigt, die neue ist ein neues
+      // Anliegen. Wir splitten in Cluster und nutzen NUR den jüngsten.
+      const STALE_GAP_MS = 12 * 3600 * 1000;
+      type MsgRow = typeof orderedOldestFirst[number];
+      const clusters: MsgRow[][] = [];
+      let cur: MsgRow[] = [];
+      for (const m of orderedOldestFirst) {
+        if (cur.length === 0) {
+          cur.push(m);
+        } else {
+          const prevT = new Date(cur[cur.length - 1].created_at).getTime();
+          const curT = new Date(m.created_at).getTime();
+          if (curT - prevT > STALE_GAP_MS) {
+            clusters.push(cur);
+            cur = [m];
+          } else {
+            cur.push(m);
+          }
+        }
+      }
+      if (cur.length > 0) clusters.push(cur);
+      const latestCluster = clusters[clusters.length - 1];
+      const staleClusters = clusters.slice(0, -1);
+      const hasStale = staleClusters.length > 0;
+
+      // Werktags-Stunden seit der jüngsten offenen Frage IM AKTUELLEN
+      // Cluster bis jetzt — Sorry darf nicht für stale messages gelten.
+      const youngestT = new Date(latestCluster[latestCluster.length - 1].created_at).getTime();
       const businessHoursSinceYoungest = businessHoursBetween(youngestT, Date.now());
       const apologyDue = businessHoursSinceYoungest >= 24;
 
-      if (openUsrDesc.length > 1) {
+      if (hasStale) {
+        // Stale-Cluster sichtbar machen (als Kontext), dann harte Regel
+        const staleSummary = staleClusters
+          .flatMap(c => c)
+          .map(m => {
+            const dt = new Date(m.created_at);
+            const fmt = `${dt.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })} ${dt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
+            return `- [${fmt}] ${(m.content || "").slice(0, 120)}`;
+          })
+          .join("\n");
+        const latestSummary = latestCluster
+          .map((m, i) => {
+            const dt = new Date(m.created_at);
+            const fmt = `${dt.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })} ${dt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
+            return `${i + 1}. [${fmt}] ${m.content}`;
+          })
+          .join("\n");
+        openTurnsHint =
+          `\n\n## 🕐 STALE-NACHRICHTEN — IGNORIEREN\nFolgende ältere Nachrichten sind über 12 h vor der jüngsten Customer-Message und gehören NICHT zum aktuellen Anliegen. Sie sind erledigt/abgelaufen (z.B. Termin-Hinweise, Spontan-Reaktionen). NICHT darauf antworten, NICHT erwähnen, NICHT entschuldigen:\n` +
+          staleSummary +
+          `\n\n## AKTUELLE OFFENE KUNDEN-NACHRICHT${latestCluster.length > 1 ? "EN" : ""} (${latestCluster.length} Stück)\n` +
+          latestSummary +
+          `\n\n→ Antworte AUSSCHLIESSLICH auf die aktuelle${latestCluster.length > 1 ? "n" : ""} Nachricht${latestCluster.length > 1 ? "en" : ""}. ` +
+          `Die Stale-Liste oben ist NUR Kontext — KEIN "kommst du gut an?" / "passt der Termin noch?" / "bist du da gut angekommen?" und auch KEINE Entschuldigung für die alte Antwort.`;
+      } else if (openUsrDesc.length > 1) {
         openTurnsHint =
           `\n\n## OFFENE KUNDEN-NACHRICHTEN (${openUsrDesc.length} Stück seit letzter Antwort von uns)\n` +
           orderedOldestFirst.map((m, i) => {
