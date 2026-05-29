@@ -386,7 +386,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-05-28.no-shop-videos.v1";
+const RESPOND_CODE_VERSION = "2026-05-29.cache-opt.v1";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
@@ -527,9 +527,20 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   const avatarRow = (avatars || []).find(a => a.name === signatureName) || (avatars || [])[0];
 
   // System-Prompt zusammenbauen
-  let systemPrompt = persona.system_prompt.replaceAll("{signature_name}", signatureName);
+  //
+  // 💰 CACHE-OPTIMIERUNG (2026-05-29): {signature_name} im stable Block lassen,
+  // statt es per Session auf den konkreten Avatar-Namen zu ersetzen. Das
+  // verhindert dass sich der gecachte Prefix pro Avatar ändert (5 Avatars →
+  // 5× redundant gecacht). Der konkrete Avatar-Name + die Persönlichkeit
+  // werden später im UNCACHED variable-Block injiziert.
+  let systemPrompt = persona.system_prompt;
+  // dynamicExtras sammelt alles, was pro Anfrage variiert (Avatar-Identität,
+  // topic-extra FAQs). Wird unten in systemPromptVariable mergiert.
+  let dynamicExtras = "";
   if (avatarRow) {
-    systemPrompt += `\n\n## DEINE PERSÖNLICHKEIT (als ${avatarRow.name})\n${avatarRow.personality}`;
+    dynamicExtras += `\n\n## 🎭 DEINE IDENTITÄT IN DIESER SESSION\nDu unterschreibst dich am Ende der Antwort (bzw. überall wo "{signature_name}" im Persona-Prompt vorkommt) als **${signatureName}**.\n\nPersönlichkeit (als ${avatarRow.name}):\n${avatarRow.personality}\n`;
+  } else {
+    dynamicExtras += `\n\n## 🎭 DEINE IDENTITÄT IN DIESER SESSION\nDu unterschreibst dich am Ende der Antwort (bzw. überall wo "{signature_name}" im Persona-Prompt vorkommt) als **${signatureName}**.\n`;
   }
 
   // PRODUKTKATALOG-MATRIX — verbindliche Methoden×Längen aus der DB
@@ -719,7 +730,16 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   //   1) pinned=true (immer dabei)
   //   2) topic IN wantedTopics (dynamisch je Customer-Frage)
   // Dedup über slug (gleiche FAQ kann sowohl pinned als auch im Topic sein).
-  const [{ data: pinnedFaqs }, { data: topicFaqs }] = await Promise.all([
+  // 💰 CACHE-OPTIMIERUNG (2026-05-29): topic-keyword-getriggerten FAQs
+  // werden NICHT mehr in den stable Block aufgenommen — sie variieren
+  // pro Customer-Message (= Cache-Miss pro Anfrage). Stattdessen:
+  //   - Stable Block: NUR pinned + CORE_TOPICS-FAQs (immer dieselben)
+  //   - Variable Block: topic-extra FAQs (pro Customer-Frage anders)
+  const extraWantedTopics = new Set<string>();
+  for (const t of wantedTopics) {
+    if (!CORE_TOPICS.has(t)) extraWantedTopics.add(t);
+  }
+  const [{ data: pinnedFaqs }, { data: coreTopicFaqs }, { data: extraTopicFaqs }] = await Promise.all([
     svc.from("chatbot_faq")
       .select("slug, topic, question, answer")
       .eq("active", true)
@@ -728,13 +748,40 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     svc.from("chatbot_faq")
       .select("slug, topic, question, answer")
       .eq("active", true)
-      .in("topic", Array.from(wantedTopics))
+      .in("topic", Array.from(CORE_TOPICS))
       .order("topic").order("order_idx"),
+    extraWantedTopics.size > 0
+      ? svc.from("chatbot_faq")
+          .select("slug, topic, question, answer")
+          .eq("active", true)
+          .in("topic", Array.from(extraWantedTopics))
+          .order("topic").order("order_idx")
+      : Promise.resolve({ data: [] as { slug: string; topic: string; question: string; answer: string }[] }),
   ]);
+  // Stable: pinned + core
   const faqMap = new Map<string, { topic: string; question: string; answer: string }>();
   for (const f of pinnedFaqs || []) faqMap.set(f.slug, { topic: f.topic, question: f.question, answer: f.answer });
-  for (const f of topicFaqs || []) if (!faqMap.has(f.slug)) faqMap.set(f.slug, { topic: f.topic, question: f.question, answer: f.answer });
+  for (const f of coreTopicFaqs || []) if (!faqMap.has(f.slug)) faqMap.set(f.slug, { topic: f.topic, question: f.question, answer: f.answer });
   const faqs = Array.from(faqMap.values());
+  // Variable: nur topic-extras, die NICHT bereits in stable sind
+  const stableSlugs = new Set<string>();
+  for (const f of pinnedFaqs || []) stableSlugs.add(f.slug);
+  for (const f of coreTopicFaqs || []) stableSlugs.add(f.slug);
+  const extraFaqs = (extraTopicFaqs || []).filter(f => !stableSlugs.has(f.slug));
+  if (extraFaqs.length > 0) {
+    const byTopic = new Map<string, { question: string; answer: string }[]>();
+    for (const f of extraFaqs) {
+      const t = f.topic || "allgemein";
+      if (!byTopic.has(t)) byTopic.set(t, []);
+      byTopic.get(t)!.push({ question: f.question, answer: f.answer });
+    }
+    let extraBlock = "\n\n## 📚 ZUSÄTZLICHE WISSENSDATENBANK (themenspezifisch zu dieser Anfrage)\n";
+    for (const [topic, items] of byTopic) {
+      extraBlock += `### ${topic}\n`;
+      for (const it of items) extraBlock += `**F:** ${it.question}\n**A:** ${it.answer}\n\n`;
+    }
+    dynamicExtras += extraBlock;
+  }
   if (faqs && faqs.length > 0) {
     systemPrompt += "\n\n## 📚 WISSENSDATENBANK — feste Fakten und FAQ\n";
     systemPrompt += "Diese Fakten sind IMMER wahr und gelten unabhängig vom konkreten Gespräch. Bei Widerspruch zwischen einem Trainings-Beispiel und der Wissensdatenbank: die Wissensdatenbank gewinnt.\n\n";
@@ -1152,7 +1199,12 @@ KEINE Farbnamen nennen — die MA macht das.`;
   // variieren. Diese gehen als UNCACHED Block AN ENDE (nach dem stable cache).
   // Reihenfolge: dynamische Hints zuerst (Color-Code-Lookup, Business-Hours),
   // dann variable Wording-Hints (greeting, urls, style, kategorie-hardrule).
+  // 💰 dynamicExtras enthält die per-Session-/per-Customer-Inhalte, die wir
+  // aus dem stable Block ausgelagert haben (Avatar-Identität, topic-extra-FAQs).
+  // Damit bleibt der gecachte Prefix sessionsübergreifend identisch und der
+  // Cache-Hit-Rate steigt deutlich (vorher ~33%, Ziel >70%).
   const systemPromptVariable =
+    dynamicExtras +
     colorCodeDynamicHint +
     businessHoursBlock +
     openTurnsHint + greetingHint + existenceRule + urlRule + styleRule + categoryHardRule;
@@ -2093,6 +2145,16 @@ KEINE Farbnamen nennen — die MA macht das.`;
   // SAFETY-NET 3: Max 3 URLs pro Antwort. Mehr wirkt überladen und macht
   // Mitarbeiterin/Kundin nervös. Überzählige werden gestrippt.
   finalText = limitUrls(finalText, 3);
+
+  // SAFETY-NET signature: durch die Cache-Optimierung (2026-05-29) bleibt
+  // der "{signature_name}" Placeholder im persona-Stable-Block — der LLM
+  // soll ihn mental durch den im variable-Block injizierten Namen ersetzen.
+  // Falls er trotzdem mal die Roh-Placeholder-Form rauslässt, ersetzen
+  // wir sie deterministisch hier nach.
+  if (finalText.includes("{signature_name}")) {
+    finalText = finalText.replaceAll("{signature_name}", signatureName);
+    console.warn(`[respond] {signature_name} placeholder leaked into output — patched to "${signatureName}"`);
+  }
 
   // ── WAITLIST-PROMISE-VALIDATOR ────────────────────────────────────────
   // User-Bug 2026-05-27: Bot sagte "Du bist jetzt auf der Benachrichtigungsliste"
