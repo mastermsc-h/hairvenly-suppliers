@@ -12,6 +12,7 @@ import {
   type OrderDocument,
   type OrderEvent,
   type OrderItem,
+  type OrderShipment,
 } from "@/lib/types";
 import { t, type Locale } from "@/lib/i18n";
 import { loadCatalog } from "@/lib/actions/catalog";
@@ -24,6 +25,7 @@ import QuickDocs from "./quick-docs";
 import BackLink from "./back-link";
 import OrderItemsSection from "./order-items-section";
 import StatusDropdown from "./status-dropdown";
+import ShipmentsSection from "./shipments-section";
 
 export default async function OrderDetailPage({
   params,
@@ -44,7 +46,7 @@ export default async function OrderDetailPage({
 
   const o = order as OrderWithTotals;
 
-  const [{ data: supplier }, { data: payments }, { data: documents }, { data: events }, { data: orderItems }] =
+  const [{ data: supplier }, { data: payments }, { data: documents }, { data: events }, { data: orderItems }, { data: shipmentsData }] =
     await Promise.all([
       supabase.from("suppliers").select("*").eq("id", o.supplier_id).single(),
       supabase
@@ -68,6 +70,11 @@ export default async function OrderDetailPage({
         .select("*")
         .eq("order_id", id)
         .order("created_at"),
+      supabase
+        .from("order_shipments")
+        .select("*")
+        .eq("order_id", id)
+        .order("created_at"),
     ]);
 
   const sup = supplier as Supplier | null;
@@ -82,12 +89,14 @@ export default async function OrderDetailPage({
   const docs = (documents ?? []) as OrderDocument[];
   const evs = (events ?? []) as OrderEvent[];
   const items = (orderItems ?? []) as OrderItem[];
+  const shipments = (shipmentsData ?? []) as OrderShipment[];
 
   // Suppliers see everything about their own orders (finance + documents)
   const isSupplier = profile.role === "supplier";
   const canSeeFinance = hasFeature(profile, "invoices") || isSupplier;
   const canSeeAllDocs = hasFeature(profile, "documents") || isSupplier;
   const canSeePackingLists = hasFeature(profile, "packing_lists") || canSeeAllDocs;
+  const canEditShipments = profile.is_admin || isSupplier;
   // Documents section is shown if user can see at least one kind of document
   const canSeeDocs = canSeeAllDocs || canSeePackingLists;
 
@@ -240,6 +249,15 @@ export default async function OrderDetailPage({
             />
           )}
 
+          {/* Teillieferungen */}
+          <ShipmentsSection
+            orderId={o.id}
+            shipments={shipments}
+            items={items}
+            documents={docs}
+            canEdit={canEditShipments}
+          />
+
           {/* Documents */}
           {canSeeDocs && (() => {
             const financialKinds = ["supplier_invoice", "payment_proof"];
@@ -253,23 +271,28 @@ export default async function OrderDetailPage({
             return (
               <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
                 <h2 className="text-sm font-medium text-neutral-700 mb-4">{t(locale, "order.documents_title")}</h2>
-                {canSeeFinance && <DocumentUpload orderId={o.id} locale={locale} />}
+                {canSeeFinance && <DocumentUpload orderId={o.id} locale={locale} shipments={shipments} />}
                 <ul className="mt-4 divide-y divide-neutral-100">
                   {visibleDocs.length === 0 && (
                     <li className="text-sm text-neutral-500 py-3">{t(locale, "order.no_documents_yet")}</li>
                   )}
-                  {visibleDocs.map((d) => (
-                    <DocumentItem
-                      key={d.id}
-                      orderId={o.id}
-                      doc={d}
-                      isAdmin={profile.is_admin}
-                      locale={locale}
-                      displayName={
-                        proofNumber.has(d.id) ? `${t(locale, "payment.number")} ${proofNumber.get(d.id)}` : undefined
-                      }
-                    />
-                  ))}
+                  {visibleDocs.map((d) => {
+                    const idx = shipments.findIndex((s) => s.id === d.shipment_id);
+                    const shipmentLabel = idx >= 0 ? (shipments[idx].label || `Teillieferung ${idx + 1}`) : null;
+                    return (
+                      <DocumentItem
+                        key={d.id}
+                        orderId={o.id}
+                        doc={d}
+                        isAdmin={profile.is_admin}
+                        locale={locale}
+                        displayName={
+                          proofNumber.has(d.id) ? `${t(locale, "payment.number")} ${proofNumber.get(d.id)}` : undefined
+                        }
+                        shipmentLabel={shipmentLabel}
+                      />
+                    );
+                  })}
                 </ul>
               </section>
             );

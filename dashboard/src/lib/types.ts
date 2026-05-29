@@ -199,7 +199,23 @@ export interface OrderDocument {
   kind: DocumentKind;
   file_path: string;
   file_name: string;
+  shipment_id: string | null;
   created_at: string;
+}
+
+export interface OrderShipment {
+  id: string;
+  order_id: string;
+  label: string | null;
+  tracking_number: string | null;
+  tracking_url: string | null;
+  eta: string | null;
+  shipped_at: string | null;
+  arrived_at: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface OrderEvent {
@@ -252,6 +268,7 @@ export interface OrderItem {
   color_name: string;
   quantity: number;
   unit: string;
+  shipment_id: string | null;
 }
 
 /** Full catalog tree loaded for the wizard */

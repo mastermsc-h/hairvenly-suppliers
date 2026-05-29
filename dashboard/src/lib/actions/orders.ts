@@ -228,6 +228,8 @@ export async function uploadDocument(orderId: string, formData: FormData) {
   const supabase = await createClient();
   const file = formData.get("file") as File | null;
   const kind = String(formData.get("kind") ?? "other");
+  const shipmentIdRaw = String(formData.get("shipment_id") ?? "").trim();
+  const shipmentId = shipmentIdRaw || null;
   if (!file || file.size === 0) return { error: "Keine Datei ausgewählt." };
 
   const safeName = file.name.replace(/[^\w.\-]+/g, "_");
@@ -242,10 +244,12 @@ export async function uploadDocument(orderId: string, formData: FormData) {
     kind,
     file_path: path,
     file_name: file.name,
+    shipment_id: shipmentId,
   });
   if (dbErr) return { error: dbErr.message };
 
-  await logEvent(supabase, orderId, profile.id, "document", `Dokument hochgeladen: ${file.name} (${kind})`);
+  await logEvent(supabase, orderId, profile.id, "document",
+    `Dokument hochgeladen: ${file.name} (${kind})${shipmentId ? " · Teillieferung" : ""}`);
 
   revalidatePath(`/orders/${orderId}`);
   return { ok: true };
