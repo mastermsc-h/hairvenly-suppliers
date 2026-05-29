@@ -52,10 +52,19 @@ export default async function ChatSessionPage({ params, searchParams }: PageProp
   // läuft separat und ändert sich erst bei echten Aktionen (Antworten /
   // "Als erledigt"-Button), damit die Session beim bloßen Anschauen nicht
   // aus dem Filter rausfällt.
+  //
+  // SENTINEL-SCHUTZ (User-Bug 2026-05-29): wenn die MA hier auf "Ungelesen"
+  // klickt, setzt markSessionUnread beide Felder auf FLAG_SENTINEL (1970).
+  // Danach feuert router.refresh() — diese Page-Page läuft erneut und würde
+  // last_opened wieder auf now() setzen, was den Sentinel überschreibt und
+  // die "Ungelesen"-Markierung zunichte macht. Wir prüfen daher zuerst, ob
+  // last_opened bereits ein Sentinel ist, und überschreiben NICHT in dem Fall.
   await svc
     .from("chat_sessions")
     .update({ last_opened_by_agent_at: new Date().toISOString() })
-    .eq("id", sessionId);
+    .eq("id", sessionId)
+    // Nur updaten wenn es KEIN Sentinel (vor 2000) ist
+    .or("last_opened_by_agent_at.is.null,last_opened_by_agent_at.gte.2000-01-01");
 
   // Aktive Avatars für Selector
   const { data: avatars } = await svc
