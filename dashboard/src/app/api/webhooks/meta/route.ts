@@ -778,11 +778,28 @@ function isReactionOnly(text: string, attachments: { type: string; url: string }
   // Wenn ein Medien-Anhang da ist (Foto/Video/Audio/Story-Mention),
   // ist das KEINE pure-reaction — wird vom Audio/Video-Bypass-Code
   // weiter oben gehandhabt.
+  // Hinweis: story_reply ist KEIN Medien-Anhang in diesem Sinne — die
+  // Antwort auf eine Story ist meistens nur emotional ("schön!") ohne
+  // echte Frage. Wir behandeln sie deshalb separat unten.
   const mediaAttachmentTypes = ["image", "video", "audio", "ephemeral", "story_mention"];
   if (attachments.some(a => mediaAttachmentTypes.includes(a.type))) return false;
 
   const raw = (text || "").trim();
-  if (raw.length === 0) return true; // Reine Story-Reply ohne Text → reactive
+  const isStoryReply = attachments.some(a => a.type === "story_reply");
+
+  // Story-Reply ohne Frage = pure Reaktion auf unsere Story (User-Feedback
+  // 2026-05-29: auch "Wunderschön!!!😘" braucht keinen Bot-Antwort, das
+  // ist nur Begeisterung). Frage-Indikator: "?" ODER ein konkretes
+  // Anliegen-Keyword. Sonst skippen wir.
+  if (isStoryReply) {
+    const hasQuestionMark = /\?/.test(raw);
+    const hasIntent = /\b(wie|wann|wo|warum|wieso|habt|haben|gibt es|ist das|kommt|preis|kosten|kaufen|bestell|verfügbar|frei|termin|öffnungs|adresse|kontakt|größe|länge|farbe|methode|info|frage)\b/i.test(raw);
+    if (!hasQuestionMark && !hasIntent) {
+      return true;
+    }
+  }
+
+  if (raw.length === 0) return true; // Leere Customer-Message ohne Anhang
 
   // Strip alle Emojis (umfassender Unicode-Range) und Sonderzeichen.
   // Wenn danach < 2 Buchstaben/Ziffern übrig sind, ist's reactive.
