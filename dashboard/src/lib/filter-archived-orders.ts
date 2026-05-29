@@ -21,24 +21,19 @@ function formatDeDate(iso: string): string {
  *   4. Fallback: keep original sheet ankunft.
  */
 function buildAnkunftFromMeta(meta: OrderMeta, productName?: string): string | null {
-  // 1) Per-position: look up by Shopify product name (AlertProduct.product)
+  // 1) Per-position ETA: look up by Shopify product name (AlertProduct.product).
+  //    If multiple ETAs exist for this product in this order (split delivery),
+  //    show the EARLIEST one — that's the precise next-arrival date for at least
+  //    some of the stock.
   if (productName) {
     const positionEtas = meta.itemEtasByShopify.get(productName);
     if (positionEtas && positionEtas.length > 0) {
-      if (positionEtas.length === 1) {
-        return `ca. Ankunft: ${formatDeDate(positionEtas[0])}`;
-      }
-      const parts = positionEtas.map((d, i) => `T${i + 1}: ${formatDeDate(d)}`).join(" · ");
-      return `ca. Ankunft: ${parts}`;
+      return `ca. Ankunft: ${formatDeDate(positionEtas[0])}`;
     }
   }
-  // 2) Partial shipments
+  // 2) Partial shipments — use earliest un-arrived ETA
   if (meta.shipmentEtas.length > 0) {
-    if (meta.shipmentEtas.length === 1) {
-      return `ca. Ankunft: ${formatDeDate(meta.shipmentEtas[0])}`;
-    }
-    const parts = meta.shipmentEtas.map((d, i) => `T${i + 1}: ${formatDeDate(d)}`).join(" · ");
-    return `ca. Ankunft: ${parts}`;
+    return `ca. Ankunft: ${formatDeDate(meta.shipmentEtas[0])}`;
   }
   // 3) Order-level ETA
   if (meta.eta) return `ca. Ankunft: ${formatDeDate(meta.eta)}`;

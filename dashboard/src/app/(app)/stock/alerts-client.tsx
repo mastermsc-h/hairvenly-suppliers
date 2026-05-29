@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
-import { Search, AlertTriangle, AlertCircle, Truck, Package, ExternalLink, Split } from "lucide-react";
+import { Search, AlertTriangle, AlertCircle, Truck, Package, ExternalLink } from "lucide-react";
 import type { AlertProduct } from "@/lib/stock-sheets";
 import type { OrderMeta } from "@/lib/order-name-map";
 import SyncBadge from "./sync-badge";
@@ -466,15 +466,6 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
   );
 }
 
-/**
- * True if the `ankunft` text contains multiple ETAs (partial shipments).
- * Format produced by buildAnkunftFromMeta(): "ca. Ankunft: T1: 28.05. · T2: 15.06.2026"
- */
-function isPartial(ankunft: string | null | undefined): boolean {
-  if (!ankunft) return false;
-  return ankunft.includes("T1:");
-}
-
 function AlertSection({
   label,
   items,
@@ -539,27 +530,17 @@ function AlertSection({
                   <div className="mt-1 space-y-0.5">
                     {item.perOrder.map((o, j) => {
                       const meta = orderIdByName?.[o.name];
-                      const partial = isPartial(o.ankunft);
                       const line = (
-                        <span className="inline-flex items-center gap-1">
-                          {partial && <Split size={10} className="text-amber-600 shrink-0" />}
-                          <span>
-                            {o.name}: {o.menge}g {o.ankunft && `· ${o.ankunft}`}
-                          </span>
-                        </span>
+                        <>
+                          {o.name}: {o.menge}g {o.ankunft && `· ${o.ankunft}`}
+                        </>
                       );
-                      const linkClass = partial
-                        ? "text-xs text-amber-700 hover:underline font-medium"
-                        : "text-xs text-indigo-600 hover:underline";
-                      const plainClass = partial
-                        ? "text-xs text-amber-700 font-medium inline-flex items-center gap-1"
-                        : "text-xs text-neutral-500";
                       return (
                         <div key={j} className="flex items-center gap-1">
                           {meta?.id ? (
-                            <Link href={`/orders/${meta.id}`} className={linkClass}>{line}</Link>
+                            <Link href={`/orders/${meta.id}`} className="text-xs text-indigo-600 hover:underline">{line}</Link>
                           ) : (
-                            <div className={plainClass}>{line}</div>
+                            <div className="text-xs text-neutral-500">{line}</div>
                           )}
                           {meta?.trackingUrl && (
                             <a
@@ -659,47 +640,30 @@ function AlertSection({
                     <div className="flex flex-wrap gap-0.5">
                       {item.perOrder.map((o, j) => {
                         const meta = orderIdByName?.[o.name];
-                        const partial = isPartial(o.ankunft);
-                        const tooltip = `${o.name}: ${o.menge}g${o.ankunft ? ` — ${o.ankunft}` : ""}${
-                          partial ? " · Teillieferung" : ""
-                        }${meta?.id ? " · Bestellung öffnen" : ""}`;
+                        const tooltip = `${o.name}: ${o.menge}g${o.ankunft ? ` — ${o.ankunft}` : ""}${meta?.id ? " · Bestellung öffnen" : ""}`;
                         const content = (
                           <>
-                            {partial && <Split size={9} className="text-amber-600 shrink-0" />}
                             <span className="font-semibold">{o.menge}g</span>
-                            <span className={partial ? "text-amber-400" : "text-indigo-400"}>·</span>
-                            <span className={partial ? "text-amber-700 truncate max-w-[100px]" : "text-indigo-500 truncate max-w-[100px]"}>{o.name}</span>
-                            {o.ankunft && (
-                              <span className={partial ? "text-amber-600 whitespace-nowrap" : "text-indigo-400 whitespace-nowrap"}>
-                                · {o.ankunft}
-                              </span>
-                            )}
+                            <span className="text-indigo-400">·</span>
+                            <span className="text-indigo-500 truncate max-w-[100px]">{o.name}</span>
+                            {o.ankunft && <span className="text-indigo-400 whitespace-nowrap">· {o.ankunft}</span>}
                           </>
                         );
-                        const baseBg = partial
-                          ? "bg-amber-50 text-amber-800 hover:bg-amber-100"
-                          : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100";
-                        const baseBorder = partial
-                          ? "border-amber-200 hover:border-amber-400"
-                          : "border-indigo-100 hover:border-indigo-300";
                         return (
                           <span
                             key={j}
-                            className={`inline-flex items-stretch rounded overflow-hidden border transition ${baseBorder}`}
+                            className="inline-flex items-stretch rounded overflow-hidden border border-indigo-100 hover:border-indigo-300 transition"
                           >
                             {meta?.id ? (
                               <Link
                                 href={`/orders/${meta.id}`}
                                 title={tooltip}
-                                className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium transition ${baseBg}`}
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition"
                               >
                                 {content}
                               </Link>
                             ) : (
-                              <span
-                                className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium ${baseBg}`}
-                                title={tooltip}
-                              >
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-indigo-50 text-indigo-700" title={tooltip}>
                                 {content}
                               </span>
                             )}

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ExternalLink, Package, Wallet, Plus, Archive, Weight } from "lucide-react";
+import { ExternalLink, Package, Wallet, Plus, Archive, Weight, Split } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { usd, date } from "@/lib/format";
@@ -37,7 +37,7 @@ export default async function DashboardPage() {
     suppliersQuery = suppliersQuery.eq("id", mySupplierId);
   }
 
-  const [{ data: orders }, { data: suppliers }, { data: documents }, { data: payments }] =
+  const [{ data: orders }, { data: suppliers }, { data: documents }, { data: payments }, { data: shipmentsData }] =
     await Promise.all([
       ordersQuery.order("created_at", { ascending: false }),
       suppliersQuery.order("sort_order").order("name"),
@@ -46,6 +46,7 @@ export default async function DashboardPage() {
         .select("*")
         .in("kind", ["supplier_invoice", "payment_proof", "customs_document", "waybill", "order_overview", "packing_details"]),
       supabase.from("payments").select("paid_at, amount"),
+      supabase.from("order_shipments").select("order_id"),
     ]);
 
   const list = (orders ?? []) as OrderWithTotals[];
@@ -55,6 +56,11 @@ export default async function DashboardPage() {
     const arr = docsByOrder.get(d.order_id) ?? [];
     arr.push(d);
     docsByOrder.set(d.order_id, arr);
+  }
+  // Set of orderIds that have at least one Teillieferung
+  const ordersWithShipments = new Set<string>();
+  for (const s of (shipmentsData ?? []) as { order_id: string }[]) {
+    ordersWithShipments.add(s.order_id);
   }
 
   const totalOpen = list.reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
@@ -266,12 +272,22 @@ export default async function DashboardPage() {
                       {openOrders.map((o) => (
                         <tr key={o.id} className="odd:bg-white even:bg-neutral-50/60 hover:bg-indigo-50/40 transition">
                           <td className="px-5 py-2.5">
-                            <Link
-                              href={`/orders/${o.id}`}
-                              className="font-medium text-indigo-700 hover:text-indigo-900 hover:underline"
-                            >
-                              {o.label}
-                            </Link>
+                            <div className="inline-flex items-center gap-1.5">
+                              <Link
+                                href={`/orders/${o.id}`}
+                                className="font-medium text-indigo-700 hover:text-indigo-900 hover:underline"
+                              >
+                                {o.label}
+                              </Link>
+                              {ordersWithShipments.has(o.id) && (
+                                <span
+                                  className="inline-flex items-center gap-0.5 text-[9px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5 py-0.5"
+                                  title="Diese Bestellung ist in Teillieferungen aufgeteilt"
+                                >
+                                  <Split size={9} /> Teillieferungen
+                                </span>
+                              )}
+                            </div>
                             {(o.tags ?? []).length > 0 && (
                               <div className="flex items-center gap-1 mt-0.5">
                                 {(o.tags as string[]).map((tag: string) => (
@@ -348,7 +364,12 @@ export default async function DashboardPage() {
                       <Link key={`mobile-${o.id}`} href={`/orders/${o.id}`} className="block px-4 py-3 odd:bg-white even:bg-neutral-50/60 hover:bg-indigo-50/40 active:bg-indigo-50/60 transition">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <div className="font-medium text-indigo-700 text-sm truncate">{o.label}</div>
+                            <div className="font-medium text-indigo-700 text-sm truncate inline-flex items-center gap-1">
+                              {o.label}
+                              {ordersWithShipments.has(o.id) && (
+                                <Split size={11} className="text-amber-600 shrink-0" />
+                              )}
+                            </div>
                             {(o.tags ?? []).length > 0 && (
                               <div className="flex gap-1 mt-0.5">
                                 {(o.tags as string[]).map((tag: string) => (
