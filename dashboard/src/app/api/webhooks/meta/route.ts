@@ -612,6 +612,19 @@ async function routeIncoming(opts: {
     }
   }
 
+  // 💬 REACTION-ONLY-GUARD (User-Bug 2026-05-29: Kundin antwortet auf Story
+  // nur mit "😍" → Bot generiert Standard-Intro "Wie kann ich dir helfen?
+  // Suchst du Tapes …?" — total überflüssig, kostet Tokens, wirkt
+  // gedankenlos). Wenn die Customer-Message NUR aus Emojis / Reaktions-
+  // Zeichen besteht und kein Foto / Story-Mention / Video / Audio
+  // mit-anhängt, dann gibt es nichts Sinnvolles zu beantworten — wir
+  // skippen die Bot-Generierung komplett. Die MA sieht die Reaktion in
+  // der Inbox und entscheidet selbst, ob es eine Antwort braucht.
+  if (session.status === "active" && isReactionOnly(opts.text, opts.attachments || [])) {
+    console.log(`[meta-webhook] REACTION-ONLY (text="${(opts.text || "").slice(0,20)}", atts=${(opts.attachments || []).map(a => a.type).join(",") || "none"}) — skip bot trigger for session=${session.id.slice(0,8)}`);
+    return;
+  }
+
   // ── AUTO-RESPOND-OVERRIDE für Standard-Eröffnungen ──
   // Standard-Muster (Begrüßung ohne Anliegen / Farbberatungs-Wunsch ohne Foto)
   // werden auto-beantwortet, EGAL was bot_mode oder Kill-Switch sagen.
@@ -745,6 +758,55 @@ async function routeIncoming(opts: {
  * auch wenn die Session auf bot_mode='off' steht. Spart der Mitarbeiterin
  * generische Antworten und bereitet die Konversation vor.
  */
+/**
+ * Erkennt rein reaktive Customer-Messages — nur Emojis, Reaktions-
+ * Zeichen oder Mini-Bestätigungen ohne echten Inhalt. Beispiele:
+ *   "😍"   "❤️"   "🥰🥰"   "👍"   "🔥"   "ok"   "okay"
+ *
+ * Wenn nur eines dieser Pattern UND kein Foto/Video/Audio/Story-Mention
+ * im Anhang ist, gibt es nichts Sinnvolles zu beantworten. Story-Reply
+ * mit nur Emoji zählt auch als reaktive Antwort — die Story ist der
+ * Kontext-Trigger, aber es gibt keine Frage zu beantworten.
+ *
+ * NICHT als reaktiv zählen:
+ *   - Texte mit Buchstaben/Ziffern jeglicher Sprache
+ *   - Foto/Video/Audio im Anhang (das wird separat gehandhabt)
+ *   - Story-Mention (das ist die Kundin, die unsere Story teilt — anders
+ *     als ihre Reply darauf)
+ */
+function isReactionOnly(text: string, attachments: { type: string; url: string }[]): boolean {
+  // Wenn ein Medien-Anhang da ist (Foto/Video/Audio/Story-Mention),
+  // ist das KEINE pure-reaction — wird vom Audio/Video-Bypass-Code
+  // weiter oben gehandhabt.
+  const mediaAttachmentTypes = ["image", "video", "audio", "ephemeral", "story_mention"];
+  if (attachments.some(a => mediaAttachmentTypes.includes(a.type))) return false;
+
+  const raw = (text || "").trim();
+  if (raw.length === 0) return true; // Reine Story-Reply ohne Text → reactive
+
+  // Strip alle Emojis (umfassender Unicode-Range) und Sonderzeichen.
+  // Wenn danach < 2 Buchstaben/Ziffern übrig sind, ist's reactive.
+  const stripped = raw
+    // Emoji-Ranges (Pictographic + Modifier + Skin-Tone + ZWJ)
+    .replace(/\p{Extended_Pictographic}/gu, "")
+    .replace(/\p{Emoji_Modifier_Base}/gu, "")
+    .replace(/\p{Emoji_Modifier}/gu, "")
+    .replace(/‍/g, "")
+    .replace(/[☀-⟿]/g, "")
+    .replace(/[︀-️]/g, "")
+    // Häufige Sonderzeichen entfernen
+    .replace(/[❣️♥♡✨⭐🌟💫💕💖💗💓💝💘♥️❤️]/g, "")
+    .trim();
+
+  // Auch reine Mini-Bestätigungen ohne Frage:
+  const miniAcks = /^(ok|okay|okey|👌|jo|jep|aha|achso|achsoo+|ahso+|mhm|hm+|alles\s+klar|cool|gut|super|nice|toll|danke|danke!|dankee+|gerne|gern|jaja|jaaa+)\.?!?$/i;
+  if (miniAcks.test(raw)) return true;
+
+  // Nach Strip nur noch < 2 alphanumerische Zeichen → reactive
+  const alphanumeric = stripped.replace(/[^\p{L}\p{N}]/gu, "");
+  return alphanumeric.length < 2;
+}
+
 function detectAutoRespondType(text: string, attachments: { type: string; url: string }[]): "intro" | "color_no_photo" | null {
   const t = (text || "").toLowerCase().trim();
   const hasImages = attachments.some(a => a.type === "image" && a.url);
