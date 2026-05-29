@@ -523,6 +523,144 @@ export function stripImpossibleLengthLineCombos(text: string): string {
 }
 
 /**
+ * URL↔Farbe-Slug-Token-Validator.
+ *
+ * Erkennt Fälle wo Bot eine Farbe X behauptet und eine URL postet, deren
+ * Slug eine ANDERE Farbe enthält (z.B. "ESPRESSO BROWN" + URL .../caramel-fudge…).
+ *
+ * Ursache solcher Fälle: meistens Daten-Drift in product_colors.shopify_url
+ * (DB sagt Farbe X = Espresso Brown, URL zeigt aber auf Caramel-Fudge-Slug).
+ * Bot vertraut der DB → klickbare URL führt Kundin zum FALSCHEN Produkt.
+ *
+ * Logik:
+ *   1. Tokenisiere Slug (nach Stopwords-Filter und DE→EN-Normalisierung)
+ *   2. Finde Farbnamen-Claim 80-120 Zeichen VOR der URL (CAPS-Pattern,
+ *      Bullet+CamelCase oder "**FARBE**")
+ *   3. Tokenisiere Claim mit gleicher Normalisierung
+ *   4. Wenn KEIN claim-Token in den slug-Tokens vorkommt → Mismatch
+ *
+ * Defensive: false-positive-Schutz durch Stopword-Liste + Min-Token-Länge 4.
+ *
+ * Sibling-Sweep: gleiches Pattern für /collections/-URLs (nicht implementiert
+ * weil Bot per Regel keine Collection-Links posten soll).
+ */
+const COLOR_SLUG_STOPWORDS = new Set([
+  // Methoden/Subtypes
+  "tape", "tapes", "bondings", "bonding", "weft", "wefts", "tressen", "ponytail",
+  "extensions", "extension", "mini", "standard", "classic", "invisible", "genius",
+  "clip", "clips", "keratin", "butterfly",
+  // Linien
+  "russisch", "russisches", "russischen", "russische", "usbekisch", "usbekische",
+  "wellig", "wellige", "glatt", "glatte", "haar", "haare", "echthaar", "us",
+  // Maße / numerisch — werden separat behandelt
+  // Sonstiges
+  "die", "der", "das", "und", "oder", "ist", "mit", "von", "zu", "auf",
+  "tape-extensions", "von-uns",
+]);
+
+/** Minimale DE→EN-Map für Farbtoken-Vergleich. Symmetrisch. */
+const COLOR_SYNONYM_BIDIR: Array<[string, string]> = [
+  ["braun", "brown"],
+  ["schwarz", "black"],
+  ["blond", "blonde"],
+  ["blond", "blond"],
+  ["rot", "red"],
+  ["aschbraun", "ash"],
+  ["aschbraune", "ash"],
+  ["asch", "ash"],
+  ["mokka", "mokka"],
+  ["mokka", "mocha"],
+  ["mokkabraun", "mocha"],
+  ["mokkabraune", "mocha"],
+  ["espresso", "espresso"],
+  ["dunkel", "dark"],
+  ["hell", "light"],
+  ["kupfer", "copper"],
+  ["karamell", "caramel"],
+  ["honig", "honey"],
+  ["pearl", "pearl"],
+  ["snowy", "snowy"],
+  ["smoky", "smoky"],
+  ["taupe", "taupe"],
+  ["champagner", "champagne"],
+  ["natural", "natur"],
+];
+
+function expandColorToken(t: string): string[] {
+  const out = new Set<string>([t]);
+  for (const [a, b] of COLOR_SYNONYM_BIDIR) {
+    if (t === a || t.includes(a)) out.add(b);
+    if (t === b || t.includes(b)) out.add(a);
+  }
+  return Array.from(out);
+}
+
+function tokenizeForColorCompare(s: string): string[] {
+  return s
+    .toLowerCase()
+    .replace(/[^a-zäöüß0-9\s\-/]/g, " ")
+    .split(/[\s\-/]+/)
+    .filter(t => t.length >= 3) // 3 erlaubt "ash"/"red"/"tan" als gültige Color-Tokens
+    .filter(t => !COLOR_SLUG_STOPWORDS.has(t))
+    .filter(t => !/^\d+(cm|g)?$/.test(t))
+    .filter(t => !/^[0-9]+[a-z]?$/.test(t)); // variant codes 2a/4a/3t/etc. raus
+}
+
+export function stripUrlColorSlugMismatch(text: string): { text: string; stripped: number } {
+  if (!text || !text.includes("hairvenly.de/products/")) return { text, stripped: 0 };
+  const urlRe = /https?:\/\/(?:www\.)?hairvenly\.de\/products\/([a-z0-9\-_/]+)(?:\?[^\s)]*)?/gi;
+  const matches = Array.from(text.matchAll(urlRe));
+  if (matches.length === 0) return { text, stripped: 0 };
+
+  const toStrip: string[] = [];
+  for (const m of matches) {
+    const fullUrl = m[0];
+    const slug = m[1];
+    const urlIdx = m.index ?? 0;
+    // Suche Farb-Claim 120 Zeichen davor (bis zur vorherigen URL oder Anfang)
+    const prevUrlIdx = matches
+      .filter(x => (x.index ?? 0) < urlIdx)
+      .map(x => (x.index ?? 0) + x[0].length)
+      .reduce((a, b) => Math.max(a, b), 0);
+    const ctxStart = Math.max(prevUrlIdx, urlIdx - 200);
+    const ctx = text.slice(ctxStart, urlIdx);
+
+    // Versuche eine Farb-Claim-Zeile zu finden:
+    // (a) **FARBNAME** ...
+    // (b) Zeile, die mit • / - / * oder Variant-Code (z.B. "2A", "ESPRESSO") beginnt
+    // (c) Letzter Satz vor URL
+    let claim = "";
+    const capsBoldMatch = ctx.match(/\*\*([A-ZÄÖÜ][A-ZÄÖÜa-zäöüß0-9\s/+\-]{2,40})\*\*/);
+    const bulletColorMatch = ctx.split(/\n/).reverse().find(line => /^[\s•\-*]*([A-ZÄÖÜ0-9][A-ZÄÖÜa-zäöüß0-9\s]{2,40})/.test(line));
+    if (capsBoldMatch) claim = capsBoldMatch[1];
+    else if (bulletColorMatch) claim = bulletColorMatch;
+    else claim = ctx.split(/[.!?\n]/).filter(Boolean).slice(-1)[0] || "";
+
+    const claimTokens = tokenizeForColorCompare(claim).flatMap(expandColorToken);
+    const slugTokens = tokenizeForColorCompare(slug).flatMap(expandColorToken);
+    if (claimTokens.length === 0 || slugTokens.length === 0) continue;
+
+    const overlap = claimTokens.some(ct => slugTokens.some(st => st === ct || st.includes(ct) || ct.includes(st)));
+    if (!overlap) {
+      console.warn(`[sanitizer] URL-COLOR-SLUG-MISMATCH claim="${claim.trim().slice(0, 60)}" → slug="${slug}" (claimT=${claimTokens.join(",")} slugT=${slugTokens.join(",")})`);
+      toStrip.push(fullUrl);
+    }
+  }
+
+  if (toStrip.length === 0) return { text, stripped: 0 };
+  let out = text;
+  for (const u of Array.from(new Set(toStrip))) {
+    const esc = u.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(new RegExp(`\\[[^\\]\\n]+\\]\\(${esc}\\)`, "g"), "");
+    out = out.replace(new RegExp(`\\s*\\(${esc}\\)`, "g"), "");
+    out = out.replace(new RegExp(`(^|\\n)[ \\t]*[•\\-*]?[ \\t]*${esc}[ \\t]*(?=\\n|$)`, "g"), "$1");
+    out = out.replace(new RegExp(esc, "g"), "");
+  }
+  out = out.replace(/\n{3,}/g, "\n\n").replace(/[ \t]+\n/g, "\n").trim();
+  return { text: out, stripped: toStrip.length };
+}
+
+/**
  * Detect: Bot behauptet OFFEN-Status für einen Tag, der laut
  * Day-Query-Pre-LLM-Check ZU ist (Wochenende, Feiertag).
  *
@@ -592,6 +730,13 @@ export function applyAllOutputSanitizers(
   out = scrubClosedHandover(out);
   out = scrubSupplierNames(out);
   out = stripColorUrlMismatch(out);
+  // Zusätzlich: Slug-Token vs. Farb-Claim-Token (deckt DB-Drift wie
+  // "Espresso Brown" → URL caramel-fudge-… ab).
+  {
+    const r = stripUrlColorSlugMismatch(out);
+    if (r.stripped > 0) console.warn(`[sanitizer] stripUrlColorSlugMismatch: ${r.stripped} URL(s) gestrippt (Slug-Token vs Farb-Claim)`);
+    out = r.text;
+  }
   if (opts.colorUrlMap) out = autoAddColorUrls(out, opts.colorUrlMap);
   // URL-Limit VOR Markdown-Strip — limitUrls erkennt noch [Label](URL)-Form
   out = limitUrls(out, 3);
