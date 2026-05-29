@@ -2,6 +2,43 @@ import type { AlertProduct, TopsSellerSection } from "@/lib/stock-sheets";
 import type { OrderMeta } from "@/lib/order-name-map";
 import { isArchived } from "@/lib/order-name-map";
 
+/** Format ISO YYYY-MM-DD to German DD.MM.YYYY for display in stock sheets. */
+function formatDeDate(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${d}.${m}.${y}`;
+}
+
+/**
+ * For each perOrder entry whose name maps to a known order in our DB,
+ * override the `ankunft` (ETA) field with the order's manually-set ETA.
+ *
+ * Why: Stock sheets reflect a static ETA from Shopify/Apps Script. Our DB
+ * has the manually-updated ETA per order (which can shift earlier or later
+ * based on real-world status updates). The DB is the source of truth.
+ *
+ * Sheet format example: "ca. Ankunft: 02.06.2026"
+ * We replicate that format.
+ */
+export function overrideEtaFromDb(
+  items: AlertProduct[],
+  orderIdByName?: Record<string, OrderMeta>,
+): AlertProduct[] {
+  if (!orderIdByName) return items;
+  return items.map((item) => {
+    let changed = false;
+    const newPerOrder = item.perOrder.map((o) => {
+      const meta = orderIdByName[o.name];
+      if (!meta?.eta) return o;
+      const newAnkunft = `ca. Ankunft: ${formatDeDate(meta.eta)}`;
+      if (newAnkunft === o.ankunft) return o;
+      changed = true;
+      return { ...o, ankunft: newAnkunft };
+    });
+    if (!changed) return item;
+    return { ...item, perOrder: newPerOrder };
+  });
+}
+
 /**
  * Remove archived (stocked / cancelled) orders from stock data.
  *
@@ -21,10 +58,19 @@ export function filterArchivedFromStock(
 ): AlertProduct[] {
   if (!orderIdByName) return items;
   return items.map((item) => {
-    const filtered = item.perOrder.filter((o) => !isArchived(orderIdByName[o.name]));
-    if (filtered.length === item.perOrder.length) return item;
-    const unterwegsG = filtered.reduce((s, o) => s + (o.menge || 0), 0);
-    return { ...item, perOrder: filtered, unterwegsG };
+    // 1) Filter out archived orders
+    const kept = item.perOrder.filter((o) => !isArchived(orderIdByName[o.name]));
+    // 2) Override ankunft with DB ETA where we have a match
+    const withEta = kept.map((o) => {
+      const meta = orderIdByName[o.name];
+      if (!meta?.eta) return o;
+      return { ...o, ankunft: `ca. Ankunft: ${formatDeDate(meta.eta)}` };
+    });
+    const archivedRemoved = kept.length !== item.perOrder.length;
+    const etaChanged = withEta.some((o, i) => o.ankunft !== kept[i].ankunft);
+    if (!archivedRemoved && !etaChanged) return item;
+    const unterwegsG = withEta.reduce((s, o) => s + (o.menge || 0), 0);
+    return { ...item, perOrder: withEta, unterwegsG };
   });
 }
 

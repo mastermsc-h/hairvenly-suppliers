@@ -8,6 +8,7 @@ export interface OrderMeta {
   trackingNumber: string | null;
   trackingUrl: string | null;
   status: string | null;
+  eta: string | null; // ISO YYYY-MM-DD from orders.eta
 }
 
 /** Statuses where the order is considered archived and should be hidden everywhere. */
@@ -37,7 +38,7 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
   const [{ data: orders }, { data: suppliers }] = await Promise.all([
     supabase
       .from("orders")
-      .select("id, label, supplier_id, order_date, tracking_number, tracking_url, status")
+      .select("id, label, supplier_id, order_date, tracking_number, tracking_url, status, eta")
       .order("order_date", { ascending: false }),
     supabase.from("suppliers").select("id, name, regions"),
   ]);
@@ -77,6 +78,7 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
     tracking_number: string | null;
     tracking_url: string | null;
     status: string | null;
+    eta: string | null;
   };
 
   // Build keys: "family|YYYY-MM-DD" → OrderMeta (canonical date = ISO).
@@ -87,6 +89,7 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
       trackingNumber: o.tracking_number,
       trackingUrl: o.tracking_url,
       status: o.status ?? null,
+      eta: o.eta ?? null,
     };
 
     const iso = toIsoDate(o.order_date);

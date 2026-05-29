@@ -2,7 +2,7 @@ import { requireProfile } from "@/lib/auth";
 import { t, type Locale } from "@/lib/i18n";
 import { readDashboardAlerts, readTopseller, enrichAlertsWithTier } from "@/lib/stock-sheets";
 import { fetchOrderIdByName } from "@/lib/order-name-map";
-import { filterArchivedFromStock } from "@/lib/filter-archived-orders";
+import { filterArchivedFromStock, overrideEtaFromDb } from "@/lib/filter-archived-orders";
 import AlertsClient from "../alerts-client";
 
 export const revalidate = 120;
