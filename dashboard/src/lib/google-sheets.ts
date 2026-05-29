@@ -792,33 +792,36 @@ export async function readOrderSheetEtas(
     const rows = data.values ?? [];
     if (rows.length < 4) return { etas: new Map() };
 
-    // Find the header row: the row that contains both "Farbcode" (or "Color") and
-    // either "Method" or "Quantity" — that's how we know it's the item table header.
-    let headerRowIdx = -1;
+    // Find columns INDEPENDENTLY by scanning all top-rows:
+    //   1) Item header row → has "Farbcode" → gives Method/Length/Color columns
+    //   2) "ETA" label can be in any row (often in the meta block at row 1)
+    let itemHeaderRow = -1;
     let colMethod = -1, colLength = -1, colColor = -1, colEta = -1;
-    for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    for (let i = 0; i < Math.min(rows.length, 20); i++) {
       const r = rows[i] ?? [];
       const cells = r.map((c) => String(c ?? "").trim().toLowerCase());
+      // Find the items header row
       const fcIdx = cells.findIndex((c) => c === "farbcode" || c === "color" || c === "farbe");
-      const mIdx = cells.findIndex((c) => c === "method" || c === "methode");
-      const lIdx = cells.findIndex(
-        (c) => c === "length/variant" || c === "length" || c === "länge" || c === "laenge" || c === "variant" || c === "länge/variante",
-      );
-      const eIdx = cells.findIndex(
-        (c) => c === "eta" || c === "ankunft" || c === "ankunftsdatum" || c === "voraussichtliche lieferung",
-      );
-      if (fcIdx >= 0 && eIdx >= 0) {
-        headerRowIdx = i;
-        colMethod = mIdx;
-        colLength = lIdx;
+      if (fcIdx >= 0 && itemHeaderRow < 0) {
+        itemHeaderRow = i;
         colColor = fcIdx;
-        colEta = eIdx;
-        break;
+        colMethod = cells.findIndex((c) => c === "method" || c === "methode");
+        colLength = cells.findIndex(
+          (c) => c === "length/variant" || c === "length" || c === "länge" || c === "laenge" || c === "variant" || c === "länge/variante",
+        );
+      }
+      // Find ETA column anywhere (meta-row or item-header-row)
+      if (colEta < 0) {
+        const eIdx = cells.findIndex(
+          (c) => c === "eta" || c === "ankunft" || c === "ankunftsdatum",
+        );
+        if (eIdx >= 0) colEta = eIdx;
       }
     }
 
-    // No header found OR no ETA column → nothing to override
-    if (headerRowIdx < 0 || colEta < 0) return { etas: new Map() };
+    // No item header found OR no ETA column → nothing to override
+    if (itemHeaderRow < 0 || colEta < 0 || colColor < 0) return { etas: new Map() };
+    const headerRowIdx = itemHeaderRow;
 
     const result = new Map<string, string>();
     // Fill-down for method + length (common in merged-cell sheets)
@@ -856,4 +859,98 @@ function parseGermanDate(s: string): string | null {
   const mm = mo.padStart(2, "0");
   const dd = d.padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+/**
+ * Read FULL item rows from an order's Google Sheet (method/length/color/qty/eta).
+ * Used to import items into DB when an order has none.
+ */
+export async function readOrderSheetItems(
+  sheetUrl: string,
+): Promise<{
+  items?: {
+    method: string;
+    length: string;
+    color: string; // without leading "#"
+    quantity: number;
+    eta: string | null; // ISO
+  }[];
+  error?: string;
+}> {
+  const m = sheetUrl.match(/\/spreadsheets\/d\/([^/]+).*[?&]gid=(\d+)/);
+  if (!m) return { error: "Sheet-URL konnte nicht geparst werden" };
+  const spreadsheetId = m[1];
+  const sheetGid = Number(m[2]);
+
+  try {
+    const auth = getAuth();
+    const sheets = google.sheets({ version: "v4", auth });
+    const { data: meta } = await sheets.spreadsheets.get({
+      spreadsheetId,
+      fields: "sheets.properties",
+    });
+    const tab = meta.sheets?.find((s) => s.properties?.sheetId === sheetGid);
+    if (!tab?.properties?.title) return { error: "Tab nicht gefunden" };
+    const tabName = tab.properties.title;
+
+    const { data } = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${tabName}'!A1:K1000`,
+    });
+    const rows = data.values ?? [];
+    if (rows.length < 4) return { items: [] };
+
+    // Locate header columns (same logic as readOrderSheetEtas)
+    let itemHeaderRow = -1;
+    let colMethod = -1, colLength = -1, colColor = -1, colQty = -1, colEta = -1;
+    for (let i = 0; i < Math.min(rows.length, 20); i++) {
+      const r = rows[i] ?? [];
+      const cells = r.map((c) => String(c ?? "").trim().toLowerCase());
+      const fcIdx = cells.findIndex((c) => c === "farbcode" || c === "color" || c === "farbe");
+      if (fcIdx >= 0 && itemHeaderRow < 0) {
+        itemHeaderRow = i;
+        colColor = fcIdx;
+        colMethod = cells.findIndex((c) => c === "method" || c === "methode");
+        colLength = cells.findIndex(
+          (c) => c === "length/variant" || c === "length" || c === "länge" || c === "laenge" || c === "variant" || c === "länge/variante",
+        );
+        colQty = cells.findIndex((c) => c === "quantity" || c === "quantity (g)" || c === "menge" || c === "menge (g)" || c === "gramm");
+      }
+      if (colEta < 0) {
+        const eIdx = cells.findIndex(
+          (c) => c === "eta" || c === "ankunft" || c === "ankunftsdatum",
+        );
+        if (eIdx >= 0) colEta = eIdx;
+      }
+    }
+    if (itemHeaderRow < 0 || colColor < 0) return { items: [] };
+
+    const items: { method: string; length: string; color: string; quantity: number; eta: string | null }[] = [];
+    let lastMethod = "";
+    let lastLength = "";
+    for (let i = itemHeaderRow + 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r || r.length === 0) continue;
+      const method = (colMethod >= 0 ? String(r[colMethod] ?? "").trim() : "") || lastMethod;
+      const length = (colLength >= 0 ? String(r[colLength] ?? "").trim() : "") || lastLength;
+      const colorRaw = String(r[colColor] ?? "").trim();
+      const qtyCell = colQty >= 0 ? String(r[colQty] ?? "").trim() : "";
+      const etaCell = colEta >= 0 ? String(r[colEta] ?? "").trim() : "";
+      if (method && method.toLowerCase() !== "subtotal") lastMethod = method;
+      if (length) lastLength = length;
+      if (!colorRaw || method.toLowerCase() === "subtotal") continue;
+      const qty = Number(qtyCell.replace(/[^\d.,-]/g, "").replace(",", "."));
+      if (!Number.isFinite(qty) || qty <= 0) continue;
+      items.push({
+        method,
+        length,
+        color: colorRaw.replace(/^#/, ""),
+        quantity: qty,
+        eta: parseGermanDate(etaCell),
+      });
+    }
+    return { items };
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }

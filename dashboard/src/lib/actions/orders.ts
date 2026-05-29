@@ -465,18 +465,22 @@ export async function generateAndUploadPDF(orderId: string): Promise<{ signedUrl
 }
 
 /**
- * Sync per-position ETAs from the order's Google Sheet back into our DB.
- * Reads the "ETA" column on each item row and updates order_items.eta.
+ * Sync items + per-position ETAs from the order's Google Sheet back into our DB.
+ *
+ * - If DB has items: just updates their `eta` field where the sheet has a date.
+ * - If DB is empty (e.g. legacy order, only in sheet): IMPORTS items from the
+ *   sheet (method, length, color, qty, eta) + tries to link to product_colors
+ *   for color_id via Hairvenly name matching.
  */
 export async function syncOrderItemsEtaFromSheet(
   orderId: string,
-): Promise<{ updated?: number; error?: string }> {
+): Promise<{ updated?: number; imported?: number; error?: string }> {
   const profile = await requireProfile();
   const supabase = await createClient();
 
   const { data: order } = await supabase
     .from("orders")
-    .select("sheet_url")
+    .select("sheet_url, supplier_id")
     .eq("id", orderId)
     .single();
   if (!order?.sheet_url) return { error: "Bestellung hat kein Sheet-Link" };
@@ -485,38 +489,88 @@ export async function syncOrderItemsEtaFromSheet(
     .from("order_items")
     .select("id, method_name, length_value, color_name, eta")
     .eq("order_id", orderId);
-  if (!items || items.length === 0) return { error: "Keine Positionen vorhanden" };
 
-  const { readOrderSheetEtas } = await import("@/lib/google-sheets");
-  const r = await readOrderSheetEtas(order.sheet_url);
-  if (r.error || !r.etas) return { error: r.error ?? "Sheet konnte nicht gelesen werden" };
+  const gs = await import("@/lib/google-sheets");
 
-  let updated = 0;
-  for (const it of items) {
-    const key = `${it.method_name.toLowerCase()}|${it.length_value.toLowerCase()}|${it.color_name.replace(/^#/, "").toLowerCase()}`;
-    const newEta = r.etas.get(key) ?? null;
-    if (newEta === it.eta) continue;
-    if (!newEta) continue; // don't overwrite if sheet cell is empty
-    const { error: updErr } = await supabase
-      .from("order_items")
-      .update({ eta: newEta })
-      .eq("id", it.id);
-    if (!updErr) updated++;
+  // Case A: items exist → update ETAs only
+  if (items && items.length > 0) {
+    const r = await gs.readOrderSheetEtas(order.sheet_url);
+    if (r.error || !r.etas) return { error: r.error ?? "Sheet konnte nicht gelesen werden" };
+
+    let updated = 0;
+    for (const it of items) {
+      const key = `${it.method_name.toLowerCase()}|${it.length_value.toLowerCase()}|${it.color_name.replace(/^#/, "").toLowerCase()}`;
+      const newEta = r.etas.get(key) ?? null;
+      if (newEta === it.eta || !newEta) continue;
+      const { error: updErr } = await supabase
+        .from("order_items")
+        .update({ eta: newEta })
+        .eq("id", it.id);
+      if (!updErr) updated++;
+    }
+
+    if (updated > 0) {
+      await logEvent(supabase, orderId, profile.id, "sheet_sync",
+        `${updated} Positions-ETA(s) aus Sheet synchronisiert`);
+    }
+    revalidatePath(`/orders/${orderId}`);
+    revalidatePath(`/stock`, "layout");
+    return { updated };
   }
 
-  if (updated > 0) {
-    await logEvent(
-      supabase,
-      orderId,
-      profile.id,
-      "sheet_sync",
-      `${updated} Positions-ETA(s) aus Sheet synchronisiert`,
-    );
+  // Case B: no items in DB → import from sheet
+  const r = await gs.readOrderSheetItems(order.sheet_url);
+  if (r.error || !r.items) return { error: r.error ?? "Sheet konnte nicht gelesen werden" };
+  if (r.items.length === 0) return { error: "Im Sheet wurden keine Positionen gefunden" };
+
+  // Best-effort color_id lookup via product_colors for this supplier
+  const { data: catalogRows } = await supabase
+    .from("product_colors")
+    .select("id, name_hairvenly, product_lengths!length_id(value, product_methods!method_id(name, supplier_id))")
+    .order("name_hairvenly");
+
+  type CatRow = {
+    id: string;
+    name_hairvenly: string | null;
+    product_lengths: {
+      value: string | null;
+      product_methods: { name: string | null; supplier_id: string | null } | { name: string | null; supplier_id: string | null }[] | null;
+    } | { value: string | null; product_methods: { name: string | null; supplier_id: string | null } | { name: string | null; supplier_id: string | null }[] | null }[] | null;
+  };
+  const colorLookup = new Map<string, string>();
+  for (const c of (catalogRows ?? []) as CatRow[]) {
+    if (!c.name_hairvenly) continue;
+    const pl = Array.isArray(c.product_lengths) ? c.product_lengths[0] : c.product_lengths;
+    if (!pl?.value) continue;
+    const pm = Array.isArray(pl.product_methods) ? pl.product_methods[0] : pl.product_methods;
+    if (!pm?.name) continue;
+    if (pm.supplier_id && pm.supplier_id !== order.supplier_id) continue;
+    const key = `${pm.name.toLowerCase()}|${pl.value.toLowerCase()}|${c.name_hairvenly.toLowerCase()}`;
+    colorLookup.set(key, c.id);
   }
+
+  const inserts = r.items.map((it) => ({
+    order_id: orderId,
+    color_id: colorLookup.get(
+      `${it.method.toLowerCase()}|${it.length.toLowerCase()}|${it.color.toLowerCase()}`,
+    ) ?? null,
+    method_name: it.method,
+    length_value: it.length,
+    color_name: it.color,
+    quantity: it.quantity,
+    unit: "g",
+    eta: it.eta,
+  }));
+
+  const { error: insErr } = await supabase.from("order_items").insert(inserts);
+  if (insErr) return { error: insErr.message };
+
+  await logEvent(supabase, orderId, profile.id, "sheet_sync",
+    `${inserts.length} Position(en) aus Sheet importiert`);
 
   revalidatePath(`/orders/${orderId}`);
   revalidatePath(`/stock`, "layout");
-  return { updated };
+  return { imported: inserts.length };
 }
 
 export async function exportOrderToGoogleSheet(orderId: string): Promise<{ sheetUrl?: string; error?: string }> {
