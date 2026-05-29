@@ -9,6 +9,27 @@ function formatDeDate(iso: string): string {
 }
 
 /**
+ * Build the "ankunft" display string from an OrderMeta.
+ * Returns null if there's nothing to display.
+ *
+ * Priority:
+ *   1. If there are partial shipments with ETAs: show all of them as
+ *      "Teil 1: 02.06. · Teil 2: 15.06.2026"
+ *   2. Otherwise: use the order's main ETA → "ca. Ankunft: 02.06.2026"
+ */
+function buildAnkunftFromMeta(meta: OrderMeta): string | null {
+  if (meta.shipmentEtas.length > 0) {
+    if (meta.shipmentEtas.length === 1) {
+      return `ca. Ankunft: ${formatDeDate(meta.shipmentEtas[0])}`;
+    }
+    const parts = meta.shipmentEtas.map((d, i) => `T${i + 1}: ${formatDeDate(d)}`).join(" · ");
+    return `ca. Ankunft: ${parts}`;
+  }
+  if (meta.eta) return `ca. Ankunft: ${formatDeDate(meta.eta)}`;
+  return null;
+}
+
+/**
  * For each perOrder entry whose name maps to a known order in our DB,
  * override the `ankunft` (ETA) field with the order's manually-set ETA.
  *
@@ -28,9 +49,9 @@ export function overrideEtaFromDb(
     let changed = false;
     const newPerOrder = item.perOrder.map((o) => {
       const meta = orderIdByName[o.name];
-      if (!meta?.eta) return o;
-      const newAnkunft = `ca. Ankunft: ${formatDeDate(meta.eta)}`;
-      if (newAnkunft === o.ankunft) return o;
+      if (!meta) return o;
+      const newAnkunft = buildAnkunftFromMeta(meta);
+      if (!newAnkunft || newAnkunft === o.ankunft) return o;
       changed = true;
       return { ...o, ankunft: newAnkunft };
     });
@@ -60,11 +81,13 @@ export function filterArchivedFromStock(
   return items.map((item) => {
     // 1) Filter out archived orders
     const kept = item.perOrder.filter((o) => !isArchived(orderIdByName[o.name]));
-    // 2) Override ankunft with DB ETA where we have a match
+    // 2) Override ankunft with DB ETA / shipment ETAs where we have a match
     const withEta = kept.map((o) => {
       const meta = orderIdByName[o.name];
-      if (!meta?.eta) return o;
-      return { ...o, ankunft: `ca. Ankunft: ${formatDeDate(meta.eta)}` };
+      if (!meta) return o;
+      const newAnkunft = buildAnkunftFromMeta(meta);
+      if (!newAnkunft || newAnkunft === o.ankunft) return o;
+      return { ...o, ankunft: newAnkunft };
     });
     const archivedRemoved = kept.length !== item.perOrder.length;
     const etaChanged = withEta.some((o, i) => o.ankunft !== kept[i].ankunft);

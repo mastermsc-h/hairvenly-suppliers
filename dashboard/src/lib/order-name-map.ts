@@ -9,6 +9,11 @@ export interface OrderMeta {
   trackingUrl: string | null;
   status: string | null;
   eta: string | null; // ISO YYYY-MM-DD from orders.eta
+  /**
+   * ETAs of all partial shipments that have not arrived yet, sorted ascending.
+   * If non-empty, replaces the order-level ETA for stock display.
+   */
+  shipmentEtas: string[];
 }
 
 /** Statuses where the order is considered archived and should be hidden everywhere. */
@@ -35,13 +40,24 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
 
   // Include ALL orders (not just active) — sheet transit data may lag behind
   // DB status changes. We want to link badges even for delivered/cancelled orders.
-  const [{ data: orders }, { data: suppliers }] = await Promise.all([
+  const [{ data: orders }, { data: suppliers }, { data: shipmentRows }] = await Promise.all([
     supabase
       .from("orders")
       .select("id, label, supplier_id, order_date, tracking_number, tracking_url, status, eta")
       .order("order_date", { ascending: false }),
     supabase.from("suppliers").select("id, name, regions"),
+    supabase.from("order_shipments").select("order_id, eta, arrived_at"),
   ]);
+
+  // Group shipment ETAs per order (only un-arrived, only with ETA set)
+  const shipmentsByOrder = new Map<string, string[]>();
+  for (const s of (shipmentRows ?? []) as { order_id: string; eta: string | null; arrived_at: string | null }[]) {
+    if (s.arrived_at) continue;
+    if (!s.eta) continue;
+    if (!shipmentsByOrder.has(s.order_id)) shipmentsByOrder.set(s.order_id, []);
+    shipmentsByOrder.get(s.order_id)!.push(s.eta);
+  }
+  for (const arr of shipmentsByOrder.values()) arr.sort();
 
   const map: Record<string, OrderMeta> = {};
   if (!orders || orders.length === 0) return map;
@@ -90,6 +106,7 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
       trackingUrl: o.tracking_url,
       status: o.status ?? null,
       eta: o.eta ?? null,
+      shipmentEtas: shipmentsByOrder.get(o.id) ?? [],
     };
 
     const iso = toIsoDate(o.order_date);
