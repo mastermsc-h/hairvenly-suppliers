@@ -374,7 +374,7 @@ export async function createWizardOrder(data: {
 
   if (orderErr || !order) return { error: orderErr?.message ?? "Fehler beim Erstellen" };
 
-  // Insert order items
+  // Insert order items (eta defaults to parent order's eta; can be overridden later via sheet sync)
   const items = data.items.map((item) => ({
     order_id: order.id,
     color_id: item.colorId,
@@ -383,6 +383,7 @@ export async function createWizardOrder(data: {
     color_name: item.colorName,
     quantity: item.quantity,
     unit: item.unit,
+    eta,
   }));
 
   const { error: itemsErr } = await supabase.from("order_items").insert(items);
@@ -425,6 +426,7 @@ export async function generateAndUploadPDF(orderId: string): Promise<{ signedUrl
       lengthValue: i.length_value,
       colorName: i.color_name,
       quantity: i.quantity,
+      eta: i.eta ?? null,
     })),
   );
 
@@ -462,6 +464,61 @@ export async function generateAndUploadPDF(orderId: string): Promise<{ signedUrl
   return { signedUrl: signedData?.signedUrl };
 }
 
+/**
+ * Sync per-position ETAs from the order's Google Sheet back into our DB.
+ * Reads the "ETA" column on each item row and updates order_items.eta.
+ */
+export async function syncOrderItemsEtaFromSheet(
+  orderId: string,
+): Promise<{ updated?: number; error?: string }> {
+  const profile = await requireProfile();
+  const supabase = await createClient();
+
+  const { data: order } = await supabase
+    .from("orders")
+    .select("sheet_url")
+    .eq("id", orderId)
+    .single();
+  if (!order?.sheet_url) return { error: "Bestellung hat kein Sheet-Link" };
+
+  const { data: items } = await supabase
+    .from("order_items")
+    .select("id, method_name, length_value, color_name, eta")
+    .eq("order_id", orderId);
+  if (!items || items.length === 0) return { error: "Keine Positionen vorhanden" };
+
+  const { readOrderSheetEtas } = await import("@/lib/google-sheets");
+  const r = await readOrderSheetEtas(order.sheet_url);
+  if (r.error || !r.etas) return { error: r.error ?? "Sheet konnte nicht gelesen werden" };
+
+  let updated = 0;
+  for (const it of items) {
+    const key = `${it.method_name.toLowerCase()}|${it.length_value.toLowerCase()}|${it.color_name.replace(/^#/, "").toLowerCase()}`;
+    const newEta = r.etas.get(key) ?? null;
+    if (newEta === it.eta) continue;
+    if (!newEta) continue; // don't overwrite if sheet cell is empty
+    const { error: updErr } = await supabase
+      .from("order_items")
+      .update({ eta: newEta })
+      .eq("id", it.id);
+    if (!updErr) updated++;
+  }
+
+  if (updated > 0) {
+    await logEvent(
+      supabase,
+      orderId,
+      profile.id,
+      "sheet_sync",
+      `${updated} Positions-ETA(s) aus Sheet synchronisiert`,
+    );
+  }
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath(`/stock`, "layout");
+  return { updated };
+}
+
 export async function exportOrderToGoogleSheet(orderId: string): Promise<{ sheetUrl?: string; error?: string }> {
   const profile = await requireAdmin();
   const supabase = await createClient();
@@ -497,6 +554,7 @@ export async function exportOrderToGoogleSheet(orderId: string): Promise<{ sheet
       lengthValue: i.length_value,
       colorName: i.color_name,
       quantity: i.quantity,
+      eta: i.eta ?? null,
     })),
     {
       status: order.status,

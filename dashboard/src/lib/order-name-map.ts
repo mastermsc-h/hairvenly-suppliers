@@ -14,6 +14,13 @@ export interface OrderMeta {
    * If non-empty, replaces the order-level ETA for stock display.
    */
   shipmentEtas: string[];
+  /**
+   * Per-position ETAs keyed by the Shopify product name (which matches
+   * AlertProduct.product / Stock-Calc product name).
+   * Map: shopify_name → set of distinct ETAs (ISO YYYY-MM-DD, sorted asc).
+   * Used by stock views to show a product-specific ETA when one is set.
+   */
+  itemEtasByShopify: Map<string, string[]>;
 }
 
 /** Statuses where the order is considered archived and should be hidden everywhere. */
@@ -40,13 +47,17 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
 
   // Include ALL orders (not just active) — sheet transit data may lag behind
   // DB status changes. We want to link badges even for delivered/cancelled orders.
-  const [{ data: orders }, { data: suppliers }, { data: shipmentRows }] = await Promise.all([
+  const [{ data: orders }, { data: suppliers }, { data: shipmentRows }, { data: itemRows }] = await Promise.all([
     supabase
       .from("orders")
       .select("id, label, supplier_id, order_date, tracking_number, tracking_url, status, eta")
       .order("order_date", { ascending: false }),
     supabase.from("suppliers").select("id, name, regions"),
     supabase.from("order_shipments").select("order_id, eta, arrived_at"),
+    // Join order_items with product_colors to know the Shopify product name per item
+    supabase
+      .from("order_items")
+      .select("order_id, eta, product_colors!color_id(name_shopify)"),
   ]);
 
   // Group shipment ETAs per order (only un-arrived, only with ETA set)
@@ -58,6 +69,23 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
     shipmentsByOrder.get(s.order_id)!.push(s.eta);
   }
   for (const arr of shipmentsByOrder.values()) arr.sort();
+
+  // Per-order, per-Shopify-name ETA index
+  type ItemRow = {
+    order_id: string;
+    eta: string | null;
+    product_colors: { name_shopify: string | null } | { name_shopify: string | null }[] | null;
+  };
+  const itemEtasByOrder = new Map<string, Map<string, Set<string>>>();
+  for (const it of (itemRows ?? []) as ItemRow[]) {
+    const pc = Array.isArray(it.product_colors) ? it.product_colors[0] : it.product_colors;
+    const shopify = pc?.name_shopify;
+    if (!shopify || !it.eta) continue;
+    if (!itemEtasByOrder.has(it.order_id)) itemEtasByOrder.set(it.order_id, new Map());
+    const m = itemEtasByOrder.get(it.order_id)!;
+    if (!m.has(shopify)) m.set(shopify, new Set());
+    m.get(shopify)!.add(it.eta);
+  }
 
   const map: Record<string, OrderMeta> = {};
   if (!orders || orders.length === 0) return map;
@@ -100,6 +128,16 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
   // Build keys: "family|YYYY-MM-DD" → OrderMeta (canonical date = ISO).
   // Orders are sorted DESC, so first occurrence of a key wins (= newest order).
   for (const o of orders as Row[]) {
+    // Build per-Shopify-name ETA list
+    const itemMap = itemEtasByOrder.get(o.id);
+    const itemEtasByShopify = new Map<string, string[]>();
+    if (itemMap) {
+      for (const [shopify, etaSet] of itemMap.entries()) {
+        const arr = Array.from(etaSet).sort();
+        itemEtasByShopify.set(shopify, arr);
+      }
+    }
+
     const meta: OrderMeta = {
       id: o.id,
       trackingNumber: o.tracking_number,
@@ -107,6 +145,7 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
       status: o.status ?? null,
       eta: o.eta ?? null,
       shipmentEtas: shipmentsByOrder.get(o.id) ?? [],
+      itemEtasByShopify,
     };
 
     const iso = toIsoDate(o.order_date);

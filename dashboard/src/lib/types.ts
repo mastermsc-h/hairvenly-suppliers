@@ -269,6 +269,7 @@ export interface OrderItem {
   quantity: number;
   unit: string;
   shipment_id: string | null;
+  eta: string | null; // ISO YYYY-MM-DD
 }
 
 /** Full catalog tree loaded for the wizard */

@@ -44,6 +44,7 @@ interface OrderItemRow {
   lengthValue: string;
   colorName: string;
   quantity: number;
+  eta?: string | null; // optional per-position ETA (ISO YYYY-MM-DD)
 }
 
 /**
@@ -135,8 +136,17 @@ export async function exportOrderToSheet(
         meta?.eta ? new Date(meta.eta).toLocaleDateString("de-DE") : "—",
       ],
       [], // Empty row before item table
-      ["Method", "Length/Variant", "Farbcode", "Quantity (g)"],
+      ["Method", "Length/Variant", "Farbcode", "Quantity (g)", "ETA"],
     ];
+
+    // Format a single ETA value (ISO YYYY-MM-DD) to German DD.MM.YYYY
+    const fmtEta = (s: string | null | undefined) => {
+      if (!s) return "";
+      const d = new Date(s + "T00:00:00");
+      if (Number.isNaN(d.getTime())) return "";
+      return d.toLocaleDateString("de-DE");
+    };
+    const fallbackEta = fmtEta(meta?.eta);
 
     // Track which rows belong to which method (for coloring)
     const groupRanges: { startRow: number; endRow: number; method: string }[] = [];
@@ -164,7 +174,13 @@ export async function exportOrderToSheet(
         groupStart = allRows.length;
         currentMethodName = item.methodName;
       }
-      allRows.push([item.methodName, item.lengthValue, `#${item.colorName}`, item.quantity]);
+      allRows.push([
+        item.methodName,
+        item.lengthValue,
+        `#${item.colorName}`,
+        item.quantity,
+        fmtEta(item.eta) || fallbackEta,
+      ]);
     }
     // Close last group
     if (groupStart >= 0) {
@@ -174,7 +190,7 @@ export async function exportOrderToSheet(
     // Add subtotal
     const totalQty = items.reduce((s, i) => s + i.quantity, 0);
     allRows.push([]);
-    allRows.push(["Subtotal", "", "", totalQty]);
+    allRows.push(["Subtotal", "", "", totalQty, ""]);
 
     // Write data
     await sheets.spreadsheets.values.update({
@@ -239,7 +255,7 @@ export async function exportOrderToSheet(
         // Auto-resize columns
         {
           autoResizeDimensions: {
-            dimensions: { sheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 5 },
+            dimensions: { sheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 6 },
           },
         },
       ];
@@ -731,4 +747,81 @@ export async function importSuggestions(tabName: string): Promise<{ rows: Sugges
     console.error("Import suggestions failed:", message);
     return { error: `Import fehlgeschlagen: ${message}` };
   }
+}
+
+/**
+ * Read per-position ETAs from an exported order tab.
+ *
+ * The order tab layout (written by exportOrderToSheet):
+ *   Row 1: ["Bestellung", "Status", "Gewicht", "Voraussichtliche Lieferung"]
+ *   Row 2: [<order name>, <status>, <weight>, <eta>]
+ *   Row 3: []
+ *   Row 4: ["Method", "Length/Variant", "Farbcode", "Quantity (g)", "ETA"]
+ *   Row 5+: items (or empty rows between groups)
+ *   Last:  ["Subtotal", ...]
+ *
+ * Returns a map: `${method}|${length}|${color}` (lowercased) → ETA-ISO-string
+ * Empty cells / "Subtotal" / group separators are skipped.
+ */
+export async function readOrderSheetEtas(
+  sheetUrl: string,
+): Promise<{ etas?: Map<string, string>; error?: string }> {
+  const m = sheetUrl.match(/\/spreadsheets\/d\/([^/]+).*[?&]gid=(\d+)/);
+  if (!m) return { error: "Sheet-URL konnte nicht geparst werden" };
+  const spreadsheetId = m[1];
+  const sheetGid = Number(m[2]);
+
+  try {
+    const auth = getAuth();
+    const sheets = google.sheets({ version: "v4", auth });
+
+    // Find the tab name for the given gid
+    const { data: meta } = await sheets.spreadsheets.get({
+      spreadsheetId,
+      fields: "sheets.properties",
+    });
+    const tab = meta.sheets?.find((s) => s.properties?.sheetId === sheetGid);
+    if (!tab?.properties?.title) return { error: "Tab nicht gefunden" };
+    const tabName = tab.properties.title;
+
+    // Read range
+    const { data } = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${tabName}'!A1:E1000`,
+    });
+    const rows = data.values ?? [];
+    if (rows.length < 5) return { etas: new Map() };
+
+    const result = new Map<string, string>();
+    // Items start at row index 4 (0-based); header row 3 is the column titles
+    for (let i = 4; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r || r.length === 0) continue;
+      const method = String(r[0] ?? "").trim();
+      const length = String(r[1] ?? "").trim();
+      const color = String(r[2] ?? "").trim();
+      const etaCell = String(r[4] ?? "").trim();
+      if (!method || method === "Subtotal") continue;
+      if (!color) continue;
+      const iso = parseGermanDate(etaCell);
+      if (!iso) continue;
+      const key = `${method.toLowerCase()}|${length.toLowerCase()}|${color.replace(/^#/, "").toLowerCase()}`;
+      result.set(key, iso);
+    }
+    return { etas: result };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { error: message };
+  }
+}
+
+/** Parse "DD.MM.YYYY" → ISO "YYYY-MM-DD". Returns null if invalid. */
+function parseGermanDate(s: string): string | null {
+  const m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
+  if (!m) return null;
+  const [, d, mo, y] = m;
+  const yyyy = y.length === 2 ? `20${y}` : y;
+  const mm = mo.padStart(2, "0");
+  const dd = d.padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }

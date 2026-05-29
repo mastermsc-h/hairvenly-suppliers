@@ -13,11 +13,26 @@ function formatDeDate(iso: string): string {
  * Returns null if there's nothing to display.
  *
  * Priority:
- *   1. If there are partial shipments with ETAs: show all of them as
- *      "Teil 1: 02.06. · Teil 2: 15.06.2026"
- *   2. Otherwise: use the order's main ETA → "ca. Ankunft: 02.06.2026"
+ *   1. Per-position ETA (from order_items.eta, joined via product_colors)
+ *      if there's a match for the AlertProduct's Shopify name.
+ *      Multiple distinct values → "T1: 28.05. · T2: 15.06.2026"
+ *   2. Partial shipment ETAs (un-arrived order_shipments) — concatenated.
+ *   3. The order's main ETA from orders.eta.
+ *   4. Fallback: keep original sheet ankunft.
  */
-function buildAnkunftFromMeta(meta: OrderMeta): string | null {
+function buildAnkunftFromMeta(meta: OrderMeta, productName?: string): string | null {
+  // 1) Per-position: look up by Shopify product name (AlertProduct.product)
+  if (productName) {
+    const positionEtas = meta.itemEtasByShopify.get(productName);
+    if (positionEtas && positionEtas.length > 0) {
+      if (positionEtas.length === 1) {
+        return `ca. Ankunft: ${formatDeDate(positionEtas[0])}`;
+      }
+      const parts = positionEtas.map((d, i) => `T${i + 1}: ${formatDeDate(d)}`).join(" · ");
+      return `ca. Ankunft: ${parts}`;
+    }
+  }
+  // 2) Partial shipments
   if (meta.shipmentEtas.length > 0) {
     if (meta.shipmentEtas.length === 1) {
       return `ca. Ankunft: ${formatDeDate(meta.shipmentEtas[0])}`;
@@ -25,6 +40,7 @@ function buildAnkunftFromMeta(meta: OrderMeta): string | null {
     const parts = meta.shipmentEtas.map((d, i) => `T${i + 1}: ${formatDeDate(d)}`).join(" · ");
     return `ca. Ankunft: ${parts}`;
   }
+  // 3) Order-level ETA
   if (meta.eta) return `ca. Ankunft: ${formatDeDate(meta.eta)}`;
   return null;
 }
@@ -50,7 +66,7 @@ export function overrideEtaFromDb(
     const newPerOrder = item.perOrder.map((o) => {
       const meta = orderIdByName[o.name];
       if (!meta) return o;
-      const newAnkunft = buildAnkunftFromMeta(meta);
+      const newAnkunft = buildAnkunftFromMeta(meta, item.product);
       if (!newAnkunft || newAnkunft === o.ankunft) return o;
       changed = true;
       return { ...o, ankunft: newAnkunft };
@@ -81,11 +97,11 @@ export function filterArchivedFromStock(
   return items.map((item) => {
     // 1) Filter out archived orders
     const kept = item.perOrder.filter((o) => !isArchived(orderIdByName[o.name]));
-    // 2) Override ankunft with DB ETA / shipment ETAs where we have a match
+    // 2) Override ankunft using per-position / shipment / order ETAs (in that priority)
     const withEta = kept.map((o) => {
       const meta = orderIdByName[o.name];
       if (!meta) return o;
-      const newAnkunft = buildAnkunftFromMeta(meta);
+      const newAnkunft = buildAnkunftFromMeta(meta, item.product);
       if (!newAnkunft || newAnkunft === o.ankunft) return o;
       return { ...o, ankunft: newAnkunft };
     });

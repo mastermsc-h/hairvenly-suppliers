@@ -26,6 +26,7 @@ import BackLink from "./back-link";
 import OrderItemsSection from "./order-items-section";
 import StatusDropdown from "./status-dropdown";
 import ShipmentsSection from "./shipments-section";
+import SyncEtaButton from "./sync-eta-button";
 
 export default async function OrderDetailPage({
   params,
@@ -211,14 +212,17 @@ export default async function OrderDetailPage({
                 label={t(locale, "order.google_sheet")}
                 value={
                   o.sheet_url ? (
-                    <a
-                      href={o.sheet_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-blue-600 hover:underline inline-flex items-center gap-1"
-                    >
-                      {t(locale, "order.open_sheet")} <ExternalLink size={12} />
-                    </a>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <a
+                        href={o.sheet_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 hover:underline inline-flex items-center gap-1"
+                      >
+                        {t(locale, "order.open_sheet")} <ExternalLink size={12} />
+                      </a>
+                      {profile.is_admin && <SyncEtaButton orderId={o.id} />}
+                    </div>
                   ) : (
                     "—"
                   )
