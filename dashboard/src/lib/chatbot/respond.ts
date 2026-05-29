@@ -966,83 +966,71 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     if (openUsrDesc.length > 0) {
       const orderedOldestFirst = openUsrDesc.slice().reverse();
 
-      // 🕐 STALE-CLUSTER-DETEKTION (User-Bug 2026-05-29): Wenn zwischen zwei
-      // unbeantworteten Customer-Messages ein Zeit-Gap > 12h liegt, gehören
-      // die NICHT mehr zum selben Anliegen. Beispiel: "Heyy ich bin auf dem
-      // Weg verspäte mich" (26.05) + Foto heute (29.05) → 3 Tage Gap → die
-      // alte Verspätungs-Nachricht ist erledigt, die neue ist ein neues
-      // Anliegen. Wir splitten in Cluster und nutzen NUR den jüngsten.
-      const STALE_GAP_MS = 12 * 3600 * 1000;
-      type MsgRow = typeof orderedOldestFirst[number];
-      const clusters: MsgRow[][] = [];
-      let cur: MsgRow[] = [];
-      for (const m of orderedOldestFirst) {
-        if (cur.length === 0) {
-          cur.push(m);
-        } else {
-          const prevT = new Date(cur[cur.length - 1].created_at).getTime();
-          const curT = new Date(m.created_at).getTime();
-          if (curT - prevT > STALE_GAP_MS) {
-            clusters.push(cur);
-            cur = [m];
-          } else {
-            cur.push(m);
-          }
-        }
-      }
-      if (cur.length > 0) clusters.push(cur);
-      const latestCluster = clusters[clusters.length - 1];
-      const staleClusters = clusters.slice(0, -1);
-      const hasStale = staleClusters.length > 0;
-
-      // Werktags-Stunden seit der jüngsten offenen Frage IM AKTUELLEN
-      // Cluster bis jetzt — Sorry darf nicht für stale messages gelten.
-      const youngestT = new Date(latestCluster[latestCluster.length - 1].created_at).getTime();
+      // Werktags-Stunden seit der jüngsten offenen Frage bis jetzt
+      const youngestT = new Date(orderedOldestFirst[orderedOldestFirst.length - 1].created_at).getTime();
       const businessHoursSinceYoungest = businessHoursBetween(youngestT, Date.now());
       const apologyDue = businessHoursSinceYoungest >= 24;
 
-      if (hasStale) {
-        // Stale-Cluster sichtbar machen (als Kontext), dann harte Regel
-        const staleSummary = staleClusters
-          .flatMap(c => c)
-          .map(m => {
-            const dt = new Date(m.created_at);
-            const fmt = `${dt.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })} ${dt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
-            return `- [${fmt}] ${(m.content || "").slice(0, 120)}`;
-          })
-          .join("\n");
-        const latestSummary = latestCluster
-          .map((m, i) => {
-            const dt = new Date(m.created_at);
-            const fmt = `${dt.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })} ${dt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
-            return `${i + 1}. [${fmt}] ${m.content}`;
-          })
-          .join("\n");
-        openTurnsHint =
-          `\n\n## 🕐 STALE-NACHRICHTEN — IGNORIEREN\nFolgende ältere Nachrichten sind über 12 h vor der jüngsten Customer-Message und gehören NICHT zum aktuellen Anliegen. Sie sind erledigt/abgelaufen (z.B. Termin-Hinweise, Spontan-Reaktionen). NICHT darauf antworten, NICHT erwähnen, NICHT entschuldigen:\n` +
-          staleSummary +
-          `\n\n## AKTUELLE OFFENE KUNDEN-NACHRICHT${latestCluster.length > 1 ? "EN" : ""} (${latestCluster.length} Stück)\n` +
-          latestSummary +
-          `\n\n→ Antworte AUSSCHLIESSLICH auf die aktuelle${latestCluster.length > 1 ? "n" : ""} Nachricht${latestCluster.length > 1 ? "en" : ""}. ` +
-          `Die Stale-Liste oben ist NUR Kontext — KEIN "kommst du gut an?" / "passt der Termin noch?" / "bist du da gut angekommen?" und auch KEINE Entschuldigung für die alte Antwort.`;
-      } else if (openUsrDesc.length > 1) {
-        openTurnsHint =
-          `\n\n## OFFENE KUNDEN-NACHRICHTEN (${openUsrDesc.length} Stück seit letzter Antwort von uns)\n` +
-          orderedOldestFirst.map((m, i) => {
-            const dt = new Date(m.created_at);
-            const fmt = `${dt.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })} ${dt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
-            return `${i + 1}. [${fmt}] ${m.content}`;
-          }).join("\n");
+      // 🕐 SITUATIV-VERFALLEN-HEURISTIK (User-Feedback 2026-05-29):
+      // Zeitgebundene Live-Anliegen ("auf dem Weg", "verspäte mich", "bin
+      // gleich da", "5 Min später") verlieren ihre Relevanz NACH dem Tag,
+      // egal ob beantwortet oder nicht. Im Gegensatz dazu bleiben Sach-
+      // Fragen (Produkt, Farbe, Preis, Reklamation) auch nach Tagen offen.
+      // Wir markieren situative Messages, die älter als 18h sind, als
+      // "verfallen" — der Bot soll sie ignorieren, nicht beantworten, nicht
+      // entschuldigen.
+      const SITUATIONAL_RE = /\b(auf\s+dem\s+weg|unterwegs|verspät\w*|verspaet\w*|bin\s+(?:gleich|fast|in\s+\d+|schon\s+fast|jetzt)\s+da|gleich\s+da|fast\s+da|gleich\s+(?:bei|im)\s+(?:euch|salon|laden|studio|laden\s+da)|bin\s+(?:angekommen|da)|(?:in|noch)\s+\d+\s*(?:min|minuten)|komme\s+(?:gleich|in)\s+\d+|melde\s+mich\s+gleich)\b/i;
+      const STALE_SITUATIONAL_AGE_MS = 18 * 3600 * 1000;
+      const nowMs = Date.now();
+      type MsgRow = typeof orderedOldestFirst[number];
+      const isStaleSituational = (m: MsgRow): boolean => {
+        const ageMs = nowMs - new Date(m.created_at).getTime();
+        if (ageMs < STALE_SITUATIONAL_AGE_MS) return false;
+        return SITUATIONAL_RE.test(m.content || "");
+      };
+      const staleSituational = orderedOldestFirst.filter(isStaleSituational);
+      const activeMessages = orderedOldestFirst.filter(m => !isStaleSituational(m));
 
-        openTurnsHint += `\n\n→ ALLE diese Nachrichten gehören zum SELBEN Anliegen (zwischendurch kam keine Antwort von uns). ` +
-          `Beantworte sie als ZUSAMMENHÄNGENDEN BLOCK in EINER Antwort — natürlich wie eine echte Mitarbeiterin, ` +
-          `nicht stur Punkt für Punkt. Greife die ältere Sachfrage genauso auf wie das spätere Nachhaken.`;
-      } else {
+      const formatMsg = (m: MsgRow, idx: number | null = null): string => {
+        const dt = new Date(m.created_at);
+        const fmt = `${dt.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })} ${dt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
+        const prefix = idx === null ? "- " : `${idx + 1}. `;
+        return `${prefix}[${fmt}] ${(m.content || "").slice(0, 200)}`;
+      };
+
+      // Wenn ALLE Messages stale-situational sind → der Bot soll nichts dazu
+      // sagen. Wir geben keinen openTurnsHint (oder einen leeren) zurück.
+      if (activeMessages.length === 0 && staleSituational.length > 0) {
         openTurnsHint =
-          `\n\n## OFFENE KUNDEN-NACHRICHT\nDer Kunde hat eine Frage, die noch unbeantwortet ist. ` +
-          `Achte auf den GESAMTEN bisherigen Verlauf — was wurde schon besprochen (Haarstruktur, Farbe, Methode), ` +
-          `was wurde versprochen.`;
+          `\n\n## 🕐 SITUATIV-VERFALLENE NACHRICHTEN — IGNORIEREN\n` +
+          staleSituational.map(m => formatMsg(m)).join("\n") +
+          `\n\n→ Diese Nachrichten waren zeitgebundene Live-Anliegen ("bin auf dem Weg", "verspäte mich" o.ä.) und sind über 18h alt. Der Anlass ist erledigt — der Tag ist vorbei. NICHT darauf antworten, NICHT erwähnen, NICHT entschuldigen ("tut mir leid wegen der späten Antwort"), KEIN Smalltalk-Nachhaken ("bist du gut angekommen?"). Behandle es so, als hätte die Kundin gerade NEU geschrieben — wenn sie nichts geschrieben hat, gibt es nichts zu antworten.`;
+      } else if (activeMessages.length > 0) {
+        // Hauptfall: aktive Messages existieren. Stale-situational (falls
+        // vorhanden) werden als Kontext erwähnt, sind aber NICHT zu
+        // beantworten.
+        if (activeMessages.length === 1) {
+          openTurnsHint =
+            `\n\n## OFFENE KUNDEN-NACHRICHT\n` +
+            formatMsg(activeMessages[0]) +
+            `\n\n→ Antworte auf diese Nachricht. Achte auf den gesamten Verlauf (Haarstruktur, Farbe, Methode etc.) — was wurde schon besprochen, was wurde versprochen.`;
+        } else {
+          openTurnsHint =
+            `\n\n## OFFENE KUNDEN-NACHRICHTEN (${activeMessages.length} Stück seit letzter Antwort von uns)\n` +
+            activeMessages.map((m, i) => formatMsg(m, i)).join("\n") +
+            `\n\n→ Diese Nachrichten gehören sachlich zum selben Anliegen. Beantworte sie als ZUSAMMENHÄNGENDEN BLOCK in EINER Antwort — natürlich wie eine echte Mitarbeiterin, nicht stur Punkt für Punkt.`;
+        }
+
+        if (staleSituational.length > 0) {
+          openTurnsHint +=
+            `\n\n## 🕐 ZUSÄTZLICH: SITUATIV-VERFALLEN — NICHT BEANTWORTEN\n` +
+            staleSituational.map(m => formatMsg(m)).join("\n") +
+            `\n→ Diese Nachrichten waren zeitgebundene Live-Anliegen und über 18h alt. Anlass erledigt. NICHT erwähnen, NICHT entschuldigen, KEIN "bist du gut angekommen?".`;
+        }
       }
+      // (Wenn keine activeMessages UND keine stale → openTurnsHint bleibt "",
+      //  z.B. wenn die Kundin nur reagiert hat — wird vom Reaction-Guard
+      //  schon vorher abgefangen.)
 
       // Sorry-Regel: NUR wenn Werktags-Stunden ≥ 24h
       if (apologyDue) {
