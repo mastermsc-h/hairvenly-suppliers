@@ -107,7 +107,7 @@ export function splitLongMessage(text: string, maxLen = 700): string[] {
 // damit auch der Webhook (Audio-Bypass) sie nutzen kann.
 import { getBusinessHoursContext } from "./business-hours";
 import { BUSINESS_CONFIG } from "./business-config";
-import { stripColorUrlMismatch, limitUrls, stripFalseMediaLimitation, detectStrandedContactInfo } from "./output-sanitizers";
+import { stripColorUrlMismatch, limitUrls, stripFalseMediaLimitation, detectStrandedContactInfo, detectFalseOpeningClaim } from "./output-sanitizers";
 import { isLeanPromptEnabled } from "./settings";
 import { buildLeanHardRules } from "./lean-rules";
 
@@ -2276,6 +2276,24 @@ KEINE Farbnamen nennen — die MA macht das.`;
       if (!needsManualReview) {
         needsManualReview = true;
         manualReviewReason = "Bot hat möglicherweise die WhatsApp-Nummer an einer unpassenden Stelle eingefügt (Halluzination). Antwort wurde als Draft gespeichert — MA bitte die markierte Stelle prüfen und korrigieren bevor senden.";
+      }
+    }
+  }
+
+  // ── FALSE-OPENING-CLAIM-DETECTOR ────────────────────────────────────
+  // User-Bug 2026-05-29 (Freitag): Bot bestätigte "morgen 10-18 offen"
+  // obwohl morgen Samstag. Persona-Hint "Mo-Fr 10-18" reichte nicht —
+  // Sonnet rechnet den Wochentag nicht selbst aus.
+  // Pre-LLM-Inject (intent-day-query) liefert deterministisch dayQueryMatches;
+  // hier wird der Bot-Output gegen die Wahrheit validiert. Force-Draft bei
+  // false-positive auf "OFFEN für einen ZU-Tag".
+  if (pipelineCtx.dayQueryMatches && pipelineCtx.dayQueryMatches.length > 0) {
+    const openCheck = detectFalseOpeningClaim(finalText, pipelineCtx.dayQueryMatches);
+    if (openCheck.suspicious) {
+      console.warn(`[respond] FALSE-OPENING-CLAIM session=${sessionId.slice(0,8)} — ${openCheck.reason}`);
+      if (!needsManualReview) {
+        needsManualReview = true;
+        manualReviewReason = `Bot hat OFFEN-Status für einen Tag behauptet an dem wir ZU sind. ${openCheck.reason} Antwort wurde als Draft gespeichert — MA bitte korrigieren bevor senden.`;
       }
     }
   }

@@ -27,6 +27,7 @@ import { buildColorCodeContext, validateNegativeClaims, type ColorCodeMatch } fr
 import { buildStockEtaContext } from "./intent-stock-eta";
 import { enforceBusinessFacts } from "./intent-contact";
 import { applyAllOutputSanitizers } from "./output-sanitizers";
+import { detectDayQueries, buildDayQueryHint, type DayQueryMatch } from "./intent-day-query";
 
 /**
  * Context, der zwischen Pre-LLM und Post-LLM weitergegeben wird.
@@ -41,6 +42,9 @@ export type ChatbotPipelineContext = {
   customerAskedForPhotos?: boolean;
   /** Optional: Farbnamen → Shopify-URL (für Auto-URL-Inject im Sanitizer) */
   colorUrlMap?: Map<string, string>;
+  /** Pre-LLM Day-Query-Matches — Validator vergleicht später Bot-Output gegen
+   *  die tatsächlichen offen/zu-Status der referenzierten Tage. */
+  dayQueryMatches?: DayQueryMatch[];
 };
 
 /**
@@ -208,6 +212,23 @@ export async function applyPreLlmContext(
       "'Hab ich notiert — wir melden uns sobald sie da sind 💕'. " +
       "OHNE Tool-Call ist diese Bestätigung eine LEERE Zusage, die nirgends " +
       "gespeichert wird. NICHT vergessen!\n";
+  }
+
+  // ── 📅 DAY-QUERY-INJECTOR ───────────────────────────────────────
+  // Kundin fragt nach "morgen", "übermorgen", einem Wochentag oder dem
+  // Wochenende → deterministisch berechnen ob OFFEN oder ZU und als
+  // Hint injizieren. Verhindert Bug 2026-05-29 (Freitag, Bot bestätigt
+  // "morgen 10-18 offen" obwohl morgen Samstag). Sibling-Sweep: deckt
+  // morgen/übermorgen/heute/Wochentage/Wochenende in einem Pass ab.
+  try {
+    const dayMatches = detectDayQueries(detectionBuffer);
+    if (dayMatches.length > 0) {
+      ctx.dayQueryMatches = dayMatches;
+      const dayHint = buildDayQueryHint(dayMatches);
+      if (dayHint) dynamicHint += dayHint;
+    }
+  } catch (e) {
+    console.warn("[pipeline] day-query-injector error:", e);
   }
 
   // ── 📦 STOCK-INJECTOR (TODO) — wenn gebaut, dynamicHint ergänzen

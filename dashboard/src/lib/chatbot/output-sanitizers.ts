@@ -522,6 +522,61 @@ export function stripImpossibleLengthLineCombos(text: string): string {
   return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/**
+ * Detect: Bot behauptet OFFEN-Status für einen Tag, der laut
+ * Day-Query-Pre-LLM-Check ZU ist (Wochenende, Feiertag).
+ *
+ * Pattern wie detectStrandedContactInfo: KEIN Stripping (false-positive-
+ * Risiko zu hoch — Bot könnte z.B. korrekt "morgen ist Samstag, da sind
+ * wir zu" schreiben, was beides Wochentag UND "zu" enthält). Stattdessen
+ * Force-Draft: MA prüft und korrigiert.
+ *
+ * Bug 2026-05-29 (Freitag): Bot bestätigte "Ja genau, morgen haben wir
+ * offen von 10-18 Uhr 💕" obwohl morgen Samstag. Persona sagt zwar
+ * "Mo-Fr 10-18" aber Sonnet rechnet nicht selbst den Wochentag aus.
+ *
+ * Erwarteter Caller (respond.ts): nutzt pipelineCtx.dayQueryMatches.
+ */
+export function detectFalseOpeningClaim(
+  text: string,
+  dayQueryMatches: Array<{ trigger: string; status: { isOpen: boolean; weekday: string; reason: string } }>,
+): { suspicious: boolean; reason: string | null } {
+  if (!text || !dayQueryMatches || dayQueryMatches.length === 0) {
+    return { suspicious: false, reason: null };
+  }
+  const closedDays = dayQueryMatches.filter(m => !m.status.isOpen);
+  if (closedDays.length === 0) return { suspicious: false, reason: null };
+
+  const lower = text.toLowerCase();
+  // "Offen"-Indikatoren in der Nähe eines Tag-Triggers
+  const openIndicators = /(offen|geöffnet|auf|geboten|da\s+sind\s+wir|haben\s+wir\s+(auf|offen|geöffnet)|von\s+10[\s:-]?\s*(bis|-)\s*18|10[\s:-]?\s*[-–]\s*18|10\s*uhr|zwischen\s+10\s+und\s+18)/i;
+  // Aber: explizite Verneinung („nicht offen", „leider zu", „geschlossen") darf
+  // direkt vor/nach dem Trigger NICHT als false-claim zählen.
+  const closedIndicators = /(zu|geschlossen|nicht\s+(offen|geöffnet|auf)|leider\s+nicht|haben\s+wir\s+(zu|geschlossen|leider))/i;
+
+  for (const m of closedDays) {
+    const trigger = m.trigger.split(" ")[0]; // "samstag (wochenende)" → "samstag"
+    // Suche Trigger im Text + nahe Umgebung (±80 Zeichen)
+    const triggerRe = new RegExp(`\\b${trigger.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi");
+    let match;
+    while ((match = triggerRe.exec(lower)) !== null) {
+      const start = Math.max(0, match.index - 80);
+      const end = Math.min(lower.length, match.index + 80);
+      const window = lower.slice(start, end);
+      const claimsOpen = openIndicators.test(window);
+      const claimsClosed = closedIndicators.test(window);
+      // Wenn "offen"-Aussage näher am Trigger als "zu"-Aussage → suspicious
+      if (claimsOpen && !claimsClosed) {
+        return {
+          suspicious: true,
+          reason: `Bot behauptet OFFEN für "${m.trigger}" (${m.status.weekday}, ${m.status.reason}), aber wir sind ZU. Snippet: "${window.trim()}"`,
+        };
+      }
+    }
+  }
+  return { suspicious: false, reason: null };
+}
+
 export function applyAllOutputSanitizers(
   text: string,
   opts: { customerAskedForPhotos?: boolean; colorUrlMap?: Map<string, string> } = {}
