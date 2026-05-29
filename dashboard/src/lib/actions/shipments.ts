@@ -163,6 +163,102 @@ export async function deleteShipment(shipmentId: string) {
 }
 
 /**
+ * Bulk-set the ETA for a list of order_items.
+ */
+export async function setItemsEta(
+  orderId: string,
+  itemIds: string[],
+  eta: string | null,
+) {
+  const profile = await requireProfile();
+  const supabase = await createClient();
+  if (itemIds.length === 0) return { ok: true };
+
+  const { error } = await supabase
+    .from("order_items")
+    .update({ eta })
+    .in("id", itemIds)
+    .eq("order_id", orderId);
+  if (error) return { error: error.message };
+
+  await logEvent(
+    supabase,
+    orderId,
+    profile.id,
+    "items_eta",
+    eta
+      ? `ETA für ${itemIds.length} Position(en) gesetzt: ${eta}`
+      : `ETA für ${itemIds.length} Position(en) entfernt`,
+  );
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
+}
+
+/**
+ * Bulk-create a shipment AND assign the given items to it in one step.
+ * Returns the new shipment's id on success.
+ */
+export async function createShipmentForItems(
+  orderId: string,
+  itemIds: string[],
+  data: {
+    label?: string;
+    eta?: string;
+    shipped_at?: string;
+    tracking_number?: string;
+    tracking_url?: string;
+    notes?: string;
+  },
+): Promise<{ id?: string; error?: string }> {
+  const profile = await requireProfile();
+  const supabase = await createClient();
+
+  const payload: Record<string, unknown> = {
+    order_id: orderId,
+    label: data.label?.trim() || null,
+    eta: data.eta || null,
+    shipped_at: data.shipped_at || null,
+    tracking_number: data.tracking_number?.trim() || null,
+    tracking_url: data.tracking_url?.trim() || null,
+    notes: data.notes?.trim() || null,
+    created_by: profile.id,
+  };
+
+  const { data: created, error } = await supabase
+    .from("order_shipments")
+    .insert(payload)
+    .select("id")
+    .single();
+  if (error) return { error: error.message };
+  if (!created?.id) return { error: "Konnte Teillieferung nicht anlegen" };
+
+  if (itemIds.length > 0) {
+    // Also propagate the shipment's ETA onto each item (so per-position ETA matches)
+    const itemPatch: Record<string, unknown> = { shipment_id: created.id };
+    if (data.eta) itemPatch.eta = data.eta;
+    const { error: itemErr } = await supabase
+      .from("order_items")
+      .update(itemPatch)
+      .in("id", itemIds)
+      .eq("order_id", orderId);
+    if (itemErr) return { error: itemErr.message };
+  }
+
+  await logEvent(
+    supabase,
+    orderId,
+    profile.id,
+    "shipment",
+    `Teillieferung angelegt${data.label ? `: ${data.label}` : ""}${
+      itemIds.length > 0 ? ` · ${itemIds.length} Positionen` : ""
+    }${data.eta ? ` · ETA ${data.eta}` : ""}`,
+  );
+
+  revalidatePath(`/orders/${orderId}`);
+  return { id: created.id };
+}
+
+/**
  * Assign / re-assign order_items to a shipment.
  * Pass shipmentId = null to unassign.
  */

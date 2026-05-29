@@ -3,13 +3,15 @@
 import { useState, useTransition, useMemo } from "react";
 import {
   ChevronDown, ChevronRight, FileSpreadsheet, ExternalLink, Loader2, FileDown,
-  Plus, X, Trash2, RefreshCw, AlertCircle, Search,
+  Plus, X, Trash2, RefreshCw, AlertCircle, Search, Check, Split, CalendarClock, Truck,
 } from "lucide-react";
 import { t, type Locale } from "@/lib/i18n";
 import {
   exportOrderToGoogleSheet, generateAndUploadPDF,
   updateOrderItemQuantity, deleteOrderItem, addOrderItem,
 } from "@/lib/actions/orders";
+import { setItemsEta, createShipmentForItems } from "@/lib/actions/shipments";
+import { date as fmtDate } from "@/lib/format";
 import type { OrderItem, OrderStatus, CatalogMethod, ProductColor } from "@/lib/types";
 
 interface ItemGroup {
@@ -63,6 +65,21 @@ export default function OrderItemsSection({
   const [exportError, setExportError] = useState("");
   const [currentSheetUrl, setCurrentSheetUrl] = useState(sheetUrl);
   const [showAddNewGroup, setShowAddNewGroup] = useState(false);
+
+  // Bulk-select state
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const toggleItem = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const exitSelect = () => {
+    setSelectMode(false);
+    setSelected(new Set());
+  };
 
   const handleExport = () => {
     setExportError("");
@@ -157,6 +174,44 @@ export default function OrderItemsSection({
             </div>
           )}
 
+          {/* ETA / Teillieferungs-Bulk-Tools */}
+          {canEdit && items.length > 0 && (
+            <div className="mt-4 flex items-center gap-2 flex-wrap">
+              {!selectMode ? (
+                <button
+                  onClick={() => setSelectMode(true)}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-neutral-300 text-neutral-700 hover:bg-neutral-50 transition"
+                >
+                  <Check size={12} /> Positionen auswählen (ETA / Teillieferung)
+                </button>
+              ) : (
+                <>
+                  <span className="text-xs font-medium text-neutral-700">
+                    {selected.size} ausgewählt
+                  </span>
+                  <button
+                    onClick={() => setSelected(new Set(items.map((i) => i.id)))}
+                    className="text-[11px] text-indigo-600 hover:underline"
+                  >
+                    Alle
+                  </button>
+                  <button
+                    onClick={() => setSelected(new Set())}
+                    className="text-[11px] text-neutral-500 hover:underline"
+                  >
+                    Keine
+                  </button>
+                  <button
+                    onClick={exitSelect}
+                    className="inline-flex items-center gap-1 text-[11px] text-neutral-500 hover:text-neutral-900 ml-auto"
+                  >
+                    <X size={11} /> Modus beenden
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
           {/* Groups */}
           <div className="mt-4 space-y-4">
             {itemGroups.map((group, gi) => {
@@ -172,6 +227,9 @@ export default function OrderItemsSection({
                   orderId={orderId}
                   isEditable={isEditable}
                   catalog={catalog}
+                  selectMode={selectMode}
+                  selected={selected}
+                  onToggle={toggleItem}
                 />
               );
             })}
@@ -181,6 +239,15 @@ export default function OrderItemsSection({
               </div>
             )}
           </div>
+
+          {/* Bulk action bar — sticky bottom when items selected */}
+          {selectMode && selected.size > 0 && (
+            <BulkActionBar
+              orderId={orderId}
+              selectedIds={Array.from(selected)}
+              onDone={exitSelect}
+            />
+          )}
 
           {/* Add completely new group */}
           {isEditable && (
@@ -252,8 +319,11 @@ export default function OrderItemsSection({
 // ── Sub-Components ──────────────────────────────────────────────
 
 function GroupCard({
-  group, methodName, lengthValue, unit, orderId, isEditable, catalog,
+  group, methodName, lengthValue, unit, orderId, isEditable, catalog, selectMode, selected, onToggle,
 }: {
+  selectMode?: boolean;
+  selected?: Set<string>;
+  onToggle?: (id: string) => void;
   group: ItemGroup;
   methodName: string;
   lengthValue: string;
@@ -297,6 +367,9 @@ function GroupCard({
             item={item}
             orderId={orderId}
             isEditable={isEditable}
+            selectMode={selectMode}
+            isSelected={selected?.has(item.id) ?? false}
+            onToggle={onToggle}
           />
         ))}
         {/* Add row inside group */}
@@ -327,10 +400,27 @@ function GroupCard({
   );
 }
 
-function ItemRow({ item, orderId, isEditable }: { item: OrderItem; orderId: string; isEditable: boolean }) {
+function ItemRow({
+  item,
+  orderId,
+  isEditable,
+  selectMode,
+  isSelected,
+  onToggle,
+}: {
+  item: OrderItem;
+  orderId: string;
+  isEditable: boolean;
+  selectMode?: boolean;
+  isSelected?: boolean;
+  onToggle?: (id: string) => void;
+}) {
   const [qty, setQty] = useState(String(item.quantity));
   const [pending, startTx] = useTransition();
   const [error, setError] = useState("");
+  const [editingEta, setEditingEta] = useState(false);
+  const [etaDraft, setEtaDraft] = useState(item.eta ?? "");
+  const [etaPending, startEtaTx] = useTransition();
 
   const save = () => {
     const n = parseInt(qty);
@@ -358,11 +448,93 @@ function ItemRow({ item, orderId, isEditable }: { item: OrderItem; orderId: stri
     });
   };
 
+  const saveEta = () => {
+    const v = etaDraft || null;
+    if (v === item.eta) {
+      setEditingEta(false);
+      return;
+    }
+    startEtaTx(async () => {
+      await setItemsEta(orderId, [item.id], v);
+      setEditingEta(false);
+    });
+  };
+
+  const hasShipment = !!item.shipment_id;
+
   return (
-    <div className="flex items-center justify-between px-4 py-2.5 hover:bg-neutral-50/50 transition group">
-      <span className="text-sm font-medium text-neutral-900 flex-1 truncate">#{item.color_name}</span>
+    <div
+      className={`flex items-center justify-between gap-2 px-4 py-2.5 hover:bg-neutral-50/50 transition group ${
+        isSelected ? "bg-indigo-50/40" : ""
+      }`}
+    >
+      {selectMode && (
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={() => onToggle?.(item.id)}
+          className="rounded shrink-0"
+        />
+      )}
+      <span className="text-sm font-medium text-neutral-900 flex-1 truncate">
+        #{item.color_name}
+        {hasShipment && (
+          <Split size={10} className="inline ml-1 text-purple-500" />
+        )}
+      </span>
+
+      {/* ETA chip / editor */}
+      <div className="shrink-0">
+        {editingEta && isEditable ? (
+          <div className="inline-flex items-center gap-1">
+            <input
+              type="date"
+              value={etaDraft}
+              onChange={(e) => setEtaDraft(e.target.value)}
+              disabled={etaPending}
+              autoFocus
+              className="px-1.5 py-0.5 text-[11px] border border-neutral-300 rounded"
+            />
+            <button onClick={saveEta} disabled={etaPending} className="text-emerald-600 hover:text-emerald-800">
+              <Check size={12} />
+            </button>
+            <button
+              onClick={() => {
+                setEditingEta(false);
+                setEtaDraft(item.eta ?? "");
+              }}
+              className="text-neutral-400 hover:text-neutral-700"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ) : item.eta ? (
+          <button
+            type="button"
+            onClick={() => isEditable && setEditingEta(true)}
+            className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border ${
+              isEditable
+                ? "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
+                : "bg-neutral-50 text-neutral-700 border-neutral-200"
+            }`}
+            title={isEditable ? "ETA bearbeiten" : "ETA"}
+          >
+            <CalendarClock size={9} /> {fmtDate(item.eta)}
+          </button>
+        ) : isEditable ? (
+          <button
+            type="button"
+            onClick={() => setEditingEta(true)}
+            className="text-[10px] text-neutral-400 hover:text-indigo-600 px-1"
+            title="ETA setzen"
+          >
+            + ETA
+          </button>
+        ) : null}
+      </div>
+
       {isEditable ? (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <input
             type="number"
             value={qty}
@@ -387,10 +559,173 @@ function ItemRow({ item, orderId, isEditable }: { item: OrderItem; orderId: stri
           {error && <span className="text-[10px] text-red-600 ml-1">{error}</span>}
         </div>
       ) : (
-        <span className="text-sm tabular-nums text-neutral-600 font-medium">
+        <span className="text-sm tabular-nums text-neutral-600 font-medium shrink-0">
           {fmt(item.quantity)} {item.unit}
         </span>
       )}
+    </div>
+  );
+}
+
+// Bulk action bar — appears when items are selected in select mode
+function BulkActionBar({
+  orderId,
+  selectedIds,
+  onDone,
+}: {
+  orderId: string;
+  selectedIds: string[];
+  onDone: () => void;
+}) {
+  const [pending, startTx] = useTransition();
+  const [showEta, setShowEta] = useState(false);
+  const [showShipment, setShowShipment] = useState(false);
+  const [eta, setEta] = useState("");
+  const [shipmentLabel, setShipmentLabel] = useState("");
+  const [shipmentEta, setShipmentEta] = useState("");
+  const [trackingNumber, setTrackingNumber] = useState("");
+  const [trackingUrl, setTrackingUrl] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const applyEta = () => {
+    if (!eta) { setError("ETA wählen"); return; }
+    setError(null);
+    startTx(async () => {
+      const res = await setItemsEta(orderId, selectedIds, eta);
+      if (res?.error) setError(res.error);
+      else {
+        setShowEta(false);
+        setEta("");
+        onDone();
+      }
+    });
+  };
+
+  const createShipment = () => {
+    setError(null);
+    startTx(async () => {
+      const res = await createShipmentForItems(orderId, selectedIds, {
+        label: shipmentLabel,
+        eta: shipmentEta,
+        tracking_number: trackingNumber,
+        tracking_url: trackingUrl,
+      });
+      if (res?.error) setError(res.error);
+      else {
+        setShowShipment(false);
+        setShipmentLabel("");
+        setShipmentEta("");
+        setTrackingNumber("");
+        setTrackingUrl("");
+        onDone();
+      }
+    });
+  };
+
+  return (
+    <div className="mt-4 sticky bottom-2 z-20 mx-auto max-w-3xl">
+      <div className="bg-neutral-900 text-white rounded-2xl shadow-lg p-3 space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-medium">{selectedIds.length} Position{selectedIds.length === 1 ? "" : "en"} ausgewählt</span>
+          <div className="ml-auto flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => { setShowEta(!showEta); setShowShipment(false); }}
+              className={`inline-flex items-center gap-1 text-[11px] font-medium px-3 py-1.5 rounded-lg ${
+                showEta ? "bg-amber-500 text-white" : "bg-white/10 hover:bg-white/20 text-white"
+              }`}
+            >
+              <CalendarClock size={12} /> ETA setzen
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowShipment(!showShipment); setShowEta(false); }}
+              className={`inline-flex items-center gap-1 text-[11px] font-medium px-3 py-1.5 rounded-lg ${
+                showShipment ? "bg-purple-500 text-white" : "bg-white/10 hover:bg-white/20 text-white"
+              }`}
+            >
+              <Truck size={12} /> Als Teillieferung anlegen
+            </button>
+            <button
+              type="button"
+              onClick={onDone}
+              className="text-[11px] text-white/70 hover:text-white px-2 py-1.5"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        </div>
+
+        {showEta && (
+          <div className="flex items-center gap-2 pt-2 border-t border-white/10">
+            <label className="text-[11px]">ETA:</label>
+            <input
+              type="date"
+              value={eta}
+              onChange={(e) => setEta(e.target.value)}
+              disabled={pending}
+              className="text-xs rounded px-2 py-1 text-neutral-900"
+            />
+            <button
+              onClick={applyEta}
+              disabled={pending}
+              className="text-[11px] font-medium px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-white inline-flex items-center gap-1 disabled:opacity-50"
+            >
+              <Check size={12} /> Übernehmen
+            </button>
+          </div>
+        )}
+
+        {showShipment && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-white/10">
+            <input
+              type="text"
+              placeholder="Bezeichnung (Teil 1)"
+              value={shipmentLabel}
+              onChange={(e) => setShipmentLabel(e.target.value)}
+              disabled={pending}
+              className="text-xs rounded px-2 py-1.5 text-neutral-900"
+            />
+            <input
+              type="date"
+              placeholder="ETA"
+              value={shipmentEta}
+              onChange={(e) => setShipmentEta(e.target.value)}
+              disabled={pending}
+              className="text-xs rounded px-2 py-1.5 text-neutral-900"
+            />
+            <input
+              type="text"
+              placeholder="Tracking-Nr"
+              value={trackingNumber}
+              onChange={(e) => setTrackingNumber(e.target.value)}
+              disabled={pending}
+              className="text-xs rounded px-2 py-1.5 text-neutral-900"
+            />
+            <input
+              type="url"
+              placeholder="Tracking-URL"
+              value={trackingUrl}
+              onChange={(e) => setTrackingUrl(e.target.value)}
+              disabled={pending}
+              className="text-xs rounded px-2 py-1.5 text-neutral-900"
+            />
+            <button
+              onClick={createShipment}
+              disabled={pending}
+              className="col-span-2 md:col-span-4 text-[11px] font-medium px-3 py-2 rounded-lg bg-purple-500 hover:bg-purple-400 text-white inline-flex items-center gap-1 justify-center disabled:opacity-50"
+            >
+              <Truck size={12} /> Teillieferung mit {selectedIds.length} Positionen anlegen
+            </button>
+          </div>
+        )}
+
+        {error && (
+          <div className="text-[11px] text-red-300 bg-red-500/20 rounded px-2 py-1">
+            {error}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
