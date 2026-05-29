@@ -71,6 +71,38 @@ export function stripProactivePhotoOffer(text: string, customerAskedForPhotos: b
  * damit der Caller `needsManualReview` setzen kann (= Draft statt Auto-Send,
  * MA korrigiert die Antwort).
  */
+/**
+ * Erkennt halluzinierte Kontakt-Infos im Bot-Output — KEIN Stripping,
+ * nur Force-Draft-Signal (zero false-positives, MA entscheidet).
+ *
+ * Bug-Pattern: LLM kippt die WhatsApp-Nummer mitten in einen
+ * unpassenden Satz, z.B. "Länge etwaWhatsApp 0173 8000865cm)?".
+ * Triggert wenn:
+ *   - WhatsApp-Nummer (0173 8000865 in 3 Varianten) im Output vorkommt
+ *   - UND der Satz, in dem sie auftaucht, KEINEN Kontakt-Trigger davor
+ *     hat ("WhatsApp", "Tel:", "ruf an", "erreichst du", "schreib uns",
+ *     "Nummer", "kontaktiere")
+ *
+ * Wir strippen NICHT (Halluzinations-Position ist schwer zu trennen
+ * vom legitimen Text). Stattdessen melden wir es als suspicious →
+ * Caller setzt needsManualReview = true, MA prüft.
+ *
+ * User-Bug 2026-05-29 (Lauri).
+ */
+export function detectStrandedContactInfo(text: string): { suspicious: boolean; matchedSnippet: string | null } {
+  // Bewusst SIMPEL: jede Erwähnung der WhatsApp-Nummer im Bot-Output
+  // löst Force-Draft aus. Begründung: die Nummer ist in der täglichen
+  // Praxis fast nie wirklich Teil einer guten Bot-Antwort — die MA
+  // verweist normalerweise von selbst. False-Positive (= MA sieht Draft
+  // statt Auto-Send) ist ein leichtes Inconvenience, kein Bug.
+  const numberRe = /\b(?:\+?49\s*173\s*8000865|0173\s*8000865|01738000865)\b/i;
+  const m = text.match(numberRe);
+  if (!m || m.index === undefined) return { suspicious: false, matchedSnippet: null };
+  const snipStart = Math.max(0, m.index - 30);
+  const snipEnd = Math.min(text.length, m.index + m[0].length + 30);
+  return { suspicious: true, matchedSnippet: text.slice(snipStart, snipEnd).trim() };
+}
+
 export function stripFalseMediaLimitation(text: string): { text: string; stripped: boolean } {
   // Pattern: kombiniert "aus technischen Gründen" / "hier" / "leider"
   // mit Medien-Versand-Negation. Sehr spezifisch, damit echte Aussagen

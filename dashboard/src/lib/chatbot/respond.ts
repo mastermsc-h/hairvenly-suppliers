@@ -107,7 +107,7 @@ export function splitLongMessage(text: string, maxLen = 700): string[] {
 // damit auch der Webhook (Audio-Bypass) sie nutzen kann.
 import { getBusinessHoursContext } from "./business-hours";
 import { BUSINESS_CONFIG } from "./business-config";
-import { stripColorUrlMismatch, limitUrls, stripFalseMediaLimitation } from "./output-sanitizers";
+import { stripColorUrlMismatch, limitUrls, stripFalseMediaLimitation, detectStrandedContactInfo } from "./output-sanitizers";
 
 /**
  * Entfernt / ersetzt interne Lagerzahlen aus dem Bot-Output.
@@ -2237,6 +2237,22 @@ KEINE Farbnamen nennen — die MA macht das.`;
       if (!needsManualReview) {
         needsManualReview = true;
         manualReviewReason = "Bot hat fälschlich 'können aus technischen Gründen keine Fotos/Videos schicken' behauptet. Wir KÖNNEN Medien senden (MA macht das manuell). Antwort wird als Draft gespeichert, damit die MA die Videos / Shopify-Links selbst raussucht.";
+      }
+    }
+  }
+
+  // ── STRANDED-CONTACT-INFO-DETECTOR ──────────────────────────────────
+  // Halluzination-Detector: LLM kippt manchmal die WhatsApp-Nummer mitten
+  // in unpassende Sätze (z.B. "Länge etwaWhatsApp 0173 8000865cm)?").
+  // KEIN Stripping (false-positive-Risiko zu hoch), nur Force-Draft.
+  // MA sieht den Draft, korrigiert die Stelle, sendet.
+  {
+    const contactCheck = detectStrandedContactInfo(finalText);
+    if (contactCheck.suspicious) {
+      console.warn(`[respond] STRANDED-CONTACT-INFO session=${sessionId.slice(0,8)} — Snippet: "${contactCheck.matchedSnippet}"`);
+      if (!needsManualReview) {
+        needsManualReview = true;
+        manualReviewReason = "Bot hat möglicherweise die WhatsApp-Nummer an einer unpassenden Stelle eingefügt (Halluzination). Antwort wurde als Draft gespeichert — MA bitte die markierte Stelle prüfen und korrigieren bevor senden.";
       }
     }
   }
