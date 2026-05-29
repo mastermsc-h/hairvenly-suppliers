@@ -1,6 +1,7 @@
 import { requireProfile } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import KillSwitchPanel from "./kill-switch-panel";
+import LeanPromptToggle from "./lean-prompt-toggle";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ export default async function BotSettingsPage() {
   const { data } = await svc
     .from("chatbot_settings")
     .select(
-      "default_bot_mode, proactive_generation_enabled, proactive_safe_categories, updated_at"
+      "default_bot_mode, proactive_generation_enabled, proactive_safe_categories, use_lean_prompt, updated_at"
     )
     .eq("id", 1)
     .maybeSingle();
@@ -34,9 +35,11 @@ export default async function BotSettingsPage() {
     default_bot_mode: "selective_auto",
     proactive_generation_enabled: false,
     proactive_safe_categories: [],
+    use_lean_prompt: false,
     updated_at: null,
   };
   const safe = (settings.proactive_safe_categories || []) as string[];
+  const leanOn = settings.use_lean_prompt === true;
 
   const noneAllowed =
     !settings.proactive_generation_enabled && safe.length === 0;
@@ -74,6 +77,8 @@ export default async function BotSettingsPage() {
         initialSafe={safe}
         categories={ALL_CATEGORIES}
       />
+
+      <LeanPromptToggle initialEnabled={leanOn} />
 
       {settings.updated_at && (
         <div className="text-xs text-neutral-500 text-right">

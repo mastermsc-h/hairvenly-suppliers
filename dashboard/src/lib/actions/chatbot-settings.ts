@@ -33,3 +33,21 @@ export async function setProactiveKillSwitch(opts: {
   revalidatePath("/chatbot/bot-settings");
   revalidatePath("/chatbot/inbox");
 }
+
+/**
+ * Toggle für den Slim-Prompt-Modus. Default false (= klassischer
+ * Verbose-Prompt). User-Anweisung 2026-05-29: aktivieren um Bot schlauer
+ * und billiger zu machen — falls Regressionen auftauchen, sofort wieder
+ * ausschalten.
+ */
+export async function setLeanPromptMode(enabled: boolean) {
+  const sup = await createClient();
+  const { data: { user } } = await sup.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  const svc = createServiceClient();
+  await svc.from("chatbot_settings").update({
+    use_lean_prompt: enabled,
+    updated_at: new Date().toISOString(),
+  }).eq("id", 1);
+  revalidatePath("/chatbot/bot-settings");
+}

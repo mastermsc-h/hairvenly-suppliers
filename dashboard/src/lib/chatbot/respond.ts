@@ -108,6 +108,8 @@ export function splitLongMessage(text: string, maxLen = 700): string[] {
 import { getBusinessHoursContext } from "./business-hours";
 import { BUSINESS_CONFIG } from "./business-config";
 import { stripColorUrlMismatch, limitUrls, stripFalseMediaLimitation, detectStrandedContactInfo } from "./output-sanitizers";
+import { isLeanPromptEnabled } from "./settings";
+import { buildLeanHardRules } from "./lean-rules";
 
 /**
  * Entfernt / ersetzt interne Lagerzahlen aus dem Bot-Output.
@@ -386,7 +388,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-05-29.cache-opt.v1";
+const RESPOND_CODE_VERSION = "2026-05-29.lean-prompt-flag.v1";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
@@ -543,11 +545,28 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     dynamicExtras += `\n\n## 🎭 DEINE IDENTITÄT IN DIESER SESSION\nDu unterschreibst dich am Ende der Antwort (bzw. überall wo "{signature_name}" im Persona-Prompt vorkommt) als **${signatureName}**.\n`;
   }
 
+  // 💡 LEAN-PROMPT-FLAG (Feature-Toggle, Default false): wenn aktiv, wird
+  // der Verbose-Rule-Block + Training + Strategies durch einen kompakten
+  // ~15-Zeilen-Block ersetzt. Ziel: ~50k → ~10k Tokens / Call.
+  const leanPrompt = await isLeanPromptEnabled();
+  // Booking-Provider-Konstanten (Treatwell) — werden in beiden Prompt-
+  // Modi referenziert (Verbose + Lean + categoryHardRule).
+  const bookingProvider = BUSINESS_CONFIG.booking_provider_name;
+  const bookingUrl      = BUSINESS_CONFIG.planity_url; // key bleibt zur Kompatibilität
+
   // PRODUKTKATALOG-MATRIX — verbindliche Methoden×Längen aus der DB
   // Das verhindert Halluzinationen wie "55cm Standard Russisch Tapes" (gibt's nicht!).
   // 55cm gibt's nur bei Eyfel-Tapes (usbekisch wellig).
   const catalog = await loadProductCatalog();
   systemPrompt += "\n\n" + catalog.promptText;
+
+  if (leanPrompt) {
+    // SLIM-PROMPT-MODUS: kompakte 15-Zeilen-Hard-Rules statt 70+ Zeilen
+    // Verbose-Block + Training + Strategies. Sonnet 4.5 macht den Rest
+    // via Reasoning auf der konkreten Customer-Message.
+    systemPrompt += buildLeanHardRules();
+  } else {
+  // ── BEGIN VERBOSE-RULES-BLOCK (skip when leanPrompt) ──────────────
   systemPrompt += "\n## 🚨 PFLICHTREGEL FÜR PRODUKTANGABEN\n";
   systemPrompt += "- Nenne NIEMALS eine Länge zu einer Methode, die NICHT in der Matrix oben steht.\n";
   systemPrompt += "- Wenn die Kundin selbst eine Länge nennt: prüfe gegen die Matrix. Wenn sie zu der Methode nicht existiert → freundlich klären, NICHT übernehmen.\n";
@@ -582,11 +601,8 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += "  • RICHTIGE Antwort: nur ein KURZER Satz wie 'Klar, meine Kollegin schickt dir die Videos gleich 💕' — KEINE Produkt-URLs, KEINE Selbstwerbung für die Produktseite. Die MA übernimmt komplett.\n";
   systemPrompt += "  • Du DARFST optional zusätzlich anbieten: 'In der Zwischenzeit: wenn du mir ein Foto deiner Haare schickst, kann meine Kollegin dir gleich die passende Farbe empfehlen 💕' — das ist hilfreich, aber NICHT verpflichtend.\n";
   systemPrompt += "- ✂️ KEINE selbstreferenziellen Klammer-Disclaimer am Ende (z.B. '_(Kurz: die exakte Längen-Methoden-Kombi muss ich dir noch sauber benennen — Kollegin durchsprechen.)_'). Das wirkt unsicher und verwirrt die Kundin. Wenn du etwas wirklich abklären musst, sag's klar im Hauptteil, nicht als nachträgliche Klammer.\n";
-  // Termin-Buchungs-Provider (aktuell: Treatwell, seit 28.05.2026).
-  // Provider-Name + URL kommen aus BUSINESS_CONFIG — beim nächsten Wechsel
-  // nur EINE Datei (business-config.ts) ändern, der Prompt zieht es automatisch.
-  const bookingProvider = BUSINESS_CONFIG.booking_provider_name;
-  const bookingUrl      = BUSINESS_CONFIG.planity_url; // key bleibt zur Kompatibilität
+  // (bookingProvider / bookingUrl wurden weiter oben definiert — beide
+  // Modi nutzen sie.)
   systemPrompt += `- 🔁 NIE wiederholen was die Kundin BEREITS WEISS oder gerade SELBST GESAGT hat. Wenn sie schreibt 'hab schon gesehen dass ich über ${bookingProvider} buchen kann' → KEIN Buchungs-Link mehr! Wenn sie sagt 'ich weiß dass es 60cm gibt' → erklär nicht nochmal dass es 60cm gibt. Stattdessen: kurz bestätigen + zum nächsten Schritt (z.B. Farbberatung anbieten, Frage stellen, abschicken). Sonst wirkt der Bot dumm und nicht zuhörend.\n`;
   systemPrompt += "- 🔁 Konkrete Beispiele für 'NICHT WIEDERHOLEN':\n";
   systemPrompt += `  • Kundin: 'hab ${bookingProvider} schon gefunden' → NICHT nochmal den Link posten. RICHTIG: 'Super 💕 Falls du vorher noch Fragen zur Farbe hast — schick gerne ein Foto bei Tageslicht.'\n`;
@@ -602,6 +618,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += `  • Wenn die Kundin schon ${bookingProvider} erwähnt hat → kurz bestätigen ('Genau, da siehst du alle freien Slots') + NICHT den Link nochmal posten.\n`;
   systemPrompt += `  • Bei Wunsch-Datum + Wunsch-Uhrzeit von der Kundin → NIE bestätigen oder ablehnen, sondern: 'Schau bitte direkt in ${bookingProvider} ob das passt — dort siehst du live ob frei.'\n`;
   systemPrompt += `  • 🚫 Wir nutzen KEIN Planity mehr — wir sind seit Mai 2026 auf ${bookingProvider}. Erwähne NIEMALS Planity oder einen planity.com-Link.\n`;
+  } // ── END VERBOSE-RULES-BLOCK (closes the leanPrompt-else) ──────────
 
   // GESCHÄFTSZEIT-KONTEXT — DYNAMISCH! Pro Anfrage anders (open/closing_soon/closed).
   // ⚠️ MUSS in den dynamic-Block (siehe Architektur-Memo §1.2 Cache-Stabilität),
@@ -835,6 +852,11 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       .slice(0, 6);
   }
 
+  // 💡 LEAN-PROMPT-MODUS: Training-Beispiele + Strategies werden komplett
+  // weggelassen. Sonnet 4.5 reasoned mit der Conversation-History selbst,
+  // ohne dass wir explizite "so antwortet ein guter Bot"-Beispiele
+  // mitschicken müssen. Spart ~5-10k Tokens pro Call.
+  if (!leanPrompt) {
   // PHASE-A KOSTENOPTIMIERUNG: viel kleinere Trainings-Selektion.
   // Vorher: bis zu 25 Trainings (10.3k Token), praktisch immer 70k-Total-Prompt.
   // Jetzt: max 10 Trainings, davon 5 pinned + 3 themen-relevant + 2 recency.
@@ -920,6 +942,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       systemPrompt += `### ${s.name}\n**Trigger:** ${s.trigger}\n${s.steps}\n\n`;
     }
   }
+  } // ── END leanPrompt-Skip für Training+Strategies ──────────────────
 
   // Conversation laden — letzte 60 Nachrichten (reduziert von 150 für Kosten)
   // Bei sehr langen Verläufen wird damit ältester Kontext verloren — der wichtige

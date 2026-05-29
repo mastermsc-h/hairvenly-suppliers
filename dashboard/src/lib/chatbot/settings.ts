@@ -59,3 +59,28 @@ export async function isProactiveGenerationEnabled(
     return true; // konservativ: erlauben statt blockieren
   }
 }
+
+/**
+ * Slim-Prompt-Modus (Feature-Flag).
+ *
+ * Default false (= klassischer Full-Prompt). Admin schaltet via UI ein.
+ *
+ * Wenn true: respondAsBot lädt einen kompakten Hard-Rule-Block (~15 Zeilen
+ * statt ~70), lässt Training-Beispiele weg, behält nur Top-2-Strategien.
+ * Ziel: ~10k statt ~50k Tokens pro Call. Bot wird gleichzeitig schlauer
+ * (weniger Lärm) und ~60-70% billiger.
+ */
+export async function isLeanPromptEnabled(): Promise<boolean> {
+  try {
+    const svc = createServiceClient();
+    const { data } = await svc
+      .from("chatbot_settings")
+      .select("use_lean_prompt")
+      .eq("id", 1)
+      .maybeSingle();
+    return data?.use_lean_prompt === true;
+  } catch (e) {
+    console.warn("[settings] lean-prompt read failed:", (e as Error).message);
+    return false;
+  }
+}
