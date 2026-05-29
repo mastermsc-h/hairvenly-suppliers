@@ -10,12 +10,25 @@ export async function takeoverSession(sessionId: string) {
   if (!user) throw new Error("Not authenticated");
 
   const svc = createServiceClient();
+  // User-Default-Avatar holen — wenn gesetzt, übernehmen wir es auf die
+  // Session (User-Wunsch 2026-05-29: "wenn die assistiert antworten oder
+  // den bot auf automodus setzen, deren Ava benutzt wird").
+  const { data: callerProfile } = await svc
+    .from("profiles")
+    .select("default_avatar_name")
+    .eq("id", user.id)
+    .maybeSingle();
+  const userAvatar = callerProfile?.default_avatar_name || null;
+
+  // Wenn der User ein Default-Avatar hat, übernehmen wir es auch in die
+  // Session (inkl. Draft-Signatur-Swap) via setSessionAvatar. Das ist
+  // idempotent — bei gleicher Avatar passiert nichts.
   await svc.from("chat_sessions")
-    .update({
-      assigned_to: user.id,
-      status: "awaiting_human",
-    })
+    .update({ assigned_to: user.id, status: "awaiting_human" })
     .eq("id", sessionId);
+  if (userAvatar) {
+    await setSessionAvatar(sessionId, userAvatar);
+  }
   revalidatePath("/chatbot/inbox");
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
@@ -195,6 +208,29 @@ export async function setBotMode(sessionId: string, mode: "auto" | "selective_au
     const ourIgId = process.env.META_INSTAGRAM_USER_ID;
     if (ses?.external_id && ourIgId && ses.external_id === ourIgId) {
       throw new Error("Diese Session ist ein Self-DM (unser eigener Account schreibt an sich selbst). Bot kann hier nicht aktiviert werden — bitte Session löschen oder schließen.");
+    }
+  }
+
+  // Wenn die MA den Bot aktiviert (auto/selective_auto/assisted) → ihre
+  // Default-Signatur auf die Session übertragen, damit nachfolgende Bot-
+  // Antworten in dieser Session ihre Persönlichkeit nutzen.
+  // (User-Wunsch 2026-05-29.)
+  if (mode !== "off") {
+    try {
+      const sup = await createClient();
+      const { data: { user } } = await sup.auth.getUser();
+      if (user) {
+        const { data: caller } = await svc
+          .from("profiles")
+          .select("default_avatar_name")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (caller?.default_avatar_name) {
+          await setSessionAvatar(sessionId, caller.default_avatar_name);
+        }
+      }
+    } catch (e) {
+      console.warn("[setBotMode] default-avatar carry-over failed:", (e as Error).message);
     }
   }
 

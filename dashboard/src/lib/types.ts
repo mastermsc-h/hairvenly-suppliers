@@ -144,6 +144,9 @@ export interface Profile {
   supplier_id: string | null;
   role: UserRole;
   denied_features: string[];
+  /** Default-Bot-Signatur für Sessions, die diese Mitarbeiterin übernimmt oder
+   *  auf auto/assisted setzt. Null = bisheriges Random-Verhalten beibehalten. */
+  default_avatar_name?: string | null;
 }
 
 export interface Order {

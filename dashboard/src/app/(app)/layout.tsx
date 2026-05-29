@@ -10,12 +10,27 @@ import LanguageSwitcher from "./language-switcher";
 import { MobileSidebarWrapper } from "./mobile-sidebar";
 import ChangePassword from "./change-password";
 import TopProgress from "./top-progress";
+import MyAvatarPicker from "./my-avatar-picker";
+import { createServiceClient } from "@/lib/supabase/server";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const profile = await requireProfile();
   const locale = (profile.language ?? "de") as Locale;
 
   const has = (f: FeatureKey) => hasFeature(profile, f);
+
+  // Aktive Avatar-Optionen für den Picker (nur für Nicht-Supplier — Supplier
+  // sehen die Chatbot-Welt sowieso nicht und brauchen keinen Avatar).
+  let activeAvatars: string[] = [];
+  if (profile.role !== "supplier") {
+    const svc = createServiceClient();
+    const { data } = await svc
+      .from("chatbot_avatars")
+      .select("name")
+      .eq("active", true)
+      .order("name");
+    activeAvatars = (data || []).map((a) => a.name);
+  }
 
   const sidebarContent = (
     <>
@@ -225,6 +240,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             {t(locale, `role.${profile.role}`)}
           </div>
         </div>
+        {profile.role !== "supplier" && activeAvatars.length > 0 && (
+          <MyAvatarPicker
+            current={profile.default_avatar_name ?? null}
+            options={activeAvatars}
+          />
+        )}
         <ChangePassword label={t(locale, "nav.change_password")} />
         <form action={signOut}>
           <button
