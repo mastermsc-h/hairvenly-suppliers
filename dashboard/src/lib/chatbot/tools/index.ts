@@ -11,6 +11,8 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { createServiceClient } from "@/lib/supabase/server";
 import { calcPacks, type Method, type PriceRow } from "@/lib/chatbot/pricing";
 import { readDashboardAlerts, readInventorySheet } from "@/lib/stock-sheets";
+import { fetchOrderIdByName } from "@/lib/order-name-map";
+import { filterArchivedFromStock } from "@/lib/filter-archived-orders";
 import { BUSINESS_CONFIG } from "@/lib/chatbot/business-config";
 
 export interface ToolContext {
@@ -334,8 +336,17 @@ const getStockEta: ToolDef = {
         return true;
       };
 
-      // 1) Lade Dashboard (Unterwegs + Nullbestand)
-      const { unterwegs, nullbestand, lastUpdated } = await readDashboardAlerts();
+      // 1) Lade Dashboard (Unterwegs + Nullbestand) + DB-Overrides anwenden
+      //    (archivierte Bestellungen raus, ETA aus DB präzisieren)
+      const [dashRes, orderIdByName] = await Promise.all([
+        readDashboardAlerts(),
+        fetchOrderIdByName(),
+      ]);
+      const unterwegs = filterArchivedFromStock(dashRes.unterwegs, orderIdByName).filter(
+        (d) => d.unterwegsG > 0,
+      );
+      const nullbestand = filterArchivedFromStock(dashRes.nullbestand, orderIdByName);
+      const lastUpdated = dashRes.lastUpdated;
 
       // 2) Lade beide Inventory-Sheets (Russisch + Usbekisch) — für "vorrätig"-Check
       const sheets: Array<"Russisch - GLATT" | "Usbekisch - WELLIG"> = [];
@@ -1005,7 +1016,15 @@ const getAvailableColors: ToolDef = {
 
     // Stock-Daten parallel laden — für jeden Catalog-Eintrag prüfen wir ob aktuell verfügbar
     // (readDashboardAlerts cached intern; ist nur ein API-Call zum Sheet)
-    const { unterwegs, nullbestand } = await readDashboardAlerts();
+    // + DB-Overrides: archivierte Bestellungen raus, ETAs aus DB
+    const [dashRes2, orderIdByName2] = await Promise.all([
+      readDashboardAlerts(),
+      fetchOrderIdByName(),
+    ]);
+    const unterwegs = filterArchivedFromStock(dashRes2.unterwegs, orderIdByName2).filter(
+      (d) => d.unterwegsG > 0,
+    );
+    const nullbestand = filterArchivedFromStock(dashRes2.nullbestand, orderIdByName2);
     // Auch reine Inventory-Sheets für "in_stock" Status
     const sheets: Array<"Russisch - GLATT" | "Usbekisch - WELLIG"> = [];
     if (supplierLine === "russisch")       sheets.push("Russisch - GLATT");

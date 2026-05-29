@@ -784,28 +784,60 @@ export async function readOrderSheetEtas(
     if (!tab?.properties?.title) return { error: "Tab nicht gefunden" };
     const tabName = tab.properties.title;
 
-    // Read range
+    // Read range — wider to support custom column layouts (A..K)
     const { data } = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `'${tabName}'!A1:E1000`,
+      range: `'${tabName}'!A1:K1000`,
     });
     const rows = data.values ?? [];
-    if (rows.length < 5) return { etas: new Map() };
+    if (rows.length < 4) return { etas: new Map() };
+
+    // Find the header row: the row that contains both "Farbcode" (or "Color") and
+    // either "Method" or "Quantity" — that's how we know it's the item table header.
+    let headerRowIdx = -1;
+    let colMethod = -1, colLength = -1, colColor = -1, colEta = -1;
+    for (let i = 0; i < Math.min(rows.length, 15); i++) {
+      const r = rows[i] ?? [];
+      const cells = r.map((c) => String(c ?? "").trim().toLowerCase());
+      const fcIdx = cells.findIndex((c) => c === "farbcode" || c === "color" || c === "farbe");
+      const mIdx = cells.findIndex((c) => c === "method" || c === "methode");
+      const lIdx = cells.findIndex(
+        (c) => c === "length/variant" || c === "length" || c === "länge" || c === "laenge" || c === "variant" || c === "länge/variante",
+      );
+      const eIdx = cells.findIndex(
+        (c) => c === "eta" || c === "ankunft" || c === "ankunftsdatum" || c === "voraussichtliche lieferung",
+      );
+      if (fcIdx >= 0 && eIdx >= 0) {
+        headerRowIdx = i;
+        colMethod = mIdx;
+        colLength = lIdx;
+        colColor = fcIdx;
+        colEta = eIdx;
+        break;
+      }
+    }
+
+    // No header found OR no ETA column → nothing to override
+    if (headerRowIdx < 0 || colEta < 0) return { etas: new Map() };
 
     const result = new Map<string, string>();
-    // Items start at row index 4 (0-based); header row 3 is the column titles
-    for (let i = 4; i < rows.length; i++) {
+    // Fill-down for method + length (common in merged-cell sheets)
+    let lastMethod = "";
+    let lastLength = "";
+    for (let i = headerRowIdx + 1; i < rows.length; i++) {
       const r = rows[i];
       if (!r || r.length === 0) continue;
-      const method = String(r[0] ?? "").trim();
-      const length = String(r[1] ?? "").trim();
-      const color = String(r[2] ?? "").trim();
-      const etaCell = String(r[4] ?? "").trim();
-      if (!method || method === "Subtotal") continue;
-      if (!color) continue;
+      const method = (colMethod >= 0 ? String(r[colMethod] ?? "").trim() : "") || lastMethod;
+      const length = (colLength >= 0 ? String(r[colLength] ?? "").trim() : "") || lastLength;
+      const colorRaw = colColor >= 0 ? String(r[colColor] ?? "").trim() : "";
+      const etaCell = String(r[colEta] ?? "").trim();
+      if (method && method.toLowerCase() !== "subtotal") lastMethod = method;
+      if (length) lastLength = length;
+      if (!colorRaw) continue;
+      if (method.toLowerCase() === "subtotal") continue;
       const iso = parseGermanDate(etaCell);
       if (!iso) continue;
-      const key = `${method.toLowerCase()}|${length.toLowerCase()}|${color.replace(/^#/, "").toLowerCase()}`;
+      const key = `${(method || "").toLowerCase()}|${(length || "").toLowerCase()}|${colorRaw.replace(/^#/, "").toLowerCase()}`;
       result.set(key, iso);
     }
     return { etas: result };

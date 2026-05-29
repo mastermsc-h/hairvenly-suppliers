@@ -43,6 +43,8 @@
  *     bisher (zero-regression-Garantie)
  */
 import { readDashboardAlerts, type AlertProduct } from "@/lib/stock-sheets";
+import { fetchOrderIdByName } from "@/lib/order-name-map";
+import { filterArchivedFromStock } from "@/lib/filter-archived-orders";
 import type { ColorCodeMatch } from "./intent-color-codes";
 
 // ── In-Memory-Cache für Dashboard-Daten ─────────────────────────────
@@ -63,11 +65,20 @@ async function getCachedDashboard(): Promise<DashboardSnapshot | null> {
     return dashboardCache;
   }
   try {
-    const result = await readDashboardAlerts();
+    // Apply the same DB-overrides as the dashboard stock views:
+    //   - drop archived orders (stocked/cancelled) from perOrder
+    //   - replace sheet ankunft with the precise ETA from DB
+    //     (per-position eta > shipment eta > order eta)
+    const [result, orderIdByName] = await Promise.all([
+      readDashboardAlerts(),
+      fetchOrderIdByName(),
+    ]);
     dashboardCache = {
-      nullbestand: result.nullbestand,
-      kritisch: result.kritisch,
-      unterwegs: result.unterwegs,
+      nullbestand: filterArchivedFromStock(result.nullbestand, orderIdByName),
+      kritisch: filterArchivedFromStock(result.kritisch, orderIdByName),
+      unterwegs: filterArchivedFromStock(result.unterwegs, orderIdByName).filter(
+        (d) => d.unterwegsG > 0,
+      ),
       lastUpdated: result.lastUpdated,
     };
     dashboardCachedAt = now;
