@@ -312,9 +312,18 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     pendingDraftSet = new Set((drafts || []).map(d => d.session_id));
   }
 
-  // Pro Session: ist sie "unbeantwortet"? = Kundin zuletzt geschrieben + nicht gesehen
-  // ODER vom Mitarbeiter explizit als "nicht erledigt" geflaggt (Sentinel < 2000).
+  // Pro Session:
+  //   - "unread" (= unbeantwortet) = Kundin zuletzt geschrieben + nicht
+  //     gesehen ODER explizit "Nicht erledigt"-Flag. Steuert "Zu tun"-Tab
+  //     + 'unbeantwortet'-Counter.
+  //   - "unseen" (= Instagram-Style) = Karte wurde von der MA noch nicht
+  //     geöffnet seit der letzten Customer-Message ODER explizit als
+  //     "Ungelesen" geflaggt. Steuert Bold/Normal-Optik + den
+  //     "Nur ungelesen"-Toggle. User-Bug 2026-05-29: Toggle nutzte vorher
+  //     unread-Semantik → schon-geöffnete-aber-unbeantwortete Chats tauchten
+  //     fälschlich auf.
   const unreadMap: Record<string, boolean> = {};
+  const unseenMap: Record<string, boolean> = {};
   const uiStatusMap: Record<string, SessionUiStatus> = {};
   for (const s of combinedSessions) {
     const st = stats[s.id];
@@ -324,6 +333,15 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
       new Date(s.last_seen_by_agent_at).getFullYear() < 2000;
     unreadMap[s.id] = isExplicitlyNotDone || (!ourTurn && !!(s.last_customer_msg_at && (
       !s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at
+    )));
+    // unseen-Semantik (Instagram-Style): hat die MA die Session geöffnet
+    // seit der letzten Customer-Message? Plus expliziter "Ungelesen"-Sentinel.
+    const sessRaw = s as { last_opened_by_agent_at?: string | null };
+    const isExplicitlyUnseen = !!sessRaw.last_opened_by_agent_at &&
+      new Date(sessRaw.last_opened_by_agent_at).getFullYear() < 2000;
+    unseenMap[s.id] = isExplicitlyUnseen || (!ourTurn && !!(s.last_customer_msg_at && (
+      !sessRaw.last_opened_by_agent_at ||
+      s.last_customer_msg_at > sessRaw.last_opened_by_agent_at
     )));
     // Deterministisches UI-Status-Modell — eindeutig pro Session.
     if (s.status === "closed") {
@@ -427,7 +445,11 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   // geantwortet hat. Greift in jedem View (todo / autobot / all / done) — auch
   // wenn die Suche aktiv ist (sonst hätte die Suche keinen Sinn mehr).
   if (unreadOnly) {
-    filteredSessions = filteredSessions.filter(s => unreadMap[s.id]);
+    // "Nur ungelesen" = Instagram-Style: MA hat die Karte seit der letzten
+    // Customer-Message NICHT geöffnet. Eine geöffnete-aber-noch-nicht-
+    // beantwortete Session ist NICHT mehr "ungelesen" — die ist in
+    // "Zu tun" sichtbar, aber nicht hier.
+    filteredSessions = filteredSessions.filter(s => unseenMap[s.id]);
   }
 
   // Sortierung — explizit per ?sort= überschreibbar.
@@ -585,7 +607,8 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         // ungelesen ist (z.B. Zu tun verengt sich nur leicht) ist die Wirkung
         // klein. Counter zeigt wie viele ungelesene im aktuellen Tab existieren.
         const unreadInView = combinedSessions.filter(s => {
-          if (!unreadMap[s.id]) return false;
+          // Counter zeigt was der Toggle filtert → gleiche Semantik (unseen).
+          if (!unseenMap[s.id]) return false;
           if (view === "todo")    return isInTodo(s);
           if (view === "autobot") return s.status !== "closed" && (stats[s.id]?.autobotCount || 0) > 0;
           if (view === "done")    return s.status === "closed";
