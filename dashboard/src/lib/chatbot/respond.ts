@@ -692,7 +692,24 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       .limit(1)
       .maybeSingle();
     const lastBotText = (lastBotRow?.content as string | null) || null;
-    const pre = await applyPreLlmContext(systemPrompt, userTxt, recentTexts, lastBotText);
+    // Conversation-Reopen-Detector braucht typed msgs mit created_at.
+    // Wir geben die letzten 30 msgs (assistant/human_agent/user) durch.
+    const { data: recentTypedMsgs } = await svc
+      .from("chat_messages")
+      .select("role, content, created_at")
+      .eq("session_id", sessionId)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(30);
+    const recentTypedOldestFirst = (recentTypedMsgs || [])
+      .slice()
+      .reverse()
+      .map(r => ({
+        role: r.role as "user" | "assistant" | "human_agent" | "system",
+        content: (r.content as string | null) || null,
+        created_at: r.created_at as string,
+      }));
+    const pre = await applyPreLlmContext(systemPrompt, userTxt, recentTexts, lastBotText, recentTypedOldestFirst);
     systemPrompt = pre.systemPrompt;          // unverändert (stable)
     colorCodeDynamicHint = pre.dynamicHint;   // dynamic, separat
     pipelineCtx = pre.ctx;
@@ -2277,6 +2294,51 @@ KEINE Farbnamen nennen — die MA macht das.`;
         needsManualReview = true;
         manualReviewReason = "Bot hat möglicherweise die WhatsApp-Nummer an einer unpassenden Stelle eingefügt (Halluzination). Antwort wurde als Draft gespeichert — MA bitte die markierte Stelle prüfen und korrigieren bevor senden.";
       }
+    }
+  }
+
+  // ── CONVERSATION-REOPEN FORCE-DRAFT ─────────────────────────────────
+  // Bug 2026-05-30: Bot reaktiviert 9 Tage alte Preis-Frage weil Kundin
+  // nur [Foto] schickt. Pre-LLM-Hint warnt schon, aber falls Bot trotzdem
+  // konkrete Preis-/Produkt-Antwort liefert → Force-Draft. MA prüft Re-Open.
+  if (pipelineCtx.conversationReopen?.isReopenWithoutText) {
+    const PRICE_PRODUCT_RE = /\b(\d+\s*(€|euro)|\d+\s*g\s+(standard|mini|bondings|tapes)|insgesamt\s+\d+|packungen\s+à|für\s+\d+g)\b/i;
+    if (PRICE_PRODUCT_RE.test(finalText) && !needsManualReview) {
+      console.warn(`[respond] REOPEN-WITH-OLD-TOPIC session=${sessionId.slice(0,8)} — Bot beantwortet altes Sach-Thema nach attachment-only Re-Open`);
+      needsManualReview = true;
+      manualReviewReason = `Kundin hat nach ${pipelineCtx.conversationReopen.gapHours?.toFixed(0)}h Pause ohne Text neu geschrieben (nur Attachment/Emoji). Bot greift trotzdem eine alte Preis-/Produkt-Frage auf. MA bitte prüfen ob die alte Frage wirklich noch reaktiviert werden soll.`;
+    }
+  }
+
+  // ── ECHO-SCHUTZ ─────────────────────────────────────────────────────
+  // Verhindert Doppel-Sends: Bug 2026-05-30 — Bot generierte zweimal
+  // dieselbe Preis+Farb-Antwort auf 2 separate [Foto]-Trigger innerhalb 12h.
+  // Token-Cosine-Similarity gegen die letzte Bot-Antwort, Schwelle 0.7.
+  if (!needsManualReview && finalText.length >= 100) {
+    try {
+      const { data: lastBotMsg } = await svc
+        .from("chat_messages")
+        .select("content, created_at")
+        .eq("session_id", sessionId)
+        .eq("role", "assistant")
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (lastBotMsg?.content) {
+        const ageHours = (Date.now() - new Date(lastBotMsg.created_at).getTime()) / 3600000;
+        if (ageHours <= 24) {
+          const { computeBotAnswerSimilarity } = await import("./intent-conversation-reopen");
+          const sim = computeBotAnswerSimilarity(finalText, lastBotMsg.content as string);
+          if (sim >= 0.7) {
+            console.warn(`[respond] ECHO-DETECTED session=${sessionId.slice(0,8)} — similarity=${sim.toFixed(2)} to bot-msg ${ageHours.toFixed(1)}h ago`);
+            needsManualReview = true;
+            manualReviewReason = `Bot hat in den letzten ${ageHours.toFixed(0)}h schon eine sehr ähnliche Antwort geschickt (Ähnlichkeit ${(sim * 100).toFixed(0)}%). Mögliches Doppel-Send. MA prüfen.`;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[respond] echo-check failed:", (e as Error).message);
     }
   }
 

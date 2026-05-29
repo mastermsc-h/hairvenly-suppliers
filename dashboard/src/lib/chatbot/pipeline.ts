@@ -28,6 +28,7 @@ import { buildStockEtaContext } from "./intent-stock-eta";
 import { enforceBusinessFacts } from "./intent-contact";
 import { applyAllOutputSanitizers } from "./output-sanitizers";
 import { detectDayQueries, buildDayQueryHint, type DayQueryMatch } from "./intent-day-query";
+import { analyzeConversationReopen, buildConversationReopenHint, type ConversationReopenAnalysis } from "./intent-conversation-reopen";
 
 /**
  * Context, der zwischen Pre-LLM und Post-LLM weitergegeben wird.
@@ -45,6 +46,10 @@ export type ChatbotPipelineContext = {
   /** Pre-LLM Day-Query-Matches — Validator vergleicht später Bot-Output gegen
    *  die tatsächlichen offen/zu-Status der referenzierten Tage. */
   dayQueryMatches?: DayQueryMatch[];
+  /** Pre-LLM Conversation-Reopen-Analyse — wenn isReopenWithoutText, soll
+   *  der Post-LLM-Pfad Force-Draft setzen falls Bot trotzdem alte Themen
+   *  reaktiviert (Preis-Berechnung, Produkt-Empfehlung mit Zahlen). */
+  conversationReopen?: ConversationReopenAnalysis;
 };
 
 /**
@@ -140,6 +145,12 @@ export async function applyPreLlmContext(
    * (Bot bot Warteliste an, Kundin sagt ja → instruiere create_reservation).
    */
   lastBotMessage?: string | null,
+  /**
+   * Optional: vollständige Session-Messages (chronologisch, oldest first) mit
+   * role + content + created_at — für Conversation-Reopen-Detection.
+   * Wenn nicht übergeben, wird Reopen-Check übersprungen.
+   */
+  recentMsgsTyped?: Array<{ role: "user" | "assistant" | "human_agent" | "system"; content: string | null; created_at: string }>,
 ): Promise<{
   /** Unveränderter stable systemPrompt — geht in den GECACHTEN Block */
   systemPrompt: string;
@@ -229,6 +240,25 @@ export async function applyPreLlmContext(
     }
   } catch (e) {
     console.warn("[pipeline] day-query-injector error:", e);
+  }
+
+  // ── 🔄 CONVERSATION-REOPEN-DETECTOR ─────────────────────────────
+  // Erkennt: letzte Customer-Msg ist attachment/emoji-only UND Gap zur
+  // letzten Text-Customer-Msg > 48h → Bot soll alte unbeantwortete
+  // Sach-Themen (Preis/Verfügbarkeit) NICHT automatisch reaktivieren.
+  // Verhindert Bug 2026-05-30: Bot reaktiviert 9 Tage alte Preis-Frage
+  // weil Kundin nur [Foto] schickt.
+  if (recentMsgsTyped && recentMsgsTyped.length > 0) {
+    try {
+      const reopen = analyzeConversationReopen(recentMsgsTyped);
+      if (reopen.isReopenWithoutText) {
+        ctx.conversationReopen = reopen;
+        const hint = buildConversationReopenHint(reopen);
+        if (hint) dynamicHint += hint;
+      }
+    } catch (e) {
+      console.warn("[pipeline] conversation-reopen-detector error:", e);
+    }
   }
 
   // ── 📦 STOCK-INJECTOR (TODO) — wenn gebaut, dynamicHint ergänzen
