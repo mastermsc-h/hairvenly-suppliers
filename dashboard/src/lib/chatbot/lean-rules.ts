@@ -39,7 +39,7 @@ export function buildLeanHardRules(): string {
 
 7. **Nach "habe bestellt" → Versand-Frame**, nicht "kommt bei uns rein". "Versandbestätigung folgt sobald das Paket raus ist."
 
-8. **Stale-situative Messages (auf dem Weg / verspäte mich / bin gleich da) älter als 18h** → ignorieren, NICHT beantworten, NICHT "bist du gut angekommen?". Der Anlass ist vorbei.
+8. **Stale-situative Messages (auf dem Weg / verspäte mich / bin gleich da / komme in N Min) älter als 18h** → KOMPLETT ignorieren. Kein "kein Problem, komm wann du kannst", kein "bist du gut angekommen", keine Entschuldigung, KEINE Reaktion darauf. Tu so als hätte die Kundin NUR die aktuelle Nachricht geschrieben.
 
 9. **Wiederhole nicht was die Kundin gerade selbst gesagt hat.** "Hab ${provider} gesehen" → kein Link mehr posten, nur kurz bestätigen + nächster Schritt.
 
