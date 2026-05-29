@@ -45,26 +45,19 @@ export default async function ChatSessionPage({ params, searchParams }: PageProp
 
   if (!session) notFound();
 
-  // INSTAGRAM-STYLE "gelesen"-Indikator: beim Öffnen setzen wir
-  // last_opened_by_agent_at. Das governt NUR die Bold/Normal-Optik des Namens
-  // in der Inbox (Name fett wenn die Kundin seither nochmal geschrieben hat).
-  // last_seen_by_agent_at bleibt unberührt — der "Nur unbeantwortet"-Filter
-  // läuft separat und ändert sich erst bei echten Aktionen (Antworten /
-  // "Als erledigt"-Button), damit die Session beim bloßen Anschauen nicht
-  // aus dem Filter rausfällt.
+  // INSTAGRAM-STYLE "gelesen"-Indikator: last_opened_by_agent_at wird
+  // beim Öffnen aktualisiert. ARCHITEKTUR-WECHSEL 2026-05-29: das passiert
+  // jetzt CLIENT-seitig in session-view.tsx via useEffect on mount, NICHT
+  // mehr hier als SSR-Side-Effect.
   //
-  // SENTINEL-SCHUTZ (User-Bug 2026-05-29): wenn die MA hier auf "Ungelesen"
-  // klickt, setzt markSessionUnread beide Felder auf FLAG_SENTINEL (1970).
-  // Danach feuert router.refresh() — diese Page-Page läuft erneut und würde
-  // last_opened wieder auf now() setzen, was den Sentinel überschreibt und
-  // die "Ungelesen"-Markierung zunichte macht. Wir prüfen daher zuerst, ob
-  // last_opened bereits ein Sentinel ist, und überschreiben NICHT in dem Fall.
-  await svc
-    .from("chat_sessions")
-    .update({ last_opened_by_agent_at: new Date().toISOString() })
-    .eq("id", sessionId)
-    // Nur updaten wenn es KEIN Sentinel (vor 2000) ist
-    .or("last_opened_by_agent_at.is.null,last_opened_by_agent_at.gte.2000-01-01");
+  // Grund: SSR-Side-Effect feuerte bei JEDEM Render — also auch bei
+  // router.refresh() innerhalb der Page. Das hat den "Ungelesen"-Sentinel
+  // sofort wieder zerstört. Mit Sentinel-Schutz blieb er dafür sticky bei
+  // erneutem Öffnen aus der Inbox. Beides falsch.
+  //
+  // Mount-basiert ist semantisch korrekt: nur eine ECHTE Navigation
+  // (Component-Mount) zählt als "geöffnet". router.refresh() ändert die
+  // URL nicht und unmountet nicht → Sentinel bleibt erhalten.
 
   // Aktive Avatars für Selector
   const { data: avatars } = await svc

@@ -954,6 +954,30 @@ export async function markSessionAsRead(sessionId: string) {
 }
 
 /**
+ * Wird beim MOUNT der Session-Detail-Page aus dem Client aufgerufen
+ * (siehe session-view.tsx → useEffect). Setzt last_opened_by_agent_at auf
+ * NOW() und überschreibt damit auch einen ggf. gesetzten "Ungelesen"-Sentinel.
+ *
+ * Architektur-Hintergrund (User-Bug 2026-05-29): Vorher lief das als
+ * SSR-Side-Effect in page.tsx — der feuerte aber auch bei jedem
+ * router.refresh() (z.B. nach Klick auf "Ungelesen") und überschrieb
+ * dann den frisch gesetzten Sentinel. Mit Sentinel-Schutz-Filter wiederum
+ * blieb der Sentinel auch nach Wiederöffnen aus der Inbox sticky → MA
+ * konnte das Flag nicht durch normales "Erneut öffnen" loswerden.
+ *
+ * Jetzt: nur bei echtem Component-Mount (= echte Navigation auf die
+ * Detail-Page) wird der Marker gesetzt. router.refresh() innerhalb der
+ * Page lässt den Sentinel intakt.
+ */
+export async function markSessionAsOpened(sessionId: string) {
+  const svc = createServiceClient();
+  await svc.from("chat_sessions")
+    .update({ last_opened_by_agent_at: new Date().toISOString() })
+    .eq("id", sessionId);
+  revalidatePath("/chatbot/inbox");
+}
+
+/**
  * Markiert eine Session als "Nur für Team" — Bot antwortet ab sofort nicht
  * mehr selbstständig auf neue Kundennachrichten. Setzt zusätzlich bot_mode='off'
  * damit auch assisted/auto-Generierung gestoppt wird.

@@ -24,6 +24,7 @@ import {
   markSessionAsSeen,
   markSessionAsNotDone,
   markSessionAsRead,
+  markSessionAsOpened,
   toggleHumanOnly,
   deleteMessage,
 } from "@/lib/actions/chat-inbox";
@@ -106,6 +107,22 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
+
+  // INSTAGRAM-STYLE "gelesen"-Marker: feuert NUR beim Component-Mount —
+  // also bei echter Navigation auf die Detail-Page (z.B. Klick aus der
+  // Inbox). router.refresh() innerhalb der Page unmountet nicht und löst
+  // dies daher NICHT aus → "Ungelesen"-Sentinel bleibt sticky bis zur
+  // nächsten echten Navigation. Architektur-Bug 2026-05-29 dadurch
+  // strukturell gelöst.
+  useEffect(() => {
+    void markSessionAsOpened(session.id).catch(() => {
+      // Silent — Marker ist Nice-to-have, kein Block für die UI
+    });
+    // Bewusst nur session.id als Dep — wir feuern pro Session genau einmal
+    // beim Mount. Wechsel auf eine andere Session-Detail-Page unmountet
+    // und remounted die Komponente → neuer Mount → erneuter Marker.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id]);
 
   // Polling für neue Nachrichten alle 3s — mit Dedup gegen Optimistic-Updates
   useEffect(() => {
