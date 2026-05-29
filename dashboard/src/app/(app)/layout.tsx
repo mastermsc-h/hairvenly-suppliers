@@ -163,6 +163,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                     { href: "/chatbot/insights",     label: "Insights" },
                     { href: "/chatbot/costs",        label: "Kosten" },
                     { href: "/chatbot/salon-prices", label: "Salon-Preise (Treatwell)" },
+                    { href: "/chatbot/bot-settings", label: "Bot-Einstellungen" },
                     { href: "/chatbot",              label: "Wissensdatenbank", exact: true },
                     { href: "/chatbot/chat-wissen", label: "Chat-Wissen (3300)" },
                     { href: "/chatbot/strategies", label: "Strategien" },

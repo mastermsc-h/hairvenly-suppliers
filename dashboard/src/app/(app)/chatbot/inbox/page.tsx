@@ -158,13 +158,16 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   }
   const combinedSessions = [...(sessions || []), ...messageMatchedSessions];
 
-  // Globaler Default-Bot-Modus für neue Sessions
+  // Globaler Default-Bot-Modus für neue Sessions + Kill-Switch-Status
   const { data: globalSettings } = await svc
     .from("chatbot_settings")
-    .select("default_bot_mode")
+    .select("default_bot_mode, proactive_generation_enabled, proactive_safe_categories")
     .eq("id", 1)
     .maybeSingle();
   const defaultBotMode = (globalSettings?.default_bot_mode || "off") as "auto" | "assisted" | "off";
+  const killSwitchSilent =
+    !globalSettings?.proactive_generation_enabled &&
+    ((globalSettings?.proactive_safe_categories || []) as string[]).length === 0;
 
   // Pro Session: Counts + jeweils NEUESTE User-Message + neueste Bot/Agent-Antwort
   const sessionIds = combinedSessions.map(s => s.id);
@@ -497,6 +500,25 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-4">
+      {/* 🚨 Silent-Kill-Switch-Banner: Kill-Switch aktiv + Whitelist leer
+          → der Bot antwortet auf NICHTS. Sichtbar machen damit's nicht
+          unentdeckt bleibt (User-Bug 2026-05-29). */}
+      {killSwitchSilent && (
+        <Link
+          href="/chatbot/bot-settings"
+          className="block rounded-2xl border-2 border-amber-300 bg-amber-50 p-3 hover:bg-amber-100 transition"
+        >
+          <div className="text-sm font-semibold text-amber-900">
+            ⚠️ Bot antwortet aktuell auf NICHTS automatisch
+          </div>
+          <div className="text-xs text-amber-800 mt-0.5">
+            Kill-Switch ist aktiv UND die Kategorie-Whitelist ist leer. Jede
+            neue Anfrage bleibt unbeantwortet bis ihr selbst ran geht. →
+            Bot-Einstellungen öffnen
+          </div>
+        </Link>
+      )}
+
       {/* Kompakter Header — Titel, Live-Counter, Aktionen in EINER Zeile */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
