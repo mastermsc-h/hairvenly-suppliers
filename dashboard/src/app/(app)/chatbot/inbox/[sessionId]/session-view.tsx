@@ -979,6 +979,13 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
                 const isStory = a.type === "story_mention" || a.type === "story_reply";
                 if (isStory && a.url) {
                   const label = a.type === "story_reply" ? "Antwort auf Story" : "Story-Mention";
+                  // Meta-CDN-URLs (scontent.cdninstagram.com / fbcdn.net) liefern
+                  // bei direktem Browser-Aufruf 403/0 wegen Hot-Link-Schutz —
+                  // wir gehen über unseren Server-Proxy. Andere URLs unverändert.
+                  const needsProxy = /\.(?:cdninstagram\.com|fbcdn\.net)\b/i.test(a.url);
+                  const displayUrl = needsProxy
+                    ? `/api/ig-proxy?url=${encodeURIComponent(a.url)}`
+                    : a.url;
                   return (
                     <div key={i} className="flex flex-col gap-1 max-w-[200px]">
                       <span className="text-[10px] text-purple-700 bg-purple-50 border border-purple-200 rounded-full px-2 py-0.5 self-start inline-flex items-center gap-1">
@@ -986,11 +993,12 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
                       </span>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={a.url}
+                        src={displayUrl}
                         alt={label}
-                        onClick={() => onImageClick?.(a.url)}
+                        onClick={() => onImageClick?.(displayUrl)}
                         onError={(e) => {
-                          // Meta-Story-URLs laufen nach 24-48h ab — Fallback-Text
+                          // Fallback wenn auch via Proxy nichts kommt
+                          // (= Meta hat den Link wirklich invalidiert).
                           const t = e.currentTarget as HTMLImageElement;
                           t.style.display = "none";
                           const next = t.nextElementSibling as HTMLElement | null;
@@ -1002,7 +1010,7 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
                         style={{ display: "none" }}
                         className="items-center gap-1 text-[11px] text-neutral-500 italic px-2 py-2 border border-dashed border-neutral-200 rounded-lg max-w-[200px]"
                       >
-                        Story-Vorschau abgelaufen (IG-Link nur ~24-48h gültig)
+                        Story-Vorschau aktuell nicht ladbar (Instagram-Link)
                       </div>
                     </div>
                   );
