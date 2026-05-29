@@ -348,13 +348,36 @@ function GroupCard({
   const usedColorIds = new Set(group.items.map((i) => i.color_id).filter(Boolean) as string[]);
   const pickableColors = availableColors.filter((c) => !usedColorIds.has(c.id));
 
+  // Selection helpers for "alle dieser Gruppe"
+  const groupItemIds = group.items.map((i) => i.id);
+  const groupSelectedCount = groupItemIds.filter((id) => selected?.has(id)).length;
+  const allInGroupSelected = groupSelectedCount === groupItemIds.length && groupItemIds.length > 0;
+  const toggleGroup = () => {
+    if (!onToggle) return;
+    if (allInGroupSelected) {
+      groupItemIds.forEach((id) => selected?.has(id) && onToggle(id));
+    } else {
+      groupItemIds.forEach((id) => !selected?.has(id) && onToggle(id));
+    }
+  };
+
   return (
     <div className={`rounded-xl border ${mc.border} overflow-hidden`}>
       {/* Group header */}
-      <div className={`${mc.bg} px-4 py-2.5 flex items-center justify-between`}>
-        <span className={`text-xs font-semibold uppercase tracking-wider ${mc.text}`}>
+      <div className={`${mc.bg} px-4 py-2.5 flex items-center justify-between gap-2`}>
+        <span className={`text-xs font-semibold uppercase tracking-wider ${mc.text} flex-1`}>
           {group.label}
         </span>
+        {selectMode && (
+          <button
+            type="button"
+            onClick={toggleGroup}
+            className={`text-[10px] font-medium px-2 py-0.5 rounded border ${mc.border} ${mc.text} hover:bg-white/60 transition`}
+            title={allInGroupSelected ? "Alle dieser Gruppe abwählen" : "Alle dieser Gruppe auswählen"}
+          >
+            {allInGroupSelected ? "Alle abwählen" : `Alle (${groupItemIds.length})`}
+          </button>
+        )}
         <span className={`text-xs font-medium ${mc.text}`}>
           {fmt(groupQty)} {unit}
         </span>
@@ -623,8 +646,8 @@ function BulkActionBar({
   };
 
   return (
-    <div className="mt-4 sticky bottom-2 z-20 mx-auto max-w-3xl">
-      <div className="bg-neutral-900 text-white rounded-2xl shadow-lg p-3 space-y-2">
+    <div className="fixed bottom-4 left-2 right-2 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-[600px] z-50">
+      <div className="bg-neutral-900 text-white rounded-2xl shadow-2xl p-3 space-y-2 border border-neutral-700">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-medium">{selectedIds.length} Position{selectedIds.length === 1 ? "" : "en"} ausgewählt</span>
           <div className="ml-auto flex items-center gap-2 flex-wrap">
