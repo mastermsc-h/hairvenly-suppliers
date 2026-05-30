@@ -20,23 +20,121 @@ function formatDeDate(iso: string): string {
  *   3. The order's main ETA from orders.eta.
  *   4. Fallback: keep original sheet ankunft.
  */
+/**
+ * Normalize a product name for fuzzy token matching:
+ *  - lowercase
+ *  - drop punctuation (#, ♡, etc.)
+ *  - split into tokens >=3 chars
+ *  - drop method/line/material stopwords (only color-words + length remain)
+ */
+function normalizeForMatch(s: string): Set<string> {
+  const STOP = new Set([
+    "extensions", "extension", "tape", "tapes", "bonding", "bondings",
+    "tressen", "weft", "wefts", "clip", "clipins", "ponytail", "ponytails",
+    "russisch", "russische", "russisches", "russischen",
+    "usbekisch", "usbekische", "usbekischen", "us",
+    "glatt", "glatte", "glattes", "wellig", "wellige", "welliges",
+    "echthaar", "haar", "haare", "keratin", "mini", "standard",
+    "classic", "invisible", "genius", "butterfly",
+  ]);
+  return new Set(
+    s.toLowerCase()
+      .replace(/[^a-zäöüß0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(t => t.length >= 3 && !STOP.has(t))
+  );
+}
+
+/**
+ * Token-Stamm-Match: behandelt Flexionen wie "aschbraun" ≈ "aschbraune".
+ * Erlaubt, wenn beide Tokens >=4 Zeichen UND einer Prefix vom anderen ist.
+ */
+function tokensMatchByStem(t1: string, t2: string): boolean {
+  if (t1 === t2) return true;
+  if (t1.length < 4 || t2.length < 4) return false;
+  return t1.startsWith(t2) || t2.startsWith(t1);
+}
+
+/**
+ * Fuzzy-Match: Sheet-AlertProduct-Name vs DB-name_shopify-Key.
+ *
+ * Beispiele:
+ *   "Pearl White Russische Bondings 60cm" vs "#PEARL WHITE RUSSISCHE BONDINGS GLATT 1G"
+ *     → A={pearl,white,60cm} ∩ B={pearl,white} → 2 Treffer → match
+ *   "Norvegian Russische Bondings 60cm" vs "#NORVEGIAN RUSSISCHE BONDINGS GLATT 1G"
+ *     → A={norvegian,60cm} ∩ B={norvegian} → 1 Treffer, B hat nur 1 Token → match
+ *   "2A Aschbraun Tape 55cm" vs "#2A ASCHBRAUNE US WELLIGE TAPE EXTENSIONS 55CM"
+ *     → "aschbraun" ≈ "aschbraune" (Prefix) → match
+ *
+ * Schwelle:
+ *   - Wenn beide Sets >2 Tokens haben: braucht ≥2 Matches (Defense gegen FP)
+ *   - Wenn entweder A oder B nur 1-2 Tokens hat: 1 Match reicht (kleine Sets,
+ *     jedes Token ist signifikant — eine 1-Token-DB-Color ist eindeutig)
+ */
+function fuzzyMatchProductKey(sheetName: string, dbKey: string): boolean {
+  const a = normalizeForMatch(sheetName);
+  const b = normalizeForMatch(dbKey);
+  if (a.size === 0 || b.size === 0) return false;
+  let overlap = 0;
+  for (const t of a) {
+    for (const t2 of b) {
+      if (tokensMatchByStem(t, t2)) {
+        overlap++;
+        break;
+      }
+    }
+  }
+  const minSize = Math.min(a.size, b.size);
+  const required = minSize <= 2 ? 1 : 2;
+  return overlap >= required;
+}
+
 function buildAnkunftFromMeta(meta: OrderMeta, productName?: string): string | null {
   // 1) Per-position ETA: look up by Shopify product name (AlertProduct.product).
   //    If multiple ETAs exist for this product in this order (split delivery),
   //    show the EARLIEST one — that's the precise next-arrival date for at least
   //    some of the stock.
   if (productName) {
+    // (a) exact name_shopify match
     const positionEtas = meta.itemEtasByShopify.get(productName);
     if (positionEtas && positionEtas.length > 0) {
       return `ca. Ankunft: ${formatDeDate(positionEtas[0])}`;
+    }
+    // (b) Bug 2026-05-30: Sheet-AlertProduct-Namen sind oft NICHT
+    //     identisch zu DB-name_shopify ("Pearl White Russische Bondings 60cm"
+    //     vs "#PEARL WHITE RUSSISCHE BONDINGS GLATT 1G"). Fuzzy-match per
+    //     normalisierten Tokens (Color-Name + optional Length/Variant).
+    //     Wenn mehrere Keys matchen, nehmen wir das früheste ETA aller Treffer.
+    let earliestFuzzy: string | null = null;
+    for (const [dbKey, etas] of meta.itemEtasByShopify.entries()) {
+      if (etas.length === 0) continue;
+      if (fuzzyMatchProductKey(productName, dbKey)) {
+        const candidate = etas[0]; // etas already sorted asc
+        if (!earliestFuzzy || candidate < earliestFuzzy) earliestFuzzy = candidate;
+      }
+    }
+    if (earliestFuzzy) {
+      return `ca. Ankunft: ${formatDeDate(earliestFuzzy)}`;
     }
   }
   // 2) Partial shipments — use earliest un-arrived ETA
   if (meta.shipmentEtas.length > 0) {
     return `ca. Ankunft: ${formatDeDate(meta.shipmentEtas[0])}`;
   }
-  // 3) Order-level ETA
-  if (meta.eta) return `ca. Ankunft: ${formatDeDate(meta.eta)}`;
+  // 3) Order-level ETA — aber NUR wenn diese in der Zukunft liegt.
+  //    Bug 2026-05-30: orders.eta wird beim Order-Anlegen einmal gesetzt
+  //    und oft nicht aktualisiert wenn die per-Position-ETAs später ins
+  //    Sheet kommen. Eine VERGANGENE orders.eta ist schlechter als kein
+  //    Override → wir lassen dann die Original-Sheet-ankunft stehen.
+  if (meta.eta) {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const etaDate = new Date(meta.eta + "T00:00:00Z");
+    if (etaDate.getTime() >= today.getTime()) {
+      return `ca. Ankunft: ${formatDeDate(meta.eta)}`;
+    }
+    // vergangenes orders.eta → kein Override (return null → original sheet bleibt)
+  }
   return null;
 }
 
