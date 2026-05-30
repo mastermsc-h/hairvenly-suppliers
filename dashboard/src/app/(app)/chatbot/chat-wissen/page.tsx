@@ -71,6 +71,33 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
     ? sanitizedQ.split(/\s+/).filter(t => t.length >= 2).slice(0, 5)
     : [];
 
+  // ── VOLLTEXT-CHAT-SUCHE ─────────────────────────────────────────
+  // User-Befund 2026-05-30: Destillierte Archives (533+148 Q&A) decken
+  // nicht das ganze Wissen ab. Echte Customer-Themen wie "Microring",
+  // "Butterfly Tressen", "Silikon-Microringe" tauchen in 2739 rohen
+  // chat_messages auf, sind aber im destillierten Archiv NICHT
+  // enthalten. Die folgende Variante (source=chats) sucht direkt in
+  // chat_messages — gruppiert nach Session, zeigt 1 Snippet pro Match.
+  type ChatHit = {
+    session_id: string;
+    role: string;
+    content: string;
+    created_at: string;
+  };
+  let chatHits: ChatHit[] = [];
+  let chatSessionCount = 0;
+  if (source === "chats" && qTerms.length > 0) {
+    let cq = svc.from("chat_messages")
+      .select("session_id, role, content, created_at")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(400);
+    for (const t of qTerms) cq = cq.ilike("content", `%${t}%`);
+    const { data } = await cq;
+    chatHits = (data || []) as ChatHit[];
+    chatSessionCount = new Set(chatHits.map(h => h.session_id)).size;
+  }
+
   // V2 query (destilliert, höhere Qualität)
   let v2q = svc.from("chatbot_knowledge_archive_v2").select("id, topic, question, answer, facts, tags, biz_score, conversion, created_at");
   if (topic !== "all") v2q = v2q.eq("topic", topic);
@@ -158,12 +185,13 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
       </div>
 
       {/* Source-Toggle */}
-      <div className="flex items-center gap-2 text-xs">
+      <div className="flex items-center gap-2 text-xs flex-wrap">
         <span className="text-neutral-500">Quelle:</span>
         {[
-          { k: "both", label: `Beide (${v1.length + v2.length})` },
-          { k: "v2",   label: `Destilliert v2 (${v2.length})` },
-          { k: "v1",   label: `Roh v1 (${v1.length})` },
+          { k: "both",  label: `Beide Archive (${v1.length + v2.length})` },
+          { k: "v2",    label: `Destilliert v2 (${v2.length})` },
+          { k: "v1",    label: `Roh v1 (${v1.length})` },
+          { k: "chats", label: `Volltext-Chats${q ? ` (${chatHits.length} Msg / ${chatSessionCount} Sess)` : ""}` },
         ].map(opt => (
           <Link
             key={opt.k}
@@ -178,6 +206,12 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
           </Link>
         ))}
       </div>
+
+      {source === "chats" && !q && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Tippe oben ein Suchwort — Volltext-Chats werden nur bei aktiver Suche durchsucht (sonst 2739 Nachrichten = zu viel).
+        </div>
+      )}
 
       {/* Topic-Chips */}
       <div className="space-y-2">
@@ -255,17 +289,110 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
         {tag !== "all" && <> · Tag „<strong>{tag}</strong>"</>}
       </div>
 
-      {/* Liste */}
-      <div className="space-y-2">
-        {entries.slice(0, 200).map(e => (
-          <KnowledgeRow key={e.source + e.id} entry={e} />
-        ))}
-        {entries.length > 200 && (
-          <div className="text-xs text-neutral-400 text-center py-2">
-            … {entries.length - 200} weitere Einträge (Top 200 angezeigt — schränke per Filter weiter ein)
+      {/* Liste — Archive-Quellen */}
+      {source !== "chats" && (
+        <div className="space-y-2">
+          {entries.slice(0, 200).map(e => (
+            <KnowledgeRow key={e.source + e.id} entry={e} />
+          ))}
+          {entries.length > 200 && (
+            <div className="text-xs text-neutral-400 text-center py-2">
+              … {entries.length - 200} weitere Einträge (Top 200 angezeigt — schränke per Filter weiter ein)
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Liste — Volltext-Chat-Treffer */}
+      {source === "chats" && q && (
+        <div className="space-y-2">
+          <div className="text-sm text-neutral-500">
+            <strong className="text-neutral-900">{chatHits.length}</strong> Nachrichten in{" "}
+            <strong className="text-neutral-900">{chatSessionCount}</strong> Sessions
+            {chatHits.length === 400 && " (Limit erreicht — schränke Suche enger ein)"}
           </div>
-        )}
-      </div>
+          {chatSessionCount === 0 && (
+            <div className="rounded-2xl border border-neutral-200 bg-white p-4 text-sm text-neutral-500">
+              Keine Treffer im Chat-Volltext für „{q}".
+            </div>
+          )}
+          {(() => {
+            const bySession = new Map<string, ChatHit[]>();
+            for (const h of chatHits) {
+              if (!bySession.has(h.session_id)) bySession.set(h.session_id, []);
+              bySession.get(h.session_id)!.push(h);
+            }
+            const sessions = Array.from(bySession.entries()).slice(0, 40);
+            return sessions.map(([sid, hits]) => {
+              const sorted = hits.slice().sort((a, b) => a.created_at.localeCompare(b.created_at));
+              return (
+                <div key={sid} className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs font-mono text-neutral-500">Session {sid.slice(0, 8)}…</div>
+                    <Link
+                      href={`/chatbot/inbox/${sid}`}
+                      className="text-xs px-2 py-1 rounded-md border border-neutral-300 hover:bg-neutral-50"
+                    >
+                      Verlauf öffnen →
+                    </Link>
+                  </div>
+                  <div className="space-y-1.5">
+                    {sorted.slice(0, 5).map((h, i) => {
+                      const lower = h.content.toLowerCase();
+                      // Snippet um ersten matching term ±100 Zeichen
+                      const firstTerm = qTerms.find(t => lower.includes(t.toLowerCase()));
+                      let snippet = h.content;
+                      if (firstTerm) {
+                        const idx = lower.indexOf(firstTerm.toLowerCase());
+                        const start = Math.max(0, idx - 100);
+                        const end = Math.min(h.content.length, idx + firstTerm.length + 200);
+                        snippet = (start > 0 ? "…" : "") + h.content.slice(start, end) + (end < h.content.length ? "…" : "");
+                      } else if (snippet.length > 300) {
+                        snippet = snippet.slice(0, 300) + "…";
+                      }
+                      // Hervorhebung der Terms (simpel: nur erster Term, reicht für UX)
+                      let highlighted: React.ReactNode = snippet;
+                      if (firstTerm) {
+                        const re = new RegExp(`(${firstTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+                        const parts: string[] = snippet.split(re);
+                        highlighted = parts.map((p: string, j: number) =>
+                          p.toLowerCase() === firstTerm.toLowerCase()
+                            ? <mark key={j} className="bg-yellow-200 px-0.5 rounded">{p}</mark>
+                            : <span key={j}>{p}</span>
+                        );
+                      }
+                      const roleBadge =
+                        h.role === "user" ? { label: "Kundin", cls: "bg-neutral-100 text-neutral-700" } :
+                        h.role === "assistant" ? { label: "Bot", cls: "bg-pink-100 text-pink-800" } :
+                        h.role === "human_agent" ? { label: "MA", cls: "bg-purple-100 text-purple-800" } :
+                        { label: h.role, cls: "bg-neutral-100 text-neutral-600" };
+                      return (
+                        <div key={i} className="text-sm text-neutral-700 leading-relaxed flex gap-2">
+                          <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${roleBadge.cls}`}>
+                            {roleBadge.label}
+                          </span>
+                          <div>
+                            <span className="text-xs text-neutral-400 mr-2">{new Date(h.created_at).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" })}</span>
+                            {highlighted}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {hits.length > 5 && (
+                      <div className="text-xs text-neutral-400">+ {hits.length - 5} weitere Treffer in dieser Session</div>
+                    )}
+                  </div>
+                </div>
+              );
+            });
+          })()}
+          {chatSessionCount > 40 && (
+            <div className="text-xs text-neutral-400 text-center py-2">
+              … {chatSessionCount - 40} weitere Sessions (Top 40 angezeigt)
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
