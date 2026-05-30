@@ -448,8 +448,8 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
                       Was passiert bei neuer Kundennachricht?
                     </div>
                     {([
-                      { v: "off",            icon: "⏸",    color: "neutral", label: "Manuell",       desc: "Bot tut nichts. Du klickst pro Antwort auf „Antwort generieren\"." },
-                      { v: "assisted",       icon: "🤝", color: "blue",    label: "Assistiert",  desc: "Bot generiert IMMER einen Entwurf, du bestätigst vor dem Senden. Antwort ist vom Bot, du gibst sie frei." },
+                      { v: "off",            icon: "⏸",    color: "neutral", label: "Manuell",       desc: "Bot ist komplett aus. Keine Generierung, kein Auto-Draft. Du schreibst alles selbst." },
+                      { v: "assisted",       icon: "🤝", color: "blue",    label: "Assistiert",  desc: "Bot wartet auf deinen Klick. Erst wenn du „Antwort generieren\" drückst, baut der Bot einen Entwurf für dich, den du dann freigibst." },
                       { v: "selective_auto", icon: "🧠",   color: "violet",  label: "Smart-Auto",    desc: "Bot prüft selbst: bei einfachen Fragen (Verfügbarkeit, Info) antwortet er autonom, sonst Entwurf." },
                       { v: "auto",           icon: "🤖",   color: "green",   label: "Auto-Antwort",  desc: "Bot sendet IMMER selbst ohne Rückfrage. Nur für eingespielte Avatare." },
                     ] as const).map(opt => {

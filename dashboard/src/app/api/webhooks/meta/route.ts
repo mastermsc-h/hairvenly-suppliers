@@ -658,7 +658,12 @@ async function routeIncoming(opts: {
     console.log(`[meta-webhook] kill-switch BYPASSED — autoOverrideType=${autoOverrideType} ist kontrollierte Vorbereitungs-Antwort`);
   }
 
-  if ((effectiveBotMode === "auto" || effectiveBotMode === "assisted" || effectiveBotMode === "selective_auto") && session.status === "active") {
+  // ⚠️ User-Anweisung 2026-05-30: "assisted" generiert NICHT mehr automatisch
+  // einen Entwurf. MA klickt explizit "Antwort generieren" (siehe
+  // generateDraftOnDemand-Action). Nur "auto" (sofort senden) und
+  // "selective_auto" (Confidence-Check → auto oder Draft) triggern den
+  // Webhook automatisch. "assisted" = MA-on-demand. "off" = inaktiv.
+  if ((effectiveBotMode === "auto" || effectiveBotMode === "selective_auto") && session.status === "active") {
     try {
       // ── SMART DEBOUNCE ──
       // Wartezeit damit die Kundin Zeit hat mehrere Nachrichten zu schicken
@@ -732,7 +737,8 @@ async function routeIncoming(opts: {
       const curMode = refreshed?.bot_mode || (refreshed?.bot_auto_reply ? "auto" : "off");
       // Bei Auto-Respond-Override darf curMode auch 'off' sein — wir antworten trotzdem.
       const effectiveCurMode = autoOverrideType && curMode === "off" ? "auto" : curMode;
-      if (refreshed?.status !== "active" || (effectiveCurMode !== "auto" && effectiveCurMode !== "assisted" && effectiveCurMode !== "selective_auto")) {
+      // Konsistent mit oben: assisted triggert NICHT mehr automatisch.
+      if (refreshed?.status !== "active" || (effectiveCurMode !== "auto" && effectiveCurMode !== "selective_auto")) {
         console.log(`[meta-webhook] debounce: session no longer active+bot, skipping`);
         return;
       }

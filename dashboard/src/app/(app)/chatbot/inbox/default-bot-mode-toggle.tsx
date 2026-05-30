@@ -12,8 +12,8 @@ interface Props {
 }
 
 const OPTIONS: { v: Mode; icon: string; label: string; desc: string; color: string }[] = [
-  { v: "off",      icon: "⏸",   label: "Manuell",     desc: "Bot tut bei neuen DMs gar nichts — du klickst manuell auf 'Antwort generieren'.",           color: "neutral" },
-  { v: "assisted", icon: "🤝", label: "Assistiert", desc: "Bot generiert IMMER einen Entwurf, du bestätigst vor dem Senden. Antwort kommt also vom Bot, aber du gibst sie frei.",            color: "blue" },
+  { v: "off",      icon: "⏸",   label: "Manuell",     desc: "Bot ist komplett aus. Keine Generierung, kein Auto-Draft. Du schreibst alles selbst.",           color: "neutral" },
+  { v: "assisted", icon: "🤝", label: "Assistiert", desc: "Bot wartet auf deinen Klick. Erst wenn du 'Antwort generieren' drückst, baut der Bot einen Entwurf für dich, den du dann freigibst.",            color: "blue" },
   { v: "auto",     icon: "🤖",   label: "Auto-Antwort", desc: "Bot sendet bei neuen DMs sofort selbst — keine Rückfrage. Nur für vertraute Avatare.",     color: "green" },
 ];
 
