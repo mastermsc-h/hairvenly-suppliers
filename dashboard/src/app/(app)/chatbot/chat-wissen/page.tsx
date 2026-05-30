@@ -71,6 +71,55 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
     ? sanitizedQ.split(/\s+/).filter(t => t.length >= 2).slice(0, 5)
     : [];
 
+  // Wortstamm-Expansion + DE/EN-Synonyme
+  // ─────────────────────────────────────
+  // Problem 2026-05-30: User sucht "mikroringe" → findet nur 4 von 12
+  // echten Messages weil Singular "Mikroring" und EN-Schreibweise
+  // "Microring" / "Microringe" nicht gematcht werden.
+  //
+  // Lösung: pro Term werden mehrere Varianten gegen content.ilike OR-verkettet
+  //   1. Original-Term
+  //   2. Suffix-stripped Stem (bei Länge ≥ 6, Endung e/en/es/er)
+  //   3. DE↔EN-Aliase (hardcoded für häufige Begriffe)
+  //
+  // Sibling-Sweep: deckt in einem Pass ab — Plural/Singular, Dativ-Endung,
+  // englische Schreibweise, common technical-term-Aliases. Erweiterung
+  // erfolgt NUR in DE_EN_ALIASES, nicht durch zusätzliche Logik.
+  const DE_EN_ALIASES: Record<string, string[]> = {
+    mikroring: ["microring"], microring: ["mikroring"],
+    mikroringe: ["microring", "mikroring"], microringe: ["mikroring", "microring"],
+    farbe: ["color"],         color: ["farbe"],
+    länge: ["length"],        laenge: ["length"],   length: ["länge", "laenge"],
+    preis: ["price"],         price: ["preis"],
+    pflege: ["care"],         care: ["pflege"],
+    haltbar: ["durable"],     durable: ["haltbar"],
+  };
+  function expandTerm(t: string): string[] {
+    const variants = new Set<string>([t]);
+    // Stem stripping bei langen Wörtern
+    if (t.length >= 6) {
+      if (t.endsWith("en") || t.endsWith("es") || t.endsWith("er")) variants.add(t.slice(0, -2));
+      else if (t.endsWith("e") || t.endsWith("n") || t.endsWith("s")) variants.add(t.slice(0, -1));
+    }
+    // DE↔EN-Synonyme für Term und alle Varianten
+    for (const v of Array.from(variants)) {
+      for (const alias of DE_EN_ALIASES[v.toLowerCase()] || []) variants.add(alias);
+    }
+    return Array.from(variants);
+  }
+  // Hilfsfunktion: baut OR-String für einen Term über alle seine Varianten
+  // gegen eine gegebene Spalte (z.B. "content" oder "question,answer")
+  function buildTermOrFilter(term: string, columns: string[]): string {
+    const variants = expandTerm(term);
+    const parts: string[] = [];
+    for (const v of variants) {
+      for (const col of columns) {
+        parts.push(`${col}.ilike.%${v}%`);
+      }
+    }
+    return parts.join(",");
+  }
+
   // ── VOLLTEXT-CHAT-SUCHE ─────────────────────────────────────────
   // User-Befund 2026-05-30: Destillierte Archives (533+148 Q&A) decken
   // nicht das ganze Wissen ab. Echte Customer-Themen wie "Microring",
@@ -91,11 +140,13 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
   let chatHitCount = 0;
   let chatSessionCount = 0;
   if (qTerms.length > 0) {
-    // 1. Cheap count query: läuft IMMER bei aktiver Suche
+    // 1. Cheap count query: läuft IMMER bei aktiver Suche.
+    //    Pro Term wird die OR-Variantenliste angehängt (.or() = innerhalb
+    //    AND zwischen den Terms, OR zwischen den Varianten desselben Terms).
     let countQ = svc.from("chat_messages")
       .select("*", { count: "exact", head: true })
       .is("deleted_at", null);
-    for (const t of qTerms) countQ = countQ.ilike("content", `%${t}%`);
+    for (const t of qTerms) countQ = countQ.or(buildTermOrFilter(t, ["content"]));
     const { count } = await countQ;
     chatHitCount = count || 0;
     // 2. Volle Liste nur bei source=chats
@@ -105,7 +156,7 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(400);
-      for (const t of qTerms) cq = cq.ilike("content", `%${t}%`);
+      for (const t of qTerms) cq = cq.or(buildTermOrFilter(t, ["content"]));
       const { data } = await cq;
       chatHits = (data || []) as ChatHit[];
       chatSessionCount = new Set(chatHits.map(h => h.session_id)).size;
@@ -116,10 +167,9 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
   let v2q = svc.from("chatbot_knowledge_archive_v2").select("id, topic, question, answer, facts, tags, biz_score, conversion, created_at");
   if (topic !== "all") v2q = v2q.eq("topic", topic);
   if (tag !== "all")   v2q = v2q.contains("tags", [tag]);
-  // Pro Term: muss in question ODER answer vorkommen (AND zwischen Terms,
-  // OR zwischen Spalten). PostgREST: kette .or() pro Term mit AND-Semantik.
+  // Pro Term: alle Varianten gegen question OR answer (AND zwischen Terms).
   for (const t of qTerms) {
-    v2q = v2q.or(`question.ilike.%${t}%,answer.ilike.%${t}%`);
+    v2q = v2q.or(buildTermOrFilter(t, ["question", "answer"]));
   }
   const { data: v2Rows } = await v2q.order("biz_score", { ascending: false, nullsFirst: false }).limit(500);
 
@@ -128,7 +178,7 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
   if (topic !== "all") v1q = v1q.eq("topic", topic);
   if (tag !== "all")   v1q = v1q.contains("methods", [tag]);
   for (const t of qTerms) {
-    v1q = v1q.or(`question.ilike.%${t}%,answer.ilike.%${t}%`);
+    v1q = v1q.or(buildTermOrFilter(t, ["question", "answer"]));
   }
   const { data: v1Rows } = await v1q.order("biz_score", { ascending: false }).limit(500);
 
