@@ -913,10 +913,14 @@ const getAvailableColors: ToolDef = {
       "Jede Farbe hat ein Feld `equivalent_in_other_line` — wenn dort z.B. \"2T14A, 3T8A\" steht, " +
       "bedeutet das: diese Farbe gibt's in der ANDEREN Linie unter diesem Namen. Beispiel: " +
       "BUTTERSCOTCH (Russisch glatt) hat equivalent_in_other_line=\"2T14A, 3T8A\" → wenn die Kundin " +
-      "fragt 'gibt's Butterscotch auch in wellig?', musst du diese Equivalents AKTIV vorschlagen: " +
-      "\"Direkt als Butterscotch nicht, aber wir haben 2T14A und 3T8A in Usbekisch wellig — beide " +
-      "sehr ähnlich (Dunkelbraun-Ombré-Verlauf). Magst du Details?\" — NIEMALS nur \"gibt's nicht in " +
-      "wellig\" antworten ohne die Equivalents zu erwähnen, wenn das Feld gepflegt ist.",
+      "fragt 'gibt's Butterscotch auch in wellig?', musst du diese Equivalents AKTIV vorschlagen + " +
+      "DIREKT die shopify_url der Equivalents posten (aus variants[] des Tool-Outputs): " +
+      "\"Direkt als Butterscotch nicht, aber 2T14A und 3T8A in Usbekisch wellig sind sehr ähnlich " +
+      "(Dunkelbraun-Ombré-Verlauf): [URL 2T14A] und [URL 3T8A]\". " +
+      "❌ NIEMALS proaktiv Foto/Video anbieten ('schick ich dir Fotos', 'such ich dir raus') — die " +
+      "Kundin braucht nur den LINK, nichts mehr. Extra Fotos/Videos NUR wenn die Kundin EXPLIZIT " +
+      "danach fragt. ❌ NIEMALS nur 'gibt's nicht in wellig' antworten ohne die Equivalents zu " +
+      "erwähnen, wenn das Feld gepflegt ist.",
     input_schema: {
       type: "object",
       properties: {
