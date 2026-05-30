@@ -2,6 +2,10 @@
 
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import {
+  type SessionCategory,
+  ALL_SESSION_CATEGORIES,
+} from "@/lib/chatbot/session-categories";
 
 /** Übernimmt eine Session: setzt assigned_to + status = awaiting_human */
 export async function takeoverSession(sessionId: string) {
@@ -1060,10 +1064,6 @@ export async function setGlobalDefaultBotMode(mode: "auto" | "assisted" | "off")
   revalidatePath("/chatbot/inbox");
 }
 
-export type SessionCategory =
-  "availability" | "pricing" | "color_advice" | "appointment"
-  | "complaint" | "order_status" | "gewerbe" | "partnership" | "models" | "general";
-
 /** Manuelles Override der Kategorie (Mitarbeiter korrigiert Bot-Klassifikation).
  *  Setzt zusätzlich category_manual=true, damit der Auto-Klassifizierer
  *  bei eingehenden Nachrichten den Wert nicht überschreibt. */
@@ -1083,14 +1083,6 @@ export async function reclassifySession(sessionId: string) {
   revalidatePath("/chatbot/inbox");
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
-
-/** Liste der Kategorien aus dem 10er-Set — als allowlist für additional_categories.
- *  Wenn ALL_SESSION_CATEGORIES erweitert wird, hier mit-aktualisieren. */
-export const ALL_SESSION_CATEGORIES: ReadonlyArray<SessionCategory> = [
-  "availability", "pricing", "general", "appointment",
-  "color_advice", "complaint", "order_status",
-  "gewerbe", "partnership", "models",
-];
 
 /**
  * Manuell gesetzte Zusatz-Kategorien einer Session aktualisieren.

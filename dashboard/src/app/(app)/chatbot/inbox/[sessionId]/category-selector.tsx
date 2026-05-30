@@ -3,7 +3,8 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Tag, ChevronDown, Check } from "lucide-react";
-import { setSessionCategory, type SessionCategory } from "@/lib/actions/chat-inbox";
+import { setSessionCategory } from "@/lib/actions/chat-inbox";
+import type { SessionCategory } from "@/lib/chatbot/session-categories";
 
 const LABELS: Record<SessionCategory, { label: string; emoji: string }> = {
   availability: { label: "Verfügbarkeit", emoji: "📦" },
