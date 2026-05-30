@@ -103,6 +103,55 @@ export function detectStrandedContactInfo(text: string): { suspicious: boolean; 
   return { suspicious: true, matchedSnippet: text.slice(snipStart, snipEnd).trim() };
 }
 
+/**
+ * Strippt verstrandete WhatsApp-Nummern aus Halluzinationen.
+ *
+ * Bug 2026-05-30 (Britt): Bot generierte
+ *   "+WhatsApp 0173 8000865Unsere Kollegin meldet sich Montag früh..."
+ * Die Nummer klemmt OHNE Trennzeichen direkt vor "Unsere" — eindeutig
+ * halluziniert. detectStrandedContactInfo setzt zwar Force-Draft, aber
+ * die kaputte Phrase bleibt im Draft.
+ *
+ * Strip-Pattern: WhatsApp-Nummer (optional mit "WhatsApp"/"+WhatsApp"
+ * Prefix oder "via WhatsApp") DIREKT vor einem Wort-Zeichen ohne
+ * Trennung. Sehr safe — false-positive nur wenn jemand bewusst die
+ * Nummer in einen Wort-Mash schreibt, was unrealistisch ist.
+ *
+ * Beispiele die gestrippt werden:
+ *   "+WhatsApp 0173 8000865Unsere"           → "Unsere"
+ *   "via WhatsApp 0173 8000865Schreib"       → "Schreib"
+ *   "0173 8000865Hallo"                       → "Hallo"
+ * Beispiele die NICHT gestrippt werden:
+ *   "WhatsApp 0173 8000865 — schneller"      (legitim, Space davor)
+ *   "Schreib uns an 0173 8000865."            (legitim, Punkt danach)
+ */
+export function stripStrandedWhatsappNumber(text: string): { text: string; stripped: boolean } {
+  if (!text) return { text, stripped: false };
+  // Pattern: optional Prefix "+", "WhatsApp ", "via WhatsApp ", "über WhatsApp "
+  //          Telefonnummer-Variante
+  //          DIREKT gefolgt von einem Buchstaben (kein Space/Punkt/Newline/Komma)
+  const stranded = /(?:\s*\+|\s*(?:via|über|auf)?\s*WhatsApp\s+)?(?:\+?49\s*173\s*8000865|0173\s*8000865|01738000865)(?=[A-Za-zÄÖÜäöüß])/gi;
+  let stripped = false;
+  let out = text.replace(stranded, () => {
+    stripped = true;
+    return "";
+  });
+  if (stripped) {
+    console.warn("[sanitizer] stripStrandedWhatsappNumber: verstrandete WhatsApp-Nummer entfernt");
+    // Aufräumen:
+    //   - einsame "+" am Zeilenanfang oder direkt vor einem Buchstaben → weg
+    //   - doppelte Spaces / führende Spaces in Zeilen
+    //   - "uns" + Wort-Mash ohne Space zwischenfügen (Schreib unsBis → Schreib uns. Bis)
+    out = out
+      .replace(/(^|\n)\s*\+\s*(?=[A-Za-zÄÖÜäöüß])/g, "$1")
+      .replace(/\s\+(?=[A-Za-zÄÖÜäöüß])/g, " ")
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/\n[ \t]+/g, "\n")
+      .trim();
+  }
+  return { text: out, stripped };
+}
+
 export function stripFalseMediaLimitation(text: string): { text: string; stripped: boolean } {
   // Pattern: kombiniert "aus technischen Gründen" / "hier" / "leider"
   // mit Medien-Versand-Negation. Sehr spezifisch, damit echte Aussagen
@@ -759,6 +808,11 @@ export function applyAllOutputSanitizers(
   let out = text;
   out = stripSelfReferentialDisclaimer(out);
   out = stripProactivePhotoOffer(out, opts.customerAskedForPhotos === true);
+  // Verstrandete WhatsApp-Nummer rausstrippen (Bug 2026-05-30, Britt)
+  {
+    const r = stripStrandedWhatsappNumber(out);
+    out = r.text;
+  }
   // ETA-"jeden Moment"-Phrasen weichspülen (Bug 2026-05-30 bei ca.-Datum am Wochenende)
   out = softenImmediateArrivalClaims(out);
   // 🚨 STRUKTURELLER VALIDATOR: physikalisch unmögliche Längen-Linien-
