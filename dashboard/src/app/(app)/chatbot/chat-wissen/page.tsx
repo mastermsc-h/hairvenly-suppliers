@@ -139,8 +139,20 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
   let chatHits: ChatHit[] = [];
   let chatHitCount = 0;
   let chatSessionCount = 0;
+  // IG-Archive (3327 historische Threads aus Meta-Datenexport)
+  type ArchiveHit = {
+    thread_id: string;
+    thread_title: string | null;
+    sender_name: string;
+    is_hairvenly: boolean;
+    content: string;
+    message_at: string;
+  };
+  let archiveHits: ArchiveHit[] = [];
+  let archiveHitCount = 0;
+  let archiveThreadCount = 0;
   if (qTerms.length > 0) {
-    // 1. Cheap count query: läuft IMMER bei aktiver Suche.
+    // 1. Cheap count queries: laufen IMMER bei aktiver Suche.
     //    Pro Term wird die OR-Variantenliste angehängt (.or() = innerhalb
     //    AND zwischen den Terms, OR zwischen den Varianten desselben Terms).
     let countQ = svc.from("chat_messages")
@@ -149,7 +161,15 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
     for (const t of qTerms) countQ = countQ.or(buildTermOrFilter(t, ["content"]));
     const { count } = await countQ;
     chatHitCount = count || 0;
-    // 2. Volle Liste nur bei source=chats
+
+    // Archive-Count
+    let acQ = svc.from("chat_messages_archive")
+      .select("*", { count: "exact", head: true });
+    for (const t of qTerms) acQ = acQ.or(buildTermOrFilter(t, ["content"]));
+    const { count: ac } = await acQ;
+    archiveHitCount = ac || 0;
+
+    // 2. Volle Liste nur wenn aktive Source-Quelle
     if (source === "chats") {
       let cq = svc.from("chat_messages")
         .select("session_id, role, content, created_at")
@@ -160,6 +180,16 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
       const { data } = await cq;
       chatHits = (data || []) as ChatHit[];
       chatSessionCount = new Set(chatHits.map(h => h.session_id)).size;
+    }
+    if (source === "archive") {
+      let aq = svc.from("chat_messages_archive")
+        .select("thread_id, thread_title, sender_name, is_hairvenly, content, message_at")
+        .order("message_at", { ascending: false })
+        .limit(400);
+      for (const t of qTerms) aq = aq.or(buildTermOrFilter(t, ["content"]));
+      const { data } = await aq;
+      archiveHits = (data || []) as ArchiveHit[];
+      archiveThreadCount = new Set(archiveHits.map(h => h.thread_id)).size;
     }
   }
 
@@ -255,7 +285,8 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
           { k: "both",  label: `Beide Archive (${v1.length + v2.length})` },
           { k: "v2",    label: `Destilliert v2 (${v2.length})` },
           { k: "v1",    label: `Roh v1 (${v1.length})` },
-          { k: "chats", label: `Volltext-Chats${q ? ` (${chatHitCount} Msg)` : ""}` },
+          { k: "chats",   label: `Volltext-Chats${q ? ` (${chatHitCount} Msg)` : ""}` },
+          { k: "archive", label: `IG-Archiv (3300)${q ? ` (${archiveHitCount} Msg)` : ""}` },
         ].map(opt => (
           <Link
             key={opt.k}
@@ -353,27 +384,38 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
         {tag !== "all" && <> · Tag „<strong>{tag}</strong>"</>}
       </div>
 
-      {/* Cross-Source-Hint: Archives leer aber Volltext-Chats hat Treffer */}
-      {q && source !== "chats" && entries.length === 0 && chatHitCount > 0 && (
+      {/* Cross-Source-Hint: Archives leer aber andere Quelle hat Treffer */}
+      {q && source !== "chats" && source !== "archive" && entries.length === 0 && (chatHitCount > 0 || archiveHitCount > 0) && (
         <div className="rounded-2xl border-2 border-purple-300 bg-purple-50 p-4">
           <div className="text-sm font-semibold text-purple-900 mb-1">
-            💡 Im Archiv keine Treffer — aber {chatHitCount} Treffer in echten Chats
+            💡 Im destillierten Archiv keine Treffer — aber Treffer in den echten Chats
           </div>
           <div className="text-xs text-purple-800 mb-3 leading-relaxed">
-            „{q}" wurde von den Mitarbeiter:innen in der Vergangenheit besprochen, aber nicht als FAQ destilliert.
-            Schau dir die echten Customer-Konversationen an um zu sehen wie das Team das Thema beantwortet hat.
+            „{q}" wurde besprochen, aber nicht als FAQ destilliert. Wähle eine echte Chat-Quelle:
           </div>
-          <Link
-            href={`/chatbot/chat-wissen${buildQs({ source: "chats" })}`}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs font-medium hover:bg-purple-700"
-          >
-            Volltext-Chats durchsuchen →
-          </Link>
+          <div className="flex gap-2 flex-wrap">
+            {chatHitCount > 0 && (
+              <Link
+                href={`/chatbot/chat-wissen${buildQs({ source: "chats" })}`}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs font-medium hover:bg-purple-700"
+              >
+                Aktuelle Inbox · {chatHitCount} Msg →
+              </Link>
+            )}
+            {archiveHitCount > 0 && (
+              <Link
+                href={`/chatbot/chat-wissen${buildQs({ source: "archive" })}`}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-medium hover:bg-amber-700"
+              >
+                IG-Archiv (3300) · {archiveHitCount} Msg →
+              </Link>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Liste — Archive-Quellen */}
-      {source !== "chats" && (
+      {/* Liste — destillierte Archive-Quellen */}
+      {source !== "chats" && source !== "archive" && (
         <div className="space-y-2">
           {entries.slice(0, 200).map(e => (
             <KnowledgeRow key={e.source + e.id} entry={e} />
@@ -472,6 +514,93 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
           {chatSessionCount > 40 && (
             <div className="text-xs text-neutral-400 text-center py-2">
               … {chatSessionCount - 40} weitere Sessions (Top 40 angezeigt)
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Liste — IG-Archiv-Treffer (historische 3300 Threads) */}
+      {source === "archive" && q && (
+        <div className="space-y-2">
+          <div className="text-sm text-neutral-500">
+            <strong className="text-neutral-900">{archiveHits.length}</strong> Nachrichten in{" "}
+            <strong className="text-neutral-900">{archiveThreadCount}</strong> Threads (historisches IG-Archiv)
+            {archiveHits.length === 400 && " (Limit erreicht — schränke Suche enger ein)"}
+          </div>
+          {archiveThreadCount === 0 && (
+            <div className="rounded-2xl border border-neutral-200 bg-white p-4 text-sm text-neutral-500">
+              Keine Treffer im IG-Archiv für „{q}".
+            </div>
+          )}
+          {(() => {
+            const byThread = new Map<string, ArchiveHit[]>();
+            for (const h of archiveHits) {
+              if (!byThread.has(h.thread_id)) byThread.set(h.thread_id, []);
+              byThread.get(h.thread_id)!.push(h);
+            }
+            const threads = Array.from(byThread.entries()).slice(0, 40);
+            return threads.map(([tid, hits]) => {
+              const sorted = hits.slice().sort((a, b) => a.message_at.localeCompare(b.message_at));
+              const title = sorted[0]?.thread_title || tid;
+              return (
+                <div key={tid} className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs text-neutral-500">
+                      <span className="font-medium text-neutral-700">{title}</span>
+                      <span className="font-mono ml-2 text-neutral-400">· {tid.slice(0, 24)}…</span>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    {sorted.slice(0, 5).map((h, i) => {
+                      const lower = h.content.toLowerCase();
+                      const firstTerm = qTerms.find(t => lower.includes(t.toLowerCase()));
+                      let snippet = h.content;
+                      if (firstTerm) {
+                        const idx = lower.indexOf(firstTerm.toLowerCase());
+                        const start = Math.max(0, idx - 100);
+                        const end = Math.min(h.content.length, idx + firstTerm.length + 200);
+                        snippet = (start > 0 ? "…" : "") + h.content.slice(start, end) + (end < h.content.length ? "…" : "");
+                      } else if (snippet.length > 300) {
+                        snippet = snippet.slice(0, 300) + "…";
+                      }
+                      let highlighted: React.ReactNode = snippet;
+                      if (firstTerm) {
+                        const re = new RegExp(`(${firstTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+                        const parts: string[] = snippet.split(re);
+                        highlighted = parts.map((p: string, j: number) =>
+                          p.toLowerCase() === firstTerm.toLowerCase()
+                            ? <mark key={j} className="bg-yellow-200 px-0.5 rounded">{p}</mark>
+                            : <span key={j}>{p}</span>
+                        );
+                      }
+                      const roleBadge = h.is_hairvenly
+                        ? { label: "MA", cls: "bg-purple-100 text-purple-800" }
+                        : { label: "Kundin", cls: "bg-neutral-100 text-neutral-700" };
+                      return (
+                        <div key={i} className="text-sm text-neutral-700 leading-relaxed flex gap-2">
+                          <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${roleBadge.cls}`}>
+                            {roleBadge.label}
+                          </span>
+                          <div>
+                            <span className="text-xs text-neutral-400 mr-2">
+                              {new Date(h.message_at).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" })}
+                            </span>
+                            {highlighted}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {hits.length > 5 && (
+                      <div className="text-xs text-neutral-400">+ {hits.length - 5} weitere Treffer in diesem Thread</div>
+                    )}
+                  </div>
+                </div>
+              );
+            });
+          })()}
+          {archiveThreadCount > 40 && (
+            <div className="text-xs text-neutral-400 text-center py-2">
+              … {archiveThreadCount - 40} weitere Threads (Top 40 angezeigt)
             </div>
           )}
         </div>
