@@ -40,9 +40,10 @@ type Args = {
   topic?: string;       // Filter-Topic
   dryRun?: boolean;
   maxSessions?: number;
+  activate?: boolean;   // wenn true: active=true direkt. Default: active=false (Review-Modus)
 };
 function parseArgs(argv: string[]): Args {
-  const a: Args = { maxSessions: 50 };
+  const a: Args = { maxSessions: 50, activate: false };
   for (let i = 0; i < argv.length; i++) {
     const x = argv[i];
     if (x === "--terms")    a.terms = argv[++i].split(",").map(s => s.trim());
@@ -51,6 +52,7 @@ function parseArgs(argv: string[]): Args {
     else if (x === "--topic")   a.topic = argv[++i];
     else if (x === "--max")     a.maxSessions = parseInt(argv[++i], 10);
     else if (x === "--dry-run" || x === "--dry") a.dryRun = true;
+    else if (x === "--activate") a.activate = true;
   }
   return a;
 }
@@ -187,6 +189,7 @@ async function insertPairs(sessionId: string, pairs: DistilledPair[]): Promise<n
     biz_score: p.biz_score ?? 3,
     conversion: p.conversion ?? false,
     source_chat_id: sourceTag,
+    active: args.activate === true, // Default: false (Review-Modus). --activate setzt true.
   }));
   const { error } = await sb.from("chatbot_knowledge_archive_v2").insert(rows);
   if (error) { console.warn(`  insert error: ${error.message}`); return 0; }
