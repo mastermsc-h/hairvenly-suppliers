@@ -10,6 +10,8 @@ export interface SidebarItem {
   label: string;
   exact?: boolean;
   children?: { href: string; label: string }[];
+  /** Optionales Badge (z.B. Unread-Counter) rechts vom Label. */
+  badge?: React.ReactNode;
 }
 
 interface SidebarGroupProps {
@@ -58,7 +60,7 @@ export default function SidebarGroup({ label, icon, href, items, trailing }: Sid
             item.children ? (
               <SubGroup key={item.href} item={item} pathname={pathname} />
             ) : (
-              <NavItem key={item.href} href={item.href} label={item.label} pathname={pathname} exact={item.exact} />
+              <NavItem key={item.href} href={item.href} label={item.label} pathname={pathname} exact={item.exact} badge={item.badge} />
             ),
           )}
         </div>
@@ -67,18 +69,19 @@ export default function SidebarGroup({ label, icon, href, items, trailing }: Sid
   );
 }
 
-function NavItem({ href, label, pathname, exact }: { href: string; label: string; pathname: string; exact?: boolean }) {
+function NavItem({ href, label, pathname, exact, badge }: { href: string; label: string; pathname: string; exact?: boolean; badge?: React.ReactNode }) {
   const isActive = exact ? pathname === href : (pathname === href || pathname.startsWith(href + "/"));
   return (
     <Link
       href={href}
-      className={`block px-3 py-1.5 text-sm rounded-md transition ${
+      className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition ${
         isActive
           ? "bg-neutral-100 text-neutral-900 font-medium"
           : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50"
       }`}
     >
-      {label}
+      <span className="flex-1">{label}</span>
+      {badge}
     </Link>
   );
 }

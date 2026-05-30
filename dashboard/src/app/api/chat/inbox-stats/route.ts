@@ -31,6 +31,34 @@ export async function GET() {
     }
   }
 
+  // unread_all: ALLE Sessions (nicht nur awaiting_human) wo die letzte
+  // Customer-Message jünger ist als das last_seen_by_agent_at — also alles
+  // was die MA noch nicht "abgehakt" hat. Für Sidebar-Counter am Chat-Inbox
+  // Sub-Item. Schließt status=closed aus (erledigte Sessions zählen nicht).
+  // Annäherung an die JS-Logik in inbox/page.tsx — die feinere "lastRole
+  // !== assistant"-Check wird hier weggelassen, weil:
+  //   (a) Cost: erspart einen weiteren Roundtrip in chat_messages
+  //   (b) Konservativ: lieber ein paar Sessions zu viel zeigen als zu wenig
+  //   (c) UX: bei korrekter Antwort durch MA wird last_seen_by_agent_at
+  //       sowieso aktualisiert → fällt automatisch raus
+  const { data: openSessions } = await svc
+    .from("chat_sessions")
+    .select("id, last_customer_msg_at, last_seen_by_agent_at")
+    .neq("status", "closed")
+    .not("last_customer_msg_at", "is", null);
+  let unreadAll = 0;
+  for (const s of openSessions || []) {
+    if (!s.last_customer_msg_at) continue;
+    // Explizit-Ungelesen-Sentinel (Jahr < 2000) ODER neuere Customer-Msg
+    // als letztes "gesehen". Konsistent mit unreadMap in inbox/page.tsx.
+    const isExplicitlyNotDone = !!s.last_seen_by_agent_at &&
+      new Date(s.last_seen_by_agent_at).getFullYear() < 2000;
+    if (isExplicitlyNotDone) { unreadAll++; continue; }
+    if (!s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at) {
+      unreadAll++;
+    }
+  }
+
   const { count: active } = await svc
     .from("chat_sessions")
     .select("id", { count: "exact", head: true })
@@ -49,6 +77,7 @@ export async function GET() {
     awaiting_human: awaitingHuman ?? 0,
     active: active ?? 0,
     unread_customer_msgs: unreadCustomerMsgs,
+    unread_all: unreadAll,
     due_follow_ups: dueFollowUps ?? 0,
   });
 }
