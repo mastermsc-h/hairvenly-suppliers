@@ -856,6 +856,55 @@ function detectAutoRespondType(text: string, attachments: { type: string; url: s
 }
 
 /**
+ * Prüft ob die Antwort ein "Tool-Confirmation-Acknowledgement" ist:
+ * Der Bot hat ein schreibendes Tool (create_reservation,
+ * create_appointment_request) erfolgreich aufgerufen UND generiert
+ * eine KURZE, confirmatorische Antwort. In dem Fall ist die DB-Aktion
+ * schon passiert — die Antwort ist nur ein Status-Update und kann
+ * autonom gesendet werden.
+ *
+ * Bug 2026-05-30: Bot rief create_reservation für DESERT auf, generierte
+ * "Hab ich notiert — wir melden uns sobald sie da ist 💕". isHighConfidence
+ * fiel false (keine URL/Stock/Datum) → Draft. Aber die Reservierung war
+ * schon real in der DB → Customer kriegte keine Bestätigung obwohl alles
+ * gut lief.
+ */
+type ToolCallShape = { name?: string; input?: unknown };
+type ToolResultShape = { content?: string; tool_use_id?: string };
+function isToolConfirmationSafe(
+  toolCalls: ToolCallShape[] | null | undefined,
+  toolResults: ToolResultShape[] | null | undefined,
+  botReply: string,
+): boolean {
+  if (!toolCalls || toolCalls.length === 0) return false;
+  // Nur diese Tools sind als "soft confirmation" sicher autonom zu bestätigen.
+  // get_stock_eta / get_available_colors etc. sind READ-only und nicht relevant.
+  const SAFE_CONFIRM_TOOLS = new Set(["create_reservation", "create_appointment_request"]);
+  const hasSafeTool = toolCalls.some(c => c.name && SAFE_CONFIRM_TOOLS.has(c.name));
+  if (!hasSafeTool) return false;
+  // Alle Tool-Results müssen ein "status:ok" oder "created_count > 0" haben.
+  // Wenn eines fehlschlug, bleibt es Draft (MA prüft).
+  if (toolResults && toolResults.length > 0) {
+    const allOk = toolResults.every(r => {
+      if (!r?.content) return false;
+      try {
+        const j = JSON.parse(r.content) as { status?: string; created_count?: number };
+        return j.status === "ok" || (typeof j.created_count === "number" && j.created_count > 0);
+      } catch {
+        return false;
+      }
+    });
+    if (!allOk) return false;
+  }
+  // Antwort muss kurz + confirmatorisch sein (kein langer Verkaufstext mit
+  // potentiellen Halluzinationen). Schwelle: 250 Zeichen, deckt typische
+  // 1-2-Satz-Bestätigungen ab.
+  if (botReply.length > 250) return false;
+  const confirmPattern = /\b(notiert|merken|merke|melde[nt]?\s+(uns|sich)|gespeichert|auf\s+(die\s+)?(warte|benachrichtigungs)?liste|warteliste|bescheid\s+(geben|sagen)|sobald|trag(e|en)\s+dich\s+ein|haben\s+dich)\b/i;
+  return confirmPattern.test(botReply);
+}
+
+/**
  * Konservativer Confidence-Check für selective_auto-Modus.
  * Antwort wird NUR autonom gesendet wenn ALLE Kriterien erfüllt sind.
  * Lieber zu vorsichtig (Draft) als false-positive (autonom gesendet aber falsch).
@@ -1132,9 +1181,24 @@ async function triggerBotResponse(
       .select("category")
       .eq("id", sessionId)
       .maybeSingle();
-    const confident = isHighConfidence(sessForCheck?.category || null, result.text);
+    // 🛡 SAFE TOOL-CONFIRMATION PRE-CHECK (Bug 2026-05-30):
+    // Wenn der Bot ein "schreibendes" Tool (create_reservation,
+    // create_appointment_request) erfolgreich aufgerufen hat UND eine
+    // kurze confirmatorische Antwort generiert ("Hab ich notiert ...",
+    // "Wir melden uns sobald ..."), ist diese Antwort kein heikles
+    // Statement — die DB-Aktion ist schon passiert, die Antwort ist
+    // nur ein Status-Update. Confident=true ohne durch isHighConfidence
+    // zu fallen (das nur nach URL/Stock/Datum sucht und solche
+    // Confirmations sonst zu Drafts macht).
+    const isSafeToolConfirmation = isToolConfirmationSafe(
+      result.toolCalls,
+      result.toolResults,
+      result.text,
+    );
+    const confident = isSafeToolConfirmation
+      || isHighConfidence(sessForCheck?.category || null, result.text);
     finalMode = confident ? "auto" : "assisted";
-    console.log(`[meta-webhook] selective_auto → ${finalMode} (category=${sessForCheck?.category}, confident=${confident})`);
+    console.log(`[meta-webhook] selective_auto → ${finalMode} (category=${sessForCheck?.category}, confident=${confident}, safeToolConfirm=${isSafeToolConfirmation})`);
   }
 
   // WAITLIST-PROMISE-OHNE-TOOL-CALL → IMMER zu Draft umwandeln (auch wenn
