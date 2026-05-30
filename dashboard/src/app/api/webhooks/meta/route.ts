@@ -566,7 +566,7 @@ async function routeIncoming(opts: {
       let logType: string;
       if (noTextWithEphemeral) {
         // Einmal-Ansicht-Foto — wir können das Bild nicht sehen, weder Bot noch Stylistin
-        reply = `Hallöchen Liebes 💕\n\nDein Foto wurde als Einmal-Ansicht geschickt — ich kann es leider nicht sehen 🥲 Und unsere Stylistin später auch nicht, weil das Bild nach dem Versand verschwindet.\n\nMagst du es einfach als ganz normales Foto noch mal schicken? Dann kann unsere Farb-Expertin es sich in Ruhe anschauen und dir eine passende Empfehlung geben ✨\n\n${handoffTime} 💌`;
+        reply = `Hallöchen Liebes 💕\n\nDu hast es als Einmal-Ansicht geschickt — sobald jemand es einmal öffnet, ist es weg. Ich kann es leider nicht sehen 🥲 Und unsere Stylistin später auch nicht.\n\nMagst du es einfach als ganz normales Foto noch mal schicken? Dann kann unsere Farb-Expertin es sich in Ruhe anschauen und dir eine passende Empfehlung geben ✨\n\n${handoffTime} 💌`;
         logType = "Einmal-Foto";
       } else {
         // Kürzere Audio/Video-Antwort (User-Anweisung 2026-05-28):
@@ -981,8 +981,25 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
 
   // 4. availability / general / pricing: Reply muss konkrete Daten enthalten
   const hasUrl = /hairvenly\.de\/products\//i.test(botReply);
-  const hasStockStatus = /(auf lager|sofort verfügbar|gerade unterwegs|ausverkauft|nicht (mehr|auf)? lager)/i.test(botReply);
-  const hasSpecificAnswer = /\b(150g|200g|225g|125g|100g|60cm|65cm|55cm|45cm|85cm|5[-–]8\s*wochen|6[-–]8\s*wochen|6\s*monate)\b/i.test(botReply);
+  // Stock-Status erweitert um Re-Stock-Phrasen ("wieder rein", "kommt zurück",
+  // "eintreffen", "wieder da") — User-Bug 2026-05-30: "ca. Anfang Juni
+  // wieder rein" wurde nicht als konkrete Antwort erkannt → fiel auf Draft.
+  const hasStockStatus = /(auf lager|sofort verfügbar|gerade unterwegs|ausverkauft|nicht (mehr|auf)? lager|wieder rein|wieder da|wieder verfügbar|kommt (zurück|wieder|am)|treffen?\s+ein|eintreffen|kommen wieder)/i.test(botReply);
+  // Konkrete Datums-Pattern als specific-answer:
+  //   - "Anfang/Mitte/Ende [Monat]"
+  //   - "DD.MM" / "DD.MM.YYYY" / "ca. DD.MM"
+  //   - "voraussichtlich/spätestens am ..."
+  //   - "ab/am [Wochentag]" mit Monat
+  //   - KW NN
+  const MONTHS_RE = /(januar|februar|märz|maerz|april|mai|juni|juli|august|september|oktober|november|dezember)/i;
+  const hasDateEta =
+    new RegExp(`\\b(anfang|mitte|ende)\\s+${MONTHS_RE.source}\\b`, "i").test(botReply) ||
+    /\b(ca\.?|circa|ungefähr|etwa|voraussichtlich|spätestens)\s+(am\s+)?\d{1,2}\.\s?\d{1,2}\.?(\s?\d{2,4})?\b/i.test(botReply) ||
+    /\b(ab|am)\s+\d{1,2}\.\s?\d{1,2}\.?(\s?\d{2,4})?\b/i.test(botReply) ||
+    new RegExp(`\\b\\d{1,2}\\.\\s?${MONTHS_RE.source}\\b`, "i").test(botReply) ||
+    /\b(KW|kalenderwoche)\s?\d{1,2}\b/i.test(botReply);
+  const hasSpecificAnswer = hasDateEta ||
+    /\b(150g|200g|225g|125g|100g|60cm|65cm|55cm|45cm|85cm|5[-–]8\s*wochen|6[-–]8\s*wochen|6\s*monate)\b/i.test(botReply);
   if (!hasUrl && !hasStockStatus && !hasSpecificAnswer) return false;
 
   // 4b. SALON-DIENSTLEISTUNGSPREISE blocken — auch wenn andere konkrete
