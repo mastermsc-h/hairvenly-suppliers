@@ -31,33 +31,65 @@ export async function GET() {
     }
   }
 
-  // unread_all: ALLE Sessions (nicht nur awaiting_human) wo die letzte
-  // Customer-Message jünger ist als das last_seen_by_agent_at — also alles
-  // was die MA noch nicht "abgehakt" hat. Für Sidebar-Counter am Chat-Inbox
-  // Sub-Item. Schließt status=closed aus (erledigte Sessions zählen nicht).
-  // Annäherung an die JS-Logik in inbox/page.tsx — die feinere "lastRole
-  // !== assistant"-Check wird hier weggelassen, weil:
-  //   (a) Cost: erspart einen weiteren Roundtrip in chat_messages
-  //   (b) Konservativ: lieber ein paar Sessions zu viel zeigen als zu wenig
-  //   (c) UX: bei korrekter Antwort durch MA wird last_seen_by_agent_at
-  //       sowieso aktualisiert → fällt automatisch raus
+  // unread_all + todo_approx — Annäherung an "Zu tun"-Tab in /chatbot/inbox.
+  //
+  // Vollständige Zu-tun-Logik (inbox/page.tsx isInTodo) hat 5 Komponenten:
+  //   1. Pending Draft existiert        ← hier erfasst
+  //   2. Ungelesen                       ← hier erfasst
+  //   3. B2B-Autobot-Warning             ← hier erfasst
+  //   4. 24h-Grace nach MA-Antwort       ← weggelassen (braucht chat_messages-
+  //                                         Aggregation, teuer beim Polling)
+  //   5. Handoff-Promise im Bot-Text     ← weggelassen (Regex über alle Bot-Msgs)
+  //
+  // User-Entscheidung 2026-05-30: Pragmatische Annäherung reicht — Sidebar-
+  // Zahl weicht um ±1-3 von Tab-Zahl ab, dafür schnelles Polling.
   const { data: openSessions } = await svc
     .from("chat_sessions")
-    .select("id, last_customer_msg_at, last_seen_by_agent_at")
-    .neq("status", "closed")
-    .not("last_customer_msg_at", "is", null);
+    .select("id, status, category, last_customer_msg_at, last_seen_by_agent_at")
+    .neq("status", "closed");
+
+  // (a) Pending Drafts
+  const { data: pendingDrafts } = await svc
+    .from("chat_drafts")
+    .select("session_id")
+    .eq("status", "pending");
+  const draftSessionIds = new Set((pendingDrafts || []).map(d => d.session_id));
+
+  // (b) Gewerbe-Sessions mit autonom-gesendeter Bot-Antwort (B2B-Warning)
+  // — ein Sub-Query auf chat_messages mit auto_sent=true und Session-Join.
+  const gewerbeSessionIds = new Set(
+    (openSessions || []).filter(s => s.category === "gewerbe").map(s => s.id)
+  );
+  const b2bWarningIds = new Set<string>();
+  if (gewerbeSessionIds.size > 0) {
+    const { data: autoBotMsgs } = await svc
+      .from("chat_messages")
+      .select("session_id")
+      .eq("role", "assistant")
+      .eq("auto_sent", true)
+      .is("deleted_at", null)
+      .in("session_id", Array.from(gewerbeSessionIds))
+      .limit(500);
+    for (const m of autoBotMsgs || []) b2bWarningIds.add(m.session_id as string);
+  }
+
+  // Sammle alle "Zu-tun"-Session-IDs + zähle unread_all separat
   let unreadAll = 0;
+  const todoIds = new Set<string>();
   for (const s of openSessions || []) {
-    if (!s.last_customer_msg_at) continue;
-    // Explizit-Ungelesen-Sentinel (Jahr < 2000) ODER neuere Customer-Msg
-    // als letztes "gesehen". Konsistent mit unreadMap in inbox/page.tsx.
-    const isExplicitlyNotDone = !!s.last_seen_by_agent_at &&
-      new Date(s.last_seen_by_agent_at).getFullYear() < 2000;
-    if (isExplicitlyNotDone) { unreadAll++; continue; }
-    if (!s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at) {
-      unreadAll++;
+    let isUnread = false;
+    if (s.last_customer_msg_at) {
+      const isExplicitlyNotDone = !!s.last_seen_by_agent_at &&
+        new Date(s.last_seen_by_agent_at).getFullYear() < 2000;
+      if (isExplicitlyNotDone) isUnread = true;
+      else if (!s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at) isUnread = true;
+    }
+    if (isUnread) unreadAll++;
+    if (isUnread || draftSessionIds.has(s.id) || b2bWarningIds.has(s.id)) {
+      todoIds.add(s.id);
     }
   }
+  const todoApprox = todoIds.size;
 
   const { count: active } = await svc
     .from("chat_sessions")
@@ -78,6 +110,10 @@ export async function GET() {
     active: active ?? 0,
     unread_customer_msgs: unreadCustomerMsgs,
     unread_all: unreadAll,
+    /** Annäherung an "Zu tun"-Tab — Drafts + Ungelesen + B2B-Warning.
+     *  Punkte 4-5 (24h-Grace + Handoff-Promise) bewusst weggelassen für
+     *  Performance. Sidebar weicht typisch um ±1-3 vom Tab ab. */
+    todo_approx: todoApprox,
     due_follow_ups: dueFollowUps ?? 0,
   });
 }
