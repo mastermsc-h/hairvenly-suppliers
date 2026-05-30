@@ -61,18 +61,34 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
 
   const svc = createServiceClient();
 
+  // q sanitisieren — PostgREST .or() bricht bei Komma/Klammer/Stern.
+  // Wir entfernen alles außer Buchstaben/Zahlen/Umlaute/Space und schneiden
+  // auf einzelne Wörter. Multi-Wort-Queries werden zu AND-verkettetem ilike,
+  // damit "tressen breite" auch Antworten mit beiden Wörtern in beliebiger
+  // Reihenfolge findet (vorher: phrasen-Suche → 0 Hits bei Wortdrehung).
+  const sanitizedQ = q.replace(/[^a-zA-Z0-9äöüÄÖÜß\s]/g, " ").replace(/\s+/g, " ").trim();
+  const qTerms = sanitizedQ
+    ? sanitizedQ.split(/\s+/).filter(t => t.length >= 2).slice(0, 5)
+    : [];
+
   // V2 query (destilliert, höhere Qualität)
   let v2q = svc.from("chatbot_knowledge_archive_v2").select("id, topic, question, answer, facts, tags, biz_score, conversion, created_at");
   if (topic !== "all") v2q = v2q.eq("topic", topic);
   if (tag !== "all")   v2q = v2q.contains("tags", [tag]);
-  if (q) v2q = v2q.or(`question.ilike.%${q}%,answer.ilike.%${q}%`);
+  // Pro Term: muss in question ODER answer vorkommen (AND zwischen Terms,
+  // OR zwischen Spalten). PostgREST: kette .or() pro Term mit AND-Semantik.
+  for (const t of qTerms) {
+    v2q = v2q.or(`question.ilike.%${t}%,answer.ilike.%${t}%`);
+  }
   const { data: v2Rows } = await v2q.order("biz_score", { ascending: false, nullsFirst: false }).limit(500);
 
   // V1 query (raw, höheres Volumen)
   let v1q = svc.from("chatbot_knowledge_archive_v1").select("id, topic, question, answer, methods, colors, lengths, grams, biz_score, conversion, created_at");
   if (topic !== "all") v1q = v1q.eq("topic", topic);
   if (tag !== "all")   v1q = v1q.contains("methods", [tag]);
-  if (q) v1q = v1q.or(`question.ilike.%${q}%,answer.ilike.%${q}%`);
+  for (const t of qTerms) {
+    v1q = v1q.or(`question.ilike.%${t}%,answer.ilike.%${t}%`);
+  }
   const { data: v1Rows } = await v1q.order("biz_score", { ascending: false }).limit(500);
 
   const v2: KnowledgeEntry[] = ((v2Rows ?? []) as RawV2[]).map(r => ({
