@@ -908,7 +908,15 @@ const getAvailableColors: ToolDef = {
       "schließen 'RAW gibt es nur als X' oder 'Standard Tapes haben kein RAW'. Wenn du eine spezifische " +
       "Farbe wie RAW empfehlen willst, rufe IMMER ZUSÄTZLICH get_stock_eta('RAW Standard Tapes Russisch') " +
       "auf um die echte Verfügbarkeit pro Methode zu prüfen. " +
-      "Filter optional nach Methode (tape/bondings/tressen/etc.) und/oder Haarqualität (russisch/usbekisch).",
+      "Filter optional nach Methode (tape/bondings/tressen/etc.) und/oder Haarqualität (russisch/usbekisch). " +
+      "🔗 CROSS-LINIEN-EQUIVALENT (sehr wichtig wenn Kundin nach Variante in anderer Linie fragt): " +
+      "Jede Farbe hat ein Feld `equivalent_in_other_line` — wenn dort z.B. \"2T14A, 3T8A\" steht, " +
+      "bedeutet das: diese Farbe gibt's in der ANDEREN Linie unter diesem Namen. Beispiel: " +
+      "BUTTERSCOTCH (Russisch glatt) hat equivalent_in_other_line=\"2T14A, 3T8A\" → wenn die Kundin " +
+      "fragt 'gibt's Butterscotch auch in wellig?', musst du diese Equivalents AKTIV vorschlagen: " +
+      "\"Direkt als Butterscotch nicht, aber wir haben 2T14A und 3T8A in Usbekisch wellig — beide " +
+      "sehr ähnlich (Dunkelbraun-Ombré-Verlauf). Magst du Details?\" — NIEMALS nur \"gibt's nicht in " +
+      "wellig\" antworten ohne die Equivalents zu erwähnen, wenn das Feld gepflegt ist.",
     input_schema: {
       type: "object",
       properties: {
