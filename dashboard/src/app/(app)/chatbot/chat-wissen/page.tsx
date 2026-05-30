@@ -76,8 +76,11 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
   // nicht das ganze Wissen ab. Echte Customer-Themen wie "Microring",
   // "Butterfly Tressen", "Silikon-Microringe" tauchen in 2739 rohen
   // chat_messages auf, sind aber im destillierten Archiv NICHT
-  // enthalten. Die folgende Variante (source=chats) sucht direkt in
-  // chat_messages — gruppiert nach Session, zeigt 1 Snippet pro Match.
+  // enthalten.
+  //
+  // UX-Trick: COUNT immer laden wenn q gesetzt (billig via head:true),
+  // damit der Source-Toggle echte Treffer-Zahlen zeigt. Volle Liste
+  // nur bei source=chats laden (teurer, aber selten).
   type ChatHit = {
     session_id: string;
     role: string;
@@ -85,17 +88,28 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
     created_at: string;
   };
   let chatHits: ChatHit[] = [];
+  let chatHitCount = 0;
   let chatSessionCount = 0;
-  if (source === "chats" && qTerms.length > 0) {
-    let cq = svc.from("chat_messages")
-      .select("session_id, role, content, created_at")
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false })
-      .limit(400);
-    for (const t of qTerms) cq = cq.ilike("content", `%${t}%`);
-    const { data } = await cq;
-    chatHits = (data || []) as ChatHit[];
-    chatSessionCount = new Set(chatHits.map(h => h.session_id)).size;
+  if (qTerms.length > 0) {
+    // 1. Cheap count query: läuft IMMER bei aktiver Suche
+    let countQ = svc.from("chat_messages")
+      .select("*", { count: "exact", head: true })
+      .is("deleted_at", null);
+    for (const t of qTerms) countQ = countQ.ilike("content", `%${t}%`);
+    const { count } = await countQ;
+    chatHitCount = count || 0;
+    // 2. Volle Liste nur bei source=chats
+    if (source === "chats") {
+      let cq = svc.from("chat_messages")
+        .select("session_id, role, content, created_at")
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(400);
+      for (const t of qTerms) cq = cq.ilike("content", `%${t}%`);
+      const { data } = await cq;
+      chatHits = (data || []) as ChatHit[];
+      chatSessionCount = new Set(chatHits.map(h => h.session_id)).size;
+    }
   }
 
   // V2 query (destilliert, höhere Qualität)
@@ -191,7 +205,7 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
           { k: "both",  label: `Beide Archive (${v1.length + v2.length})` },
           { k: "v2",    label: `Destilliert v2 (${v2.length})` },
           { k: "v1",    label: `Roh v1 (${v1.length})` },
-          { k: "chats", label: `Volltext-Chats${q ? ` (${chatHits.length} Msg / ${chatSessionCount} Sess)` : ""}` },
+          { k: "chats", label: `Volltext-Chats${q ? ` (${chatHitCount} Msg)` : ""}` },
         ].map(opt => (
           <Link
             key={opt.k}
@@ -288,6 +302,25 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
         {topic !== "all" && TOPIC_LABELS[topic] && <> · {TOPIC_LABELS[topic].emoji} {TOPIC_LABELS[topic].label}</>}
         {tag !== "all" && <> · Tag „<strong>{tag}</strong>"</>}
       </div>
+
+      {/* Cross-Source-Hint: Archives leer aber Volltext-Chats hat Treffer */}
+      {q && source !== "chats" && entries.length === 0 && chatHitCount > 0 && (
+        <div className="rounded-2xl border-2 border-purple-300 bg-purple-50 p-4">
+          <div className="text-sm font-semibold text-purple-900 mb-1">
+            💡 Im Archiv keine Treffer — aber {chatHitCount} Treffer in echten Chats
+          </div>
+          <div className="text-xs text-purple-800 mb-3 leading-relaxed">
+            „{q}" wurde von den Mitarbeiter:innen in der Vergangenheit besprochen, aber nicht als FAQ destilliert.
+            Schau dir die echten Customer-Konversationen an um zu sehen wie das Team das Thema beantwortet hat.
+          </div>
+          <Link
+            href={`/chatbot/chat-wissen${buildQs({ source: "chats" })}`}
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs font-medium hover:bg-purple-700"
+          >
+            Volltext-Chats durchsuchen →
+          </Link>
+        </div>
+      )}
 
       {/* Liste — Archive-Quellen */}
       {source !== "chats" && (
