@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown, AlertTriangle, Mail, CornerUpLeft } from "lucide-react";
 import CategorySelector from "./category-selector";
+import AdditionalCategoriesSelector from "./additional-categories-selector";
 import AddToWaitlistButton from "./add-to-waitlist-button";
 import TeamNotes from "./team-notes";
 import FollowupButton from "./followup-button";
@@ -62,6 +63,7 @@ interface Props {
     followup_due_at?: string | null;
     followup_reason?: string | null;
     category: null | "availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "models" | "general";
+    additional_categories?: Array<"availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "models" | "general">;
     assigned_name: string | null;
   };
   initialMessages: Message[];
@@ -399,6 +401,11 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             </div>
           )}
           <CategorySelector sessionId={session.id} currentCategory={session.category} />
+          <AdditionalCategoriesSelector
+            sessionId={session.id}
+            primaryCategory={session.category}
+            initialAdditional={session.additional_categories || []}
+          />
         </div>
         <div className="flex gap-1 items-center flex-wrap [&>div.divider]:mx-1 [&>div.divider]:h-5 [&>div.divider]:w-px [&>div.divider]:bg-neutral-200">
           {/* Bot-Modus — klarer Dropdown-Button mit Pfeil, deutlich klickbar */}

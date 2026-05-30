@@ -35,7 +35,7 @@ export default async function ChatSessionPage({ params, searchParams }: PageProp
     .select(`
       id, channel, customer_name, customer_full_name, status, assigned_to, bot_signature_name,
       bot_auto_reply, bot_mode, human_only, team_notes, team_notes_updated_at, team_notes_updated_by,
-      followup_due_at, followup_reason, external_id, category,
+      followup_due_at, followup_reason, external_id, category, additional_categories,
       last_message_at, created_at,
       assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email),
       team_notes_profile:profiles!chat_sessions_team_notes_updated_by_fkey(display_name,email)
@@ -127,6 +127,7 @@ export default async function ChatSessionPage({ params, searchParams }: PageProp
           bot_auto_reply: session.bot_auto_reply ?? false,
           bot_mode: (session.bot_mode ?? (session.bot_auto_reply ? "auto" : "off")) as "auto" | "selective_auto" | "assisted" | "off",
           category: session.category as null | "availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "models" | "general",
+          additional_categories: (((session as { additional_categories?: string[] | null }).additional_categories) || []) as Array<"availability" | "pricing" | "color_advice" | "appointment" | "complaint" | "order_status" | "gewerbe" | "partnership" | "models" | "general">,
           assigned_name: (() => {
             const p = session.assigned_profile as unknown as { display_name?: string; email?: string } | null;
             return p?.display_name || p?.email || null;

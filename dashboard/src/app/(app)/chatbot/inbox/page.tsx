@@ -112,7 +112,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     .from("chat_sessions")
     .select(`
       id, channel, customer_name, customer_full_name, status, assigned_to, bot_signature_name,
-      bot_mode, human_only, team_notes, followup_due_at, followup_reason, ig_unread_count, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
+      bot_mode, human_only, team_notes, followup_due_at, followup_reason, ig_unread_count, category, additional_categories, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
       assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
     `)
     .order("last_message_at", { ascending: false })
@@ -123,7 +123,12 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   if (filter !== "all")        query = query.eq("status", filter);
   else if (!showClosed)        query = query.neq("status", "closed"); // erledigte standardmäßig ausblenden
   if (channelFilter !== "all") query = query.eq("channel", channelFilter);
-  if (categoryFilter !== "all") query = query.eq("category", categoryFilter);
+  if (categoryFilter !== "all") {
+    // Session erscheint in einem Kategorie-Tab wenn die Kategorie entweder
+    // PRIMARY (category) ODER eine manuell gesetzte ZUSATZ-Kategorie
+    // (additional_categories[]) ist. Implementation: PostgREST .or()-Klausel.
+    query = query.or(`category.eq.${categoryFilter},additional_categories.cs.{${categoryFilter}}`);
+  }
   if (searchQuery) query = query.ilike("customer_name", `%${searchQuery}%`);
   const { data: sessions } = await query;
 
@@ -148,7 +153,7 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         .from("chat_sessions")
         .select(`
           id, channel, customer_name, customer_full_name, status, assigned_to, bot_signature_name,
-          bot_mode, human_only, team_notes, followup_due_at, followup_reason, ig_unread_count, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
+          bot_mode, human_only, team_notes, followup_due_at, followup_reason, ig_unread_count, category, additional_categories, last_message_at, last_customer_msg_at, last_seen_by_agent_at, last_opened_by_agent_at, created_at,
           assigned_profile:profiles!chat_sessions_assigned_to_fkey(display_name,email)
         `)
         .in("id", onlyNew)
@@ -1068,6 +1073,19 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                               {CATEGORY_LABELS[s.category].emoji} {CATEGORY_LABELS[s.category].label}
                             </span>
                           )}
+                          {/* Manuelle Zusatz-Tags (additional_categories) — dezenter Style */}
+                          {Array.isArray((s as { additional_categories?: string[] }).additional_categories) &&
+                            ((s as { additional_categories?: string[] }).additional_categories || [])
+                              .filter((c): c is keyof typeof CATEGORY_LABELS => !!CATEGORY_LABELS[c as keyof typeof CATEGORY_LABELS])
+                              .map(c => (
+                                <span
+                                  key={c}
+                                  className="text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5 border border-neutral-200 bg-neutral-50 text-neutral-600"
+                                  title={`Manuell ergänzt: ${CATEGORY_LABELS[c].label}`}
+                                >
+                                  {CATEGORY_LABELS[c].emoji} {CATEGORY_LABELS[c].label}
+                                </span>
+                              ))}
                           {lastReplyViaIgApp && (
                             <span
                               title="Diese Antwort wurde direkt über die Instagram-App geschickt, nicht aus dem Dashboard."

@@ -1084,6 +1084,60 @@ export async function reclassifySession(sessionId: string) {
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
 
+/** Liste der Kategorien aus dem 10er-Set — als allowlist für additional_categories.
+ *  Wenn ALL_SESSION_CATEGORIES erweitert wird, hier mit-aktualisieren. */
+export const ALL_SESSION_CATEGORIES: ReadonlyArray<SessionCategory> = [
+  "availability", "pricing", "general", "appointment",
+  "color_advice", "complaint", "order_status",
+  "gewerbe", "partnership", "models",
+];
+
+/**
+ * Manuell gesetzte Zusatz-Kategorien einer Session aktualisieren.
+ *
+ * Wirkung (Phase 1): reines Tagging + Inbox-Tab-Filter — Session erscheint
+ * in jedem Tab dessen Kategorie in primary ODER additional_categories ist.
+ * Auto-Bot/safe-categories-Check schaut WEITERHIN nur auf primary.category
+ * (sicherheitskonservativ — MA kann nicht versehentlich Auto-Bot freischalten).
+ *
+ * Haiku-Auto-Classifier ändert NUR `category` — additional_categories bleibt
+ * MA-Hoheit. User-Anweisung 2026-05-30: "manuell zusatz bleibt fest".
+ *
+ * @param sessionId  Session-UUID
+ * @param categories Vollständige Liste der gewünschten Zusatz-Kategorien
+ *                   (replace-modus, kein add/remove). Primary wird automatisch
+ *                   ausgeschlossen — wenn sie versehentlich mit übergeben wird.
+ */
+export async function setSessionAdditionalCategories(
+  sessionId: string,
+  categories: SessionCategory[],
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  // Validate: nur erlaubte Werte aus dem 10er-Set
+  const allowed = new Set<SessionCategory>(ALL_SESSION_CATEGORIES);
+  const clean = Array.from(new Set(categories.filter(c => allowed.has(c))));
+
+  const svc = createServiceClient();
+  // Primary aus der Liste ausschließen (wäre redundant)
+  const { data: sess } = await svc
+    .from("chat_sessions")
+    .select("category")
+    .eq("id", sessionId)
+    .maybeSingle();
+  const primary = sess?.category as SessionCategory | null;
+  const additional = primary ? clean.filter(c => c !== primary) : clean;
+
+  await svc
+    .from("chat_sessions")
+    .update({ additional_categories: additional })
+    .eq("id", sessionId);
+  revalidatePath("/chatbot/inbox");
+  revalidatePath(`/chatbot/inbox/${sessionId}`);
+}
+
 /**
  * Markiert eine einzelne Message als gelöscht (soft-delete via deleted_at).
  * Notfall-Tool wenn IG-Recall nicht durchgesynced wurde oder
