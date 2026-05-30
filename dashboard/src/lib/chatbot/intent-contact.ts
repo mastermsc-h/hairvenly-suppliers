@@ -98,6 +98,43 @@ function hasProductContext(t: string): boolean {
   return false;
 }
 
+/**
+ * Detection: Teilt die Kundin ihre EIGENEN Kontaktdaten (Lieferadresse,
+ * eigene E-Mail, eigene Telefonnummer) — statt nach UNSEREN zu fragen?
+ *
+ * Bug-Klasse 2026-05-30 (Britt @britt_de_man): Kundin schickt "ich möchte
+ * bestellen" + dann Adress-Block "E-mail: demanbritt@gmail.com /
+ * Telefoonnummer: +32 468 03 27 51". Der Pattern-Match "E-mail" triggert
+ * fälschlich das email-Template — Bot antwortet mit unserer Kontaktinfo
+ * obwohl die Kundin BESTELLEN will.
+ *
+ * Heuristik: wenn die Message eine ECHTE konkrete E-Mail-Adresse oder
+ * Telefonnummer enthält UND KEINEN Frage-/Korrektur-Marker hat ("richtig?",
+ * "stimmt das?", "eure", "euer"), gibt die Kundin Daten — keine Anfrage.
+ */
+function isCustomerSharingOwnContact(t: string): boolean {
+  // 1. Echte E-Mail-Adresse (nicht nur das Wort "E-Mail")
+  const hasRealEmail = /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i.test(t);
+  // 2. Echte Telefonnummer (mindestens 8 Ziffern, optional mit Ländervorwahl)
+  const hasRealPhone = /(?:\+\d{1,3}[\s\-.]?)?\d{2,4}[\s\-.\/]?\d{2,4}[\s\-.\/]?\d{2,4}[\s\-.\/]?\d{0,4}/i.test(t)
+    && t.replace(/\D/g, "").length >= 8;
+  // 3. Label-basiertes Self-Share: "Adresse:", "Adres:", "Stadt:", "Gemeinde:",
+  //    "PLZ:", "Vorname:", "Nachname:", "Lieferadresse:" — typische Formulare
+  //    die Kundinnen für Bestellungen ausfüllen.
+  const hasContactLabel = /\b(adres(se)?|stadt|gemeinde|land|postleitzahl|plz|vorname|nachname|name|telefoon(nummer)?|telefon(nummer)?|lieferadresse|rechnungsadresse)\s*:/i.test(t);
+
+  if (!hasRealEmail && !hasRealPhone && !hasContactLabel) return false;
+
+  // Korrektur-/Anfrage-Marker → KEIN self-share (Kundin fragt z.B. "ist diese
+  // E-Mail richtig?" — auch wenn sie eine E-Mail nennt, ist's eine Frage).
+  const isCorrectionOrQuestion =
+    /\b(richtig|stimmt|wirklich|euer[e]?|eure|eu[a-zäöü]+\s+(mail|email|nummer|telefon)|deine|stimmt\s+(das|es))\b/i.test(t)
+    || /\b(habt|seid|gibt\s+es|wo|wie|wann|wer)\b.{0,30}\b(adresse|mail|email|telefon|nummer|kontakt)\b/i.test(t);
+  if (isCorrectionOrQuestion) return false;
+
+  return true;
+}
+
 export function detectContactIntent(userMessage: string): ContactIntent {
   if (!userMessage) return null;
   const t = userMessage.toLowerCase().trim();
@@ -105,6 +142,13 @@ export function detectContactIntent(userMessage: string): ContactIntent {
   // Sehr kurz = wahrscheinlich nicht eindeutig. Sehr lang = vermutlich komplexer
   // Kontext der nicht nur Kontakt-Info will.
   if (t.length < 6 || t.length > 250) return null;
+
+  // ── SELF-SHARES-CONTACT-GUARD ──────────────────────────────────
+  // Wenn die Kundin ihre EIGENEN Kontaktdaten teilt (Lieferadresse,
+  // eigene E-Mail, eigene Telefonnummer für Bestellung), ist das KEIN
+  // Intent — LLM antworten lassen damit Bestellung normal abgewickelt
+  // wird. Bug-Report 2026-05-30 (Britt @britt_de_man).
+  if (isCustomerSharingOwnContact(t)) return null;
 
   // ── KLASSEN-BASIERTER PRODUKT-KONTEXT-GUARD ─────────────────────
   // Wenn IRGENDEINE Produkt-/Bestell-/Lieferungs-Pattern-Klasse matched,
