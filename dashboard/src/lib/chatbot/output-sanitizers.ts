@@ -715,6 +715,43 @@ export function detectFalseOpeningClaim(
   return { suspicious: false, reason: null };
 }
 
+/**
+ * "Jeden-Moment-eintreffen"-Phrasen weichspülen.
+ *
+ * Bug 2026-05-30: Bot sagte "müssten also jeden Moment eintreffen" zu einer
+ * ca.-ETA (30.05., Samstag — Salon zu, kein Wareneingang am Wochenende).
+ * Solche Aussagen sind doppelt falsch:
+ *   - "ca."-Daten sind ±3-7 Tage ungenau, nicht "jeden Moment"
+ *   - am Wochenende kommt sowieso nichts
+ *
+ * Wir ersetzen die problematischen Phrasen durch neutralere Formulierungen.
+ * Das ist eine WEICHE Korrektur (Sanitizer) — die Hauptlogik soll der
+ * Persona-FAQ "eta-ca-wording-no-jetzt-jeden-moment" leisten.
+ */
+export function softenImmediateArrivalClaims(text: string): string {
+  if (!text) return text;
+  let out = text;
+  const replacements: Array<[RegExp, string]> = [
+    // "müssten also jeden Moment eintreffen" / "sollten jeden Moment ankommen"
+    [/\b(müssten?|sollten?|werden)\s+(also\s+)?jeden\s+moment\s+(ein-?\s?treffen|ankommen|da\s+sein|kommen|rein\s?(kommen)?)\b/gi,
+     "$1 in den nächsten Tagen ankommen"],
+    // "treffen jeden Moment ein"
+    [/\btreffen\s+jeden\s+moment\s+ein\b/gi, "treffen in den nächsten Tagen ein"],
+    // "sind gleich da" im Lager-/Liefer-Kontext
+    [/\b(sind|kommen)\s+gleich\s+(da|rein|an)\b/gi, "$1 voraussichtlich in den nächsten Tagen $2"],
+    // "kommt sicher am [Datum]" → "kommt voraussichtlich"
+    [/\b(kommt|kommen)\s+sicher\s+(am|um\s+den)\b/gi, "$1 voraussichtlich $2"],
+  ];
+  for (const [pat, sub] of replacements) {
+    const before = out;
+    out = out.replace(pat, sub);
+    if (before !== out) {
+      console.warn(`[sanitizer] softenImmediateArrivalClaims: weichgespült "${pat}"`);
+    }
+  }
+  return out;
+}
+
 export function applyAllOutputSanitizers(
   text: string,
   opts: { customerAskedForPhotos?: boolean; colorUrlMap?: Map<string, string> } = {}
@@ -722,6 +759,8 @@ export function applyAllOutputSanitizers(
   let out = text;
   out = stripSelfReferentialDisclaimer(out);
   out = stripProactivePhotoOffer(out, opts.customerAskedForPhotos === true);
+  // ETA-"jeden Moment"-Phrasen weichspülen (Bug 2026-05-30 bei ca.-Datum am Wochenende)
+  out = softenImmediateArrivalClaims(out);
   // 🚨 STRUKTURELLER VALIDATOR: physikalisch unmögliche Längen-Linien-
   // Kombinationen rausstrippen (z.B. „Mini Tapes 55cm russisch glatt").
   // Greift FRÜH, damit nachfolgende Sanitizer auf bereinigtem Text laufen.
