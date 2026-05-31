@@ -1367,11 +1367,13 @@ KEINE Farbnamen nennen — die MA macht das.`;
   // aus dem stable Block ausgelagert haben (Avatar-Identität, topic-extra-FAQs).
   // Damit bleibt der gecachte Prefix sessionsübergreifend identisch und der
   // Cache-Hit-Rate steigt deutlich (vorher ~33%, Ziel >70%).
+  // Hinweis: existenceRule/urlRule/styleRule sind NICHT mehr hier — sie wurden
+  // in den gecachten stable-Block verschoben (siehe Cache-Optimierung #3 oben).
   const systemPromptVariable =
     dynamicExtras +
     colorCodeDynamicHint +
     businessHoursBlock +
-    openTurnsHint + greetingHint + existenceRule + urlRule + styleRule + categoryHardRule;
+    openTurnsHint + greetingHint + categoryHardRule;
 
   // Set aller external_ids in dieser Session — für Reply-Lookup. Wenn eine
   // Customer-Message eine reply_to_external_id hat, die NICHT in diesem Set
