@@ -880,15 +880,26 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   // Jetzt: max 10 Trainings, davon 5 pinned + 3 themen-relevant + 2 recency.
   // Pinned werden NACH created_at DESC limitiert (neueste Pinned zuerst) —
   // ältere Pinned die nicht mehr gebraucht werden sollten manuell archiviert.
-  const [{ data: pinnedTraining }, { data: relevantTraining }, { data: recentTraining }] = await Promise.all([
-    // 1) Pinned Trainings — max 5 (Reihenfolge: neueste zuerst)
+  const [{ data: pinnedTraining }, { data: pinnedAvatarTraining }, { data: relevantTraining }, { data: recentTraining }] = await Promise.all([
+    // 1a) GLOBALE Pinned Trainings (avatar_name IS NULL) — max 5. Bewusst OHNE
+    //     Avatar-OR, damit das Ergebnis AVATAR-UNABHÄNGIG ist → identischer
+    //     stable-Cache für alle Sessions (sonst Cache-Fragmentierung pro Avatar).
     svc.from("chatbot_training")
       .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
       .eq("active", true)
       .eq("pinned", true)
-      .or(`avatar_name.is.null,avatar_name.eq.${signatureName}`)
+      .is("avatar_name", null)
       .order("created_at", { ascending: false })
       .limit(5),
+    // 1b) AVATAR-SPEZIFISCHE Pinned Trainings — max 3, gehen in den variable
+    //     Block (nicht in den geteilten Cache).
+    svc.from("chatbot_training")
+      .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
+      .eq("active", true)
+      .eq("pinned", true)
+      .eq("avatar_name", signatureName)
+      .order("created_at", { ascending: false })
+      .limit(3),
     // 2) Themen-Match — max 3 (vorher 15)
     keywords.length > 0
       ? svc.from("chatbot_training")
@@ -925,19 +936,28 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   //
   // Ziel: Cache-Hit-Rate 33% → ~80%, Token-Kosten ~$170/Monat → ~$45.
   type TrainingRow = NonNullable<typeof pinnedTraining>[number];
+  // 💰 CACHE-OPTIMIERUNG #2 (2026-05-31, Kostenanalyse): Der stable Block MUSS
+  // AVATAR-UNABHÄNGIG sein, sonst entsteht pro Avatar ein eigener Cache (5
+  // Avatare = 5 Caches, die einzeln auslaufen → massenhaft Cache-Neuaufbauten,
+  // gemessen 82% der respond-Kosten = $101/30d).
+  //   • Stable Block: NUR globale Pinned-Trainings (avatar_name IS NULL) →
+  //     identisch für ALLE Sessions/Avatare → EIN geteilter Cache.
+  //   • Avatar-spezifische Pinned-Trainings wandern in den variable Block
+  //     (vorn, höchste Prio) — gleicher Content, nur anderer Cache-Slot.
   const stableTrainingIds = new Set<string>();
   const stableTrainings: TrainingRow[] = [];
-  for (const t of pinnedTraining || []) {
-    if (!stableTrainingIds.has(t.id)) {
-      stableTrainingIds.add(t.id);
-      stableTrainings.push(t);
-    }
+  for (const t of pinnedTraining || []) {        // nur globale (avatar IS NULL)
+    if (stableTrainingIds.has(t.id)) continue;
+    stableTrainingIds.add(t.id);
+    stableTrainings.push(t);
   }
-  // Variable Trainings: themen-relevant + recency, ABER ohne Duplikate
-  // mit den stable (pinned) Trainings.
+  // avatar-spezifische Pinned → variable Block (nicht in den geteilten Cache)
+  const avatarSpecificPinned: TrainingRow[] = [...(pinnedAvatarTraining || [])];
+  // Variable Trainings: avatar-spezifische Pinned (Prio) + themen-relevant +
+  // recency, ohne Duplikate mit den stable (globalen Pinned) Trainings.
   const variableTrainings: TrainingRow[] = [];
   const variableTrainingIds = new Set<string>();
-  for (const t of [...(relevantTraining || []), ...(recentTraining || [])]) {
+  for (const t of [...avatarSpecificPinned, ...(relevantTraining || []), ...(recentTraining || [])]) {
     if (stableTrainingIds.has(t.id)) continue;
     if (variableTrainingIds.has(t.id)) continue;
     variableTrainingIds.add(t.id);
