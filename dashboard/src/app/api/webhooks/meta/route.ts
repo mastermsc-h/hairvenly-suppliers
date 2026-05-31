@@ -20,6 +20,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 // bis 300s (5 Min) maxDuration.
 export const maxDuration = 300;
 import { verifyMetaSignature, getInstagramUsername, getInstagramUserInfo, sendInstagramMessage } from "@/lib/messaging/meta";
+import { shouldBotIgnore, isClosingAcknowledgement } from "@/lib/chatbot/message-triage";
 
 // GET: Webhook-Verification von Meta beim Setup
 export async function GET(req: NextRequest) {
