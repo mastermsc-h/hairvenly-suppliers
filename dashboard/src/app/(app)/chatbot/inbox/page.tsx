@@ -732,8 +732,10 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
 
             {/* Aufgeklappter Filter-Bereich — eigenes Panel mit gestapelten
                 Block-Labels (UI-Cleanup 2026-05-30: vorher floss alles als
-                Label-Spalte + wrappende Chips ineinander → chaotisch). */}
-            <div className="mt-3 rounded-2xl border border-neutral-200 bg-neutral-50/60 p-4 divide-y divide-neutral-200">
+                Label-Spalte + wrappende Chips ineinander → chaotisch).
+                Distinkter weißer Card-Look + Schatten, damit er sich klar von
+                der Chat-Liste darunter abhebt (User-Feedback 2026-05-30). */}
+            <div className="mt-3 rounded-2xl border border-neutral-300 bg-white p-4 divide-y divide-neutral-200 shadow-md">
               {/* Kanal */}
               <div className="pb-3">
                 <div className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide mb-2">Kanal</div>
@@ -827,6 +829,16 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
           </details>
         );
       })()}
+
+      {/* Trenn-Header zwischen Filter/Tabs und der Chat-Liste — klare visuelle
+          Grenze (User-Feedback 2026-05-30: ohne Trennung floss alles ineinander).
+          Zeigt zugleich die Anzahl der Treffer im aktuellen Filter. */}
+      <div className="mt-6 mb-2 flex items-center gap-3">
+        <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
+          {filteredSessions.length} Chat{filteredSessions.length === 1 ? "" : "s"}
+        </span>
+        <div className="flex-1 h-px bg-neutral-200" />
+      </div>
 
       {/* Sessions Liste — immer als atmende Card-Liste mit Abstand, damit auch
           längere Listen nicht erdrückend wirken (vorher war Default eine
