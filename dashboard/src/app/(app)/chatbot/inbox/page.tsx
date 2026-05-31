@@ -260,6 +260,14 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
       }
       // Patterns (gleiches Pattern wie in pipeline.ts detectWaitlistConfirmation)
       const offerRe = /\b(benachrichtigungsliste|warteliste|bescheid\s+geben|melden\s+uns?(\s+sobald)?|notiere\s+(ich\s+)?dich|merke\s+ich\s+(mir|für\s+dich)\s+vor)\b/i;
+      // 🛡 Bug 2026-05-30: "Hab ich notiert — wir melden uns sobald" matched
+      // offerRe, ist aber eine BESTÄTIGUNG nach erfolgreicher Reservierung,
+      // KEIN Offer mehr. Ein echtes Offer hat einen Frage-Indikator.
+      const questionIndicatorRe = /(\?|\bmagst\s+du\b|\bwillst\s+du\b|\bsoll\s+ich\b|\bmöchtest\s+du\b|\bdarf\s+ich\b)/i;
+      // Bestätigungs-Pattern: "Hab ich notiert", "Hab dich auf die Liste",
+      // "Habe dich vorgemerkt" — wenn das in der Bot-Message steht, ist es
+      // KEIN Offer mehr, sondern eine Post-Reservierung-Bestätigung.
+      const confirmationRe = /\b(hab[\s']?(e\s+)?(ich|dich)?\s*(dich\s+)?(notiert|vorgemerkt|gespeichert|eingetragen|auf\s+(die|der)\s+(warte|benachrichtigungs)?liste)|trag[e]?\s+dich\s+ein|ist\s+notiert)/i;
       const yesPatterns = [
         /^j+a+\b/i, /^gerne\b/i, /^perfekt\b/i, /^super\b/i, /^okay?\b/i, /^klar\b/i, /^bitte\b/i,
         /\boh\s+ja\b/i, /\bwäre\s+(super|gut|toll|nice|cool)\b/i, /\bsehr\s+gerne\b/i,
@@ -281,7 +289,15 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
         // Nächste ältere Bot/MA-Message
         const prevBot = sessionMsgs.slice(lastUserIdx + 1).find(m => m.role === "assistant" || m.role === "human_agent");
         if (!prevBot) continue;
-        if (!offerRe.test(prevBot.content || "")) continue;
+        const prevBotText = prevBot.content || "";
+        if (!offerRe.test(prevBotText)) continue;
+        // Echtes Offer braucht Frage-Indikator (verhindert false-positive bei
+        // "Hab ich notiert — wir melden uns sobald" Bestätigungen).
+        if (!questionIndicatorRe.test(prevBotText)) continue;
+        // Plus: wenn die Bot-Message bereits eine Reservierungs-Bestätigung
+        // enthält ("Hab ich notiert", "auf die Liste gesetzt"), war das schon
+        // der Confirm-Schritt — kein neues Offer.
+        if (confirmationRe.test(prevBotText)) continue;
         candidates.push({ sessionId: sessId, userYesAt: lastUser.created_at });
       }
       // DB-Check: existiert eine Reservierung seit dem Ja?

@@ -98,6 +98,16 @@ export function detectWaitlistConfirmation(
   // Bot/MA hat Warteliste angeboten?
   const offerPattern = /\b(benachrichtigungsliste|warteliste|bescheid\s+geben|melden\s+uns?(\s+sobald)?|notiere\s+(ich\s+)?dich|merke\s+ich\s+(mir|für\s+dich)\s+vor)\b/i;
   if (!offerPattern.test(lastBotMessage)) return false;
+  // 🛡 Bug 2026-05-30: Pattern matched auch Bestätigungen wie "Hab ich notiert
+  // — wir melden uns sobald die da sind". Echtes Offer braucht Frage-Indikator
+  // (magst du?, soll ich?, willst du?, ?). Wenn Frage-Indikator fehlt, ist's
+  // eine Post-Confirm-Bestätigung — kein neues Offer → false. Plus: wenn die
+  // Bot-Message bereits eine Confirm-Phrase enthält ("Hab ich notiert", "auf
+  // die Liste gesetzt"), war der Reservierungs-Schritt schon abgeschlossen.
+  const questionIndicatorRe = /(\?|\bmagst\s+du\b|\bwillst\s+du\b|\bsoll\s+ich\b|\bmöchtest\s+du\b|\bdarf\s+ich\b)/i;
+  const confirmationRe = /\b(hab[\s']?(e\s+)?(ich|dich)?\s*(dich\s+)?(notiert|vorgemerkt|gespeichert|eingetragen|auf\s+(die|der)\s+(warte|benachrichtigungs)?liste)|trag[e]?\s+dich\s+ein|ist\s+notiert)/i;
+  if (!questionIndicatorRe.test(lastBotMessage)) return false;
+  if (confirmationRe.test(lastBotMessage)) return false;
   // Kundinnen-Antwort ist klares JA?
   // (kurz, affirmativ, keine offene Rückfrage)
   const t = customerText.trim().toLowerCase().replace(/[💕❤🩷✨🥰😊👍🙂🙏]/g, "").trim();
