@@ -14,6 +14,7 @@ import SupplierCard from "./supplier-card";
 import SupplierList from "./supplier-list";
 import TrackingLink from "./tracking-link";
 import TrackingCell from "./tracking-cell";
+import ShipmentsCell from "./shipments-cell";
 import NotesCell from "./notes-cell";
 import SupplierProfile from "./supplier-profile";
 import StatusDropdown from "./orders/[id]/status-dropdown";
@@ -46,7 +47,10 @@ export default async function DashboardPage() {
         .select("*")
         .in("kind", ["supplier_invoice", "payment_proof", "customs_document", "waybill", "order_overview", "packing_details"]),
       supabase.from("payments").select("paid_at, amount"),
-      supabase.from("order_shipments").select("order_id"),
+      supabase
+        .from("order_shipments")
+        .select("id, order_id, label, tracking_number, tracking_url, eta, shipped_at, arrived_at")
+        .order("created_at"),
     ]);
 
   const list = (orders ?? []) as OrderWithTotals[];
@@ -57,11 +61,23 @@ export default async function DashboardPage() {
     arr.push(d);
     docsByOrder.set(d.order_id, arr);
   }
-  // Set of orderIds that have at least one Teillieferung
-  const ordersWithShipments = new Set<string>();
-  for (const s of (shipmentsData ?? []) as { order_id: string }[]) {
-    ordersWithShipments.add(s.order_id);
+  // Shipments grouped by order_id (with full tracking/eta info)
+  type ShipmentLite = {
+    id: string;
+    order_id: string;
+    label: string | null;
+    tracking_number: string | null;
+    tracking_url: string | null;
+    eta: string | null;
+    shipped_at: string | null;
+    arrived_at: string | null;
+  };
+  const shipmentsByOrder = new Map<string, ShipmentLite[]>();
+  for (const s of (shipmentsData ?? []) as ShipmentLite[]) {
+    if (!shipmentsByOrder.has(s.order_id)) shipmentsByOrder.set(s.order_id, []);
+    shipmentsByOrder.get(s.order_id)!.push(s);
   }
+  const ordersWithShipments = new Set(shipmentsByOrder.keys());
 
   const totalOpen = list.reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
   // An order is "active" if it's not stocked/cancelled, OR if it still has an open balance.
@@ -313,14 +329,22 @@ export default async function DashboardPage() {
                                 {Number(o.weight_kg)} kg
                               </div>
                             )}
-                            <TrackingCell
-                              orderId={o.id}
-                              number={o.tracking_number}
-                              url={o.tracking_url}
-                              canEdit={canEditOrder}
-                              maxWidth={140}
-                              locale={locale}
-                            />
+                            {(() => {
+                              const ships = shipmentsByOrder.get(o.id);
+                              if (ships && ships.length > 0) {
+                                return <div className="mt-0.5"><ShipmentsCell shipments={ships} /></div>;
+                              }
+                              return (
+                                <TrackingCell
+                                  orderId={o.id}
+                                  number={o.tracking_number}
+                                  url={o.tracking_url}
+                                  canEdit={canEditOrder}
+                                  maxWidth={140}
+                                  locale={locale}
+                                />
+                              );
+                            })()}
                           </td>
                           {showDocs && (
                             <td className="px-5 py-2.5">
@@ -391,14 +415,22 @@ export default async function DashboardPage() {
                                 </span>
                               )}
                             </div>
-                            <TrackingCell
-                              orderId={o.id}
-                              number={o.tracking_number}
-                              url={o.tracking_url}
-                              canEdit={canEditOrder}
-                              maxWidth={200}
-                              locale={locale}
-                            />
+                            {(() => {
+                              const ships = shipmentsByOrder.get(o.id);
+                              if (ships && ships.length > 0) {
+                                return <div className="mt-1"><ShipmentsCell shipments={ships} /></div>;
+                              }
+                              return (
+                                <TrackingCell
+                                  orderId={o.id}
+                                  number={o.tracking_number}
+                                  url={o.tracking_url}
+                                  canEdit={canEditOrder}
+                                  maxWidth={200}
+                                  locale={locale}
+                                />
+                              );
+                            })()}
                           </div>
                           {showInvoices && (
                             <div className="text-right shrink-0">

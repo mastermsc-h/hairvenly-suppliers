@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useRef } from "react";
 import { Package, Plus, X, Check, Pencil, Trash2, Truck, ExternalLink, Calendar } from "lucide-react";
-import { createShipment, updateShipment, deleteShipment } from "@/lib/actions/shipments";
+import { createShipment, updateShipment, deleteShipment, setItemsShipment } from "@/lib/actions/shipments";
 import { date } from "@/lib/format";
 import type { OrderShipment, OrderItem, OrderDocument } from "@/lib/types";
 
@@ -187,19 +187,13 @@ function ShipmentCard({
       )}
 
       {items.length > 0 && (
-        <details className="text-[11px]">
-          <summary className="cursor-pointer text-purple-700 hover:text-purple-900">
-            {items.length} Positionen · {totalQty} {totalUnit}
-          </summary>
-          <ul className="mt-1.5 pl-3 space-y-0.5 text-neutral-700">
-            {items.map((i) => (
-              <li key={i.id} className="text-[10px]">
-                {i.method_name} · {i.length_value} · {i.color_name}
-                <span className="ml-1 text-neutral-400">— {i.quantity} {i.unit}</span>
-              </li>
-            ))}
-          </ul>
-        </details>
+        <ShipmentItemList
+          shipmentId={shipment.id}
+          items={items}
+          totalQty={totalQty}
+          totalUnit={totalUnit}
+          canEdit={canEdit}
+        />
       )}
 
       {documents.length > 0 && (
@@ -464,6 +458,71 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
         {label}
       </label>
       {children}
+    </div>
+  );
+}
+
+function ShipmentItemList({
+  shipmentId,
+  items,
+  totalQty,
+  totalUnit,
+  canEdit,
+}: {
+  shipmentId: string;
+  items: OrderItem[];
+  totalQty: number;
+  totalUnit: string;
+  canEdit: boolean;
+}) {
+  const [pending, start] = useTransition();
+  const [open, setOpen] = useState(false);
+
+  function removeFromShipment(item: OrderItem) {
+    if (!canEdit) return;
+    if (
+      !confirm(
+        `Position "${item.method_name} · ${item.length_value} · ${item.color_name}" aus dieser Teillieferung entfernen?\n\nDie Position bleibt erhalten und wird wieder als "nicht zugeordnet" markiert.`,
+      )
+    )
+      return;
+    start(async () => {
+      await setItemsShipment(item.order_id, null, [item.id]);
+    });
+  }
+
+  return (
+    <div className="text-[11px]">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="cursor-pointer text-purple-700 hover:text-purple-900 inline-flex items-center gap-1"
+      >
+        <span>{open ? "▼" : "▶"}</span>
+        {items.length} Positionen · {totalQty} {totalUnit}
+      </button>
+      {open && (
+        <ul className="mt-1.5 pl-3 space-y-0.5 text-neutral-700">
+          {items.map((i) => (
+            <li key={i.id} className="text-[10px] flex items-center gap-1.5 group">
+              {canEdit && (
+                <input
+                  type="checkbox"
+                  checked
+                  onChange={() => removeFromShipment(i)}
+                  disabled={pending}
+                  title="Aus dieser Teillieferung entfernen — Position bleibt in der Bestellung"
+                  className="rounded shrink-0 accent-purple-600"
+                />
+              )}
+              <span className="flex-1">
+                {i.method_name} · {i.length_value} · {i.color_name}
+                <span className="ml-1 text-neutral-400">— {i.quantity} {i.unit}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
