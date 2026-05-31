@@ -520,9 +520,18 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             <SplitButton
               primaryLabel="Erledigt"
               primaryIcon={<Check size={13} />}
-              primaryTitle="Markiert die Session als erledigt — sie verschwindet aus 'Nur unbeantwortet'"
+              primaryTitle="Session schließen und zurück zur Inbox-Übersicht"
               primaryClass="text-emerald-700 hover:bg-emerald-50"
-              onPrimary={() => startTransition(async () => { await markSessionAsSeen(session.id); router.refresh(); })}
+              onPrimary={() => startTransition(async () => {
+                // User-Anweisung 2026-05-30: "Erledigt" schließt die Session
+                // (status=closed) UND navigiert zurück zur Inbox-Übersicht.
+                // markSessionAsSeen wird zusätzlich gerufen, damit der "Zu
+                // tun"-Detector zuverlässig greift, falls die Session jemals
+                // wieder reopened wird.
+                await markSessionAsSeen(session.id);
+                await closeSession(session.id);
+                router.push(backInboxHref);
+              })}
               menuLabel="✗ Nicht erledigt"
               menuTitle="Session wieder als 'noch zu tun' markieren"
               onMenu={() => startTransition(async () => { await markSessionAsNotDone(session.id); router.refresh(); })}
