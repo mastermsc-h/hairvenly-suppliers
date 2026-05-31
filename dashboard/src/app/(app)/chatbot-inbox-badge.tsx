@@ -73,29 +73,31 @@ export default function ChatbotInboxBadge() {
   // Nichts anzuzeigen — Badge verschwindet komplett
   if (awaiting === 0 && todoApprox === 0) return null;
 
-  // Eskalations-Modus: rote pulsierende Pille zeigt awaiting_human
-  // (Zahl + optional Subscript für unread innerhalb)
-  if (awaiting > 0) {
-    return (
-      <span
-        className="inline-flex items-center px-1.5 h-[18px] rounded-full bg-red-600 text-white text-[10px] font-bold animate-pulse"
-        title={`${awaiting} Eskalation${awaiting === 1 ? "" : "en"} · insgesamt ${todoApprox} im Zu-tun-Tab`}
-      >
-        {awaiting}
-        {unreadInAwaiting > 0 && unreadInAwaiting !== awaiting && (
-          <span className="opacity-80 ml-0.5">·{unreadInAwaiting}</span>
-        )}
-      </span>
-    );
+  // IMMER die "Zu tun"-Zahl als Hauptzahl. Bei Eskalation (awaiting > 0)
+  // wird die Pille rot + pulsierend statt grau — die Zahl bleibt aber
+  // todoApprox (User-Wunsch 2026-05-30: "Zu tun-Counter muss als Zahl
+  // sichtbar sein, nicht nur Eskalations-Subset").
+  const escalating = awaiting > 0;
+  const displayNumber = todoApprox > 0 ? todoApprox : awaiting;
+  const tooltipParts: string[] = [];
+  tooltipParts.push(`${todoApprox} offene Session${todoApprox === 1 ? "" : "s"} im Zu-tun-Tab (Drafts + Ungelesen + B2B-Warning)`);
+  if (escalating) {
+    tooltipParts.push(`davon ${awaiting} Eskalation${awaiting === 1 ? "" : "en"} (awaiting_human)`);
+  }
+  if (unreadInAwaiting > 0 && unreadInAwaiting !== awaiting) {
+    tooltipParts.push(`+ ${unreadInAwaiting} ungelesene Kunden-Msg in awaiting-Sessions`);
   }
 
-  // Nur-Todo-Modus: neutrale Pille, keine Pulsierung, dezent
   return (
     <span
-      className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-neutral-200 text-neutral-700 text-[10px] font-semibold"
-      title={`${todoApprox} offene Session${todoApprox === 1 ? "" : "s"} im Zu-tun-Tab (Drafts + Ungelesen + B2B-Warning)`}
+      className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full text-[10px] font-semibold ${
+        escalating
+          ? "bg-red-600 text-white font-bold animate-pulse"
+          : "bg-neutral-200 text-neutral-700"
+      }`}
+      title={tooltipParts.join(" · ")}
     >
-      {todoApprox}
+      {displayNumber}
     </span>
   );
 }
