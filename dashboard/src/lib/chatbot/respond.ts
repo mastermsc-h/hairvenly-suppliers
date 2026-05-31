@@ -1499,6 +1499,26 @@ KEINE Farbnamen nennen — die MA macht das.`;
       : t
   );
 
+  // 📏 PROMPT-GRÖSSEN-MESSUNG (temporär, 2026-05-31): Ground-Truth statt
+  // Schätzung. Loggt die char-Größe jedes Prompt-Bestandteils + grobe
+  // Token-Schätzung (chars/3.6). Damit sehen wir EXAKT wo die ~45k cached
+  // Tokens herkommen, bevor wir kürzen. Reine console-Ausgabe, kein
+  // Verhalten geändert. Nach der Analyse wieder entfernen.
+  {
+    const estTok = (s: string) => Math.round((s || "").length / 3.6);
+    const toolsJson = JSON.stringify(cachedTools);
+    const convoJson = JSON.stringify(messages);
+    console.log(
+      `[respond] 📏 PROMPT-BREAKDOWN session=${sessionId.slice(0, 8)} | ` +
+      `stable=${estTok(systemPromptStable)}tok(${systemPromptStable.length}ch) | ` +
+      `variable=${estTok(systemPromptVariable)}tok(${systemPromptVariable.length}ch) | ` +
+      `tools=${estTok(toolsJson)}tok(${toolsJson.length}ch) | ` +
+      `convo=${estTok(convoJson)}tok(${convoJson.length}ch, ${messages.length}msgs) | ` +
+      `dynamicExtras=${estTok(dynamicExtras)}tok | catalog=${estTok(catalog.promptText)}tok | ` +
+      `faqStable=${estTok(systemPromptStable) - estTok(persona.system_prompt) - estTok(catalog.promptText)}tok(rest)`
+    );
+  }
+
   const { logUsage } = await import("./usage-logger");
   for (let iter = 0; iter < MAX_ITER; iter++) {
     const callStart = Date.now();
