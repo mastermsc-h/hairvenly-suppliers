@@ -84,3 +84,28 @@ export async function isLeanPromptEnabled(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * FAQ-Kompressions-Modus (Feature-Flag).
+ *
+ * Default false (= volle FAQ-Antworten im Prompt).
+ *
+ * Wenn true: respondAsBot nutzt die fakttreue Kurzfassung answer_short (sofern
+ * vorhanden) statt der vollen answer. Das ORIGINAL bleibt unberührt → kein
+ * Wissensverlust, voll reversibel (Flag aus = sofort wieder volle Antworten).
+ * Spart ~8k Token/Call im FAQ-Block.
+ */
+export async function isFaqCompressionEnabled(): Promise<boolean> {
+  try {
+    const svc = createServiceClient();
+    const { data } = await svc
+      .from("chatbot_settings")
+      .select("use_faq_compression")
+      .eq("id", 1)
+      .maybeSingle();
+    return data?.use_faq_compression === true;
+  } catch (e) {
+    console.warn("[settings] faq-compression read failed:", (e as Error).message);
+    return false;
+  }
+}

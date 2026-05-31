@@ -783,27 +783,32 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   }
   const [{ data: pinnedFaqs }, { data: coreTopicFaqs }, { data: extraTopicFaqs }] = await Promise.all([
     svc.from("chatbot_faq")
-      .select("slug, topic, question, answer")
+      .select("slug, topic, question, answer, answer_short")
       .eq("active", true)
       .eq("pinned", true)
       .order("topic").order("order_idx"),
     svc.from("chatbot_faq")
-      .select("slug, topic, question, answer")
+      .select("slug, topic, question, answer, answer_short")
       .eq("active", true)
       .in("topic", Array.from(CORE_TOPICS))
       .order("topic").order("order_idx"),
     extraWantedTopics.size > 0
       ? svc.from("chatbot_faq")
-          .select("slug, topic, question, answer")
+          .select("slug, topic, question, answer, answer_short")
           .eq("active", true)
           .in("topic", Array.from(extraWantedTopics))
           .order("topic").order("order_idx")
-      : Promise.resolve({ data: [] as { slug: string; topic: string; question: string; answer: string }[] }),
+      : Promise.resolve({ data: [] as { slug: string; topic: string; question: string; answer: string; answer_short: string | null }[] }),
   ]);
+  // 💰 FAQ-KOMPRESSION (Flag): answer_short (fakttreue Kurzfassung) nutzen,
+  // sofern vorhanden — sonst volle answer. Original bleibt unberührt.
+  const faqCompression = await isFaqCompressionEnabled();
+  const pickAnswer = (f: { answer: string; answer_short?: string | null }): string =>
+    faqCompression && f.answer_short ? f.answer_short : f.answer;
   // Stable: pinned + core
   const faqMap = new Map<string, { topic: string; question: string; answer: string }>();
-  for (const f of pinnedFaqs || []) faqMap.set(f.slug, { topic: f.topic, question: f.question, answer: f.answer });
-  for (const f of coreTopicFaqs || []) if (!faqMap.has(f.slug)) faqMap.set(f.slug, { topic: f.topic, question: f.question, answer: f.answer });
+  for (const f of pinnedFaqs || []) faqMap.set(f.slug, { topic: f.topic, question: f.question, answer: pickAnswer(f) });
+  for (const f of coreTopicFaqs || []) if (!faqMap.has(f.slug)) faqMap.set(f.slug, { topic: f.topic, question: f.question, answer: pickAnswer(f) });
   const faqs = Array.from(faqMap.values());
   // Variable: nur topic-extras, die NICHT bereits in stable sind
   const stableSlugs = new Set<string>();
@@ -815,7 +820,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     for (const f of extraFaqs) {
       const t = f.topic || "allgemein";
       if (!byTopic.has(t)) byTopic.set(t, []);
-      byTopic.get(t)!.push({ question: f.question, answer: f.answer });
+      byTopic.get(t)!.push({ question: f.question, answer: pickAnswer(f) });
     }
     let extraBlock = "\n\n## 📚 ZUSÄTZLICHE WISSENSDATENBANK (themenspezifisch zu dieser Anfrage)\n";
     for (const [topic, items] of byTopic) {
