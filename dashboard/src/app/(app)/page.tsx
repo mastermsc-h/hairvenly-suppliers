@@ -14,7 +14,7 @@ import SupplierCard from "./supplier-card";
 import SupplierList from "./supplier-list";
 import TrackingLink from "./tracking-link";
 import TrackingCell from "./tracking-cell";
-import ShipmentsCell from "./shipments-cell";
+import ShipmentsCell, { ShipmentProgress } from "./shipments-cell";
 import NotesCell from "./notes-cell";
 import SupplierProfile from "./supplier-profile";
 import StatusDropdown from "./orders/[id]/status-dropdown";
@@ -315,11 +315,14 @@ export default async function DashboardPage() {
                             )}
                           </td>
                           <td className="px-5 py-2.5">
-                            {canEditOrder ? (
-                              <StatusDropdown orderId={o.id} currentStatus={o.status} locale={locale} />
-                            ) : (
-                              <StatusBadge status={o.status} locale={locale} />
-                            )}
+                            <div className="flex flex-col items-start gap-0.5">
+                              {canEditOrder ? (
+                                <StatusDropdown orderId={o.id} currentStatus={o.status} locale={locale} />
+                              ) : (
+                                <StatusBadge status={o.status} locale={locale} />
+                              )}
+                              <ShipmentProgress shipments={shipmentsByOrder.get(o.id) ?? []} />
+                            </div>
                           </td>
                           <td className="px-5 py-2.5 text-neutral-700 align-top">
                             {date(o.eta)}
@@ -407,6 +410,7 @@ export default async function DashboardPage() {
                               ) : (
                                 <StatusBadge status={o.status} locale={locale} />
                               )}
+                              <ShipmentProgress shipments={shipmentsByOrder.get(o.id) ?? []} />
                               {o.eta && <span className="text-xs text-neutral-500">{date(o.eta)}</span>}
                               {o.weight_kg != null && Number(o.weight_kg) > 0 && (
                                 <span className="text-xs text-neutral-500 inline-flex items-center gap-0.5">

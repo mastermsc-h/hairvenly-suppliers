@@ -32,6 +32,45 @@ function deriveStatus(s: ShipmentLite): { label: string; bg: string; text: strin
 }
 
 /**
+ * Aggregated progress badge for the main status column.
+ * Shows "N/M versandt" / "N/M angekommen" etc. depending on the highest
+ * milestone any Teil has reached. Returns null if no shipments or nothing
+ * has progressed past "offen/in produktion" (main status is enough).
+ */
+export function ShipmentProgress({ shipments }: { shipments: ShipmentLite[] }) {
+  if (!shipments || shipments.length === 0) return null;
+  const total = shipments.length;
+  const arrived = shipments.filter((s) => s.arrived_at).length;
+  const shipped = shipments.filter((s) => s.shipped_at).length;
+  const ready = shipments.filter((s) => s.tracking_number && !s.shipped_at && !s.arrived_at).length;
+
+  let label = "";
+  let cls = "";
+  if (arrived > 0) {
+    label = arrived === total ? "alle angekommen" : `${arrived}/${total} angekommen`;
+    cls = "bg-emerald-50 text-emerald-700 border-emerald-200";
+  } else if (shipped > 0) {
+    label = shipped === total ? "alle versandt" : `${shipped}/${total} versandt`;
+    cls = "bg-cyan-50 text-cyan-700 border-cyan-200";
+  } else if (ready > 0) {
+    label = ready === total ? "alle versandbereit" : `${ready}/${total} versandbereit`;
+    cls = "bg-orange-50 text-orange-700 border-orange-200";
+  } else {
+    return null;
+  }
+
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium border ${cls} mt-0.5`}
+      title={`${total} Teillieferungen`}
+    >
+      <Package size={9} />
+      {label}
+    </span>
+  );
+}
+
+/**
  * Compact, expandable per-Teillieferung display for the order overview tables.
  *
  * Collapsed: "▸ 2 Teillieferungen" pill button
