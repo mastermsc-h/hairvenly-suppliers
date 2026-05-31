@@ -4,6 +4,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { createServiceClient } from "@/lib/supabase/server";
+import { sanitizeUtf16, sanitizeUtf16Deep } from "@/lib/chatbot/sanitize-unicode";
 import { TOOLS, TOOL_SCHEMAS, type ToolContext } from "@/lib/chatbot/tools";
 
 const MODEL = "claude-sonnet-4-5";
@@ -1406,11 +1407,14 @@ KEINE Farbnamen nennen — die MA macht das.`;
   const allToolCalls: { id: string; name: string; input: Record<string, unknown> }[] = [];
   const allToolResults: { tool_use_id: string; content: string }[] = [];
 
+  // 🛡 Unicode-Sanitize: lone UTF-16 surrogates (z.B. halbierte Emojis durch
+  // String-Slices) führen sonst zu Anthropic 400 "no low surrogate in string"
+  // (Bug 2026-05-30 Danči). sanitizeUtf16 ersetzt sie durch U+FFFD.
   const systemBlocks: Anthropic.TextBlockParam[] = [
-    { type: "text", text: systemPromptStable, cache_control: { type: "ephemeral", ttl: "1h" } as const },
+    { type: "text", text: sanitizeUtf16(systemPromptStable), cache_control: { type: "ephemeral", ttl: "1h" } as const },
   ];
   if (systemPromptVariable.trim()) {
-    systemBlocks.push({ type: "text", text: systemPromptVariable });
+    systemBlocks.push({ type: "text", text: sanitizeUtf16(systemPromptVariable) });
   }
   // Tools-Schema ebenfalls cachen (letztes Tool kriegt cache_control)
   const cachedTools = TOOL_SCHEMAS.map((t, i) =>
@@ -1422,12 +1426,15 @@ KEINE Farbnamen nennen — die MA macht das.`;
   const { logUsage } = await import("./usage-logger");
   for (let iter = 0; iter < MAX_ITER; iter++) {
     const callStart = Date.now();
+    // 🛡 Deep-Sanitize aller Customer/Bot-Messages: jede content-block-string
+    // wird gegen lone surrogates abgesichert (verhindert Anthropic 400).
+    const sanitizedConvo = sanitizeUtf16Deep(convo);
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 1024,
       system: systemBlocks,
       tools: cachedTools,
-      messages: convo,
+      messages: sanitizedConvo,
     });
     logUsage({
       purpose: opts.assisted ? "respond" : "respond",
@@ -1489,10 +1496,10 @@ KEINE Farbnamen nennen — die MA macht das.`;
         model: MODEL,
         max_tokens: 1024,
         system: [
-          { type: "text", text: systemPromptStable, cache_control: { type: "ephemeral", ttl: "1h" } as const },
-          { type: "text", text: (systemPromptVariable || "") + "\n\nFasse jetzt die Tool-Ergebnisse zusammen und antworte dem Kunden auf seine letzte Frage. KEINE weiteren Tools aufrufen. SCHREIBE UNBEDINGT EINE KOMPLETTE ANTWORT — auch wenn du dir unsicher bist, formuliere mit den verfügbaren Infos das Beste was du kannst." },
+          { type: "text", text: sanitizeUtf16(systemPromptStable), cache_control: { type: "ephemeral", ttl: "1h" } as const },
+          { type: "text", text: sanitizeUtf16((systemPromptVariable || "") + "\n\nFasse jetzt die Tool-Ergebnisse zusammen und antworte dem Kunden auf seine letzte Frage. KEINE weiteren Tools aufrufen. SCHREIBE UNBEDINGT EINE KOMPLETTE ANTWORT — auch wenn du dir unsicher bist, formuliere mit den verfügbaren Infos das Beste was du kannst.") },
         ],
-        messages: convo,
+        messages: sanitizeUtf16Deep(convo),
       });
       logUsage({
         purpose: "respond",

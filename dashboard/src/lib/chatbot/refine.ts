@@ -5,6 +5,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createServiceClient } from "@/lib/supabase/server";
 import { applyAllOutputSanitizers } from "./output-sanitizers";
+import { sanitizeUtf16, sanitizeUtf16Deep } from "./sanitize-unicode";
 
 const MODEL = "claude-sonnet-4-5";
 
@@ -88,13 +89,14 @@ WICHTIG:
   try {
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const refineStart = Date.now();
+    // 🛡 Unicode-Sanitize gegen lone surrogates (Anthropic 400-Schutz)
     const resp = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 1024,
       system: [
-        { type: "text", text: systemPrompt, cache_control: { type: "ephemeral", ttl: "1h" } as const },
+        { type: "text", text: sanitizeUtf16(systemPrompt), cache_control: { type: "ephemeral", ttl: "1h" } as const },
       ],
-      messages,
+      messages: sanitizeUtf16Deep(messages),
     });
     const { logUsage } = await import("./usage-logger");
     logUsage({
