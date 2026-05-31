@@ -109,7 +109,7 @@ export function splitLongMessage(text: string, maxLen = 700): string[] {
 import { getBusinessHoursContext } from "./business-hours";
 import { BUSINESS_CONFIG } from "./business-config";
 import { stripColorUrlMismatch, limitUrls, stripFalseMediaLimitation, detectStrandedContactInfo, detectFalseOpeningClaim } from "./output-sanitizers";
-import { isLeanPromptEnabled } from "./settings";
+import { isLeanPromptEnabled, isFaqCompressionEnabled } from "./settings";
 import { buildLeanHardRules } from "./lean-rules";
 
 /**
