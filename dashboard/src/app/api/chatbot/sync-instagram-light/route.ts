@@ -64,7 +64,7 @@ export async function POST() {
       // Aktuellen DB-Stand holen, nur updaten wenn anders (spart Schreibzugriffe)
       const { data: existing } = await svc
         .from("chat_sessions")
-        .select("id, ig_unread_count, last_seen_by_agent_at, last_customer_msg_at")
+        .select("id, ig_unread_count, last_seen_by_agent_at, last_opened_by_agent_at, last_customer_msg_at, status")
         .eq("channel", "instagram")
         .eq("external_id", customer.id)
         .maybeSingle();
@@ -73,18 +73,31 @@ export async function POST() {
       if (existing.ig_unread_count !== igUnread) {
         const update: Record<string, unknown> = { ig_unread_count: igUnread };
 
-        // VARIANTE B: IG sagt unread + Dashboard hatte "gesehen" älter als
-        // 10 Min → Session zurück in "Zu tun" durch last_seen_by_agent_at=null.
-        // 10-Min-Grace verhindert False-Reset direkt nach Dashboard-Aktion
-        // (Phase 1 mark_seen API könnte noch nicht propagiert sein).
-        if (igUnread > 0 && existing.last_seen_by_agent_at) {
-          const seenAge = Date.now() - new Date(existing.last_seen_by_agent_at).getTime();
-          const TEN_MIN_MS = 10 * 60 * 1000;
-          if (seenAge > TEN_MIN_MS) {
-            update.last_seen_by_agent_at = null;
-            divergenceDetected++;
-            console.log(`[sync-light] Session ${existing.id.slice(0,8)} → IG-unread reactivated (age=${Math.round(seenAge/60000)}min)`);
-          }
+        // ── IG → DASHBOARD: ungelesen + unerledigt syncen ───────────────
+        // User-Anweisung 2026-05-30: Wenn auf IG eine Nachricht (wieder) auf
+        // UNGELESEN gestellt wird, soll das Dashboard das übernehmen:
+        //   (a) Session als UNGELESEN markieren (blauer Punkt + Zu-tun)
+        //   (b) Falls erledigt/geschlossen → wieder als UNERLEDIGT öffnen.
+        //
+        // Wir spiegeln exakt den markSessionUnread-Zustand: BEIDE Timestamps
+        // auf den Sentinel (1970) → isExplicitlyNotDone feuert robust,
+        // unabhängig davon wer zuletzt geschrieben hat (überschreibt den
+        // ourTurn-Guard). Plus Reopen falls status=closed.
+        //
+        // 10-Min-Grace: nur wenn die letzte Dashboard-"gesehen"-Aktion alt
+        // genug ist (verhindert Race mit einem mark_seen, das noch nicht zu
+        // IG propagiert ist und dort fälschlich noch als unread erscheint).
+        const FLAG_SENTINEL = "1970-01-01T00:00:00Z";
+        const seenAt = existing.last_seen_by_agent_at;
+        const alreadyUnread = !!seenAt && new Date(seenAt).getFullYear() < 2000;
+        const seenAge = seenAt ? Date.now() - new Date(seenAt).getTime() : Infinity;
+        const TEN_MIN_MS = 10 * 60 * 1000;
+        if (igUnread > 0 && !alreadyUnread && seenAge > TEN_MIN_MS) {
+          update.last_seen_by_agent_at = FLAG_SENTINEL;
+          update.last_opened_by_agent_at = FLAG_SENTINEL;
+          if (existing.status === "closed") update.status = "active"; // reopen = unerledigt
+          divergenceDetected++;
+          console.log(`[sync-light] Session ${existing.id.slice(0,8)} → IG-unread: ungelesen+unerledigt (war status=${existing.status}, seenAge=${seenAge === Infinity ? "∞" : Math.round(seenAge/60000)+"min"})`);
         }
 
         await svc.from("chat_sessions").update(update).eq("id", existing.id);
