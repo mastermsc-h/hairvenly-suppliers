@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Truck, Calendar, Check, ExternalLink, Package } from "lucide-react";
+import { ChevronDown, ChevronRight, Truck, Calendar, ExternalLink, Package } from "lucide-react";
 import { date as fmtDate } from "@/lib/format";
 
 export interface ShipmentLite {
@@ -13,6 +13,22 @@ export interface ShipmentLite {
   eta: string | null;
   shipped_at: string | null;
   arrived_at: string | null;
+}
+
+/**
+ * Derive a status from the date fields:
+ *   - arrived_at set → "angekommen" (emerald)
+ *   - shipped_at set → "versandt" (cyan)
+ *   - tracking_number set → "versandbereit" (orange)
+ *   - eta set → "in produktion" (amber)
+ *   - else → "offen" (neutral)
+ */
+function deriveStatus(s: ShipmentLite): { label: string; bg: string; text: string; dot: string } {
+  if (s.arrived_at) return { label: "angekommen", bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" };
+  if (s.shipped_at) return { label: "versandt", bg: "bg-cyan-50", text: "text-cyan-700", dot: "bg-cyan-500" };
+  if (s.tracking_number) return { label: "versandbereit", bg: "bg-orange-50", text: "text-orange-700", dot: "bg-orange-500" };
+  if (s.eta) return { label: "in produktion", bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-500" };
+  return { label: "offen", bg: "bg-neutral-100", text: "text-neutral-700", dot: "bg-neutral-400" };
 }
 
 /**
@@ -41,18 +57,20 @@ export default function ShipmentsCell({ shipments }: { shipments: ShipmentLite[]
         <div className="mt-1 space-y-1">
           {shipments.map((s, idx) => {
             const label = s.label || `Teil ${idx + 1}`;
+            const st = deriveStatus(s);
             return (
               <div
                 key={s.id}
                 className="bg-purple-50/40 border border-purple-200 rounded px-1.5 py-1 leading-tight"
               >
-                <div className="font-semibold text-purple-900 inline-flex items-center gap-0.5">
-                  <Package size={8} /> {label}
-                  {s.arrived_at && (
-                    <span className="ml-1 text-emerald-700 inline-flex items-center gap-0.5">
-                      <Check size={8} /> da
-                    </span>
-                  )}
+                <div className="flex items-center gap-1 flex-wrap">
+                  <span className="font-semibold text-purple-900 inline-flex items-center gap-0.5">
+                    <Package size={8} /> {label}
+                  </span>
+                  <span className={`inline-flex items-center gap-0.5 px-1 py-px rounded ${st.bg} ${st.text}`}>
+                    <span className={`w-1 h-1 rounded-full ${st.dot}`} />
+                    {st.label}
+                  </span>
                 </div>
                 {s.eta && (
                   <div className="text-purple-700/80 inline-flex items-center gap-0.5">

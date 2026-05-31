@@ -1,0 +1,201 @@
+{
+  "sections": {
+    "image_banner_Pd6tJN": {
+      "type": "image-banner",
+      "settings": {
+        "image_overlay_opacity": 0,
+        "image_height": "medium",
+        "desktop_content_position": "middle-center",
+        "show_text_box": true,
+        "desktop_content_alignment": "center",
+        "color_scheme": "",
+        "image_behavior": "none",
+        "mobile_content_alignment": "center",
+        "stack_images_on_mobile": true,
+        "show_text_below": true
+      }
+    },
+    "rich_text_pcmxcL": {
+      "type": "rich-text",
+      "blocks": {
+        "heading_RUHxFR": {
+          "type": "heading",
+          "settings": {
+            "heading": "Talk about your brand",
+            "heading_size": "h1"
+          }
+        },
+        "text_nHk4pB": {
+          "type": "text",
+          "settings": {
+            "text": "<p>Share information about your brand with your customers. Describe a product, make announcements, or welcome customers to your store.<\/p>"
+          }
+        }
+      },
+      "block_order": [
+        "heading_RUHxFR",
+        "text_nHk4pB"
+      ],
+      "settings": {
+        "desktop_content_position": "center",
+        "content_alignment": "center",
+        "color_scheme": "",
+        "full_width": true,
+        "padding_top": 40,
+        "padding_bottom": 52
+      }
+    },
+    "main": {
+      "type": "main-article",
+      "blocks": {
+        "featured_image": {
+          "type": "featured_image",
+          "disabled": true,
+          "settings": {
+            "image_height": "adapt"
+          }
+        }
+      },
+      "block_order": [
+        "featured_image"
+      ],
+      "settings": {}
+    },
+    "feather_line_qHXpKA": {
+      "type": "feather_line",
+      "settings": {
+        "color_scheme": "scheme-38b23c2f-c32f-4b69-8f1c-a049f73174ee",
+        "divider_color": "#ffffff",
+        "padding_top": 40,
+        "padding_bottom": 10,
+        "h2_content": "EXTENSION SICHERN"
+      }
+    },
+    "rich_text_EppKiQ": {
+      "type": "rich-text",
+      "blocks": {
+        "text_rGgTbT": {
+          "type": "text",
+          "settings": {
+            "text": "<p>Sichere dir deine hochwertige Extension von HAIRVENLY und erlebe dich neu.<\/p>"
+          }
+        },
+        "button_ffPiYB": {
+          "type": "button",
+          "settings": {
+            "button_label": "Jetzt entdecken",
+            "button_link": "shopify:\/\/collections",
+            "button_style_secondary": true,
+            "button_label_2": "",
+            "button_link_2": "",
+            "button_style_secondary_2": false
+          }
+        }
+      },
+      "block_order": [
+        "text_rGgTbT",
+        "button_ffPiYB"
+      ],
+      "settings": {
+        "desktop_content_position": "center",
+        "content_alignment": "center",
+        "color_scheme": "background-2",
+        "full_width": true,
+        "padding_top": 0,
+        "padding_bottom": 52
+      }
+    },
+    "feather_line_Xk9ja6": {
+      "type": "feather_line",
+      "settings": {
+        "color_scheme": "scheme-e56a687c-d074-43ce-a35a-23211ccfd3f5",
+        "divider_color": "#ead5b7",
+        "padding_top": 40,
+        "padding_bottom": 10,
+        "h2_content": "Weitere Beiträge"
+      }
+    },
+    "featured_blog_hyAK9p": {
+      "type": "featured-blog",
+      "settings": {
+        "heading": "",
+        "heading_size": "h1",
+        "blog": "magazin",
+        "post_limit": 3,
+        "columns_desktop": 3,
+        "color_scheme": "",
+        "show_image": false,
+        "show_date": true,
+        "show_author": true,
+        "show_view_all": true,
+        "padding_top": 0,
+        "padding_bottom": 36
+      }
+    },
+    "multirow_wgdy8m": {
+      "type": "multirow",
+      "blocks": {
+        "row_kQNrWq": {
+          "type": "row",
+          "settings": {
+            "caption": "Caption",
+            "heading": "Row",
+            "text": "<p>Pair text with an image to focus on your chosen product, collection, or blog post. Add details on availability, style, or even provide a review.<\/p>",
+            "button_label": "Button label",
+            "button_link": ""
+          }
+        },
+        "row_H9xfMj": {
+          "type": "row",
+          "settings": {
+            "caption": "Caption",
+            "heading": "Row",
+            "text": "<p>Pair text with an image to focus on your chosen product, collection, or blog post. Add details on availability, style, or even provide a review.<\/p>",
+            "button_label": "Button label",
+            "button_link": ""
+          }
+        },
+        "row_FLQBMa": {
+          "type": "row",
+          "settings": {
+            "caption": "Caption",
+            "heading": "Row",
+            "text": "<p>Pair text with an image to focus on your chosen product, collection, or blog post. Add details on availability, style, or even provide a review.<\/p>",
+            "button_label": "Button label",
+            "button_link": ""
+          }
+        }
+      },
+      "block_order": [
+        "row_kQNrWq",
+        "row_H9xfMj",
+        "row_FLQBMa"
+      ],
+      "settings": {
+        "image_height": "medium",
+        "desktop_image_width": "medium",
+        "heading_size": "h1",
+        "text_style": "body",
+        "button_style": "secondary",
+        "desktop_content_position": "middle",
+        "desktop_content_alignment": "left",
+        "image_layout": "alternate-left",
+        "section_color_scheme": "",
+        "row_color_scheme": "",
+        "mobile_content_alignment": "left",
+        "padding_top": 36,
+        "padding_bottom": 36
+      }
+    }
+  },
+  "order": [
+    "image_banner_Pd6tJN",
+    "rich_text_pcmxcL",
+    "main",
+    "multirow_wgdy8m",
+    "feather_line_qHXpKA",
+    "rich_text_EppKiQ",
+    "feather_line_Xk9ja6",
+    "featured_blog_hyAK9p"
+  ]
+}
