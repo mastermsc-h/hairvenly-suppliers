@@ -38,7 +38,7 @@ export default async function DashboardPage() {
     suppliersQuery = suppliersQuery.eq("id", mySupplierId);
   }
 
-  const [{ data: orders }, { data: suppliers }, { data: documents }, { data: payments }, { data: shipmentsData }] =
+  const [{ data: orders }, { data: suppliers }, { data: documents }, { data: payments }, { data: shipmentsData }, { data: itemsShipMap }] =
     await Promise.all([
       ordersQuery.order("created_at", { ascending: false }),
       suppliersQuery.order("sort_order").order("name"),
@@ -51,6 +51,7 @@ export default async function DashboardPage() {
         .from("order_shipments")
         .select("id, order_id, label, tracking_number, tracking_url, eta, shipped_at, arrived_at")
         .order("created_at"),
+      supabase.from("order_items").select("order_id, shipment_id"),
     ]);
 
   const list = (orders ?? []) as OrderWithTotals[];
@@ -78,6 +79,11 @@ export default async function DashboardPage() {
     shipmentsByOrder.get(s.order_id)!.push(s);
   }
   const ordersWithShipments = new Set(shipmentsByOrder.keys());
+  // Track which orders still have items NOT assigned to any Teillieferung
+  const unassignedByOrder = new Set<string>();
+  for (const it of (itemsShipMap ?? []) as { order_id: string; shipment_id: string | null }[]) {
+    if (!it.shipment_id) unassignedByOrder.add(it.order_id);
+  }
 
   const totalOpen = list.reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
   // An order is "active" if it's not stocked/cancelled, OR if it still has an open balance.
@@ -321,7 +327,7 @@ export default async function DashboardPage() {
                               ) : (
                                 <StatusBadge status={o.status} locale={locale} />
                               )}
-                              <ShipmentProgress shipments={shipmentsByOrder.get(o.id) ?? []} />
+                              <ShipmentProgress shipments={shipmentsByOrder.get(o.id) ?? []} hasUnassignedItems={unassignedByOrder.has(o.id)} />
                             </div>
                           </td>
                           <td className="px-5 py-2.5 text-neutral-700 align-top">
@@ -410,7 +416,7 @@ export default async function DashboardPage() {
                               ) : (
                                 <StatusBadge status={o.status} locale={locale} />
                               )}
-                              <ShipmentProgress shipments={shipmentsByOrder.get(o.id) ?? []} />
+                              <ShipmentProgress shipments={shipmentsByOrder.get(o.id) ?? []} hasUnassignedItems={unassignedByOrder.has(o.id)} />
                               {o.eta && <span className="text-xs text-neutral-500">{date(o.eta)}</span>}
                               {o.weight_kg != null && Number(o.weight_kg) > 0 && (
                                 <span className="text-xs text-neutral-500 inline-flex items-center gap-0.5">

@@ -37,9 +37,17 @@ function deriveStatus(s: ShipmentLite): { label: string; bg: string; text: strin
  * milestone any Teil has reached. Returns null if no shipments or nothing
  * has progressed past "offen/in produktion" (main status is enough).
  */
-export function ShipmentProgress({ shipments }: { shipments: ShipmentLite[] }) {
+export function ShipmentProgress({
+  shipments,
+  hasUnassignedItems = false,
+}: {
+  shipments: ShipmentLite[];
+  hasUnassignedItems?: boolean;
+}) {
   if (!shipments || shipments.length === 0) return null;
-  const total = shipments.length;
+  // Unassigned items count as an implicit "offen" pseudo-shipment so we never
+  // claim "alle versandt" while positions are still in production.
+  const total = shipments.length + (hasUnassignedItems ? 1 : 0);
   const arrived = shipments.filter((s) => s.arrived_at).length;
   const shipped = shipments.filter((s) => s.shipped_at).length;
   const ready = shipments.filter((s) => s.tracking_number && !s.shipped_at && !s.arrived_at).length;
