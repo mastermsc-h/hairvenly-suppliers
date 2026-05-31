@@ -67,7 +67,9 @@ export async function GET() {
   const stats: Record<string, SessionStats> = {};
   const openSessionIds = (openSessions || []).map(s => s.id);
   if (openSessionIds.length > 0) {
-    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    // 120-Tage-Window + limit 20000, EXAKT wie inbox/page.tsx stats-Query
+    // (sonst werden Handoff-Promise-Sessions 30-120 Tage alt nicht erkannt).
+    const cutoff = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString();
     const { data: msgs } = await svc
       .from("chat_messages")
       .select("session_id, role, content, created_at, auto_sent")
@@ -98,14 +100,20 @@ export async function GET() {
   let unreadAll = 0;
   const todoIds = new Set<string>();
   for (const s of openSessions || []) {
-    // Unread-Berechnung (für unreadAll counter UND als Komponente von Zu-tun)
-    let isUnread = false;
-    if (s.last_customer_msg_at) {
-      const isExplicitlyNotDone = !!s.last_seen_by_agent_at &&
-        new Date(s.last_seen_by_agent_at).getFullYear() < 2000;
-      if (isExplicitlyNotDone) isUnread = true;
-      else if (!s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at) isUnread = true;
-    }
+    // Unread-Berechnung — EXAKT wie inbox/page.tsx unreadMap:
+    //   isExplicitlyNotDone OR (!ourTurn AND customerMsg > lastSeen)
+    // 🛡 ourTurn-Guard ist KRITISCH (Bug 2026-05-30): wenn die letzte
+    // Nachricht von UNS ist (assistant/human_agent), zählt die Session NICHT
+    // als ungelesen — auch wenn last_customer_msg_at > last_seen. Ohne den
+    // Guard zählte das API 62 Sessions zu viel (Sidebar 122 statt Tab 97).
+    const stForUnread = stats[s.id];
+    const lastRole = stForUnread?.lastMsgRole;
+    const ourTurn = lastRole === "assistant" || lastRole === "human_agent";
+    const isExplicitlyNotDone = !!s.last_seen_by_agent_at &&
+      new Date(s.last_seen_by_agent_at).getFullYear() < 2000;
+    const isUnread = isExplicitlyNotDone || (!ourTurn && !!(s.last_customer_msg_at && (
+      !s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at
+    )));
     if (isUnread) unreadAll++;
 
     // EXPLIZIT-ERLEDIGT-Override (manuell "Erledigt"-Klick → seenAt > lastMsg + 5s)
