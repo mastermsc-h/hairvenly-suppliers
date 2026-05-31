@@ -38,6 +38,10 @@ const PRICING: Record<string, {
   "claude-3-5-haiku":       { input: 1.00, output: 5.00,  cacheRead: 0.10, cacheWrite: 1.25 },
   "claude-opus-4":          { input: 15.0, output: 75.0,  cacheRead: 1.50, cacheWrite: 18.75 },
   "claude-opus-4-1":        { input: 15.0, output: 75.0,  cacheRead: 1.50, cacheWrite: 18.75 },
+  // DeepSeek V3 (OpenAI-kompatibel) — Mini-Tasks (classify/needs_answer/
+  // guardian/auto_consolidate). Preise Stand 2026 (cache-miss-Tarif, USD/Mtok).
+  // Kein Prompt-Caching genutzt → cacheRead/Write = input-Preis.
+  "deepseek-chat":          { input: 0.27, output: 1.10,  cacheRead: 0.07, cacheWrite: 0.27 },
 };
 
 export type UsagePurpose =

@@ -2,7 +2,6 @@
  * Auto-Kategorisierung einer Chat-Session via Haiku.
  * Wird beim Eingang einer Kundennachricht aufgerufen (oder manuell).
  */
-import Anthropic from "@anthropic-ai/sdk";
 import { createServiceClient } from "@/lib/supabase/server";
 
 const MODEL = "claude-haiku-4-5";
@@ -72,13 +71,11 @@ export async function classifySession(sessionId: string): Promise<Category | nul
     .map(([k, d]) => `- ${k}: ${d}`)
     .join("\n");
 
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  try {
-    const classifyStart = Date.now();
-    const resp = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 50,
-      system: `Du klassifizierst Kundennachrichten an einen Haar-Extension-Shop (Hairvenly).
+  const valid: Category[] = ["availability","pricing","color_advice","appointment","complaint","order_status","gewerbe","partnership","models","general"];
+  // 💰 Mini-LLM: DeepSeek (günstig) mit automatischem Haiku-Fallback.
+  // Validierung: DeepSeek-Antwort MUSS einen gültigen Kategorie-Key enthalten,
+  // sonst greift der Haiku-Fallback → Qualität bleibt garantiert ≥ vorher.
+  const SYSTEM = `Du klassifizierst Kundennachrichten an einen Haar-Extension-Shop (Hairvenly).
 Wähle GENAU EINE Kategorie aus dieser Liste:
 
 ${categoryList}
@@ -92,22 +89,29 @@ WICHTIGE REGELN:
 - Bei konkretem Beratungswunsch zur Verlängerung → color_advice
 - Bei "ich würde gerne Modell sein" / "sucht ihr Modelle" / Casting-Anfrage → models
 
-Antworte AUSSCHLIESSLICH mit dem Kategorie-Key in Kleinbuchstaben (z.B. "availability") — kein Erklärtext, keine Anführungszeichen, kein Punkt.`,
-      messages: [{ role: "user", content: userText }],
-    });
-    const { logUsage } = await import("./usage-logger");
-    logUsage({
-      purpose: "classify_category",
-      model: MODEL,
-      usage: resp.usage,
-      sessionId,
-      durationMs: Date.now() - classifyStart,
-    });
+Antworte AUSSCHLIESSLICH mit dem Kategorie-Key in Kleinbuchstaben (z.B. "availability") — kein Erklärtext, keine Anführungszeichen, kein Punkt.`;
+  try {
+    const { miniMessagesCreate } = await import("./mini-llm");
+    const resp = await miniMessagesCreate(
+      {
+        model: MODEL,
+        max_tokens: 50,
+        system: SYSTEM,
+        messages: [{ role: "user", content: userText }],
+      },
+      {
+        purpose: "classify_category",
+        sessionId,
+        validate: (text) => {
+          const t = text.toLowerCase();
+          return valid.some((v) => t.includes(v));
+        },
+      }
+    );
     const out = resp.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
-      .map(b => b.text).join("").trim().toLowerCase();
+      .filter((b) => b.type === "text")
+      .map((b) => b.text).join("").trim().toLowerCase();
 
-    const valid: Category[] = ["availability","pricing","color_advice","appointment","complaint","order_status","gewerbe","partnership","models","general"];
     const cat = valid.find(v => out.includes(v)) || "general";
     await svc.from("chat_sessions").update({ category: cat }).eq("id", sessionId);
     return cat;
