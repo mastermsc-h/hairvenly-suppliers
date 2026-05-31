@@ -31,21 +31,22 @@ export async function GET() {
     }
   }
 
-  // unread_all + todo_approx — Annäherung an "Zu tun"-Tab in /chatbot/inbox.
+  // unread_all + todo_approx — EXAKTE Replikation der "Zu tun"-Logik aus
+  // inbox/page.tsx (isInTodo). User-Anweisung 2026-05-30: Sidebar-Counter und
+  // Tab-Counter müssen 1:1 identisch sein.
   //
-  // Vollständige Zu-tun-Logik (inbox/page.tsx isInTodo) hat 5 Komponenten:
-  //   1. Pending Draft existiert        ← hier erfasst
-  //   2. Ungelesen                       ← hier erfasst
-  //   3. B2B-Autobot-Warning             ← hier erfasst
-  //   4. 24h-Grace nach MA-Antwort       ← weggelassen (braucht chat_messages-
-  //                                         Aggregation, teuer beim Polling)
-  //   5. Handoff-Promise im Bot-Text     ← weggelassen (Regex über alle Bot-Msgs)
+  // 5 Komponenten der vollständigen isInTodo-Logik:
+  //   1. Pending Draft existiert
+  //   2. Ungelesen (last_customer_msg_at > last_seen_by_agent_at)
+  //   3. B2B-Autobot-Warning (Gewerbe + autonome Bot-Antwort)
+  //   4. 24h-Grace nach MA-Antwort (lastWasOurs + age < 24h)
+  //   5. Handoff-Promise im letzten Bot-Text (HANDOFF_RE / HANDOFF_DAY_RE)
   //
-  // User-Entscheidung 2026-05-30: Pragmatische Annäherung reicht — Sidebar-
-  // Zahl weicht um ±1-3 von Tab-Zahl ab, dafür schnelles Polling.
+  // Plus: EXPLIZIT-ERLEDIGT-Override (last_seen_by_agent_at > last_message_at +
+  // 5s → false), Sentinel-Check für "Nicht erledigt"-Flag (Jahr < 2000).
   const { data: openSessions } = await svc
     .from("chat_sessions")
-    .select("id, status, category, last_customer_msg_at, last_seen_by_agent_at")
+    .select("id, status, category, last_message_at, last_customer_msg_at, last_seen_by_agent_at")
     .neq("status", "closed");
 
   // (a) Pending Drafts
@@ -55,28 +56,49 @@ export async function GET() {
     .eq("status", "pending");
   const draftSessionIds = new Set((pendingDrafts || []).map(d => d.session_id));
 
-  // (b) Gewerbe-Sessions mit autonom-gesendeter Bot-Antwort (B2B-Warning)
-  // — ein Sub-Query auf chat_messages mit auto_sent=true und Session-Join.
-  const gewerbeSessionIds = new Set(
-    (openSessions || []).filter(s => s.category === "gewerbe").map(s => s.id)
-  );
-  const b2bWarningIds = new Set<string>();
-  if (gewerbeSessionIds.size > 0) {
-    const { data: autoBotMsgs } = await svc
+  // (b) Pro Session: lastMsgRole, lastMsgAutoSent, lastBot, autobotCount.
+  // Aggregation aus chat_messages (DESC, first-seen-wins für die neueste msg).
+  type SessionStats = {
+    lastMsgRole?: string;
+    lastMsgAutoSent?: boolean;
+    lastBot?: string;
+    autobotCount: number;
+  };
+  const stats: Record<string, SessionStats> = {};
+  const openSessionIds = (openSessions || []).map(s => s.id);
+  if (openSessionIds.length > 0) {
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: msgs } = await svc
       .from("chat_messages")
-      .select("session_id")
-      .eq("role", "assistant")
-      .eq("auto_sent", true)
+      .select("session_id, role, content, created_at, auto_sent")
+      .in("session_id", openSessionIds)
       .is("deleted_at", null)
-      .in("session_id", Array.from(gewerbeSessionIds))
-      .limit(500);
-    for (const m of autoBotMsgs || []) b2bWarningIds.add(m.session_id as string);
+      .gte("created_at", cutoff)
+      .order("created_at", { ascending: false })
+      .limit(20000);
+    for (const m of msgs || []) {
+      const s = stats[m.session_id] ??= { autobotCount: 0 };
+      const autoSent = (m as { auto_sent?: boolean }).auto_sent === true;
+      if (m.role === "assistant" && autoSent) s.autobotCount++;
+      if (!s.lastMsgRole) {
+        s.lastMsgRole = m.role;
+        s.lastMsgAutoSent = m.role === "assistant" ? autoSent : false;
+      }
+      if ((m.role === "assistant" || m.role === "human_agent") && !s.lastBot) {
+        s.lastBot = m.content || undefined;
+      }
+    }
   }
 
-  // Sammle alle "Zu-tun"-Session-IDs + zähle unread_all separat
+  // (c) isInTodo — EXAKTE Kopie aus inbox/page.tsx
+  const HANDOFF_RE = /\b(kollegin|stylistin|farb-?expertin|mitarbeiterin)\b[^.\n]{0,80}\b(meldet|schreibt|kommt|kümmert|schaut)/i;
+  const HANDOFF_DAY_RE = /\b(montag|dienstag|mittwoch|donnerstag|freitag|morgen)\b[^.\n]{0,30}\b(früh|ab\s+10|10\s*uhr|ankommt)/i;
+  const now = Date.now();
+
   let unreadAll = 0;
   const todoIds = new Set<string>();
   for (const s of openSessions || []) {
+    // Unread-Berechnung (für unreadAll counter UND als Komponente von Zu-tun)
     let isUnread = false;
     if (s.last_customer_msg_at) {
       const isExplicitlyNotDone = !!s.last_seen_by_agent_at &&
@@ -85,8 +107,39 @@ export async function GET() {
       else if (!s.last_seen_by_agent_at || s.last_customer_msg_at > s.last_seen_by_agent_at) isUnread = true;
     }
     if (isUnread) unreadAll++;
-    if (isUnread || draftSessionIds.has(s.id) || b2bWarningIds.has(s.id)) {
-      todoIds.add(s.id);
+
+    // EXPLIZIT-ERLEDIGT-Override (manuell "Erledigt"-Klick → seenAt > lastMsg + 5s)
+    const seenAt = s.last_seen_by_agent_at;
+    const lastMsgAt = s.last_message_at;
+    if (seenAt && lastMsgAt) {
+      const seenAtMs = new Date(seenAt).getTime();
+      const lastMsgMs = new Date(lastMsgAt).getTime();
+      const isSentinel = new Date(seenAt).getFullYear() < 2000;
+      if (!isSentinel && seenAtMs - lastMsgMs > 5000) {
+        continue; // explizit erledigt — raus aus Zu-tun
+      }
+    }
+
+    // Triggers (any of)
+    if (draftSessionIds.has(s.id)) { todoIds.add(s.id); continue; }
+    if (isUnread) { todoIds.add(s.id); continue; }
+    const st = stats[s.id];
+    // B2B-Autobot-Warning
+    if (s.category === "gewerbe" && (st?.autobotCount || 0) > 0) {
+      todoIds.add(s.id); continue;
+    }
+    // 24h-Grace nach MA-Antwort
+    if (lastMsgAt && st) {
+      const ageH = (now - new Date(lastMsgAt).getTime()) / 3_600_000;
+      const lastWasOurs = st.lastMsgRole === "human_agent" ||
+        (st.lastMsgRole === "assistant" && !st.lastMsgAutoSent);
+      if (ageH < 24 && lastWasOurs) {
+        todoIds.add(s.id); continue;
+      }
+    }
+    // Handoff-Promise im letzten Bot-Text
+    if (st?.lastBot && (HANDOFF_RE.test(st.lastBot) || HANDOFF_DAY_RE.test(st.lastBot))) {
+      todoIds.add(s.id); continue;
     }
   }
   const todoApprox = todoIds.size;
