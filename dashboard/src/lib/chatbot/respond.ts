@@ -389,7 +389,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-05-29.lean-prompt-flag.v1";
+const RESPOND_CODE_VERSION = "2026-05-31.cache-split-trainings.v1";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
@@ -907,41 +907,87 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       .order("created_at", { ascending: false })
       .limit(2),
   ]);
-  const trainingIds = new Set<string>();
+  // 💰 CACHE-OPTIMIERUNG (2026-05-31): Trainings-Beispiele zweigeteilt.
+  //
+  // VOR DEM REFACTOR: ALLE 10 Trainings (5 pinned + 3 themen + 2 recency)
+  // landeten im stable Block — aber themen+recency variieren PRO Customer-
+  // Message (themen-keyword-getrieben) bzw. global bei jedem neuen Training
+  // (recency). Folge: Cache-Hit-Rate nur ~33%, weil der "stabile" Block
+  // gar nicht stabil war.
+  //
+  // NACH DEM REFACTOR:
+  //   • Pinned (5) bleiben im stable Block — die sind echt stabil pro
+  //     Avatar und kuratiert/wichtig.
+  //   • Themen-relevant (3) + Recency (2) wandern in dynamicExtras (=
+  //     variable Block, uncached). Quality-äquivalent (gleicher Content
+  //     im selben Prompt, nur in einem späteren Block — späte Positionen
+  //     werden vom LLM sogar leicht stärker gewichtet).
+  //
+  // Ziel: Cache-Hit-Rate 33% → ~80%, Token-Kosten ~$170/Monat → ~$45.
   type TrainingRow = NonNullable<typeof pinnedTraining>[number];
-  const training: TrainingRow[] = [];
-  for (const t of [...(pinnedTraining || []), ...(relevantTraining || []), ...(recentTraining || [])]) {
-    if (!trainingIds.has(t.id)) {
-      trainingIds.add(t.id);
-      training.push(t);
+  const stableTrainingIds = new Set<string>();
+  const stableTrainings: TrainingRow[] = [];
+  for (const t of pinnedTraining || []) {
+    if (!stableTrainingIds.has(t.id)) {
+      stableTrainingIds.add(t.id);
+      stableTrainings.push(t);
     }
   }
-  // Cap auf 10 (vorher 25) — Pinned + Themen-Match haben Vorrang.
-  training.splice(10);
-  if (training.length > 0) {
-    systemPrompt += "\n\n## DEINE TRAININGS-BEISPIELE\n";
-    systemPrompt += "Diese Beispiele zeigen dir den GANZEN Gesprächsverlauf — nicht nur die Einzelfrage. ";
-    systemPrompt += "Achte besonders auf STRATEGIE-HINWEISE: sie sagen dir WIE du in ähnlichen Situationen vorgehen sollst. ";
-    systemPrompt += "📌-Beispiele sind ANGEPINNT — die musst du IMMER befolgen, sie sind besonders wichtig.\n\n";
-    for (let i = 0; i < training.length; i++) {
-      const t = training[i];
+  // Variable Trainings: themen-relevant + recency, ABER ohne Duplikate
+  // mit den stable (pinned) Trainings.
+  const variableTrainings: TrainingRow[] = [];
+  const variableTrainingIds = new Set<string>();
+  for (const t of [...(relevantTraining || []), ...(recentTraining || [])]) {
+    if (stableTrainingIds.has(t.id)) continue;
+    if (variableTrainingIds.has(t.id)) continue;
+    variableTrainingIds.add(t.id);
+    variableTrainings.push(t);
+  }
+  // Cap insgesamt 10 — pinned haben Vorrang, dann variable auffüllen.
+  const remainingSlots = Math.max(0, 10 - stableTrainings.length);
+  variableTrainings.splice(remainingSlots);
+
+  // Helper für Training-Rendering (DRY zwischen stable/variable).
+  const renderTrainings = (rows: TrainingRow[], startIdx: number, headerNote: string): string => {
+    if (rows.length === 0) return "";
+    let out = "\n\n## DEINE TRAININGS-BEISPIELE";
+    if (headerNote) out += ` ${headerNote}`;
+    out += "\n";
+    out += "Diese Beispiele zeigen dir den GANZEN Gesprächsverlauf — nicht nur die Einzelfrage. ";
+    out += "Achte besonders auf STRATEGIE-HINWEISE: sie sagen dir WIE du in ähnlichen Situationen vorgehen sollst. ";
+    out += "📌-Beispiele sind ANGEPINNT — die musst du IMMER befolgen, sie sind besonders wichtig.\n\n";
+    for (let i = 0; i < rows.length; i++) {
+      const t = rows[i];
       const scope = t.avatar_name ? `nur für ${t.avatar_name}` : "für alle Avatare";
       const pin = t.pinned ? "📌 ANGEPINNT — " : "";
-      systemPrompt += `### Beispiel ${i + 1} (${pin}${scope})\n`;
+      out += `### Beispiel ${startIdx + i + 1} (${pin}${scope})\n`;
       const ctx = (t.context_messages as { role: string; content: string }[] | null) || [];
       if (ctx.length > 0) {
-        systemPrompt += "Vorheriger Gesprächsverlauf:\n";
+        out += "Vorheriger Gesprächsverlauf:\n";
         for (const c of ctx) {
           const who = c.role === "user" ? "Kunde" : "Bot/Mitarbeiter";
-          systemPrompt += `  ${who}: ${c.content}\n`;
+          out += `  ${who}: ${c.content}\n`;
         }
       }
-      systemPrompt += `Kunde fragt jetzt: ${t.user_message}\n`;
-      systemPrompt += `→ Gute Antwort: ${t.good_answer}\n`;
-      if (t.bad_answer) systemPrompt += `→ FALSCH wäre: ${t.bad_answer}\n`;
-      if (t.feedback)   systemPrompt += `→ Hinweis: ${t.feedback}\n`;
-      systemPrompt += "\n";
+      out += `Kunde fragt jetzt: ${t.user_message}\n`;
+      out += `→ Gute Antwort: ${t.good_answer}\n`;
+      if (t.bad_answer) out += `→ FALSCH wäre: ${t.bad_answer}\n`;
+      if (t.feedback)   out += `→ Hinweis: ${t.feedback}\n`;
+      out += "\n";
     }
+    return out;
+  };
+
+  // Stable: pinned Trainings (gehen in den gecachten systemPrompt-Block)
+  systemPrompt += renderTrainings(stableTrainings, 0, "(angepinnt)");
+  // Variable: themen + recency (gehen unten in dynamicExtras → uncached)
+  const variableTrainingBlock = renderTrainings(
+    variableTrainings,
+    stableTrainings.length,
+    "(themen-/zeit-bezogen zur aktuellen Anfrage)"
+  );
+  if (variableTrainingBlock) {
+    dynamicExtras += variableTrainingBlock;
   }
 
   // Verkaufs-Strategien (höchste Priorität zuerst) — Cap auf 8 (vorher 20).
