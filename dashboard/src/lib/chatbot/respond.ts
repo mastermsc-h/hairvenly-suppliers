@@ -1216,6 +1216,14 @@ Wenn KEIN \`shopify_url\` im Tool-Output steht: schicke KEINEN Link. Schreibe st
 ❌ FALSCH: "hairvenly.de/products/usbekisch-soft-blond-balayage-65cm-tapes" (selbst gebaut)
 ✅ RICHTIG: exakt der String aus shopify_url, sonst kein Link.`;
 
+  // 💰 CACHE-OPTIMIERUNG #3 (2026-05-31): styleRule + existenceRule + urlRule
+  // sind STATISCHE Texte (keine Session-Variablen) — sie gehörten früher in den
+  // ungecachten variable-Block und wurden so JEDEN Call voll zu $3/Mtok bezahlt.
+  // Jetzt in den gecachten stable-Block (vor CRITICAL_RULES, bleibt also spät
+  // genug) → nur noch ~$0.30/Mtok beim Cache-Read. Null Qualitätsrisiko
+  // (gleicher Text, nur Position minimal früher; CRITICAL_RULES bleibt letztes).
+  systemPrompt += styleRule + existenceRule + urlRule;
+
   // ── CRITICAL_RULES: ans absolute Prompt-Ende.
   // LLMs gewichten Anweisungen am Ende des System-Prompts am stärksten.
   // Diese Top-5 sind harte Pflichtregeln die der Bot historisch ignoriert hat.
