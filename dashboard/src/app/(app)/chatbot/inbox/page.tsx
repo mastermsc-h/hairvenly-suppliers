@@ -730,10 +730,13 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
               ))}
             </summary>
 
-            {/* Aufgeklappter Filter-Bereich */}
-            <div className="mt-3 space-y-2.5 pl-1">
-              <div className="flex items-center gap-x-3 gap-y-2 flex-wrap text-xs">
-                <span className="text-neutral-500 font-medium shrink-0 w-20">Kanal</span>
+            {/* Aufgeklappter Filter-Bereich — eigenes Panel mit gestapelten
+                Block-Labels (UI-Cleanup 2026-05-30: vorher floss alles als
+                Label-Spalte + wrappende Chips ineinander → chaotisch). */}
+            <div className="mt-3 rounded-2xl border border-neutral-200 bg-neutral-50/60 p-4 divide-y divide-neutral-200">
+              {/* Kanal */}
+              <div className="pb-3">
+                <div className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide mb-2">Kanal</div>
                 <div className="flex gap-1.5 flex-wrap">
                   {["all", "instagram", "whatsapp", "web"].map(c => (
                     <Link key={c}
@@ -745,8 +748,8 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         ...(searchQuery ? { q: searchQuery } : {}),
                         ...(unreadOnly ? { unread_only: "1" } : {}),
                       }).toString()}`}
-                      className={`px-2.5 py-1 rounded-full transition ${
-                        channelFilter === c ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                        channelFilter === c ? "bg-neutral-900 text-white" : "bg-white text-neutral-600 border border-neutral-200 hover:bg-neutral-100"
                       }`}
                     >
                       {c === "all" ? "Alle" : CHANNEL_LABELS[c] || c}
@@ -755,10 +758,13 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 </div>
               </div>
 
-              <div className="flex items-center gap-x-3 gap-y-2 flex-wrap text-xs">
-                <span className="text-neutral-500 font-medium shrink-0 w-20">Kategorie</span>
-                <div className="flex gap-1.5 flex-wrap items-center">
+              {/* Kategorie */}
+              <div className="py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide">Kategorie</div>
                   <ClassifyBackfillButton />
+                </div>
+                <div className="flex gap-1.5 flex-wrap">
                   <Link href={`/chatbot/inbox?${new URLSearchParams({
                       ...(view !== "todo" ? { view } : {}),
                       ...(mode !== "all" ? { mode } : {}),
@@ -766,8 +772,8 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                       ...(searchQuery ? { q: searchQuery } : {}),
                       ...(unreadOnly ? { unread_only: "1" } : {}),
                     }).toString()}`}
-                    className={`px-2.5 py-1 rounded-full transition ${
-                      categoryFilter === "all" ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                      categoryFilter === "all" ? "bg-neutral-900 text-white" : "bg-white text-neutral-600 border border-neutral-200 hover:bg-neutral-100"
                     }`}>
                     Alle
                   </Link>
@@ -783,8 +789,8 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                           ...(unreadOnly ? { unread_only: "1" } : {}),
                           category: key,
                         }).toString()}`}
-                        className={`px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition ${
-                          categoryFilter === key ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition ${
+                          categoryFilter === key ? "bg-neutral-900 text-white" : "bg-white text-neutral-600 border border-neutral-200 hover:bg-neutral-100"
                         }`}>
                         <span>{meta.emoji}</span>{meta.label}
                         {cnt > 0 && <span className={categoryFilter === key ? "text-white/70" : "text-neutral-400"}>· {cnt}</span>}
@@ -794,8 +800,9 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                 </div>
               </div>
 
-              <div className="flex items-center gap-x-3 gap-y-2 flex-wrap text-xs">
-                <span className="text-neutral-500 font-medium shrink-0 w-20">Sortieren</span>
+              {/* Sortieren */}
+              <div className="pt-3">
+                <div className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide mb-2">Sortieren</div>
                 <div className="flex gap-1.5 flex-wrap">
                   {Object.entries(SORT_OPTIONS).map(([key, meta]) => (
                     <Link key={key}
@@ -808,8 +815,8 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                         ...(unreadOnly ? { unread_only: "1" } : {}),
                         ...(key !== "newest" ? { sort: key } : {}),
                       }).toString()}`}
-                      className={`px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition ${
-                        sortMode === key ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition ${
+                        sortMode === key ? "bg-neutral-900 text-white" : "bg-white text-neutral-600 border border-neutral-200 hover:bg-neutral-100"
                       }`}>
                       <span>{meta.emoji}</span> {meta.label}
                     </Link>
