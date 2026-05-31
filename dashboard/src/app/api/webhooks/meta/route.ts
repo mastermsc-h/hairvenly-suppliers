@@ -625,6 +625,32 @@ async function routeIncoming(opts: {
     return;
   }
 
+  // 💬 CLOSING-ACKNOWLEDGEMENT-GUARD (User-Bug 2026-05-31: Kundin schreibt
+  // "Okay perfekt vielen Dank ❤️" als Gesprächs-Abschluss → Bot generiert
+  // einen "Sehr gerne 💕"-Entwurf, der ~6 ct kostet und völlig unnötig ist).
+  // Eine reine Dankes-/Abschluss-Nachricht braucht KEINE Bot-Antwort:
+  //   - kein Entwurf, kein Auto-Send, keine LLM-Kosten
+  // ABER nur, wenn die letzte Bot-/MA-Nachricht KEINE offene Frage hatte —
+  // sonst könnte "ja perfekt danke" eine Bestätigung auf ein Angebot sein
+  // ("Magst du auf die Warteliste?"), die eine echte Aktion erwartet.
+  if (isClosingAcknowledgement(opts.text, opts.attachments || [])) {
+    const { data: lastBotMsg } = await svc
+      .from("chat_messages")
+      .select("content")
+      .eq("session_id", session.id)
+      .in("role", ["assistant", "human_agent"])
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const lastBotText = (lastBotMsg?.content as string | null) || "";
+    if (!lastBotText.includes("?")) {
+      console.log(`[meta-webhook] CLOSING-ACK (text="${(opts.text || "").slice(0,30)}") — skip bot, last bot msg has no open question, session=${session.id.slice(0,8)}`);
+      return;
+    }
+    console.log(`[meta-webhook] CLOSING-ACK but last bot msg has open question → bot darf antworten (mögliche Bestätigung), session=${session.id.slice(0,8)}`);
+  }
+
   // ── AUTO-RESPOND-OVERRIDE für Standard-Eröffnungen ──
   // Standard-Muster (Begrüßung ohne Anliegen / Farbberatungs-Wunsch ohne Foto)
   // werden auto-beantwortet, EGAL was bot_mode oder Kill-Switch sagen.
@@ -780,6 +806,75 @@ async function routeIncoming(opts: {
  *   - Story-Mention (das ist die Kundin, die unsere Story teilt — anders
  *     als ihre Reply darauf)
  */
+/**
+ * Erkennt eine REINE Abschluss-/Dankes-Nachricht ("Okay perfekt vielen Dank ❤️",
+ * "alles klar, danke dir 🙏", "super danke"). Solche Nachrichten beenden das
+ * Gespräch — der Bot soll NICHT antworten.
+ *
+ * WHITELIST-ANSATZ (minimiert False-Positives, Zero-Regression):
+ *  - Es wird NUR als Closer gewertet, wenn JEDES Wort ein Dank-/Bestätigungs-/
+ *    Füllwort ist UND mindestens ein echtes Dank-/Closer-Wort dabei ist.
+ *  - Sobald ein "Content-Wort" auftaucht (Produkt, Wunsch, Frage), liefert die
+ *    Funktion false → der Bot antwortet normal. Beispiel:
+ *    "danke! gerne mehr Infos" → "mehr"/"infos" sind keine Closer-Wörter → false.
+ *  - Fragezeichen → false (es wird eine Antwort erwartet).
+ *  - Echter Anhang (Foto/Video/Audio) → false (will angeschaut werden).
+ *
+ * Die KONTEXT-Prüfung (offene Frage in der letzten Bot-Nachricht?) passiert
+ * NICHT hier, sondern am Call-Site — dort haben wir DB-Zugriff.
+ */
+function isClosingAcknowledgement(text: string, attachments: { type: string; url: string }[]): boolean {
+  const raw = (text || "").trim();
+  if (!raw) return false;
+
+  // Echte (nicht-Reaktions-)Anhänge → nicht unterdrücken.
+  const hasRealAttachment = (attachments || []).some(
+    a => !["reaction", "like"].includes(a.type)
+  );
+  if (hasRealAttachment) return false;
+
+  // Fragezeichen → Antwort erwartet.
+  if (raw.includes("?")) return false;
+
+  // Normalisieren: ß→ss, lowercase, alles außer Buchstaben+Space (Emojis,
+  // Ziffern, Satzzeichen) zu Space.
+  const norm = raw
+    .toLowerCase()
+    .replace(/ß/g, "ss")
+    .replace(/[^\p{L}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!norm) return false;
+
+  const tokens = norm.split(" ").filter(Boolean);
+  if (tokens.length === 0 || tokens.length > 8) return false; // lang = inhaltlich
+
+  // Erlaubtes Closer-Vokabular (Dank + Bestätigung + Füllwörter/Pronomen).
+  const FILLER = new Set([
+    // Dank
+    "danke","dank","dankeschoen","dankee","dankeee","dankoe","merci","thanks","thx","thank","you","vielen","vielmals","herzlichen","tausend","besten",
+    // Bestätigung / Abschluss
+    "ok","okay","oki","okey","okok","alles","klar","gut","guut","super","perfekt","prefekt","top","klasse","mega","prima","wunderbar","toll","passt","passts","verstanden","geht","ordnung","cool","nice","schoen","lieb","lieben","liebe","liebes","nett","spitze","wow","hammer","yay",
+    // Gefühl / Füllwörter / Pronomen
+    "freut","freu","mich","gefreut","dir","euch","das","ist","du","ihr","na","dann","also","ja","jaa","joa","jo","echt","wirklich","so","an","dich","mal","nochmal","noch","sehr","ach","achso","aso","gerne","gern",
+  ]);
+
+  // Starke Closer-Tokens — mind. EINER muss vorkommen (sonst kein echter
+  // Abschluss). Bewusst KONSERVATIV: nur eindeutige Dank-/Abschluss-Wörter,
+  // damit bloße "ja"/"ok"/"super"-Bestätigungen NICHT unterdrückt werden.
+  const STRONG = new Set([
+    "danke","dank","dankeschoen","dankee","dankeee","dankoe","merci","thanks","thx","thank",
+    "perfekt","prefekt","passt","passts","verstanden","top","klasse","spitze",
+  ]);
+
+  let sawStrong = false;
+  for (const tok of tokens) {
+    if (!FILLER.has(tok)) return false;   // Content-Wort → normal antworten
+    if (STRONG.has(tok)) sawStrong = true;
+  }
+  return sawStrong;
+}
+
 function isReactionOnly(text: string, attachments: { type: string; url: string }[]): boolean {
   // Wenn ein Medien-Anhang da ist (Foto/Video/Audio/Story-Mention),
   // ist das KEINE pure-reaction — wird vom Audio/Video-Bypass-Code
