@@ -620,8 +620,12 @@ async function routeIncoming(opts: {
   // mit-anhängt, dann gibt es nichts Sinnvolles zu beantworten — wir
   // skippen die Bot-Generierung komplett. Die MA sieht die Reaktion in
   // der Inbox und entscheidet selbst, ob es eine Antwort braucht.
-  if (session.status === "active" && isReactionOnly(opts.text, opts.attachments || [])) {
-    console.log(`[meta-webhook] REACTION-ONLY (text="${(opts.text || "").slice(0,20)}", atts=${(opts.attachments || []).map(a => a.type).join(",") || "none"}) — skip bot trigger for session=${session.id.slice(0,8)}`);
+  // 🛑 ZENTRALE TRIAGE (message-triage.ts, getestet): Emoji/Mini-Ack ODER
+  // Engagement-Attachment (Story-Mention/-Reply, geteilter Post, Reaktion)
+  // OHNE echtes Anliegen → Bot ignoriert komplett. Behebt u.a. den
+  // wiederkehrenden Story-Mention-Bug (Bot machte Farbanalyse auf [Foto]).
+  if (session.status === "active" && shouldBotIgnore(opts.text, opts.attachments || [])) {
+    console.log(`[meta-webhook] BOT-IGNORE (text="${(opts.text || "").slice(0,20)}", atts=${(opts.attachments || []).map(a => a.type).join(",") || "none"}) — skip bot trigger for session=${session.id.slice(0,8)}`);
     return;
   }
 
@@ -806,125 +810,6 @@ async function routeIncoming(opts: {
  *   - Story-Mention (das ist die Kundin, die unsere Story teilt — anders
  *     als ihre Reply darauf)
  */
-/**
- * Erkennt eine REINE Abschluss-/Dankes-Nachricht ("Okay perfekt vielen Dank ❤️",
- * "alles klar, danke dir 🙏", "super danke"). Solche Nachrichten beenden das
- * Gespräch — der Bot soll NICHT antworten.
- *
- * WHITELIST-ANSATZ (minimiert False-Positives, Zero-Regression):
- *  - Es wird NUR als Closer gewertet, wenn JEDES Wort ein Dank-/Bestätigungs-/
- *    Füllwort ist UND mindestens ein echtes Dank-/Closer-Wort dabei ist.
- *  - Sobald ein "Content-Wort" auftaucht (Produkt, Wunsch, Frage), liefert die
- *    Funktion false → der Bot antwortet normal. Beispiel:
- *    "danke! gerne mehr Infos" → "mehr"/"infos" sind keine Closer-Wörter → false.
- *  - Fragezeichen → false (es wird eine Antwort erwartet).
- *  - Echter Anhang (Foto/Video/Audio) → false (will angeschaut werden).
- *
- * Die KONTEXT-Prüfung (offene Frage in der letzten Bot-Nachricht?) passiert
- * NICHT hier, sondern am Call-Site — dort haben wir DB-Zugriff.
- */
-function isClosingAcknowledgement(text: string, attachments: { type: string; url: string }[]): boolean {
-  const raw = (text || "").trim();
-  if (!raw) return false;
-
-  // Echte (nicht-Reaktions-)Anhänge → nicht unterdrücken.
-  const hasRealAttachment = (attachments || []).some(
-    a => !["reaction", "like"].includes(a.type)
-  );
-  if (hasRealAttachment) return false;
-
-  // Fragezeichen → Antwort erwartet.
-  if (raw.includes("?")) return false;
-
-  // Normalisieren: ß→ss, lowercase, alles außer Buchstaben+Space (Emojis,
-  // Ziffern, Satzzeichen) zu Space.
-  const norm = raw
-    .toLowerCase()
-    .replace(/ß/g, "ss")
-    .replace(/[^\p{L}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!norm) return false;
-
-  const tokens = norm.split(" ").filter(Boolean);
-  if (tokens.length === 0 || tokens.length > 8) return false; // lang = inhaltlich
-
-  // Erlaubtes Closer-Vokabular (Dank + Bestätigung + Füllwörter/Pronomen).
-  const FILLER = new Set([
-    // Dank
-    "danke","dank","dankeschoen","dankee","dankeee","dankoe","merci","thanks","thx","thank","you","vielen","vielmals","herzlichen","tausend","besten",
-    // Bestätigung / Abschluss
-    "ok","okay","oki","okey","okok","alles","klar","gut","guut","super","perfekt","prefekt","top","klasse","mega","prima","wunderbar","toll","passt","passts","verstanden","geht","ordnung","cool","nice","schoen","lieb","lieben","liebe","liebes","nett","spitze","wow","hammer","yay",
-    // Gefühl / Füllwörter / Pronomen
-    "freut","freu","mich","gefreut","dir","euch","das","ist","du","ihr","na","dann","also","ja","jaa","joa","jo","echt","wirklich","so","an","dich","mal","nochmal","noch","sehr","ach","achso","aso","gerne","gern",
-  ]);
-
-  // Starke Closer-Tokens — mind. EINER muss vorkommen (sonst kein echter
-  // Abschluss). Bewusst KONSERVATIV: nur eindeutige Dank-/Abschluss-Wörter,
-  // damit bloße "ja"/"ok"/"super"-Bestätigungen NICHT unterdrückt werden.
-  const STRONG = new Set([
-    "danke","dank","dankeschoen","dankee","dankeee","dankoe","merci","thanks","thx","thank",
-    "perfekt","prefekt","passt","passts","verstanden","top","klasse","spitze",
-  ]);
-
-  let sawStrong = false;
-  for (const tok of tokens) {
-    if (!FILLER.has(tok)) return false;   // Content-Wort → normal antworten
-    if (STRONG.has(tok)) sawStrong = true;
-  }
-  return sawStrong;
-}
-
-function isReactionOnly(text: string, attachments: { type: string; url: string }[]): boolean {
-  // Wenn ein Medien-Anhang da ist (Foto/Video/Audio/Story-Mention),
-  // ist das KEINE pure-reaction — wird vom Audio/Video-Bypass-Code
-  // weiter oben gehandhabt.
-  // Hinweis: story_reply ist KEIN Medien-Anhang in diesem Sinne — die
-  // Antwort auf eine Story ist meistens nur emotional ("schön!") ohne
-  // echte Frage. Wir behandeln sie deshalb separat unten.
-  const mediaAttachmentTypes = ["image", "video", "audio", "ephemeral", "story_mention"];
-  if (attachments.some(a => mediaAttachmentTypes.includes(a.type))) return false;
-
-  const raw = (text || "").trim();
-  const isStoryReply = attachments.some(a => a.type === "story_reply");
-
-  // Story-Reply ohne Frage = pure Reaktion auf unsere Story (User-Feedback
-  // 2026-05-29: auch "Wunderschön!!!😘" braucht keinen Bot-Antwort, das
-  // ist nur Begeisterung). Frage-Indikator: "?" ODER ein konkretes
-  // Anliegen-Keyword. Sonst skippen wir.
-  if (isStoryReply) {
-    const hasQuestionMark = /\?/.test(raw);
-    const hasIntent = /\b(wie|wann|wo|warum|wieso|habt|haben|gibt es|ist das|kommt|preis|kosten|kaufen|bestell|verfügbar|frei|termin|öffnungs|adresse|kontakt|größe|länge|farbe|methode|info|frage)\b/i.test(raw);
-    if (!hasQuestionMark && !hasIntent) {
-      return true;
-    }
-  }
-
-  if (raw.length === 0) return true; // Leere Customer-Message ohne Anhang
-
-  // Strip alle Emojis (umfassender Unicode-Range) und Sonderzeichen.
-  // Wenn danach < 2 Buchstaben/Ziffern übrig sind, ist's reactive.
-  const stripped = raw
-    // Emoji-Ranges (Pictographic + Modifier + Skin-Tone + ZWJ)
-    .replace(/\p{Extended_Pictographic}/gu, "")
-    .replace(/\p{Emoji_Modifier_Base}/gu, "")
-    .replace(/\p{Emoji_Modifier}/gu, "")
-    .replace(/‍/g, "")
-    .replace(/[☀-⟿]/g, "")
-    .replace(/[︀-️]/g, "")
-    // Häufige Sonderzeichen entfernen
-    .replace(/[❣️♥♡✨⭐🌟💫💕💖💗💓💝💘♥️❤️]/g, "")
-    .trim();
-
-  // Auch reine Mini-Bestätigungen ohne Frage:
-  const miniAcks = /^(ok|okay|okey|👌|jo|jep|aha|achso|achsoo+|ahso+|mhm|hm+|alles\s+klar|cool|gut|super|nice|toll|danke|danke!|dankee+|gerne|gern|jaja|jaaa+)\.?!?$/i;
-  if (miniAcks.test(raw)) return true;
-
-  // Nach Strip nur noch < 2 alphanumerische Zeichen → reactive
-  const alphanumeric = stripped.replace(/[^\p{L}\p{N}]/gu, "");
-  return alphanumeric.length < 2;
-}
-
 function detectAutoRespondType(text: string, attachments: { type: string; url: string }[]): "intro" | "color_no_photo" | null {
   const t = (text || "").toLowerCase().trim();
   const hasImages = attachments.some(a => a.type === "image" && a.url);
