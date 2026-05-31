@@ -7,41 +7,16 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 
-/**
- * IG-Light-Sync piggyback — Hobby-Plan erlaubt keinen 10-Minuten-Cron, also
- * triggern wir den Light-Sync hier (inbox-stats wird vom Sidebar-Badge alle
- * 20s gepollt). Server-seitig auf 10 Min gedrosselt via chatbot_settings
- * .ig_light_sync_at (DB-Gate, damit mehrere Lambda-Instanzen sich denselben
- * Throttle teilen). Fire-and-forget — verzögert die stats-Antwort NICHT.
- */
-async function maybeTriggerIgLightSync(svc: ReturnType<typeof createServiceClient>) {
-  const TEN_MIN_MS = 10 * 60 * 1000;
-  try {
-    const { data: settings } = await svc
-      .from("chatbot_settings")
-      .select("ig_light_sync_at")
-      .eq("id", 1)
-      .maybeSingle();
-    const last = settings?.ig_light_sync_at ? new Date(settings.ig_light_sync_at).getTime() : 0;
-    if (Date.now() - last < TEN_MIN_MS) return; // noch im Throttle-Fenster
-
-    // Gate ZUERST setzen (verhindert Doppel-Trigger durch parallele Polls),
-    // dann fire-and-forget den Sync.
-    await svc.from("chatbot_settings").update({ ig_light_sync_at: new Date().toISOString() }).eq("id", 1);
-    const { runIgLightSync } = await import("@/lib/chatbot/ig-light-sync");
-    runIgLightSync()
-      .then(r => console.log("[inbox-stats] IG-light-sync triggered:", JSON.stringify(r)))
-      .catch(e => console.warn("[inbox-stats] IG-light-sync error:", (e as Error).message));
-  } catch (e) {
-    console.warn("[inbox-stats] light-sync throttle check failed:", (e as Error).message);
-  }
-}
+// HINWEIS 2026-05-31: Der frühere IG-Light-Sync-Piggyback (alle 10 Min aus
+// diesem Endpoint) wurde ENTFERNT. Grund: die Instagram-Login-Graph-API
+// liefert kein `unread_count` (verifiziert über 500 Conversations, alle null),
+// d.h. ein IG-seitiges "als ungelesen markieren" ist über die API gar nicht
+// erkennbar. Der Poll lief also für nichts. Dashboard→IG mark_seen läuft
+// unabhängig weiter (markSessionAsSeen → markInstagramSeen). Der manuelle
+// Sync-Endpoint /api/chatbot/sync-instagram-light bleibt für Notfälle.
 
 export async function GET() {
   const svc = createServiceClient();
-
-  // IG-Light-Sync ggf. anstoßen (throttled, non-blocking)
-  await maybeTriggerIgLightSync(svc);
 
   // Zähle awaiting_human
   const { count: awaitingHuman } = await svc
