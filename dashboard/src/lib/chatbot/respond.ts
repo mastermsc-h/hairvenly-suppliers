@@ -2453,6 +2453,26 @@ KEINE Farbnamen nennen — die MA macht das.`;
     }
   }
 
+  // ── VERFÜGBARKEITS-HALLUZINATIONS-GUARD ─────────────────────────────
+  // Bug 02.06 (Mocha Melt, WIEDERKEHREND): Bot behauptete "55cm wellig sofort
+  // verfügbar", obwohl get_stock_eta für 65cm "ausverkauft" lieferte und für
+  // 55cm NIE aufgerufen wurde. Er verwechselte get_available_colors (Katalog-
+  // Existenz) mit Lagerbestand. Strukturelle Invariante: jede Sofort-
+  // Verfügbarkeits-Behauptung MUSS durch ein get_stock_eta-In-Stock-Ergebnis
+  // gedeckt sein, sonst Force-Draft. Getestet: 11 Fälle inkl. echtem Mocha-Melt.
+  if (!needsManualReview) {
+    const { detectAvailabilityHallucination } = await import("./detect-availability-hallucination");
+    const availCheck = detectAvailabilityHallucination(
+      finalText,
+      allToolResults.map(r => ({ content: r.content })),
+    );
+    if (availCheck.suspicious) {
+      console.warn(`[respond] AVAILABILITY-HALLUCINATION session=${sessionId.slice(0,8)} — Snippet: "${availCheck.matchedSnippet}"`);
+      needsManualReview = true;
+      manualReviewReason = "Bot behauptet Sofort-Verfügbarkeit, aber KEIN get_stock_eta-Ergebnis mit In-Stock-Status liegt vor (Bug 02.06 Mocha Melt: Bot verwechselte Katalog-Existenz mit Lagerbestand → 'verfügbar' frei erfunden). Antwort als Draft gespeichert. MA bitte echte Verfügbarkeit prüfen, oder Bot neu generieren lassen.";
+    }
+  }
+
   // ── FALSE-MEDIA-LIMITATION-DETECTOR ─────────────────────────────────
   // User-Anweisung 2026-05-28: wenn die Kundin EXPLIZIT um Fotos/Videos
   // einer Farbe bittet, DARF der Bot NICHT lügen "können wir aus technischen
