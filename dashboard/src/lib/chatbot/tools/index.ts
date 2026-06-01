@@ -615,13 +615,21 @@ const getStockEta: ToolDef = {
             shopify_url: urlFor(m.product),
           };
         });
+        // Niedrigbestand-Hinweis auch hier (User-Regel 01.06): wenn das
+        // SOFORT-verfügbare ≤150g ist, ehrlich die echte Restmenge nennen.
+        const earlyTotalG = withStockEarly.reduce((s, r) => s + (r.totalWeight || 0), 0);
+        const earlyTotalPacks = withStockEarly.reduce((s, r) => s + (r.quantity || 0), 0);
+        const earlyLow = earlyTotalG <= 150;
         return {
           output: JSON.stringify({
-            status: "in_stock_partial_unterwegs",
+            status: earlyLow ? "in_stock_low_partial_unterwegs" : "in_stock_partial_unterwegs",
+            ...(earlyLow ? { available_grams: earlyTotalG, available_packs: earlyTotalPacks } : {}),
             message:
-              "WICHTIG: Manche Varianten sind SOFORT VERFÜGBAR, andere sind unterwegs. " +
-              "Erwähne BEIDES: erst was sofort da ist (das ist die beste Option für die Kundin!), " +
-              "dann was später kommt. " +
+              (earlyLow
+                ? `WICHTIG: Vom SOFORT verfügbaren ist nur noch WENIG da: ${earlyTotalG}g (${earlyTotalPacks} Packung${earlyTotalPacks === 1 ? "" : "en"}). ` +
+                  `Nenne diese echte Restmenge + Packungszahl ehrlich und sag, dass die Kundin im Online-Shop prüfen soll, ob das für sie reicht. `
+                : "WICHTIG: Manche Varianten sind SOFORT VERFÜGBAR, andere sind unterwegs. ") +
+              "Erwähne BEIDES: erst was sofort da ist, dann was später kommt. " +
               "Beispiel: 'Soft Blond Balayage hätten wir in 65cm sofort verfügbar 💕 " +
               "In 55cm/85cm ist die Farbe gerade unterwegs (ca. Anfang Juni). " +
               "Magst du die 65cm nehmen oder lieber auf die andere Länge warten?' " +
@@ -702,19 +710,47 @@ const getStockEta: ToolDef = {
       }
 
       // D) Im Inventory gefunden mit echtem Bestand → verfügbar
-      // WICHTIG: Bot bekommt KEINE konkreten Zahlen mehr (kein 'quantity', kein
-      // 'total_weight_g'). Stattdessen nur eine qualitative Stufe — sonst leakt
-      // er die Zahl wörtlich an den Kunden.
+      // Ab ≥150g: Bot bekommt KEINE konkreten Zahlen (sonst leakt er sie als
+      // Verpackungs-Menge → verwirrend). NUR qualitative Stufe.
+      //
+      // User-Regel 01.06: BEI ≤150g (Schwelle inklusive) ist "verfügbar" eine
+      // IRREFÜHRENDE Aussage — z.B. RAW Standard Tapes hatte nur 25g (1 Packung)
+      // übrig, die Kundin braucht aber meist 150g+. In dem Fall MUSS der Bot die
+      // echte Restmenge + Packungszahl nennen + auf den Online-Shop verweisen
+      // (dort sieht die Kundin live, ob genug für sie da ist).
       const withStock = inventoryMatches.filter(r => r.quantity > 0);
       if (withStock.length > 0) {
-        const bucketize = (g: number): "comfortable" | "limited" | "tight" => {
-          if (g >= 300) return "comfortable"; // ≥ 300g — entspannt
-          if (g >= 150) return "limited";     // 150-299g — begrenzt
-          return "tight";                      // < 150g — sehr wenig
-        };
-        const overallBucket = bucketize(
-          withStock.reduce((s, r) => s + (r.totalWeight || 0), 0)
-        );
+        const totalG = withStock.reduce((s, r) => s + (r.totalWeight || 0), 0);
+        const totalPacks = withStock.reduce((s, r) => s + (r.quantity || 0), 0);
+
+        // ── NIEDRIGBESTAND (≤150g): echte Zahlen raus ──────────────────────
+        if (totalG <= 150) {
+          return {
+            output: JSON.stringify({
+              status: "in_stock_low",
+              availability_level: "low",
+              available_grams: totalG,
+              available_packs: totalPacks,
+              message:
+                `Von diesem Produkt ist NUR NOCH WENIG auf Lager: ${totalG}g` +
+                (totalPacks > 0 ? ` (${totalPacks} Packung${totalPacks === 1 ? "" : "en"})` : "") +
+                `. Das reicht für eine normale Verlängerung (meist 150g+) NICHT aus. ` +
+                `Sag der Kundin EHRLICH die echte Restmenge UND Packungszahl im Format "${totalG}g (${totalPacks} Packung${totalPacks === 1 ? "" : "en"})" ` +
+                `und weise sie darauf hin, im Online-Shop zu prüfen, ob die verfügbare Menge für sie reicht. ` +
+                `Beispiel: "Von RAW haben wir aktuell nur noch ${totalG}g (${totalPacks} Packung${totalPacks === 1 ? "" : "en"}) da — schau am besten direkt im Shop, ob das für deine Wunschmenge reicht 💕". ` +
+                `KEINE falsche "haben wir gut da"-Aussage! Den Shop-Link mitschicken.`,
+              products: withStock.slice(0, 5).map(r => ({
+                product: r.product,
+                collection: r.collection,
+                shopify_url: urlFor(r.product),
+              })),
+              url_rule: "Wenn du einen Produkt-Link schickst, kopiere AUSSCHLIESSLICH die shopify_url aus diesem Output. NIEMALS URLs selbst zusammenbauen, erfinden oder raten.",
+            }),
+          };
+        }
+
+        // ── AB 150g: qualitative Stufe, KEINE konkreten Zahlen ─────────────
+        const overallBucket: "comfortable" | "limited" = totalG >= 300 ? "comfortable" : "limited";
         return {
           output: JSON.stringify({
             status: "in_stock",
@@ -722,9 +758,7 @@ const getStockEta: ToolDef = {
             message:
               overallBucket === "comfortable"
                 ? "Produkt ist gut verfügbar (≥300g). Sag dem Kunden NUR 'haben wir da' — knapp, ohne Mengen, ohne Übertreibungen. Verweise auf den Shop. Falls passend: frag nach gewünschten Gramm für Preisangabe. NIEMALS konkrete Lagerzahlen nennen!"
-                : overallBucket === "limited"
-                ? "Produkt ist verfügbar, der Lagervorrat geht aber langsam zur Neige. Sag dem Kunden weich: 'haben wir noch da' (ohne 'in begrenzter Menge' zu sagen — das klingt nach Verpackungsmenge). Optional dezenter Hinweis: 'der Vorrat wird langsam knapp'. NIEMALS konkrete Gramm- oder Stückzahlen!"
-                : "Produkt ist nur noch in kleinem Lagervorrat. Sag dem Kunden: 'haben wir noch da — schau aber gerne schnell, da der Vorrat langsam knapp wird.' NIEMALS sagen 'in begrenzter Menge à Xg' (das klingt nach Verpackungs-Größe und ist verwirrend). NIEMALS konkrete Zahlen!",
+                : "Produkt ist verfügbar (150-299g), der Lagervorrat geht aber langsam zur Neige. Sag dem Kunden weich: 'haben wir noch da' (ohne 'in begrenzter Menge' zu sagen — das klingt nach Verpackungsmenge). Optional dezenter Hinweis: 'der Vorrat wird langsam knapp'. NIEMALS konkrete Gramm- oder Stückzahlen!",
             products: withStock.slice(0, 5).map(r => ({
               product: r.product,
               collection: r.collection,

@@ -320,8 +320,12 @@ function validateMethodLengthCombos(
   return { text: cleaned, corrections };
 }
 
-function sanitizeStockLeaks(text: string): string {
+function sanitizeStockLeaks(text: string, allowLowStockNumbers = false): string {
   let t = text;
+  // User-Regel 01.06: Wenn das Tool einen NIEDRIGBESTAND (≤150g) gemeldet hat,
+  // sind die echten Restmengen-Zahlen ("25g (1 Packung)") GEWOLLT — die Kundin
+  // soll genau diese Info bekommen. Dann KEINE Stock-Zahlen strippen.
+  if (allowLowStockNumbers) return t;
   // Verbotene Fachwörter ersetzen — Persona-Regel "Einfache Sprache" hart durchsetzen
   // (Claude ignoriert die Regel manchmal trotz System-Prompt — daher Post-Filter)
   t = t.replace(/\bGrammatur\b/g, "Menge");
@@ -1723,7 +1727,13 @@ KEINE Farbnamen nennen — die MA macht das.`;
 
   // SAFETY-NET 1stock: konkrete Lagerzahlen rausfiltern (respond-spezifisch,
   // bleibt hier weil es Tool-Result-Context braucht).
-  finalText = sanitizeStockLeaks(finalText);
+  // AUSNAHME: bei gemeldetem Niedrigbestand (≤150g, status in_stock_low*) sind
+  // die echten Restmengen GEWOLLT (User-Regel 01.06) → nicht strippen.
+  const hadLowStock = allToolResults.some(r => {
+    try { return /"status"\s*:\s*"in_stock_low/.test(r.content || ""); }
+    catch { return false; }
+  });
+  finalText = sanitizeStockLeaks(finalText, hadLowStock);
 
   // SAFETY-NET 1eta: ETA-LINIEN-KONSISTENZ
   // Häufiger Halluzinationsfehler: Bot bekommt vom get_stock_eta-Tool ETAs
