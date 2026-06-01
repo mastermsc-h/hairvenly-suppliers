@@ -13,6 +13,7 @@ import {
 export type PushItemStatus =
   | "ok"
   | "no_mapping"
+  | "missing_conversion"
   | "product_not_found"
   | "variant_not_found"
   | "ambiguous_product"
@@ -20,11 +21,14 @@ export type PushItemStatus =
 
 export interface PushItemResult {
   item_id: string;
-  display: string; // human-readable line: "Tape · 50cm · #1B (50 g)"
-  qty: number;
+  display: string; // human-readable line: "Tape · 50cm · #1B"
+  grams: number;
+  pieces: number | null;
+  grams_per_piece: number | null;
   status: PushItemStatus;
   shopify_product?: string;
   shopify_variant?: string;
+  shopify_url?: string | null;
   error?: string;
   already_pushed_at?: string | null;
   already_pushed_qty?: number | null;
@@ -53,6 +57,37 @@ function norm(s: string): string {
     .replace(/[̀-ͯ]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+/**
+ * Gramm pro Stück je Methode (vom User vorgegeben).
+ *
+ *   Bondings:       25 g/Strand
+ *   Standard Tapes: 25 g/Tape
+ *   Minitapes:      50 g/Tape
+ *   Classic Weft:   50 g/Tresse
+ *   Invisible Weft: 50 g/Tresse
+ *   Clip-Ins:       length_value = Packungsgröße (100g/150g/225g) → 1 Stück = length_value
+ *   Tapes (Aria):   25 g/Tape  (analog Standard Tapes)
+ *
+ * Gibt null zurück, wenn keine Umrechnung hinterlegt — Position wird dann
+ * als 'missing_conversion' markiert und NICHT gepusht.
+ */
+function gramsPerPiece(methodName: string | null, lengthValue: string | null): number | null {
+  if (!methodName) return null;
+  const m = methodName.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (m === "bondings") return 25;
+  if (m === "standardtapes" || m === "tapes") return 25;
+  if (m === "minitapes") return 50;
+  if (m === "classicweft" || m === "invisibleweft") return 50;
+  if (m === "clipins") {
+    if (!lengthValue) return null;
+    const match = String(lengthValue).match(/(\d+)\s*g/i);
+    if (!match) return null;
+    const n = Number(match[1]);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+  return null;
 }
 
 /**
@@ -115,7 +150,10 @@ interface DbItem {
   pushed_to_shopify_at: string | null;
   shopify_push_qty: number | null;
   shipment_id: string | null;
-  product_colors: { name_shopify: string | null } | { name_shopify: string | null }[] | null;
+  product_colors:
+    | { name_shopify: string | null; shopify_url: string | null }
+    | { name_shopify: string | null; shopify_url: string | null }[]
+    | null;
 }
 
 function formatDisplay(it: DbItem): string {
@@ -123,9 +161,7 @@ function formatDisplay(it: DbItem): string {
   if (it.method_name) parts.push(it.method_name);
   if (it.length_value) parts.push(it.length_value);
   if (it.color_name) parts.push(it.color_name);
-  const head = parts.join(" · ") || "—";
-  const unit = (it.unit || "").trim() || "Stk";
-  return `${head} (${it.quantity} ${unit})`;
+  return parts.join(" · ") || "—";
 }
 
 /**
@@ -159,11 +195,11 @@ export async function pushOrderItemsToShopify(
       };
     }
 
-    // Load items + their Shopify name mapping.
+    // Load items + their Shopify name + url mapping.
     let q = supabase
       .from("order_items")
       .select(
-        "id, order_id, color_id, method_name, length_value, color_name, quantity, unit, pushed_to_shopify_at, shopify_push_qty, shipment_id, product_colors:color_id ( name_shopify )",
+        "id, order_id, color_id, method_name, length_value, color_name, quantity, unit, pushed_to_shopify_at, shopify_push_qty, shipment_id, product_colors:color_id ( name_shopify, shopify_url )",
       )
       .eq("order_id", orderId);
     if (shipmentId) {
@@ -187,13 +223,19 @@ export async function pushOrderItemsToShopify(
     for (const it of items) {
       const pc = Array.isArray(it.product_colors) ? it.product_colors[0] : it.product_colors;
       const nameShopify = pc?.name_shopify ?? null;
+      const shopifyUrl = pc?.shopify_url ?? null;
       const display = formatDisplay(it);
-      const qty = Number(it.quantity || 0);
+      const grams = Number(it.quantity || 0);
+      const gPerPiece = gramsPerPiece(it.method_name, it.length_value);
+      const pieces = gPerPiece && grams > 0 ? Math.round(grams / gPerPiece) : null;
 
       const base = {
         item_id: it.id,
         display,
-        qty,
+        grams,
+        pieces,
+        grams_per_piece: gPerPiece,
+        shopify_url: shopifyUrl,
         already_pushed_at: it.pushed_to_shopify_at,
         already_pushed_qty: it.shopify_push_qty,
       };
@@ -202,8 +244,12 @@ export async function pushOrderItemsToShopify(
         results.push({ ...base, status: "no_mapping" });
         continue;
       }
-      if (qty <= 0) {
+      if (grams <= 0) {
         results.push({ ...base, status: "error", error: "Menge ≤ 0" });
+        continue;
+      }
+      if (!gPerPiece || !pieces || pieces <= 0) {
+        results.push({ ...base, status: "missing_conversion" });
         continue;
       }
 
@@ -230,16 +276,16 @@ export async function pushOrderItemsToShopify(
       if (!variant) {
         results.push({
           ...base,
-          status: variant === null && product.variants.edges.length > 1 ? "ambiguous_product" : "variant_not_found",
+          status: product.variants.edges.length > 1 ? "ambiguous_product" : "variant_not_found",
           shopify_product: product.title,
         });
         continue;
       }
 
-      // Adjust inventory.
+      // Adjust inventory by piece count (positive delta = Wareneingang).
       const res = await adjustShopifyInventoryByItemId(
         variant.inventoryItem.id,
-        qty,
+        pieces,
         "received",
       );
       if (!res.ok) {
@@ -253,11 +299,11 @@ export async function pushOrderItemsToShopify(
         continue;
       }
 
-      // Stamp the item.
+      // Stamp the item (we record the PIECE count that was pushed).
       const nowIso = new Date().toISOString();
       await supabase
         .from("order_items")
-        .update({ pushed_to_shopify_at: nowIso, shopify_push_qty: qty })
+        .update({ pushed_to_shopify_at: nowIso, shopify_push_qty: pieces })
         .eq("id", it.id);
 
       results.push({
@@ -272,7 +318,9 @@ export async function pushOrderItemsToShopify(
     const failed = results.filter((r) =>
       ["error", "product_not_found", "variant_not_found", "ambiguous_product"].includes(r.status),
     ).length;
-    const skipped = results.filter((r) => r.status === "no_mapping").length;
+    const skipped = results.filter((r) =>
+      r.status === "no_mapping" || r.status === "missing_conversion",
+    ).length;
 
     // Audit-log to order_events.
     await supabase.from("order_events").insert({
@@ -316,7 +364,7 @@ export async function previewShopifyPush(
     let q = supabase
       .from("order_items")
       .select(
-        "id, order_id, color_id, method_name, length_value, color_name, quantity, unit, pushed_to_shopify_at, shopify_push_qty, shipment_id, product_colors:color_id ( name_shopify )",
+        "id, order_id, color_id, method_name, length_value, color_name, quantity, unit, pushed_to_shopify_at, shopify_push_qty, shipment_id, product_colors:color_id ( name_shopify, shopify_url )",
       )
       .eq("order_id", orderId);
     if (shipmentId) {
@@ -330,11 +378,23 @@ export async function previewShopifyPush(
     return {
       items: items.map((it) => {
         const pc = Array.isArray(it.product_colors) ? it.product_colors[0] : it.product_colors;
+        const nameShopify = pc?.name_shopify ?? null;
+        const grams = Number(it.quantity || 0);
+        const gPerPiece = gramsPerPiece(it.method_name, it.length_value);
+        const pieces = gPerPiece && grams > 0 ? Math.round(grams / gPerPiece) : null;
+        const status: PushItemStatus = !nameShopify
+          ? "no_mapping"
+          : !gPerPiece || !pieces
+            ? "missing_conversion"
+            : "ok";
         return {
           item_id: it.id,
           display: formatDisplay(it),
-          qty: Number(it.quantity || 0),
-          status: pc?.name_shopify ? "ok" : "no_mapping",
+          grams,
+          pieces,
+          grams_per_piece: gPerPiece,
+          status,
+          shopify_url: pc?.shopify_url ?? null,
           already_pushed_at: it.pushed_to_shopify_at,
           already_pushed_qty: it.shopify_push_qty,
         };

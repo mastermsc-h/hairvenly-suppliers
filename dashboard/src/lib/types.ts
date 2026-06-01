@@ -270,6 +270,8 @@ export interface OrderItem {
   unit: string;
   shipment_id: string | null;
   eta: string | null; // ISO YYYY-MM-DD
+  pushed_to_shopify_at?: string | null;
+  shopify_push_qty?: number | null;
 }
 
 /** Full catalog tree loaded for the wizard */

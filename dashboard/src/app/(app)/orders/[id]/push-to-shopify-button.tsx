@@ -32,9 +32,10 @@ function statusLabel(status: PushItemResult["status"]): string {
   switch (status) {
     case "ok": return "Eingepflegt";
     case "no_mapping": return "Kein Shopify-Mapping";
+    case "missing_conversion": return "Fehlt Umrechnung g→Stück";
     case "product_not_found": return "Produkt nicht gefunden";
     case "variant_not_found": return "Variante nicht gefunden";
-    case "ambiguous_product": return "Mehrdeutig";
+    case "ambiguous_product": return "Mehrdeutig (mehrere Varianten)";
     case "error": return "Fehler";
   }
 }
@@ -109,12 +110,14 @@ export default function PushToShopifyButton({ orderId, shipmentId, label, compac
                   </div>
                 </div>
               )}
-              <div className="max-h-72 overflow-y-auto border border-neutral-200 rounded">
+              <div className="max-h-96 overflow-y-auto border border-neutral-200 rounded">
                 <table className="w-full text-xs">
                   <thead className="bg-neutral-50 sticky top-0">
                     <tr className="text-left text-neutral-600">
                       <th className="px-2 py-1.5 font-medium">Position</th>
-                      <th className="px-2 py-1.5 font-medium text-right">Menge</th>
+                      <th className="px-2 py-1.5 font-medium text-right">Gramm</th>
+                      <th className="px-2 py-1.5 font-medium text-right">Stück</th>
+                      <th className="px-2 py-1.5 font-medium">Shopify</th>
                       <th className="px-2 py-1.5 font-medium">Status</th>
                     </tr>
                   </thead>
@@ -122,12 +125,39 @@ export default function PushToShopifyButton({ orderId, shipmentId, label, compac
                     {preview.map((p) => (
                       <tr key={p.item_id} className={p.already_pushed_at ? "bg-amber-50/40" : ""}>
                         <td className="px-2 py-1.5">{p.display}</td>
-                        <td className="px-2 py-1.5 text-right font-medium">{p.qty}</td>
+                        <td className="px-2 py-1.5 text-right text-neutral-600">{p.grams} g</td>
+                        <td className="px-2 py-1.5 text-right font-medium">
+                          {p.pieces != null ? (
+                            <span className="text-emerald-700">{p.pieces}</span>
+                          ) : (
+                            <span className="text-red-600">—</span>
+                          )}
+                          {p.grams_per_piece && (
+                            <div className="text-[9px] text-neutral-400 font-normal">à {p.grams_per_piece}g</div>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5">
+                          {p.shopify_url ? (
+                            <a
+                              href={p.shopify_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-blue-600 hover:underline inline-flex items-center gap-0.5"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              prüfen <ExternalLink size={9} />
+                            </a>
+                          ) : (
+                            <span className="text-neutral-400">—</span>
+                          )}
+                        </td>
                         <td className="px-2 py-1.5">
                           {p.already_pushed_at ? (
                             <span className="text-amber-700">bereits {fmtDate(p.already_pushed_at)}</span>
                           ) : p.status === "no_mapping" ? (
                             <span className="text-amber-700">kein Mapping</span>
+                          ) : p.status === "missing_conversion" ? (
+                            <span className="text-red-600">fehlt g→Stück</span>
                           ) : (
                             <span className="text-neutral-500">neu</span>
                           )}
@@ -184,7 +214,8 @@ export default function PushToShopifyButton({ orderId, shipmentId, label, compac
                 <tr className="text-left text-neutral-600">
                   <th className="px-2 py-1.5 font-medium w-4"></th>
                   <th className="px-2 py-1.5 font-medium">Position</th>
-                  <th className="px-2 py-1.5 font-medium text-right">Menge</th>
+                  <th className="px-2 py-1.5 font-medium text-right">Gramm</th>
+                  <th className="px-2 py-1.5 font-medium text-right">Stück</th>
                   <th className="px-2 py-1.5 font-medium">Shopify-Variante</th>
                   <th className="px-2 py-1.5 font-medium">Status</th>
                 </tr>
@@ -194,15 +225,41 @@ export default function PushToShopifyButton({ orderId, shipmentId, label, compac
                   <tr key={r.item_id}>
                     <td className="px-2 py-1.5"><StatusIcon status={r.status} /></td>
                     <td className="px-2 py-1.5">{r.display}</td>
-                    <td className="px-2 py-1.5 text-right font-medium">{r.qty}</td>
+                    <td className="px-2 py-1.5 text-right text-neutral-600">{r.grams} g</td>
+                    <td className="px-2 py-1.5 text-right font-medium">
+                      {r.pieces != null ? r.pieces : "—"}
+                    </td>
                     <td className="px-2 py-1.5 text-neutral-600">
                       {r.shopify_product ? (
-                        <div className="truncate max-w-[260px]" title={`${r.shopify_product} → ${r.shopify_variant ?? ""}`}>
-                          {r.shopify_product}
-                          {r.shopify_variant && r.shopify_variant !== "Default Title" && (
-                            <span className="text-neutral-400"> · {r.shopify_variant}</span>
+                        <div className="max-w-[280px]">
+                          <div className="truncate" title={`${r.shopify_product} → ${r.shopify_variant ?? ""}`}>
+                            {r.shopify_product}
+                            {r.shopify_variant && r.shopify_variant !== "Default Title" && (
+                              <span className="text-neutral-400"> · {r.shopify_variant}</span>
+                            )}
+                          </div>
+                          {r.shopify_url && (
+                            <a
+                              href={r.shopify_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-blue-600 hover:underline text-[10px] inline-flex items-center gap-0.5"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              prüfen <ExternalLink size={9} />
+                            </a>
                           )}
                         </div>
+                      ) : r.shopify_url ? (
+                        <a
+                          href={r.shopify_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-blue-600 hover:underline text-[10px] inline-flex items-center gap-0.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          prüfen <ExternalLink size={9} />
+                        </a>
                       ) : (
                         "—"
                       )}

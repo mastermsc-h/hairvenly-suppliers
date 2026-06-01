@@ -504,6 +504,21 @@ function ItemRow({
         {hasShipment && (
           <Split size={10} className="inline ml-1 text-purple-500" />
         )}
+        {item.pushed_to_shopify_at ? (
+          <span
+            className="ml-1.5 inline-flex items-center gap-0.5 px-1 py-px rounded text-[9px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"
+            title={`In Shopify eingepflegt am ${new Date(item.pushed_to_shopify_at).toLocaleString("de-DE")} (${item.shopify_push_qty ?? "?"} Stück)`}
+          >
+            ✓ Shopify
+          </span>
+        ) : (
+          <span
+            className="ml-1.5 inline-flex items-center gap-0.5 px-1 py-px rounded text-[9px] font-medium bg-neutral-100 text-neutral-500 border border-neutral-200"
+            title="Noch nicht in Shopify eingepflegt"
+          >
+            ○ Shopify
+          </span>
+        )}
       </span>
 
       {/* ETA chip / editor */}
