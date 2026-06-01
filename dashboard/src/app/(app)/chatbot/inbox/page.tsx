@@ -329,8 +329,28 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   let pendingDraftSet = new Set<string>();
   if (sessionIds.length > 0) {
     const { data: drafts } = await svc.from("chat_drafts")
-      .select("session_id").in("session_id", sessionIds).eq("status", "pending");
-    pendingDraftSet = new Set((drafts || []).map(d => d.session_id));
+      .select("session_id, created_at").in("session_id", sessionIds).eq("status", "pending");
+    // 🛡 STALE-DRAFT-INVARIANTE (Bug 01.06): Ein Entwurf, der ÄLTER ist als die
+    // letzte Kundennachricht der Session, ist veraltet — er bezieht sich auf
+    // einen überholten Gesprächsstand und darf NICHT als offener "Zu-tun"-Draft
+    // zählen (sonst Geister-Counter). Dieselbe Invariante wie in der
+    // Session-Detail-View. Per-Session jüngsten Draft nehmen + gegen
+    // last_customer_msg_at prüfen.
+    const lastCustomerBySession = new Map<string, string>();
+    for (const s of sessions || []) {
+      if (s.last_customer_msg_at) lastCustomerBySession.set(s.id, s.last_customer_msg_at as string);
+    }
+    const newestDraftBySession = new Map<string, string>();
+    for (const d of drafts || []) {
+      const prev = newestDraftBySession.get(d.session_id);
+      if (!prev || (d.created_at as string) > prev) newestDraftBySession.set(d.session_id, d.created_at as string);
+    }
+    for (const [sid, draftAt] of newestDraftBySession) {
+      const lastUserAt = lastCustomerBySession.get(sid);
+      // Draft gilt nur als offen, wenn er NEUER (oder gleich) der letzten
+      // Kundennachricht ist. Älter → stale → nicht zählen.
+      if (!lastUserAt || draftAt >= lastUserAt) pendingDraftSet.add(sid);
+    }
   }
 
   // Pro Session:

@@ -67,7 +67,7 @@ export default async function ChatSessionPage({ params, searchParams }: PageProp
     .order("name");
 
   // Pending Draft (falls Bot-Begleitung Modus)
-  const { data: pendingDraft } = await svc
+  const { data: pendingDraftRaw } = await svc
     .from("chat_drafts")
     .select("id, original_text, created_at")
     .eq("session_id", sessionId)
@@ -75,6 +75,36 @@ export default async function ChatSessionPage({ params, searchParams }: PageProp
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+
+  // 🛡 STALE-DRAFT-INVARIANTE (Bug 01.06, Zélia): Ein Entwurf wird für einen
+  // bestimmten Gesprächsstand erzeugt. Schreibt die Kundin DANACH neue
+  // Nachrichten (z.B. "Danke" + Foto + neue Frage), bezieht sich der alte
+  // Entwurf auf einen Stand, den es nicht mehr gibt — und steht in der UI
+  // direkt unter der neuen Kundennachricht, als hätte der Bot gerade darauf
+  // geantwortet. REGEL: Ein Entwurf, der ÄLTER ist als die letzte
+  // Kundennachricht, ist veraltet → nicht anzeigen. Deckt ALLE stale-Drafts
+  // strukturell ab (keine Einzelfall-Behandlung).
+  let pendingDraft = pendingDraftRaw;
+  if (pendingDraftRaw) {
+    const { data: lastUserMsg } = await svc
+      .from("chat_messages")
+      .select("created_at")
+      .eq("session_id", sessionId)
+      .eq("role", "user")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (lastUserMsg?.created_at && lastUserMsg.created_at > pendingDraftRaw.created_at) {
+      // Entwurf ist älter als die letzte Kundennachricht → veraltet.
+      // Soft-verwerfen, damit er nicht erneut auftaucht, und NICHT anzeigen.
+      await svc.from("chat_drafts")
+        .update({ status: "discarded" })
+        .eq("id", pendingDraftRaw.id);
+      console.log(`[inbox] stale draft ${pendingDraftRaw.id} discarded (draft ${pendingDraftRaw.created_at} < lastUser ${lastUserMsg.created_at}) session=${sessionId.slice(0,8)}`);
+      pendingDraft = null;
+    }
+  }
 
   // Aktive Wartelisten-Reservierungen für diese Session — als Banner in der
   // Session-View anzeigen, damit die MA sieht "die Kundin ist auf der Liste

@@ -58,11 +58,28 @@ export async function GET() {
     .neq("status", "closed");
 
   // (a) Pending Drafts
+  // 🛡 STALE-DRAFT-INVARIANTE (Bug 01.06): Drafts, die ÄLTER sind als die
+  // letzte Kundennachricht ihrer Session, sind veraltet und dürfen NICHT als
+  // offener "Zu-tun"-Draft zählen (sonst Geister-Counter im Sidebar-Badge).
+  // Gleiche Regel wie Inbox-Listing + Session-Detail-View.
   const { data: pendingDrafts } = await svc
     .from("chat_drafts")
-    .select("session_id")
+    .select("session_id, created_at")
     .eq("status", "pending");
-  const draftSessionIds = new Set((pendingDrafts || []).map(d => d.session_id));
+  const lastCustomerBySession = new Map<string, string>();
+  for (const s of openSessions || []) {
+    if (s.last_customer_msg_at) lastCustomerBySession.set(s.id, s.last_customer_msg_at as string);
+  }
+  const newestDraftBySession = new Map<string, string>();
+  for (const d of pendingDrafts || []) {
+    const prev = newestDraftBySession.get(d.session_id);
+    if (!prev || (d.created_at as string) > prev) newestDraftBySession.set(d.session_id, d.created_at as string);
+  }
+  const draftSessionIds = new Set<string>();
+  for (const [sid, draftAt] of newestDraftBySession) {
+    const lastUserAt = lastCustomerBySession.get(sid);
+    if (!lastUserAt || draftAt >= lastUserAt) draftSessionIds.add(sid);
+  }
 
   // (b) Pro Session: lastMsgRole, lastMsgAutoSent, lastBot, autobotCount.
   // Aggregation aus chat_messages (DESC, first-seen-wins für die neueste msg).
