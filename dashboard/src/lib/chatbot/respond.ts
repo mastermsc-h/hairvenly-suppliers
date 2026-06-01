@@ -2372,6 +2372,24 @@ KEINE Farbnamen nennen — die MA macht das.`;
     manualReviewReason = "Bot hat Warteliste versprochen, aber NICHT als Reservierung angelegt. Webhook sollte das zu einem Draft umwandeln statt autobot-zu-senden.";
   }
 
+  // ── PREIS-HALLUZINATIONS-GUARD ──────────────────────────────────────
+  // User-Bug 01.06: Bot nannte Verkaufspreise mal mit get_price (korrekt),
+  // mal geraten ("beide Linien gleich teuer" — FALSCH; echte Daten:
+  // Russisch 72,50€/Pack vs. Usbekisch 47,25€/Pack). Die Preistabelle
+  // (chatbot_prices) ist korrekt — das Problem ist der unzuverlässige
+  // Tool-Aufruf. Wenn die Antwort konkrete Verkaufspreise enthält, aber
+  // KEIN get_price/get_salon_service_price aufgerufen wurde → Force-Draft.
+  // Getestet: scripts/smoke/price-hallucination.spec.mjs (14 Fälle).
+  if (!needsManualReview) {
+    const { detectPriceHallucination } = await import("./detect-price-hallucination");
+    const priceCheck = detectPriceHallucination(finalText, toolsUsed);
+    if (priceCheck.suspicious) {
+      console.warn(`[respond] PRICE-HALLUCINATION session=${sessionId.slice(0,8)} — Snippet: "${priceCheck.matchedSnippet}"`);
+      needsManualReview = true;
+      manualReviewReason = "Bot nennt konkrete Verkaufspreise, hat aber das get_price-Tool NICHT aufgerufen — die Zahlen könnten geraten sein (Bug 01.06: 'beide Linien gleich teuer' war falsch). Antwort als Draft gespeichert. MA bitte die Preise gegen die Preistabelle prüfen, oder Bot neu generieren lassen (dann nutzt er hoffentlich get_price).";
+    }
+  }
+
   // ── FALSE-MEDIA-LIMITATION-DETECTOR ─────────────────────────────────
   // User-Anweisung 2026-05-28: wenn die Kundin EXPLIZIT um Fotos/Videos
   // einer Farbe bittet, DARF der Bot NICHT lügen "können wir aus technischen
