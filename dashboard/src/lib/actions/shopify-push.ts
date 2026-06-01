@@ -282,14 +282,16 @@ export async function pushOrderItemsToShopify(
         continue;
       }
 
-      // Adjust inventory by piece count. Wareneingang → on_hand bumpen,
-      // damit Shopify die Lieferung als physisch eingegangene Ware verbucht.
-      // (available wird automatisch nachgezogen: available = on_hand - committed - reserved.)
+      // Adjust inventory by piece count. Wareneingang → name="available"
+      // mit reason="received": Shopify bumpt dabei automatisch on_hand UND
+      // available um denselben Delta, validiert via Live-Test. name="on_hand"
+      // ist bei inventoryAdjustQuantities NICHT erlaubt (Shopify erlaubt nur
+      // available/damaged/incoming/quality_control/reserved/safety_stock).
       const res = await adjustShopifyInventoryByItemId(
         variant.inventoryItem.id,
         pieces,
         "received",
-        "on_hand",
+        "available",
       );
       if (!res.ok) {
         results.push({
