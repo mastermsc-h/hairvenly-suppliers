@@ -45,6 +45,9 @@ export default function PushToShopifyButton({ orderId, shipmentId, label, compac
   const [preview, setPreview] = useState<PushItemResult[] | null>(null);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
   const [report, setReport] = useState<PushReport | null>(null);
+  // Auswahl pro Position. Default: nur Items, die noch NICHT eingepflegt
+  // sind UND ein gültiges Mapping/Umrechnung haben, sind angehakt.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   function openConfirm() {
     setPreviewErr(null);
@@ -55,6 +58,12 @@ export default function PushToShopifyButton({ orderId, shipmentId, label, compac
         setPreview([]);
         return;
       }
+      // Defaults: nur "neue, pushbare" Positionen vorausgewählt
+      const def = new Set<string>();
+      for (const p of res.items) {
+        if (!p.already_pushed_at && p.status === "ok") def.add(p.item_id);
+      }
+      setSelected(def);
       setPreview(res.items);
     });
   }
@@ -63,13 +72,40 @@ export default function PushToShopifyButton({ orderId, shipmentId, label, compac
     setPreview(null);
     setPreviewErr(null);
     setReport(null);
+    setSelected(new Set());
+  }
+
+  function toggle(itemId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }
+
+  function selectAllPushable() {
+    if (!preview) return;
+    const all = new Set<string>();
+    for (const p of preview) if (p.status === "ok") all.add(p.item_id);
+    setSelected(all);
+  }
+  function selectNone() { setSelected(new Set()); }
+  function selectNewOnly() {
+    if (!preview) return;
+    const def = new Set<string>();
+    for (const p of preview) if (!p.already_pushed_at && p.status === "ok") def.add(p.item_id);
+    setSelected(def);
   }
 
   function doPush() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
     startTransition(async () => {
-      const res = await pushOrderItemsToShopify(orderId, shipmentId);
+      const res = await pushOrderItemsToShopify(orderId, shipmentId, ids);
       setReport(res);
       setPreview(null);
+      setSelected(new Set());
     });
   }
 
@@ -78,6 +114,8 @@ export default function PushToShopifyButton({ orderId, shipmentId, label, compac
     : "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-green-600 hover:bg-green-700 text-white transition disabled:opacity-50";
 
   const alreadyPushedCount = preview?.filter((p) => p.already_pushed_at).length ?? 0;
+  const newCount = preview?.filter((p) => !p.already_pushed_at && p.status === "ok").length ?? 0;
+  const selectedCount = selected.size;
 
   return (
     <>
@@ -99,21 +137,30 @@ export default function PushToShopifyButton({ orderId, shipmentId, label, compac
           ) : (
             <>
               <p className="text-sm text-neutral-700 mb-3">
-                Folgende {preview.length} Positionen werden in Shopify als Bestand <strong>hinzugefügt</strong>:
+                {newCount} {newCount === 1 ? "neue Position" : "neue Positionen"} bereit zum Einpflegen
+                {alreadyPushedCount > 0 && (
+                  <> · {alreadyPushedCount} bereits eingepflegt (übersprungen)</>
+                )}
               </p>
               {alreadyPushedCount > 0 && (
-                <div className="mb-3 px-3 py-2 rounded bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-start gap-2">
+                <div className="mb-3 px-3 py-2 rounded bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-start gap-2">
                   <AlertTriangle size={14} className="shrink-0 mt-0.5" />
                   <div>
-                    <strong>{alreadyPushedCount}</strong> {alreadyPushedCount === 1 ? "Position wurde" : "Positionen wurden"} bereits eingepflegt.
-                    Erneutes Einpflegen würde den Shopify-Bestand <strong>doppelt erhöhen</strong>.
+                    Bereits eingepflegte Positionen sind automatisch <strong>abgewählt</strong>, damit der Shopify-Bestand nicht doppelt erhöht wird. Du kannst die Auswahl unten manuell anpassen.
                   </div>
                 </div>
               )}
+              <div className="flex items-center gap-2 mb-2 text-xs">
+                <span className="text-neutral-500">Schnellauswahl:</span>
+                <button type="button" onClick={selectNewOnly} className="px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700">nur neue ({newCount})</button>
+                <button type="button" onClick={selectAllPushable} className="px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700">alle pushbaren</button>
+                <button type="button" onClick={selectNone} className="px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700">keine</button>
+              </div>
               <div className="max-h-96 overflow-y-auto border border-neutral-200 rounded">
                 <table className="w-full text-xs">
                   <thead className="bg-neutral-50 sticky top-0">
                     <tr className="text-left text-neutral-600">
+                      <th className="px-2 py-1.5 font-medium w-6"></th>
                       <th className="px-2 py-1.5 font-medium">Position</th>
                       <th className="px-2 py-1.5 font-medium text-right">Gramm</th>
                       <th className="px-2 py-1.5 font-medium text-right">Stück</th>
@@ -122,8 +169,30 @@ export default function PushToShopifyButton({ orderId, shipmentId, label, compac
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-100">
-                    {preview.map((p) => (
-                      <tr key={p.item_id} className={p.already_pushed_at ? "bg-amber-50/40" : ""}>
+                    {preview.map((p) => {
+                      const isChecked = selected.has(p.item_id);
+                      const disabled = p.status !== "ok";
+                      return (
+                      <tr
+                        key={p.item_id}
+                        className={
+                          disabled
+                            ? "opacity-60"
+                            : p.already_pushed_at
+                              ? (isChecked ? "bg-amber-50/60" : "bg-neutral-50/40")
+                              : (isChecked ? "" : "opacity-60")
+                        }
+                      >
+                        <td className="px-2 py-1.5">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            disabled={disabled}
+                            onChange={() => toggle(p.item_id)}
+                            title={disabled ? `Nicht pushbar: ${p.status}` : (p.already_pushed_at ? "Bereits eingepflegt — Häkchen setzen würde Bestand doppelt erhöhen!" : "Diese Position einpflegen")}
+                            className="rounded"
+                          />
+                        </td>
                         <td className="px-2 py-1.5">{p.display}</td>
                         <td className="px-2 py-1.5 text-right text-neutral-600">{p.grams} g</td>
                         <td className="px-2 py-1.5 text-right font-medium">
@@ -163,23 +232,29 @@ export default function PushToShopifyButton({ orderId, shipmentId, label, compac
                           )}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
-              <div className="flex justify-end gap-2 mt-4">
-                <button type="button" onClick={close} className="px-4 py-2 rounded-lg text-sm font-medium bg-neutral-100 hover:bg-neutral-200 text-neutral-700">
-                  Abbrechen
-                </button>
-                <button
-                  type="button"
-                  onClick={doPush}
-                  disabled={pending}
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
-                >
-                  {pending && <Loader2 size={14} className="animate-spin" />}
-                  Jetzt einpflegen
-                </button>
+              <div className="flex justify-between items-center gap-2 mt-4">
+                <div className="text-xs text-neutral-500">
+                  {selectedCount} {selectedCount === 1 ? "Position" : "Positionen"} ausgewählt
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={close} className="px-4 py-2 rounded-lg text-sm font-medium bg-neutral-100 hover:bg-neutral-200 text-neutral-700">
+                    Abbrechen
+                  </button>
+                  <button
+                    type="button"
+                    onClick={doPush}
+                    disabled={pending || selectedCount === 0}
+                    className="px-4 py-2 rounded-lg text-sm font-medium bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
+                  >
+                    {pending && <Loader2 size={14} className="animate-spin" />}
+                    {selectedCount === 0 ? "Nichts ausgewählt" : `${selectedCount} jetzt einpflegen`}
+                  </button>
+                </div>
               </div>
             </>
           )}

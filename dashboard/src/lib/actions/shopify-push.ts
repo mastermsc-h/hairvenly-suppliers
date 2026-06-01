@@ -174,6 +174,7 @@ function formatDisplay(it: DbItem): string {
 export async function pushOrderItemsToShopify(
   orderId: string,
   shipmentId: string | null,
+  itemIds?: string[],
 ): Promise<PushReport> {
   try {
     const profile = await requireProfile();
@@ -207,6 +208,12 @@ export async function pushOrderItemsToShopify(
     } else {
       q = q.is("shipment_id", null);
     }
+    // Optional explicit allowlist of item IDs (Checkbox-Auswahl im Modal).
+    // Verhindert versehentliches Doppel-Einpflegen: nur ausgewählte Items
+    // werden tatsächlich gepusht.
+    if (itemIds && itemIds.length > 0) {
+      q = q.in("id", itemIds);
+    }
     const { data: itemsRaw, error: itemsErr } = await q;
     if (itemsErr) {
       return {
@@ -218,10 +225,55 @@ export async function pushOrderItemsToShopify(
     }
     const items = (itemsRaw ?? []) as DbItem[];
 
+    // Fallback-Lookup für Items ohne color_id (z.B. Wizard hat nicht gematched):
+    // Versuche per Methode+Länge+Farbname die richtige product_colors-Zeile zu finden.
+    // Verhindert dass solche Items mit "kein Mapping" stehen bleiben obwohl der
+    // Katalog die passende Farbe längst kennt.
+    const orphanItems = items.filter((it) => !it.color_id);
+    const fallbackMapping = new Map<string, { name_shopify: string | null; shopify_url: string | null }>();
+    if (orphanItems.length > 0) {
+      const { data: catalogRows } = await supabase
+        .from("product_colors")
+        .select("name_hairvenly, name_supplier, name_shopify, shopify_url, length_id, product_lengths!inner(value, method_id, product_methods!inner(name))");
+      type CatalogRow = {
+        name_hairvenly: string | null;
+        name_supplier: string | null;
+        name_shopify: string | null;
+        shopify_url: string | null;
+        product_lengths: { value: string; product_methods: { name: string } };
+      };
+      const rows = (catalogRows ?? []) as unknown as CatalogRow[];
+      const normalize = (s: string | null) => (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+      for (const it of orphanItems) {
+        if (!it.method_name || !it.color_name) continue;
+        const mNorm = normalize(it.method_name);
+        const lNorm = normalize(it.length_value);
+        const cNorm = normalize(it.color_name);
+        // Search: exact method+length match, then color contains (catalog name in item name OR vice versa)
+        for (const row of rows) {
+          if (normalize(row.product_lengths?.product_methods?.name) !== mNorm) continue;
+          if (normalize(row.product_lengths?.value) !== lNorm) continue;
+          const hv = normalize(row.name_hairvenly);
+          const sup = normalize(row.name_supplier);
+          if (!hv && !sup) continue;
+          if (
+            (hv && (cNorm.startsWith(hv) || hv.startsWith(cNorm) || cNorm.includes(hv))) ||
+            (sup && (cNorm.startsWith(sup) || sup.startsWith(cNorm) || cNorm.includes(sup)))
+          ) {
+            fallbackMapping.set(it.id, { name_shopify: row.name_shopify, shopify_url: row.shopify_url });
+            break;
+          }
+        }
+      }
+    }
+
     const results: PushItemResult[] = [];
 
     for (const it of items) {
-      const pc = Array.isArray(it.product_colors) ? it.product_colors[0] : it.product_colors;
+      let pc: { name_shopify: string | null; shopify_url: string | null } | null = Array.isArray(it.product_colors) ? it.product_colors[0] : it.product_colors;
+      if (!pc?.name_shopify && fallbackMapping.has(it.id)) {
+        pc = fallbackMapping.get(it.id)!;
+      }
       const nameShopify = pc?.name_shopify ?? null;
       const shopifyUrl = pc?.shopify_url ?? null;
       const display = formatDisplay(it);
@@ -380,9 +432,41 @@ export async function previewShopifyPush(
     const { data, error } = await q;
     if (error) return { items: [], error: error.message };
     const items = (data ?? []) as DbItem[];
+
+    // Gleicher Fallback wie im echten Push — sonst zeigt das Modal "kein Mapping"
+    // obwohl der Push tatsächlich klappen würde.
+    const orphanItems = items.filter((it) => !it.color_id);
+    const fallbackMapping = new Map<string, { name_shopify: string | null; shopify_url: string | null }>();
+    if (orphanItems.length > 0) {
+      const { data: catalogRows } = await supabase
+        .from("product_colors")
+        .select("name_hairvenly, name_supplier, name_shopify, shopify_url, length_id, product_lengths!inner(value, method_id, product_methods!inner(name))");
+      type CatalogRow = {
+        name_hairvenly: string | null; name_supplier: string | null; name_shopify: string | null; shopify_url: string | null;
+        product_lengths: { value: string; product_methods: { name: string } };
+      };
+      const rows = (catalogRows ?? []) as unknown as CatalogRow[];
+      const normalize = (s: string | null) => (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+      for (const it of orphanItems) {
+        if (!it.method_name || !it.color_name) continue;
+        const mN = normalize(it.method_name), lN = normalize(it.length_value), cN = normalize(it.color_name);
+        for (const row of rows) {
+          if (normalize(row.product_lengths?.product_methods?.name) !== mN) continue;
+          if (normalize(row.product_lengths?.value) !== lN) continue;
+          const hv = normalize(row.name_hairvenly), sup = normalize(row.name_supplier);
+          if ((hv && (cN.startsWith(hv) || hv.startsWith(cN) || cN.includes(hv))) ||
+              (sup && (cN.startsWith(sup) || sup.startsWith(cN) || cN.includes(sup)))) {
+            fallbackMapping.set(it.id, { name_shopify: row.name_shopify, shopify_url: row.shopify_url });
+            break;
+          }
+        }
+      }
+    }
+
     return {
       items: items.map((it) => {
-        const pc = Array.isArray(it.product_colors) ? it.product_colors[0] : it.product_colors;
+        let pc: { name_shopify: string | null; shopify_url: string | null } | null = Array.isArray(it.product_colors) ? it.product_colors[0] : it.product_colors;
+        if (!pc?.name_shopify && fallbackMapping.has(it.id)) pc = fallbackMapping.get(it.id)!;
         const nameShopify = pc?.name_shopify ?? null;
         const grams = Number(it.quantity || 0);
         const gPerPiece = gramsPerPiece(it.method_name, it.length_value);
