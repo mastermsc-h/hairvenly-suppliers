@@ -32,11 +32,41 @@ async function fetchImageAsBase64(url: string): Promise<{ mediaType: string; dat
       console.warn(`[respond] image fetch wrong content-type: ${contentType}`);
       return null;
     }
-    const buf = await res.arrayBuffer();
-    const data = Buffer.from(buf).toString("base64");
+    const buf = Buffer.from(await res.arrayBuffer());
     // Anthropic akzeptiert: jpeg, png, gif, webp
     const allowed = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-    const mediaType = allowed.includes(contentType) ? contentType : "image/jpeg";
+    let mediaType = allowed.includes(contentType) ? contentType : "image/jpeg";
+
+    // 🛡 DOWNSCALE (Bug 01.06): Anthropic lehnt Bilder mit einer Kante >2000px
+    // in Multi-Image-Requests ab ("image dimensions exceed max allowed size
+    // for many-image requests: 2000 pixels" → HTTP 400, Bot-Antwort crasht).
+    // Kundenfotos vom Handy sind oft 3000-4000px. Wir skalieren auf max
+    // 1568px lange Kante (Anthropic-Empfehlung, sicher unter dem Limit) und
+    // konvertieren nach JPEG. Fail-safe: bei sharp-Fehler Original verwenden.
+    let outBuf: Buffer = buf;
+    try {
+      const sharp = (await import("sharp")).default;
+      const meta = await sharp(buf).metadata();
+      const longEdge = Math.max(meta.width || 0, meta.height || 0);
+      if (longEdge > 1568) {
+        outBuf = Buffer.from(
+          await sharp(buf)
+            .rotate() // EXIF-Orientierung anwenden, bevor wir resizen
+            .resize({ width: 1568, height: 1568, fit: "inside", withoutEnlargement: true })
+            .jpeg({ quality: 85 })
+            .toBuffer()
+        );
+        mediaType = "image/jpeg";
+        console.log(`[respond] image downscaled ${longEdge}px → ≤1568px (${buf.length}→${outBuf.length} bytes)`);
+      }
+    } catch (e) {
+      // sharp nicht verfügbar / Bild nicht dekodierbar → Original senden.
+      // (Falls Original >2000px ist, schlägt der API-Call fehl — aber besser
+      // als hier hart zu crashen; der Catch im Caller fängt das ab.)
+      console.warn(`[respond] image downscale skipped (${(e as Error).message}) — using original`);
+    }
+
+    const data = outBuf.toString("base64");
     return { mediaType, data };
   } catch (e) {
     console.warn(`[respond] image fetch failed for ${url.slice(0, 80)}: ${(e as Error).message}`);
