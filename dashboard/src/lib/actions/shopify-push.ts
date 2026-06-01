@@ -6,6 +6,7 @@ import { requireProfile } from "@/lib/auth";
 import {
   searchProductsByTitle,
   adjustShopifyInventoryByItemId,
+  shopifyGraphQL,
   type ShopifyProduct,
   type ShopifyVariant,
 } from "@/lib/shopify";
@@ -136,6 +137,59 @@ function pickProduct(products: ShopifyProduct[], nameShopify: string): ShopifyPr
   if (exact) return exact;
   // Prefer longest common-prefix-ish — fall back to first.
   return products[0];
+}
+
+/**
+ * Map our supplier-internal method names to the keyword(s) used in Shopify
+ * product titles. Bei Mehrfach-Match (z.B. Tressen) müssen ALLE Keywords im
+ * Titel vorkommen, damit der Fallback nicht versehentlich Standard-Tapes für
+ * Mini-Tapes erwischt.
+ */
+function shopifyKeywordsForMethod(methodName: string | null): string[] {
+  if (!methodName) return [];
+  const m = methodName.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (m === "bondings") return ["BONDINGS"];
+  if (m === "standardtapes") return ["STANDARD", "TAPE"];
+  if (m === "tapes") return ["TAPE"];
+  if (m === "minitapes") return ["MINI TAPE"];
+  if (m === "classicweft") return ["CLASSIC WEFT"];
+  if (m === "invisibleweft") return ["INVISIBLE"]; // Invisible Butterfly / Invisible Tressen
+  if (m === "clipins") return ["CLIP"];
+  return [];
+}
+
+/**
+ * Token-basierter Fallback wenn die exakte Wildcard-Suche nichts findet
+ * (z.B. weil der Katalog "BALAYAGE" enthält das im echten Shopify-Titel
+ * fehlt). Sucht über `color_name AND method_keyword` und filtert nachher
+ * sicher: ALLE method-keywords müssen im Titel vorkommen.
+ */
+async function fallbackSearchByTokens(
+  cleanColor: string | null,
+  methodName: string | null,
+): Promise<ShopifyProduct[]> {
+  if (!cleanColor) return [];
+  const kws = shopifyKeywordsForMethod(methodName);
+  const firstKw = kws[0] ?? "";
+  const q = firstKw ? `title:*${cleanColor}* AND title:*${firstKw}*` : `title:*${cleanColor}*`;
+  const query = `
+    query searchProducts($q: String!) {
+      products(first: 10, query: $q) {
+        edges { node { id title handle variants(first: 50) { edges { node { id title inventoryPolicy inventoryItem { id } } } } } }
+      }
+    }
+  `;
+  const res = await shopifyGraphQL<{
+    products: { edges: { node: ShopifyProduct }[] };
+  }>(query, { q });
+  const products = res.data?.products.edges.map((e) => e.node) ?? [];
+  // Sicherheits-Filter: ALLE method-keywords müssen im Titel vorkommen.
+  // Verhindert false positives wie "STANDARD TAPE" für eine "MINI TAPE"-Position.
+  if (kws.length === 0) return products;
+  return products.filter((p) => {
+    const t = p.title.toUpperCase();
+    return kws.every((kw) => t.includes(kw.toUpperCase()));
+  });
 }
 
 interface DbItem {
@@ -269,6 +323,20 @@ export async function pushOrderItemsToShopify(
 
     const results: PushItemResult[] = [];
 
+    // Hole product_colors für die Suche nach sauberen Farbnamen für den
+    // Token-Fallback (z.B. wenn name_shopify im Katalog "BALAYAGE" extra hat).
+    const colorIdsNeeded = items.map((it) => it.color_id).filter((x): x is string => !!x);
+    const cleanNamesByColorId = new Map<string, string>();
+    if (colorIdsNeeded.length > 0) {
+      const { data: pcRows } = await supabase
+        .from("product_colors")
+        .select("id, name_hairvenly")
+        .in("id", colorIdsNeeded);
+      for (const row of (pcRows ?? []) as { id: string; name_hairvenly: string | null }[]) {
+        if (row.name_hairvenly) cleanNamesByColorId.set(row.id, row.name_hairvenly);
+      }
+    }
+
     for (const it of items) {
       let pc: { name_shopify: string | null; shopify_url: string | null } | null = Array.isArray(it.product_colors) ? it.product_colors[0] : it.product_colors;
       if (!pc?.name_shopify && fallbackMapping.has(it.id)) {
@@ -276,6 +344,7 @@ export async function pushOrderItemsToShopify(
       }
       const nameShopify = pc?.name_shopify ?? null;
       const shopifyUrl = pc?.shopify_url ?? null;
+      const cleanColor = it.color_id ? cleanNamesByColorId.get(it.color_id) ?? null : null;
       const display = formatDisplay(it);
       const grams = Number(it.quantity || 0);
       const gPerPiece = gramsPerPiece(it.method_name, it.length_value);
@@ -309,6 +378,12 @@ export async function pushOrderItemsToShopify(
       let products: ShopifyProduct[] = [];
       try {
         products = await searchProductsByTitle(nameShopify);
+        // Token-Fallback: wenn die exakte Wildcard-Suche nichts findet
+        // (z.B. Katalog hat "BALAYAGE" extra, oder Shopify-Titel hat sich
+        // geändert seit Katalog-Pflege), versuche es mit (Farbe + Methode).
+        if (products.length === 0 && cleanColor) {
+          products = await fallbackSearchByTokens(cleanColor, it.method_name);
+        }
       } catch (e) {
         results.push({
           ...base,
