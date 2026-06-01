@@ -44,6 +44,20 @@ const PRICE_CONTEXT_RE =
 const SHIPPING_THRESHOLD_RE =
   /\b(ab\s+\d+\s*€?\s*(kostenlos|gratis|versandkostenfrei|frei)|versandkosten|bestellwert|mindestbestell|kostenloser?\s+versand)\b/i;
 
+// QUALITATIVE Preisvergleiche OHNE Zahl — der eigentliche Screenshot-Bug 01.06:
+// "der Preis ist gleich", "beide kosten das Gleiche", "günstiger", "teurer".
+// Solche Aussagen sind genauso geraten wie konkrete Zahlen, wenn get_price
+// nicht aufgerufen wurde — und enthalten KEINE Euro-Zahl, rutschten also bisher
+// durch. Echte Daten: Russisch 72,50€/Pack ≠ Usbekisch 47,25€/Pack → "gleich"
+// ist FALSCH.
+const QUALITATIVE_PRICE_CLAIM_RE =
+  /(preis(e|lich)?\s+(ist|sind|bleibt|bleiben)\s+(gleich|identisch|derselbe|dasselbe|der\s+gleiche)|(kostet|kosten)\s+(das\s+)?(gleiche|dasselbe|identisch|gleich\s+viel)|gleich\s+(teuer|viel|günstig)|(günstiger|guenstiger|teurer|preiswerter|billiger)\s+(als|wie)|preislich\s+(gleich|identisch)|(kein|keinen)\s+(preis-?)?unterschied|(preis-?)?unterschied\s+(im\s+preis|gibt'?s\s+(es\s+)?kein))/i;
+
+// Linien-/Produkt-Bezug, der zeigt dass es um Verkaufspreise geht (nicht z.B.
+// "gleich teuer wie Friseur XY" allgemein).
+const QUALITATIVE_CONTEXT_RE =
+  /\b(russisch|usbekisch|glatt|wellig|linie|tape|tapes|bonding|bondings|tressen|extension|methode|pack|packung|gramm|\d+\s*g\b)\b/i;
+
 /**
  * @param finalText   die fertige Bot-Antwort
  * @param toolsUsed   Namen der in dieser Antwort aufgerufenen Tools
@@ -60,7 +74,22 @@ export function detectPriceHallucination(
   );
   if (usedPriceTool) return { suspicious: false };
 
-  // Kein Euro-Betrag in Verkaufs-Höhe → nichts zu prüfen.
+  // QUALITATIVE Preisvergleichs-Behauptung ohne Tool (z.B. "der Preis ist
+  // gleich", "Usbekisch ist günstiger") → verdächtig, auch ohne Euro-Zahl.
+  const qualMatch = text.match(QUALITATIVE_PRICE_CLAIM_RE);
+  if (qualMatch) {
+    const qi = qualMatch.index ?? 0;
+    const qctx = text.slice(Math.max(0, qi - 80), Math.min(text.length, qi + 80));
+    if (QUALITATIVE_CONTEXT_RE.test(qctx)) {
+      return {
+        suspicious: true,
+        reason: "Bot macht eine qualitative Preisaussage (gleich/günstiger/teurer) ohne get_price aufzurufen — geraten (Bug 01.06: 'der Preis ist gleich' war falsch; echte Daten: Russisch 72,50€ ≠ Usbekisch 47,25€/Pack).",
+        matchedSnippet: qctx.trim().slice(0, 120),
+      };
+    }
+  }
+
+  // Kein Euro-Betrag in Verkaufs-Höhe → nichts mehr zu prüfen.
   const euroMatch = text.match(EURO_AMOUNT_RE);
   if (!euroMatch) return { suspicious: false };
 

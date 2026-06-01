@@ -26,6 +26,12 @@ const SUSPICIOUS = [
   ["Verlängerung Gesamtpreis", "Die Tape-Verlängerung liegt bei 540€ inklusive Styling", []],
   ["Bonding-Preis", "Für 150g Bondings zahlst du insgesamt 435€", []],
   ["nur falsches Tool genutzt", "Standard Tapes 60cm kosten 119€ pro Packung", ["get_stock_eta"]],
+  // QUALITATIVE Preisaussagen OHNE Zahl — der echte Screenshot-Bug 01.06
+  ["Screenshot 'Preis ist gleich'", "Genau, der Preis ist gleich 💕 Beide Linien (Russisch glatt und Usbekisch wellig) kosten das Gleiche", []],
+  ["beide gleich teuer", "Wellig und glatt sind gleich teuer bei den Tapes", []],
+  ["Usbekisch günstiger geraten", "Usbekisch wellig ist etwas günstiger als Russisch glatt", []],
+  ["Russisch teurer geraten", "Russisch glatt ist teurer als die wellige Linie", []],
+  ["kein Preisunterschied", "Bei den Tapes gibt's preislich keinen Unterschied zwischen den Linien", []],
 ];
 for (const [name, text, tools] of SUSPICIOUS) check("SUSPICIOUS " + name, detectPriceHallucination(text, tools).suspicious, true);
 
@@ -42,6 +48,12 @@ const OK = [
   ["reine Klärungsfrage", "Magst du Russisch glatt oder Usbekisch wellig? Welche Länge?", []],
   ["Methoden-Info ohne Preis", "Tapes gibt es in beiden Linien, Bondings auch", []],
   ["nur Begrüßung", "Hi Liebes 💕 wie kann ich dir helfen?", []],
+  // Qualitative Aussagen MIT get_price → ok (Bot hat verifiziert)
+  ["günstiger MIT tool", "Usbekisch wellig ist günstiger — 47,25€ vs 72,50€ pro Pack", ["get_price"]],
+  // Qualitativer Preisvergleich OHNE Linien-/Produktbezug → kein Force-Draft
+  // (z.B. allgemeine Aussage, nicht über unsere Verkaufspreise)
+  ["Haltbarkeit gleich (kein Preis)", "Die Pflege ist bei beiden gleich aufwendig", []],
+  ["Struktur-Vergleich", "Usbekisch ist leichter als Russisch", []],
 ];
 for (const [name, text, tools] of OK) check("OK " + name, detectPriceHallucination(text, tools).suspicious, false);
 
