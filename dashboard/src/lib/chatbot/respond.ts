@@ -109,7 +109,7 @@ export function splitLongMessage(text: string, maxLen = 700): string[] {
 import { getBusinessHoursContext } from "./business-hours";
 import { BUSINESS_CONFIG } from "./business-config";
 import { stripColorUrlMismatch, limitUrls, stripFalseMediaLimitation, detectStrandedContactInfo, detectFalseOpeningClaim } from "./output-sanitizers";
-import { isLeanPromptEnabled, isFaqCompressionEnabled } from "./settings";
+import { isLeanPromptEnabled, isFaqCompressionEnabled, isForceToolsEnabled } from "./settings";
 import { buildLeanHardRules } from "./lean-rules";
 
 /**
@@ -1524,18 +1524,41 @@ KEINE Farbnamen nennen — die MA macht das.`;
     );
   }
 
+  // 🔒 TOOL-ZWANG (Schicht 1, force-tool-intent.ts): Wenn die Kundennachricht
+  // erkennbar nach einem prüfbaren Fakt fragt (Preis/Verfügbarkeit/Länge),
+  // zwingen wir den Bot beim ERSTEN Call, erst das passende Tool aufzurufen.
+  // Behebt die Wurzel (Baseline: Tools nur in 23% genutzt → Bot riet "gleich
+  // teuer" / "verfügbar"). Hinter Flag use_force_tools (Default: an, da reine
+  // Verbesserung — Bot kann dann keinen Fakt erfinden ohne Datenbeleg).
+  const forceToolsEnabled = await isForceToolsEnabled();
+  const { decideForcedTool } = await import("./force-tool-intent");
+
   const { logUsage } = await import("./usage-logger");
   for (let iter = 0; iter < MAX_ITER; iter++) {
     const callStart = Date.now();
     // 🛡 Deep-Sanitize aller Customer/Bot-Messages: jede content-block-string
     // wird gegen lone surrogates abgesichert (verhindert Anthropic 400).
     const sanitizedConvo = sanitizeUtf16Deep(convo);
+
+    // Tool-Zwang nur bei der ERSTEN Iteration prüfen (danach hat der Bot die
+    // Tool-Daten und soll frei formulieren dürfen). decideForcedTool prüft,
+    // ob das Tool in diesem Turn schon lief → kein Endlos-Zwang.
+    let toolChoice: Anthropic.ToolChoice | undefined;
+    if (forceToolsEnabled && iter === 0) {
+      const decision = decideForcedTool(lastUserText, toolsUsed);
+      if (decision.tool) {
+        toolChoice = { type: "tool", name: decision.tool };
+        console.log(`[respond] 🔒 FORCE-TOOL session=${sessionId.slice(0,8)} → ${decision.tool} (${decision.reason})`);
+      }
+    }
+
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 1024,
       system: systemBlocks,
       tools: cachedTools,
       messages: sanitizedConvo,
+      ...(toolChoice ? { tool_choice: toolChoice } : {}),
     });
     logUsage({
       purpose: opts.assisted ? "respond" : "respond",

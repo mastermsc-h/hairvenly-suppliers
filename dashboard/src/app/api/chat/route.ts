@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createServiceClient } from "@/lib/supabase/server";
 import { TOOLS, TOOL_SCHEMAS, type ToolContext } from "@/lib/chatbot/tools";
+import { isForceToolsEnabled } from "@/lib/chatbot/settings";
 
 const MODEL = "claude-sonnet-4-5";
 const MAX_TOOL_ITERATIONS = 5;
@@ -360,6 +361,11 @@ export async function POST(req: NextRequest) {
         const allToolCalls: { id: string; name: string; input: Record<string, unknown> }[] = [];
         const allToolResults: { tool_use_id: string; content: string }[] = [];
 
+        // 🔒 TOOL-ZWANG (Schicht 1) — auch im Test-Modus (genau die Pipeline
+        // aus den Screenshots 01.06, die bisher OHNE Guards lief).
+        const forceToolsEnabledTest = await isForceToolsEnabled();
+        const { decideForcedTool: decideForcedToolTest } = await import("@/lib/chatbot/force-tool-intent");
+
         for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
           // Streaming-Aufruf
           let iterText = "";
@@ -368,6 +374,18 @@ export async function POST(req: NextRequest) {
           let currentToolName = "";
           let currentToolInputJson = "";
 
+          // Tool-Zwang nur bei erster Iteration (danach Daten da → frei
+          // formulieren). Verhindert geratene Preise/Verfügbarkeit.
+          let toolChoiceTest: Anthropic.ToolChoice | undefined;
+          if (forceToolsEnabledTest && iter === 0) {
+            const usedSoFar = allToolCalls.map(c => c.name);
+            const decision = decideForcedToolTest(body.message || "", usedSoFar);
+            if (decision.tool) {
+              toolChoiceTest = { type: "tool", name: decision.tool };
+              console.log(`[chat/route] 🔒 FORCE-TOOL → ${decision.tool} (${decision.reason})`);
+            }
+          }
+
           const callStart = Date.now();
           const claudeStream = anthropic.messages.stream({
             model: MODEL,
@@ -375,6 +393,7 @@ export async function POST(req: NextRequest) {
             system: systemPrompt,
             tools: TOOL_SCHEMAS,
             messages,
+            ...(toolChoiceTest ? { tool_choice: toolChoiceTest } : {}),
           });
 
           for await (const event of claudeStream) {

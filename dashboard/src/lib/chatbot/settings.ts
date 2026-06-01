@@ -109,3 +109,31 @@ export async function isFaqCompressionEnabled(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Tool-Zwang bei Fakten-Intents (Schicht 1 Anti-Halluzination, Feature-Flag).
+ *
+ * Default TRUE (anders als die anderen Flags!): reine Verbesserung — bei einer
+ * erkannten Preis-/Verfügbarkeits-/Längen-Frage wird der Bot gezwungen, erst
+ * das passende Tool (get_price/get_stock_eta) aufzurufen, bevor er antwortet.
+ * Er KANN dann keinen Fakt erfinden ohne Datenbeleg.
+ *
+ * Notausschalter: chatbot_settings.use_force_tools = false → klassisches
+ * Verhalten (Bot entscheidet selbst über Tool-Nutzung). Spalten-Default true,
+ * und auch bei fehlender Spalte/Row gibt diese Funktion true zurück.
+ */
+export async function isForceToolsEnabled(): Promise<boolean> {
+  try {
+    const svc = createServiceClient();
+    const { data } = await svc
+      .from("chatbot_settings")
+      .select("use_force_tools")
+      .eq("id", 1)
+      .maybeSingle();
+    // Default an: nur explizit false schaltet ab.
+    return data?.use_force_tools !== false;
+  } catch (e) {
+    console.warn("[settings] force-tools read failed:", (e as Error).message);
+    return true; // im Fehlerfall AN (sicherer: lieber Tool-Zwang als Halluzination)
+  }
+}
