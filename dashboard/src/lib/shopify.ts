@@ -49,9 +49,12 @@ export async function shopifyGraphQL<T = unknown>(
     }
 
     const json = (await res.json()) as GraphQLResponse<T>;
-    // GraphQL-Level-Errors (200 OK aber errors-array vorhanden) sichtbar machen
-    // statt stillschweigend leeres data zurückzugeben.
-    if (json.errors && json.errors.length > 0 && !json.data) {
+    // GraphQL-Level-Errors IMMER als Fehler durchschlagen — Shopify gibt bei
+    // Access-Denied oft `{ data: { field: null }, errors: [...] }` zurück, was
+    // mit der alten Logik (nur `!json.data`) fälschlich als Erfolg behandelt
+    // wurde. Sicherheitsrelevant für Inventory-Mutationen: lieber laut
+    // scheitern als stillschweigend NICHTS schreiben und Erfolg melden.
+    if (json.errors && json.errors.length > 0) {
       throw new Error(
         `Shopify GraphQL error: ${json.errors.map((e) => e.message).join("; ")}`,
       );
@@ -2017,6 +2020,7 @@ export async function adjustShopifyInventoryByItemId(
   inventoryItemId: string,
   delta: number,
   reason: string = "other",
+  name: "available" | "on_hand" = "available",
 ): Promise<{ ok: boolean; error?: string }> {
   if (delta === 0) return { ok: true };
   try {
@@ -2037,12 +2041,20 @@ export async function adjustShopifyInventoryByItemId(
     }>(mutation, {
       input: {
         reason,
-        name: "available",
+        name,
         changes: [{ delta, inventoryItemId, locationId }],
       },
     });
-    const errs = res.data?.inventoryAdjustQuantities?.userErrors ?? [];
+    const payload = res.data?.inventoryAdjustQuantities;
+    const errs = payload?.userErrors ?? [];
     if (errs.length > 0) return { ok: false, error: errs.map((e) => e.message).join("; ") };
+    // Härtung: wenn Shopify die Mutation auf null gesetzt hat (z.B. Access
+    // Denied ohne Errors-Array, oder einfach keine Group zurückgegeben),
+    // dürfen wir NICHT als Erfolg melden — das hatte zu 58 falsch
+    // gemeldeten Pushes geführt.
+    if (!payload || !payload.inventoryAdjustmentGroup) {
+      return { ok: false, error: "Shopify hat die Inventory-Mutation nicht bestätigt (keine AdjustmentGroup zurück) — vermutlich fehlendes write_inventory Scope oder die Variante ist am Standort nicht aktiviert." };
+    }
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };

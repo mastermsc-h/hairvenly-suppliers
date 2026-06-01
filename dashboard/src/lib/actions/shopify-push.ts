@@ -282,11 +282,14 @@ export async function pushOrderItemsToShopify(
         continue;
       }
 
-      // Adjust inventory by piece count (positive delta = Wareneingang).
+      // Adjust inventory by piece count. Wareneingang → on_hand bumpen,
+      // damit Shopify die Lieferung als physisch eingegangene Ware verbucht.
+      // (available wird automatisch nachgezogen: available = on_hand - committed - reserved.)
       const res = await adjustShopifyInventoryByItemId(
         variant.inventoryItem.id,
         pieces,
         "received",
+        "on_hand",
       );
       if (!res.ok) {
         results.push({
