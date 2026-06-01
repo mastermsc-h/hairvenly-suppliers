@@ -27,6 +27,7 @@ import OrderItemsSection from "./order-items-section";
 import StatusDropdown from "./status-dropdown";
 import ShipmentsSection from "./shipments-section";
 import SyncEtaButton from "./sync-eta-button";
+import PushToShopifyButton from "./push-to-shopify-button";
 
 export default async function OrderDetailPage({
   params,
@@ -261,6 +262,55 @@ export default async function OrderDetailPage({
             documents={docs}
             canEdit={canEditShipments}
           />
+
+          {/* Shopify-Push: Bestand aus Bestellpositionen in Shopify einpflegen */}
+          {profile.is_admin && items.length > 0 && (() => {
+            const unassigned = items.filter((it) => !it.shipment_id);
+            const hasUnassigned = unassigned.length > 0;
+            const totalShipments = shipments.length;
+            if (!hasUnassigned && totalShipments === 0) return null;
+            return (
+              <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
+                <h2 className="text-sm font-medium text-neutral-700 mb-1 flex items-center gap-2">
+                  In Shopify einpflegen
+                </h2>
+                <p className="text-xs text-neutral-500 mb-4">
+                  Pflegt die Bestellpositionen als positiven Bestand in Shopify ein (über das Mapping <code className="text-[10px] bg-neutral-100 px-1 rounded">name_shopify</code> im Produktkatalog).
+                </p>
+                <div className="space-y-2">
+                  {shipments.map((s, idx) => {
+                    const count = items.filter((it) => it.shipment_id === s.id).length;
+                    if (count === 0) return null;
+                    const label = s.label || `Teillieferung ${idx + 1}`;
+                    return (
+                      <div key={s.id} className="flex items-center justify-between gap-3 p-2.5 rounded-lg bg-purple-50/40 border border-purple-200">
+                        <div className="text-sm">
+                          <div className="font-medium text-purple-900">{label}</div>
+                          <div className="text-xs text-neutral-600">{count} {count === 1 ? "Position" : "Positionen"}</div>
+                        </div>
+                        <PushToShopifyButton orderId={o.id} shipmentId={s.id} label={`${label} einpflegen`} />
+                      </div>
+                    );
+                  })}
+                  {hasUnassigned && (
+                    <div className="flex items-center justify-between gap-3 p-2.5 rounded-lg bg-neutral-50 border border-neutral-200">
+                      <div className="text-sm">
+                        <div className="font-medium text-neutral-800">
+                          {totalShipments > 0 ? "Restliche Positionen (ohne Teillieferung)" : "Alle Positionen"}
+                        </div>
+                        <div className="text-xs text-neutral-600">{unassigned.length} {unassigned.length === 1 ? "Position" : "Positionen"}</div>
+                      </div>
+                      <PushToShopifyButton
+                        orderId={o.id}
+                        shipmentId={null}
+                        label={totalShipments > 0 ? "Rest einpflegen" : "Alle einpflegen"}
+                      />
+                    </div>
+                  )}
+                </div>
+              </section>
+            );
+          })()}
 
           {/* Documents */}
           {canSeeDocs && (() => {
