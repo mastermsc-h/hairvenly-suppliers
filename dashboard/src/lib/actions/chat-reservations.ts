@@ -359,11 +359,20 @@ export async function scanReservationsAgainstStock(): Promise<StockCheckResult[]
   if (!rows || rows.length === 0) return [];
 
   const { readDashboardAlerts, readInventorySheet } = await import("@/lib/stock-sheets");
-  const [{ unterwegs, nullbestand }, ruSheet, uzSheet] = await Promise.all([
+  const { fetchOrderIdByName } = await import("@/lib/order-name-map");
+  const { filterArchivedFromStock } = await import("@/lib/filter-archived-orders");
+  const [{ unterwegs: rawUnterwegs, nullbestand: rawNullbestand }, ruSheet, uzSheet, orderIdByName] = await Promise.all([
     readDashboardAlerts(),
     readInventorySheet("Russisch - GLATT"),
     readInventorySheet("Usbekisch - WELLIG"),
+    fetchOrderIdByName(),
   ]);
+  // Wende DB-Override an: ersetzt Sheet-Ankunft durch präzise Per-Position-/
+  // Shipment-/Order-ETA aus unserer DB. Sonst zeigt der Lager-Check stale
+  // Sheet-ETAs (z.B. CAPPUCCINO 30.05. statt 03.06.) — Sheet wird nur
+  // periodisch von Apps Script gepflegt, DB ist Source-of-Truth.
+  const unterwegs = filterArchivedFromStock(rawUnterwegs, orderIdByName);
+  const nullbestand = filterArchivedFromStock(rawNullbestand, orderIdByName);
   // 🔑 LINE-AWARENESS: jede Inventory-Row trägt jetzt ihre Linie aus dem
   // Sheet-Namen — verhindert falsche Cross-Line-Matches (z.B. "Mocha Melt
   // US Wellige Tape" matchte fälschlich "MOCHAMELT STANDARD RUSSISCHE TAPE").
