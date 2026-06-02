@@ -637,3 +637,18 @@ export async function importShopifyNamesForSupplier(supplierId: string): Promise
   revalidatePath("/catalog");
   return { matched, created, total: result.products.length, unmatched };
 }
+
+// ── Farb-Sheet-Sync (Wella-Helligkeit, Unterton, KI-Abgrenzung) ──────────
+/**
+ * Importiert das kuratierte Farb-Sheet ("Farben Shopify Details") in
+ * product_colors. Quelle der Wahrheit für Helligkeit/Unterschiede → verhindert
+ * Helligkeits-Halluzinationen des Bots (RAW vs ESPRESSO etc.).
+ * Per Button im Produktkatalog auslösbar.
+ */
+export async function syncColorSheet() {
+  await requireAdmin();
+  const { importColorSheet } = await import("@/lib/import-color-sheet");
+  const result = await importColorSheet();
+  revalidatePath("/catalog");
+  return result;
+}

@@ -8,6 +8,7 @@ import {
   createLength, deleteLength,
   createColor, updateColor, deleteColor,
   syncCatalogFromSheets,
+  syncColorSheet,
 } from "@/lib/actions/catalog";
 import type { Supplier, CatalogMethod, CatalogLength, ProductColor } from "@/lib/types";
 
@@ -22,7 +23,22 @@ export default function CatalogEditor({ suppliers, catalogs, locale }: Props) {
   const [shopifyImporting, startShopifyImport] = useTransition();
   const [syncResult, setSyncResult] = useState<{ methodsCreated: number; lengthsCreated: number; colorsCreated: number; hairvenlyMatched: number; total: number } | null>(null);
   const [syncError, setSyncError] = useState("");
+  const [colorSyncing, startColorSync] = useTransition();
   const methods = catalogs[activeSupplier] ?? [];
+
+  const handleColorSheetSync = () => {
+    if (!confirm("Farb-Sheet (Wella-Helligkeit, Unterton, KI-Abgrenzung) in den Katalog übernehmen?")) return;
+    startColorSync(async () => {
+      try {
+        const r = await syncColorSheet();
+        alert(`✓ Farb-Sheet synchronisiert: ${r.matchedColors} Farben, ${r.updatedEntries} Einträge aktualisiert.` +
+          (r.unmatched.length ? `\nKein Match (nur usbekisch o.ä.): ${r.unmatched.join(", ")}` : ""));
+        window.location.reload();
+      } catch (e) {
+        alert("Fehler beim Farb-Sheet-Sync: " + (e as Error).message);
+      }
+    });
+  };
 
   const handleSync = () => {
     setSyncError("");
@@ -81,6 +97,12 @@ export default function CatalogEditor({ suppliers, catalogs, locale }: Props) {
             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition">
             {shopifyImporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
             {shopifyImporting ? "Synchronisiert..." : "Katalog synchronisieren"}
+          </button>
+          <button onClick={handleColorSheetSync} disabled={colorSyncing}
+            className="flex items-center gap-2 px-4 py-2 bg-pink-600 text-white text-sm font-medium rounded-lg hover:bg-pink-700 disabled:opacity-50 transition"
+            title="Übernimmt Wella-Helligkeit, Unterton, Farbtyp und KI-Abgrenzung aus dem Farb-Sheet (verhindert Helligkeits-Halluzinationen des Bots)">
+            {colorSyncing ? <Loader2 size={14} className="animate-spin" /> : "🎨"}
+            {colorSyncing ? "Synchronisiert..." : "Farb-Sheet synchronisieren"}
           </button>
         </div>
       </div>

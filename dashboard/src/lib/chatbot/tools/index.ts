@@ -954,7 +954,17 @@ const getAvailableColors: ToolDef = {
       "❌ NIEMALS proaktiv Foto/Video anbieten ('schick ich dir Fotos', 'such ich dir raus') — die " +
       "Kundin braucht nur den LINK, nichts mehr. Extra Fotos/Videos NUR wenn die Kundin EXPLIZIT " +
       "danach fragt. ❌ NIEMALS nur 'gibt's nicht in wellig' antworten ohne die Equivalents zu " +
-      "erwähnen, wenn das Feld gepflegt ist.",
+      "erwähnen, wenn das Feld gepflegt ist. " +
+      "🎨 HELLIGKEIT/UNTERSCHIEDE (kuratierte Wahrheit — NIEMALS selbst raten!): Jede Farbe hat " +
+      "`wella_level` (z.B. '3/0'), `brightness_level` (Zahl: KLEINER = DUNKLER), `undertone` " +
+      "(warm/kühl/neutral) und `ki_abgrenzung` (expliziter Vergleich 'im Gegensatz zu X...'). " +
+      "Wenn die Kundin fragt 'ist X dunkler/heller als Y?' oder 'was ist der Unterschied?', " +
+      "ANTWORTE AUSSCHLIESSLICH anhand brightness_level + ki_abgrenzung — NIEMALS aus der " +
+      "description schätzen. Beispiel: RAW brightness_level=3, ESPRESSO BROWN=6 → RAW ist DUNKLER. " +
+      "Wenn brightness_level fehlt, sag ehrlich dass du den genauen Vergleich nicht sicher hast " +
+      "statt zu raten. " +
+      "🔁 AUSVERKAUFT-ALTERNATIVE: `similar_in_same_line` listet ähnliche Farben DERSELBEN Linie — " +
+      "nutze diese wenn die Wunschfarbe ausverkauft ist.",
     input_schema: {
       type: "object",
       properties: {
@@ -988,6 +998,11 @@ const getAvailableColors: ToolDef = {
       shopify_url,
       description,
       equivalent_in_other_line,
+      similar_in_same_line,
+      wella_level,
+      brightness_level,
+      undertone,
+      ki_abgrenzung,
       length:product_lengths!product_colors_length_id_fkey(
         value,
         unit,
@@ -1006,6 +1021,11 @@ const getAvailableColors: ToolDef = {
       shopify_url: string | null;
       description: string | null;
       equivalent_in_other_line: string | null;
+      similar_in_same_line: string | null;
+      wella_level: string | null;
+      brightness_level: number | null;
+      undertone: string | null;
+      ki_abgrenzung: string | null;
       length?: { value?: number; unit?: string; method?: { name?: string; supplier?: { name?: string } | null } | null } | null;
     };
     let rows = (data as unknown as Row[]) || [];
@@ -1103,6 +1123,11 @@ const getAvailableColors: ToolDef = {
       shopify_url: string | null; // BACKWARD-COMPAT: erste URL als Quick-Fallback
       description: string | null;
       equivalent_in_other_line: string | null;
+      similar_in_same_line: string | null;
+      wella_level: string | null;
+      brightness_level: number | null;
+      undertone: string | null;
+      ki_abgrenzung: string | null;
       in_stock: boolean;
       eta: string | null;
     };
@@ -1111,10 +1136,17 @@ const getAvailableColors: ToolDef = {
       if (!r.name_hairvenly) continue;
       const entry = colorMap.get(r.name_hairvenly) || {
         lengths: new Set(), methods: new Set(), variants: [], shopify_url: null,
-        description: null, equivalent_in_other_line: null, in_stock: false, eta: null,
+        description: null, equivalent_in_other_line: null, similar_in_same_line: null,
+        wella_level: null, brightness_level: null, undertone: null, ki_abgrenzung: null,
+        in_stock: false, eta: null,
       };
       if (r.description && !entry.description) entry.description = r.description;
       if (r.equivalent_in_other_line && !entry.equivalent_in_other_line) entry.equivalent_in_other_line = r.equivalent_in_other_line;
+      if (r.similar_in_same_line && !entry.similar_in_same_line) entry.similar_in_same_line = r.similar_in_same_line;
+      if (r.wella_level && !entry.wella_level) entry.wella_level = r.wella_level;
+      if (r.brightness_level != null && entry.brightness_level == null) entry.brightness_level = r.brightness_level;
+      if (r.undertone && !entry.undertone) entry.undertone = r.undertone;
+      if (r.ki_abgrenzung && !entry.ki_abgrenzung) entry.ki_abgrenzung = r.ki_abgrenzung;
       const lenStr = r.length?.value ? `${r.length.value}${r.length.unit || "cm"}` : "";
       const methodName = r.length?.method?.name || "";
       if (lenStr) entry.lengths.add(lenStr);
@@ -1159,6 +1191,11 @@ const getAvailableColors: ToolDef = {
       name,
       description: info.description,
       equivalent_in_other_line: info.equivalent_in_other_line,  // direkte Cross-Linie-Matches (gepflegt im Katalog)
+      similar_in_same_line: info.similar_in_same_line,          // ähnliche Farben SELBE Linie (Ausverkauf-Alternativen)
+      wella_level: info.wella_level,                            // Wella-Code z.B. "3/0" (kuratiert)
+      brightness_level: info.brightness_level,                  // numerische Tiefe (kleiner=dunkler) für Vergleiche
+      undertone: info.undertone,                                // warm/kuehl/neutral
+      ki_abgrenzung: info.ki_abgrenzung,                        // EXPLIZITE Abgrenzung "im Gegensatz zu X..."
       methods: Array.from(info.methods),
       lengths: Array.from(info.lengths),
       // variants enthält PRO METHODE+LÄNGE die EXAKTE URL — Bot muss aus dieser
