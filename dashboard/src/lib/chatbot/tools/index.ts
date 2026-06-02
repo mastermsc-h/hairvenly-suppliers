@@ -964,7 +964,13 @@ const getAvailableColors: ToolDef = {
       "Wenn brightness_level fehlt, sag ehrlich dass du den genauen Vergleich nicht sicher hast " +
       "statt zu raten. " +
       "🔁 AUSVERKAUFT-ALTERNATIVE: `similar_in_same_line` listet ähnliche Farben DERSELBEN Linie — " +
-      "nutze diese wenn die Wunschfarbe ausverkauft ist.",
+      "nutze diese wenn die Wunschfarbe ausverkauft ist. " +
+      "🎭 FARBTYP (für 'suche solide/Balayage/Ombré'-Anfragen): `color_type` ist " +
+      "einheitlich/balayage/ombre/highlights. Bei mehrtönigen Farben geben `base_tone` (Grundton) " +
+      "und `highlights` (Strähnen-Töne) die Details. Wenn die Kundin explizit 'eine einfarbige/solide' " +
+      "ODER 'eine Balayage/Ombré/gesträhnte' Farbe will, filtere/empfehle NUR Farben mit passendem " +
+      "color_type. NIEMALS eine Balayage als 'einheitlich' verkaufen oder umgekehrt — color_type ist " +
+      "die kuratierte Wahrheit. Für die ausführliche Farbbeschreibung nutze `ki_description`.",
     input_schema: {
       type: "object",
       properties: {
@@ -1002,6 +1008,10 @@ const getAvailableColors: ToolDef = {
       wella_level,
       brightness_level,
       undertone,
+      color_type,
+      base_tone,
+      highlights,
+      ki_description,
       ki_abgrenzung,
       length:product_lengths!product_colors_length_id_fkey(
         value,
@@ -1025,6 +1035,10 @@ const getAvailableColors: ToolDef = {
       wella_level: string | null;
       brightness_level: number | null;
       undertone: string | null;
+      color_type: string | null;
+      base_tone: string | null;
+      highlights: string | null;
+      ki_description: string | null;
       ki_abgrenzung: string | null;
       length?: { value?: number; unit?: string; method?: { name?: string; supplier?: { name?: string } | null } | null } | null;
     };
@@ -1127,6 +1141,10 @@ const getAvailableColors: ToolDef = {
       wella_level: string | null;
       brightness_level: number | null;
       undertone: string | null;
+      color_type: string | null;
+      base_tone: string | null;
+      highlights: string | null;
+      ki_description: string | null;
       ki_abgrenzung: string | null;
       in_stock: boolean;
       eta: string | null;
@@ -1137,7 +1155,8 @@ const getAvailableColors: ToolDef = {
       const entry = colorMap.get(r.name_hairvenly) || {
         lengths: new Set(), methods: new Set(), variants: [], shopify_url: null,
         description: null, equivalent_in_other_line: null, similar_in_same_line: null,
-        wella_level: null, brightness_level: null, undertone: null, ki_abgrenzung: null,
+        wella_level: null, brightness_level: null, undertone: null,
+        color_type: null, base_tone: null, highlights: null, ki_description: null, ki_abgrenzung: null,
         in_stock: false, eta: null,
       };
       if (r.description && !entry.description) entry.description = r.description;
@@ -1146,6 +1165,10 @@ const getAvailableColors: ToolDef = {
       if (r.wella_level && !entry.wella_level) entry.wella_level = r.wella_level;
       if (r.brightness_level != null && entry.brightness_level == null) entry.brightness_level = r.brightness_level;
       if (r.undertone && !entry.undertone) entry.undertone = r.undertone;
+      if (r.color_type && !entry.color_type) entry.color_type = r.color_type;
+      if (r.base_tone && !entry.base_tone) entry.base_tone = r.base_tone;
+      if (r.highlights && !entry.highlights) entry.highlights = r.highlights;
+      if (r.ki_description && !entry.ki_description) entry.ki_description = r.ki_description;
       if (r.ki_abgrenzung && !entry.ki_abgrenzung) entry.ki_abgrenzung = r.ki_abgrenzung;
       const lenStr = r.length?.value ? `${r.length.value}${r.length.unit || "cm"}` : "";
       const methodName = r.length?.method?.name || "";
@@ -1195,6 +1218,10 @@ const getAvailableColors: ToolDef = {
       wella_level: info.wella_level,                            // Wella-Code z.B. "3/0" (kuratiert)
       brightness_level: info.brightness_level,                  // numerische Tiefe (kleiner=dunkler) für Vergleiche
       undertone: info.undertone,                                // warm/kuehl/neutral
+      color_type: info.color_type,                              // einheitlich/balayage/ombre/highlights
+      base_tone: info.base_tone,                                // Grundton (bei mehrtönig)
+      highlights: info.highlights,                              // Highlight-Töne (bei mehrtönig)
+      ki_description: info.ki_description,                      // KI-optimierte Farbbeschreibung
       ki_abgrenzung: info.ki_abgrenzung,                        // EXPLIZITE Abgrenzung "im Gegensatz zu X..."
       methods: Array.from(info.methods),
       lengths: Array.from(info.lengths),

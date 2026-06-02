@@ -61,6 +61,8 @@ export async function importColorSheet(): Promise<ColorImportResult> {
   const iWella = col(/Helligkeit/i);
   const iUnder = col(/Unterton/i);
   const iType = col(/Farbe Typ/i);
+  const iBase = col(/Grundton/i);
+  const iHigh = col(/Highlights/i);
   const iKi = col(/Beschreibung fuer KI/i);
   const iAbg = col(/Abgrenzung/i);
 
@@ -77,6 +79,8 @@ export async function importColorSheet(): Promise<ColorImportResult> {
       brightness_level: parseBrightness(wella),
       undertone: (x[iUnder] || "").trim() || null,
       color_type: (x[iType] || "").trim() || null,
+      base_tone: iBase >= 0 ? ((x[iBase] || "").trim() || null) : null,
+      highlights: iHigh >= 0 ? ((x[iHigh] || "").trim() || null) : null,
       ki_description: (x[iKi] || "").trim() || null,
       ki_abgrenzung: (x[iAbg] || "").trim() || null,
     };
