@@ -674,17 +674,25 @@ async function routeIncoming(opts: {
   }
 
   // 🛑 GRANULAR KILL-SWITCH (via lib/chatbot/settings.ts)
-  // User-Anweisung 2026-05-26: Bot antwortet nur bei "ungefährlichen" Categories
-  // automatisch. AUSNAHME 2026-05-27: autoOverrideType (intro / color_no_photo)
-  // umgeht den Kill-Switch — das sind kontrollierte Vorbereitungs-Antworten
-  // (Foto-Bitte etc.), die immer durchlaufen dürfen.
-  // Manual-Trigger (Inbox "Antwort generieren") ist NICHT betroffen.
-  if (!autoOverrideType) {
+  // User-Anweisung 2026-06-02: Wenn ein Chat BEWUSST auf "auto" (Auto-Antwort)
+  // gestellt ist, soll der Bot IMMER automatisch antworten — EGAL welches
+  // Thema/welche Kategorie. Das "auto"-Flag ist die explizite Mitarbeiter-
+  // Entscheidung "dieser Chat darf voll autonom laufen", die den Kategorie-
+  // Kill-Switch übersteuert.
+  //
+  // Der granulare Kill-Switch (proactive_safe_categories) gilt deshalb NUR
+  // noch für "selective_auto" — den Modus, der NICHT pro Chat freigegeben
+  // wurde, sondern global vorsichtig agieren soll.
+  // AUSNAHME wie bisher: autoOverrideType (intro / color_no_photo) umgeht den
+  // Kill-Switch ebenfalls. Manual-Trigger ("Antwort generieren") ist nicht betroffen.
+  if (!autoOverrideType && effectiveBotMode !== "auto") {
     const { isProactiveGenerationEnabled } = await import("@/lib/chatbot/settings");
     if (!(await isProactiveGenerationEnabled(sessionCategory))) {
-      console.log(`[meta-webhook] PROACTIVE-DISABLED (category=${sessionCategory ?? "none"}) — skip bot session=${session.id.slice(0,8)}`);
+      console.log(`[meta-webhook] PROACTIVE-DISABLED (mode=${effectiveBotMode}, category=${sessionCategory ?? "none"}) — skip bot session=${session.id.slice(0,8)}`);
       return;
     }
+  } else if (effectiveBotMode === "auto") {
+    console.log(`[meta-webhook] kill-switch BYPASSED — bot_mode=auto (bewusste Auto-Antwort, antwortet immer) session=${session.id.slice(0,8)}`);
   } else {
     console.log(`[meta-webhook] kill-switch BYPASSED — autoOverrideType=${autoOverrideType} ist kontrollierte Vorbereitungs-Antwort`);
   }
