@@ -558,8 +558,14 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   }
 
   // KPIs (awaiting_human wird nicht mehr genutzt — siehe KPI-Block unten)
-  const { count: cntActive } = await svc.from("chat_sessions").select("id", { count: "exact", head: true }).eq("status", "active");
-  const { count: cntClosed } = await svc.from("chat_sessions").select("id", { count: "exact", head: true }).eq("status", "closed");
+  // ⚡ PERF (2026-06-02): beide count-Queries PARALLEL statt nacheinander.
+  // Messung zeigte: der "active"-count war bei kaltem Cache 3-4s (verstreute
+  // Rows). Parallelisieren halbiert mind. die Wartezeit; estimated planning
+  // (head+exact) bleibt, aber beide laufen gleichzeitig.
+  const [{ count: cntActive }, { count: cntClosed }] = await Promise.all([
+    svc.from("chat_sessions").select("id", { count: "exact", head: true }).eq("status", "active"),
+    svc.from("chat_sessions").select("id", { count: "exact", head: true }).eq("status", "closed"),
+  ]);
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-4">
