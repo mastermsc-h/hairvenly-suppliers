@@ -1419,9 +1419,19 @@ const getSalonServicePrice: ToolDef = {
     let rows = (data || []) as Array<{ category: string; service: string; price_min: number | null; price_max: number | null; duration_min: number | null }>;
 
     if (search) {
-      rows = rows.filter(r =>
-        `${r.category} ${r.service}`.toLowerCase().includes(search)
-      );
+      // Mehrwort-Suche als UND über einzelne Wörter (nicht als ein zusammen-
+      // hängender String). Bug 02.06: search="tressen einarbeiten" fand 0, weil
+      // category "Tressen Usbekisch" + service "...einarbeiten" nie als EIN
+      // String "tressen einarbeiten" vorkommen. Stop-Wörter (einsetzen/machen/
+      // lassen…) werden ignoriert, damit natürliche Suchbegriffe greifen.
+      const STOP = new Set(["einarbeiten", "einsetzen", "einbauen", "machen", "lassen", "mit", "und", "im", "salon", "preis", "kosten", "service"]);
+      const terms = search.split(/\s+/).map(t => t.trim()).filter(t => t.length >= 2 && !STOP.has(t));
+      if (terms.length > 0) {
+        rows = rows.filter(r => {
+          const hay = `${r.category} ${r.service}`.toLowerCase();
+          return terms.every(t => hay.includes(t));
+        });
+      }
     }
     if (haartyp === "wellig") {
       rows = rows.filter(r => /wellig|usbekisch/i.test(r.category) || !/glatt|russisch/i.test(r.category));
