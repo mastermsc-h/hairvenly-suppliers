@@ -172,11 +172,24 @@ export default function InventoryPageClient({ data, title, subtitle, lastUpdated
                       const printed = printedSummary?.[r.barcode!]?.totalPrinted ?? 0;
                       return s + Math.max(0, Math.floor(r.quantity) - printed);
                     }, 0);
+                    // Safari-Workaround: sticky <tr> Compositing kann button-clicks
+                    // ins leere laufen lassen. relative+z-index hebt den button auf
+                    // den eigenen layer; onPointerDown als click-fallback.
+                    const handleOpen = (e: React.SyntheticEvent) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openPrintModal(groupKey, rows as InventoryWithTransit[]);
+                    };
                     return (
                       <button
                         type="button"
-                        onClick={() => openPrintModal(groupKey, rows as InventoryWithTransit[])}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-white/15 hover:bg-white/25 text-white border border-white/30"
+                        onClick={handleOpen}
+                        onPointerDown={(e) => {
+                          // Safari: pointer-down feuert auch wenn click swallowed wird
+                          if (e.pointerType === "mouse" || e.pointerType === "pen") return;
+                          handleOpen(e);
+                        }}
+                        className="relative z-20 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-white/15 hover:bg-white/25 text-white border border-white/30 cursor-pointer"
                         title={`Etiketten-Auswahl öffnen (Vorschlag: ${totalSuggested} fehlend)`}
                       >
                         <Printer size={12} />
@@ -852,28 +865,38 @@ function PrintLabels({ items }: { items: { title: string; barcode: string }[] })
           body > *:not(.stock-label-sheet-portal) { display: none !important; }
           .stock-label-sheet-portal { display: block !important; }
           html, body { background: white !important; margin: 0 !important; padding: 0 !important; }
-          @page { size: 50mm 25mm; margin: 0; }
-          /* Jedes label = 1 PNG mit fixen 50mm x 25mm. Browser kann
-             eine bild-zelle nicht über seitengrenzen aufsplitten —
-             das verhindert das gefürchtete '1 label auf 2 seiten'-bug. */
+          /* @page mit explizitem size für Chrome/Firefox. Safari ignoriert
+             custom @page size historisch — wir fixen das per page-break-
+             BEFORE every label (statt page-break-after), damit jedes label
+             zwingend am seitenanfang startet und nie über die page-grenze
+             rutschen kann. */
+          @page { size: 50mm 25mm; margin: 0; marks: none; }
           .stock-label {
             width: 50mm !important;
             height: 25mm !important;
             display: block !important;
+            position: relative !important;
+            margin: 0 !important;
+            padding: 0 !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
-            page-break-after: always !important;
-            break-after: page !important;
+            /* Jedes label startet auf NEUER seite — auch wenn safari A4
+               nutzt, kann das label dadurch nie gesplittet werden. */
+            page-break-before: always !important;
+            break-before: page !important;
           }
-          .stock-label:last-child {
-            page-break-after: auto !important;
-            break-after: auto !important;
+          .stock-label:first-child {
+            page-break-before: avoid !important;
+            break-before: avoid !important;
           }
           .stock-label-img {
             display: block;
             width: 50mm;
             height: 25mm;
             object-fit: contain;
+            position: absolute;
+            top: 0;
+            left: 0;
           }
         }
       `}</style>
