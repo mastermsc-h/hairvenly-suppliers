@@ -1255,7 +1255,10 @@ const getAvailableColors: ToolDef = {
               `Wenn du eine spezifische Farbe wie RAW empfehlen willst, ruf get_stock_eta für genau diese ` +
               `Methode auf um die echte Verfügbarkeit zu prüfen. ` : "") +
           `${colors.length} ECHTE Farben gefunden — NUR diese darfst du dem Kunden nennen. ` +
-          "Bei kuratierten Empfehlungen (3-5 passende statt alle): " +
+          "🚨 MAX 2 EMPFEHLUNGEN: Nenne NIEMALS mehr als 2 Farben pro Antwort (User-Regel 02.06: " +
+          "3 sind zu viel Text). Wähle die 2 BESTEN passenden aus, kurz gehalten — lieber 2 starke " +
+          "Treffer als eine lange Liste. " +
+          "Bei kuratierten Empfehlungen (max 2 passende statt alle): " +
           "WICHTIG bei URL-Wahl: variants[] enthält pro Methode+Länge die KORREKTE shopify_url. " +
           "Wenn du eine spezifische Methode empfiehlst (z.B. Mini Tapes), nimm aus variants[] " +
           "die Variante mit dem passenden method-Wert — NICHT pauschal das oberste shopify_url. " +
