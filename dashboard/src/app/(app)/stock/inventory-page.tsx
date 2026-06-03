@@ -41,14 +41,16 @@ export default function InventoryPageClient({ data, title, subtitle, lastUpdated
   // Modal-State: Gruppe die der User gerade auswählt (zum Drucken)
   const [modalGroup, setModalGroup] = useState<{ key: string; rows: InventoryWithTransit[] } | null>(null);
 
-  // Wenn printItems gesetzt: kurz warten bis SVGs gerendert sind, dann drucken + reset
+  // Wenn printItems gesetzt: warten bis alle Canvas-zu-PNG-Komponenten
+  // fertig komponiert sind, dann drucken + reset. Pro label braucht's
+  // ~10-30ms, also skaliert die wartezeit mit der menge.
   useEffect(() => {
     if (printItems.length === 0) return;
+    const ms = Math.max(400, printItems.length * 25);
     const tm = setTimeout(() => {
       window.print();
-      // Nach kurzer Zeit reset, damit der Druckbereich verschwindet
-      setTimeout(() => setPrintItems([]), 1000);
-    }, 200);
+      setTimeout(() => setPrintItems([]), 1500);
+    }, ms);
     return () => clearTimeout(tm);
   }, [printItems]);
 
@@ -851,35 +853,28 @@ function PrintLabels({ items }: { items: { title: string; barcode: string }[] })
           .stock-label-sheet-portal { display: block !important; }
           html, body { background: white !important; margin: 0 !important; padding: 0 !important; }
           @page { size: 50mm 25mm; margin: 0; }
+          /* Jedes label = 1 PNG mit fixen 50mm x 25mm. Browser kann
+             eine bild-zelle nicht über seitengrenzen aufsplitten —
+             das verhindert das gefürchtete '1 label auf 2 seiten'-bug. */
           .stock-label {
+            width: 50mm !important;
+            height: 25mm !important;
+            display: block !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            page-break-after: always !important;
+            break-after: page !important;
+          }
+          .stock-label:last-child {
+            page-break-after: auto !important;
+            break-after: auto !important;
+          }
+          .stock-label-img {
+            display: block;
             width: 50mm;
             height: 25mm;
-            padding: 1mm;
-            box-sizing: border-box;
-            page-break-after: always;
-            break-after: page;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
+            object-fit: contain;
           }
-          .stock-label:last-child { page-break-after: auto; break-after: auto; }
-          .stock-label-title {
-            font-size: 6pt;
-            line-height: 1.1;
-            text-align: center;
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-            color: #000;
-            max-height: 7mm;
-            overflow: hidden;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            margin-bottom: 0.5mm;
-          }
-          .stock-label-barcode { width: 100%; max-height: 14mm; }
-          .stock-label-barcode svg { width: 100%; height: 100%; max-height: 14mm; }
         }
       `}</style>
       <div className="stock-label-sheet-portal">
@@ -892,31 +887,103 @@ function PrintLabels({ items }: { items: { title: string; barcode: string }[] })
   );
 }
 
+// Pixel-dimensionen des Label-Canvas (Aspect-ratio 50:25 = 2:1).
+// 600×300 px für scharfe drucke bei 203/300 dpi auf Zebra ZD421.
+const STOCK_LABEL_W = 600;
+const STOCK_LABEL_H = 300;
+
 function SingleLabel({ title, barcode }: { title: string; barcode: string }) {
-  const ref = useRef<SVGSVGElement>(null);
+  // Komplette Label-Komposition in EIN canvas → PNG → <img>.
+  // Ein PNG mit fixen mm-massen rendert atomar im print — browser können
+  // es nicht über seiten zerlegen. Lösung für '1 label auf 2 seiten'-bug.
+  const [labelDataUrl, setLabelDataUrl] = useState<string>("");
+
   useEffect(() => {
-    if (!ref.current) return;
     try {
-      JsBarcode(ref.current, barcode, {
+      // 1) Barcode-Canvas separat erzeugen
+      const barcodeCanvas = document.createElement("canvas");
+      JsBarcode(barcodeCanvas, barcode, {
         format: "CODE128",
         displayValue: true,
-        fontSize: 10,
-        height: 36,
+        fontSize: 30,
+        height: 130,
         margin: 0,
-        textMargin: 1,
+        textMargin: 4,
+        background: "#ffffff",
+        lineColor: "#000000",
       });
+
+      // 2) Label-Canvas mit Titel + komponiertem Barcode
+      const canvas = document.createElement("canvas");
+      canvas.width = STOCK_LABEL_W;
+      canvas.height = STOCK_LABEL_H;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, STOCK_LABEL_W, STOCK_LABEL_H);
+
+      // Titel (max 2 Zeilen)
+      const titleLines = splitStockLabelTitle(title, 38);
+      ctx.fillStyle = "#000000";
+      ctx.font = "bold 22px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      const titleY = 12;
+      const lineHeight = 26;
+      titleLines.forEach((line, i) => {
+        ctx.fillText(line, STOCK_LABEL_W / 2, titleY + i * lineHeight, STOCK_LABEL_W - 20);
+      });
+
+      // Barcode unterhalb des Titels — proportionsgerecht eingebettet
+      const titleBlockH = titleY + titleLines.length * lineHeight + 6;
+      const barcodeArea = {
+        x: 20,
+        y: titleBlockH,
+        w: STOCK_LABEL_W - 40,
+        h: STOCK_LABEL_H - titleBlockH - 8,
+      };
+      const bcRatio = barcodeCanvas.width / barcodeCanvas.height;
+      let drawW = barcodeArea.w;
+      let drawH = drawW / bcRatio;
+      if (drawH > barcodeArea.h) {
+        drawH = barcodeArea.h;
+        drawW = drawH * bcRatio;
+      }
+      const drawX = barcodeArea.x + (barcodeArea.w - drawW) / 2;
+      const drawY = barcodeArea.y + (barcodeArea.h - drawH) / 2;
+      ctx.drawImage(barcodeCanvas, drawX, drawY, drawW, drawH);
+
+      setLabelDataUrl(canvas.toDataURL("image/png"));
     } catch {
-      // ignore
+      // ignore (z.B. ungültiger Code)
     }
-  }, [barcode]);
+  }, [title, barcode]);
+
   return (
     <div className="stock-label">
-      <div className="stock-label-title">{title}</div>
-      <div className="stock-label-barcode">
-        <svg ref={ref} />
-      </div>
+      {labelDataUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={labelDataUrl} alt="" className="stock-label-img" />
+      )}
     </div>
   );
+}
+
+// Splittet titel auf max 2 zeilen, zweite zeile bekommt "…"-fallback
+function splitStockLabelTitle(title: string, maxCharsPerLine: number): string[] {
+  if (title.length <= maxCharsPerLine) return [title];
+  // an einem space splitten
+  let breakAt = -1;
+  for (let i = maxCharsPerLine; i > 0; i--) {
+    if (title[i] === " ") { breakAt = i; break; }
+  }
+  if (breakAt === -1) breakAt = maxCharsPerLine;
+  const line1 = title.slice(0, breakAt).trim();
+  let line2 = title.slice(breakAt).trim();
+  if (line2.length > maxCharsPerLine) {
+    line2 = line2.slice(0, maxCharsPerLine - 1) + "…";
+  }
+  return [line1, line2];
 }
 
 function KpiCard({ label, value, icon, color }: { label: string; value: string; icon: React.ReactNode; color: "indigo" | "rose" | "emerald" | "amber" }) {

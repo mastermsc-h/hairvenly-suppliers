@@ -19,6 +19,7 @@ interface GraphQLResponse<T = unknown> {
 export async function shopifyGraphQL<T = unknown>(
   query: string,
   variables?: Record<string, unknown>,
+  opts?: { allowPartialErrors?: boolean },
 ): Promise<GraphQLResponse<T>> {
   if (!SHOP_DOMAIN || !ACCESS_TOKEN) {
     throw new Error("SHOPIFY_SHOP_DOMAIN and SHOPIFY_ACCESS_TOKEN must be set");
@@ -54,10 +55,21 @@ export async function shopifyGraphQL<T = unknown>(
     // mit der alten Logik (nur `!json.data`) fälschlich als Erfolg behandelt
     // wurde. Sicherheitsrelevant für Inventory-Mutationen: lieber laut
     // scheitern als stillschweigend NICHTS schreiben und Erfolg melden.
+    //
+    // AUSNAHME: bei opts.allowPartialErrors (z.B. bulk-read-queries, die oft
+    // throttle/deprecation-warnungen in errors[] kriegen aber trotzdem
+    // verwertbare data liefern), tolerieren wir errors solange data da ist.
+    // Dann landen die meldungen nur im console.warn statt zu werfen.
     if (json.errors && json.errors.length > 0) {
-      throw new Error(
-        `Shopify GraphQL error: ${json.errors.map((e) => e.message).join("; ")}`,
-      );
+      if (opts?.allowPartialErrors && json.data) {
+        console.warn(
+          `[shopifyGraphQL] partial errors (ignored, data present): ${json.errors.map((e) => e.message).join("; ")}`,
+        );
+      } else {
+        throw new Error(
+          `Shopify GraphQL error: ${json.errors.map((e) => e.message).join("; ")}`,
+        );
+      }
     }
     return json;
   }
@@ -1431,6 +1443,7 @@ export async function fetchAllVariantsForBarcodes(): Promise<BarcodeVariant[]> {
     const res: GraphQLResponse<BarcodeProductsResponse> = await shopifyGraphQL<BarcodeProductsResponse>(
       query,
       { cursor },
+      { allowPartialErrors: true },
     );
 
     const products = res.data?.products.edges.map((e) => e.node) ?? [];
@@ -1525,6 +1538,7 @@ export async function fetchAllVariantsForAudit(): Promise<AuditVariant[]> {
     const res: GraphQLResponse<AuditProductsResponse> = await shopifyGraphQL<AuditProductsResponse>(
       query,
       { cursor },
+      { allowPartialErrors: true },
     );
 
     const products = res.data?.products.edges.map((e) => e.node) ?? [];
