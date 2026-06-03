@@ -747,7 +747,6 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
               {activeChips.map((chip, i) => (
                 <Link key={i} href={chip.clearHref}
                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200 text-[11px] hover:bg-blue-100"
-                  onClick={(e) => e.stopPropagation()}
                   title="Filter entfernen"
                 >
                   {chip.label}
