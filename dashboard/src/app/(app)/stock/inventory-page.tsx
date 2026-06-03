@@ -432,9 +432,13 @@ function PrintModal({
     onConfirm(items);
   }
 
-  return (
+  // Portal an document.body, damit kein parent-stacking-context oder
+  // -transform das modal clippen kann (Safari-Workaround: position:fixed
+  // wird durch ancestor-transforms/filters gebrochen).
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
@@ -674,7 +678,8 @@ function PrintModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
