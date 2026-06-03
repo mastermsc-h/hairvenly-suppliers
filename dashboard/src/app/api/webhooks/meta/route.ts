@@ -697,6 +697,19 @@ async function routeIncoming(opts: {
     console.log(`[meta-webhook] kill-switch BYPASSED — autoOverrideType=${autoOverrideType} ist kontrollierte Vorbereitungs-Antwort`);
   }
 
+  // 🎨 FARBBERATUNG-HARTAUSNAHME (User-Anweisung 02.06: "keine Farbberatung
+  // momentan"). color_advice darf AKTUELL NIEMALS automatisch beantwortet
+  // werden — auch nicht im auto-Modus, auch nicht via autoOverrideType.
+  // Farbberatung ist Stylistinnen-Aufgabe (subjektiv, Foto-Interpretation).
+  // Der explizite "Antwort generieren"-Klick der MA läuft über einen anderen
+  // Pfad (generateDraftOnDemand in chat-inbox.ts), ist also NICHT betroffen —
+  // die MA kann weiterhin bewusst einen Entwurf anfordern.
+  // Wieder freischalten: diesen Block entfernen.
+  if (sessionCategory === "color_advice") {
+    console.log(`[meta-webhook] COLOR-ADVICE-HARTAUSNAHME — kein Autobot bei Farbberatung, session=${session.id.slice(0,8)}`);
+    return;
+  }
+
   // 🤝 MA-AKTIV-GUARD (User-Bug 02.06: Bot grätschte in laufende manuelle
   // Farbberatung rein). Wenn in den letzten 6 STUNDEN eine ECHTE manuelle
   // Mitarbeiter-Nachricht (human_agent, NICHT auto_sent) in dieser Session
