@@ -507,6 +507,11 @@ export async function approveDraft(
     tool_calls:   draft.tool_calls,
     tool_results: draft.tool_results,
     auto_sent:    false,
+    // agent_id = der freigebende Mitarbeiter (assistiert-Modus). Damit steht
+    // pro Nachricht fest, WER sie übers Dashboard abgeschickt hat (User-Wunsch
+    // 02.06: (i)-Info neben jeder Dashboard-Antwort). IG-App-Echos haben
+    // weiterhin KEINE agent_id → so unterscheidbar.
+    agent_id:     user.id,
     teach_feedback_at: markAsPositive ? new Date().toISOString() : null,
     teach_feedback_by: markAsPositive ? user.id : null,
     teach_sentiment:   markAsPositive ? "positive" : null,

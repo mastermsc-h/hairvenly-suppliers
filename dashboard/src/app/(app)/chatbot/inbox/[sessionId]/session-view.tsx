@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown, AlertTriangle, Mail, CornerUpLeft } from "lucide-react";
+import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown, AlertTriangle, Mail, CornerUpLeft, Info } from "lucide-react";
 import CategorySelector from "./category-selector";
 import AdditionalCategoriesSelector from "./additional-categories-selector";
 import AddToWaitlistButton from "./add-to-waitlist-button";
@@ -1107,8 +1107,20 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
             />
           )}
         </div>
-        <div className="w-7 h-7 rounded-full bg-rose-100 flex-shrink-0 flex items-center justify-center">
-          <Bot size={12} className="text-rose-600" />
+        <div className="flex flex-col items-center gap-1 flex-shrink-0">
+          <div className="w-7 h-7 rounded-full bg-rose-100 flex items-center justify-center">
+            <Bot size={12} className="text-rose-600" />
+          </div>
+          {/* (i): wer hat übers Dashboard abgeschickt. Nur wenn agent_name
+              gesetzt ist — IG-App-Antworten haben keine agent_id. */}
+          {msg.agent_name && (
+            <span
+              className="cursor-help text-neutral-300 hover:text-neutral-500"
+              title={`Abgeschickt von: ${msg.agent_name} (über Dashboard)`}
+            >
+              <Info size={12} />
+            </span>
+          )}
         </div>
       </div>
     );
@@ -1125,8 +1137,20 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
             {msg.agent_name || "Mitarbeiterin"} · {time}
           </div>
         </div>
-        <div className="w-7 h-7 rounded-full bg-orange-100 flex-shrink-0 flex items-center justify-center">
-          <UserCheck size={12} className="text-orange-600" />
+        <div className="flex flex-col items-center gap-1 flex-shrink-0">
+          <div className="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center">
+            <UserCheck size={12} className="text-orange-600" />
+          </div>
+          {/* (i): wer hat übers Dashboard abgeschickt. agent_name gesetzt =
+              Dashboard-Antwort. IG-App-Echos haben keine agent_id → kein (i). */}
+          {msg.agent_name && (
+            <span
+              className="cursor-help text-neutral-300 hover:text-neutral-500"
+              title={`Abgeschickt von: ${msg.agent_name} (über Dashboard)`}
+            >
+              <Info size={12} />
+            </span>
+          )}
         </div>
       </div>
     );
