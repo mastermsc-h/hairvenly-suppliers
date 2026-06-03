@@ -697,6 +697,32 @@ async function routeIncoming(opts: {
     console.log(`[meta-webhook] kill-switch BYPASSED — autoOverrideType=${autoOverrideType} ist kontrollierte Vorbereitungs-Antwort`);
   }
 
+  // 🤝 MA-AKTIV-GUARD (User-Bug 02.06: Bot grätschte in laufende manuelle
+  // Farbberatung rein). Wenn in den letzten 6 STUNDEN eine ECHTE manuelle
+  // Mitarbeiter-Nachricht (human_agent, NICHT auto_sent) in dieser Session
+  // war, übernimmt der Mensch gerade aktiv das Gespräch — der Bot soll NICHT
+  // automatisch antworten/Entwürfe erzeugen. Die MA klickt selbst "Antwort
+  // generieren", wenn sie Bot-Hilfe will. Kategorie-unabhängig (greift auch
+  // wenn die Auto-Kategorisierung mal falsch ist, z.B. Farbberatung als
+  // "availability" gelabelt).
+  if (session.status === "active") {
+    const sixHoursAgo = new Date(Date.now() - 6 * 3600 * 1000).toISOString();
+    const { data: recentHumanMsgs } = await svc
+      .from("chat_messages")
+      .select("created_at, auto_sent")
+      .eq("session_id", session.id)
+      .eq("role", "human_agent")
+      .is("deleted_at", null)
+      .gt("created_at", sixHoursAgo)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const maActive = (recentHumanMsgs || []).some(m => (m as { auto_sent?: boolean }).auto_sent !== true);
+    if (maActive) {
+      console.log(`[meta-webhook] MA-ACTIVE-GUARD — manuelle MA-Antwort in letzten 6h, Bot greift NICHT ein, session=${session.id.slice(0,8)}`);
+      return;
+    }
+  }
+
   // ⚠️ User-Anweisung 2026-05-30: "assisted" generiert NICHT mehr automatisch
   // einen Entwurf. MA klickt explizit "Antwort generieren" (siehe
   // generateDraftOnDemand-Action). Nur "auto" (sofort senden) und
