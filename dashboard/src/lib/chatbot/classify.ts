@@ -82,8 +82,8 @@ ${categoryList}
 
 WICHTIGE REGELN:
 - "general" NUR verwenden wenn es WIRKLICH keine spezifische Kategorie ist (reine Grüße, "Danke", oder unverständlich)
-- Bei Beratungswunsch zu Farbe / "welche Farbe passt" → color_advice (NICHT general)
-- Bei "habt ihr X" / "auf Lager" / "noch da" → availability
+- 🎨 color_advice hat VORRANG: Sobald die Kundin um eine FARB-EMPFEHLUNG bittet ("welche Farbe passt", "welche Farbe könnte passen", "sagt mir welche Farbe", "welcher Ton zu mir", "Farbberatung", schickt ein Foto ihrer Haare für Farbwahl) → IMMER color_advice. Das gilt AUCH wenn in denselben Nachrichten "ausverkauft", "auf Lager", "noch da" o.ä. vorkommt — die Farb-Empfehlungsbitte ist das eigentliche Anliegen, die Verfügbarkeit nur Nebenaspekt. NICHT availability wählen nur weil "ausverkauft" öfter vorkommt.
+- Bei "habt ihr X" / "auf Lager" / "noch da" OHNE Farb-Empfehlungsbitte → availability
 - Bei "kann ich vorbeikommen" / "im Laden" / "Showroom" → appointment
 - Bei "we have hair to sell" / "eleman ariyor" / Friseur-Outreach → partnership
 - Bei konkretem Beratungswunsch zur Verlängerung → color_advice
