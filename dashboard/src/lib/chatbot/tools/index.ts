@@ -1454,6 +1454,16 @@ const getSalonServicePrice: ToolDef = {
         count: services.length,
         message:
           "Nenne der Kundin den/die relevanten Preise KURZ und KLAR — max. 2-3 Services pro Antwort. " +
+          "🚨 PREIS-LOGIK (KRITISCH): Diese Einarbeitungs-/Service-Preise sind KOMPLETTPREISE — " +
+          "das HAAR/die Extensions sind im Einarbeitungspreis BEREITS ENTHALTEN (z.B. 'Tressen 100g " +
+          "einarbeiten = 470€' = inkl. Haar). NIEMALS zusätzlich den Produkt-/Extensions-Preis aus " +
+          "get_price addieren — das wäre DOPPELT berechnet und ein schwerer Fehler. Bei einer " +
+          "Salon-Behandlung NUR den Einarbeitungspreis nennen, KEINE Summe aus Extensions + Einarbeitung. " +
+          "(get_price/Produktpreise gelten NUR wenn die Kundin das Haar OHNE Einbau, also nur zum " +
+          "Kaufen/Selbstmachen, will.) " +
+          "🚫 KEINE proaktiven Methoden-Wertungen: Behaupte NICHT unaufgefordert dass eine Methode " +
+          "'schonender/besser' ist (z.B. 'Tressen sind schonender als Tapes'). NUR wenn die Kundin " +
+          "EXPLIZIT fragt ('was ist besser/schonender?'). Sonst sachlich bei der gestellten Frage bleiben. " +
           `Füge IMMER am Ende den ${BUSINESS_CONFIG.booking_provider_name}-Link hinzu für 'alle Preise + Termin buchen': ` +
           `${BUSINESS_CONFIG.planity_url} — formuliere natürlich, nicht wie Liste.`,
         services,
