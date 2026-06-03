@@ -697,16 +697,20 @@ async function routeIncoming(opts: {
     console.log(`[meta-webhook] kill-switch BYPASSED — autoOverrideType=${autoOverrideType} ist kontrollierte Vorbereitungs-Antwort`);
   }
 
-  // 🎨 FARBBERATUNG-HARTAUSNAHME (User-Anweisung 02.06: "keine Farbberatung
-  // momentan"). color_advice darf AKTUELL NIEMALS automatisch beantwortet
-  // werden — auch nicht im auto-Modus, auch nicht via autoOverrideType.
-  // Farbberatung ist Stylistinnen-Aufgabe (subjektiv, Foto-Interpretation).
+  // 🚫 KATEGORIE-HARTAUSNAHMEN (User-Anweisungen 02.06): Diese Kategorien
+  // dürfen AKTUELL NIEMALS automatisch beantwortet werden — auch nicht im
+  // auto-Modus, auch nicht via autoOverrideType.
+  //   • color_advice — Farbberatung ist Stylistinnen-Aufgabe (subjektiv,
+  //     Foto-Interpretation).
+  //   • models — Model-Anfragen sind individuell (Casting/Konditionen) und
+  //     müssen manuell von der MA bearbeitet werden.
   // Der explizite "Antwort generieren"-Klick der MA läuft über einen anderen
   // Pfad (generateDraftOnDemand in chat-inbox.ts), ist also NICHT betroffen —
   // die MA kann weiterhin bewusst einen Entwurf anfordern.
-  // Wieder freischalten: diesen Block entfernen.
-  if (sessionCategory === "color_advice") {
-    console.log(`[meta-webhook] COLOR-ADVICE-HARTAUSNAHME — kein Autobot bei Farbberatung, session=${session.id.slice(0,8)}`);
+  // Wieder freischalten: Kategorie aus NO_AUTOBOT_CATEGORIES entfernen.
+  const NO_AUTOBOT_CATEGORIES = new Set(["color_advice", "models"]);
+  if (sessionCategory && NO_AUTOBOT_CATEGORIES.has(sessionCategory)) {
+    console.log(`[meta-webhook] NO-AUTOBOT-CATEGORY (${sessionCategory}) — kein Autobot, session=${session.id.slice(0,8)}`);
     return;
   }
 
