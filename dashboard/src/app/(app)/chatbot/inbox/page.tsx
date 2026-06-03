@@ -123,14 +123,22 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   if (filter !== "all")        query = query.eq("status", filter);
   else if (!showClosed)        query = query.neq("status", "closed"); // erledigte standardmäßig ausblenden
   if (channelFilter !== "all") query = query.eq("channel", channelFilter);
-  if (categoryFilter !== "all") {
-    // Session erscheint in einem Kategorie-Tab wenn die Kategorie entweder
-    // PRIMARY (category) ODER eine manuell gesetzte ZUSATZ-Kategorie
-    // (additional_categories[]) ist. Implementation: PostgREST .or()-Klausel.
-    query = query.or(`category.eq.${categoryFilter},additional_categories.cs.{${categoryFilter}}`);
-  }
+  // ⚠️ KATEGORIE-FILTER bewusst NICHT mehr in SQL (User-Bug 02.06: dadurch
+  // basierten alle Tab-/Kategorie-Counts auf der gefilterten Teilmenge → "Zu
+  // tun" sank von 124 auf 12 wenn man Termin filterte). Stattdessen wird der
+  // Kategorie-Filter unten in JS NUR auf die ANGEZEIGTE Liste angewandt
+  // (matchesCategoryFilter), genau wie die view-Filter. So bleiben alle Counts
+  // GLOBAL (über alle nicht-geschlossenen Sessions).
   if (searchQuery) query = query.ilike("customer_name", `%${searchQuery}%`);
   const { data: sessions } = await query;
+
+  // Kategorie-Match-Helper (PRIMARY category ODER additional_categories[]).
+  const matchesCategoryFilter = (s: { category?: string | null; additional_categories?: string[] | null }) => {
+    if (categoryFilter === "all") return true;
+    if (s.category === categoryFilter) return true;
+    const add = Array.isArray(s.additional_categories) ? s.additional_categories : [];
+    return add.includes(categoryFilter);
+  };
 
   // Wenn Such-Query: Auch IDs aus chat_messages.content matching suchen
   // (damit man auch nach Nachricht-Inhalt suchen kann, nicht nur Kundenname)
@@ -404,6 +412,11 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
   // Filter nach Mode: pure_bot = nur Bot hat geantwortet, with_human = Mensch hat reingeschrieben,
   // autobot_active = mindestens eine autonom-vom-Bot-gesendete Nachricht (auto_sent=true)
   let filteredSessions = combinedSessions;
+  // Kategorie-Filter wirkt NUR auf die angezeigte Liste (nicht auf Counts —
+  // die bleiben global, siehe SQL-Kommentar oben).
+  if (categoryFilter !== "all") {
+    filteredSessions = filteredSessions.filter(matchesCategoryFilter);
+  }
   if (mode === "pure_bot") {
     filteredSessions = filteredSessions.filter(s => (stats[s.id]?.humanCount || 0) === 0);
   } else if (mode === "with_human") {
@@ -553,8 +566,17 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
     ? combinedSessions.filter(s => unreadMap[s.id])
     : combinedSessions;
   for (const s of baseForCounts) {
-    const c = s.category || "general";
-    categoryCounts[c] = (categoryCounts[c] || 0) + 1;
+    // Primary-Kategorie zählen + alle manuellen Zusatz-Kategorien (damit der
+    // Chip-Count konsistent mit dem Filter ist, der ebenfalls
+    // additional_categories berücksichtigt). Dedup pro Session, damit eine
+    // Session mit category=X UND additional=[X] nicht doppelt zählt.
+    const cats = new Set<string>();
+    cats.add(s.category || "general");
+    const add = Array.isArray((s as { additional_categories?: string[] }).additional_categories)
+      ? (s as { additional_categories?: string[] }).additional_categories!
+      : [];
+    for (const a of add) cats.add(a);
+    for (const c of cats) categoryCounts[c] = (categoryCounts[c] || 0) + 1;
   }
 
   // KPIs (awaiting_human wird nicht mehr genutzt — siehe KPI-Block unten)
