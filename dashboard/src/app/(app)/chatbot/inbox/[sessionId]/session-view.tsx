@@ -1095,7 +1095,11 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
                 🤝 assistiert
               </span>
             )}
-            <span>Ava von {signatureName || "—"} · {time}</span>
+            <span>
+              Ava von {signatureName || "—"}
+              {msg.agent_name ? <> · <span className="text-neutral-600 font-medium">freigegeben: {msg.agent_name}</span></> : null}
+              {" · "}{time}
+            </span>
           </div>
           {/* Nachtraining-Box für Autobot-Antworten */}
           {msg.auto_sent && (
@@ -1115,7 +1119,7 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
               gesetzt ist — IG-App-Antworten haben keine agent_id. */}
           {msg.agent_name && (
             <span
-              className="cursor-help text-neutral-300 hover:text-neutral-500"
+              className="cursor-help text-neutral-400 hover:text-neutral-700"
               title={`Abgeschickt von: ${msg.agent_name} (über Dashboard)`}
             >
               <Info size={12} />
@@ -1134,7 +1138,9 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
           {ReplyPreview}
           <div className="bg-orange-50 border border-orange-100/80 rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap shadow-sm">{msg.content}</div>
           <div className="text-[10px] text-neutral-400 mt-0.5 text-right">
-            {msg.agent_name || "Mitarbeiterin"} · {time}
+            {msg.agent_name
+              ? <><span className="text-neutral-600 font-medium">{msg.agent_name}</span> · über Dashboard</>
+              : "Mitarbeiterin · Instagram-App"} · {time}
           </div>
         </div>
         <div className="flex flex-col items-center gap-1 flex-shrink-0">
@@ -1145,7 +1151,7 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
               Dashboard-Antwort. IG-App-Echos haben keine agent_id → kein (i). */}
           {msg.agent_name && (
             <span
-              className="cursor-help text-neutral-300 hover:text-neutral-500"
+              className="cursor-help text-neutral-400 hover:text-neutral-700"
               title={`Abgeschickt von: ${msg.agent_name} (über Dashboard)`}
             >
               <Info size={12} />
