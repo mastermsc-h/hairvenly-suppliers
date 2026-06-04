@@ -4,7 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, Save, Check, XCircle, AlertTriangle, Download, CalendarDays, Trash2,
-  Cake, GraduationCap, ChevronLeft, ChevronRight,
+  Cake, GraduationCap, ChevronLeft, ChevronRight, ChevronDown, CalendarRange,
 } from "lucide-react";
 import { TEAMS, teamMeta } from "@/lib/staff/teams";
 import { countWorkdays, vacationBalance, bremenHolidays } from "@/lib/staff/holidays";
@@ -41,6 +41,7 @@ export default function VacationClient({
   const [year, setYear] = useState(currentYear);
   const [teamFilter, setTeamFilter] = useState<string>("all");
   const [adding, setAdding] = useState(false);
+  const [showYear, setShowYear] = useState(false);
 
   const byMember = useMemo(() => {
     const map = new Map<string, VacationRequest[]>();
@@ -221,6 +222,23 @@ export default function VacationClient({
       {/* Team-Kapazitätskalender */}
       <CapacityCalendar members={members} requests={requests} settings={settings} year={year} today={today} />
 
+      {/* Jahresraster-Planner (ausklappbare Alternative) */}
+      <div>
+        <button
+          onClick={() => setShowYear((s) => !s)}
+          className="flex items-center gap-2 text-sm font-medium text-neutral-700 rounded-lg border border-neutral-300 bg-white px-3 py-2 hover:bg-neutral-50"
+        >
+          <CalendarRange size={16} />
+          Jahresansicht (Raster) {showYear ? "ausblenden" : "anzeigen"}
+          <ChevronDown size={15} className={`transition-transform ${showYear ? "rotate-180" : ""}`} />
+        </button>
+        {showYear && (
+          <div className="mt-3">
+            <YearPlanner members={members} requests={requests} settings={settings} year={year} today={today} />
+          </div>
+        )}
+      </div>
+
       {/* Timeline */}
       <Timeline members={visibleMembers} requests={requests} year={year} today={today} />
 
@@ -353,6 +371,112 @@ function CapacityCalendar({
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function YearPlanner({
+  members, requests, settings, year, today,
+}: {
+  members: StaffMember[];
+  requests: VacationRequest[];
+  settings: TeamSetting[];
+  year: number;
+  today: string;
+}) {
+  const [team, setTeam] = useState<string>("all");
+  const visible = team === "all" ? members : members.filter((m) => m.team === team);
+  const idToMember = useMemo(() => new Map(visible.map((m) => [m.id, m])), [visible]);
+  const holidays = useMemo(() => bremenHolidays(year), [year]);
+  const cap = team === "all" ? UNLIMITED : maxOnVacation(settings, team);
+  const dayCols = Array.from({ length: 31 }, (_, i) => i + 1);
+
+  return (
+    <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <div className="flex items-center gap-2 text-sm font-medium text-neutral-700">
+          <CalendarRange size={16} /> Jahresplaner {year}
+        </div>
+        <select value={team} onChange={(e) => setTeam(e.target.value)} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm">
+          <option value="all">Alle Teams</option>
+          {TEAMS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="border-separate border-spacing-0.5 text-[10px]">
+          <thead>
+            <tr>
+              <th className="sticky left-0 bg-white z-10 text-left pr-2 font-medium text-neutral-500 w-10">Monat</th>
+              {dayCols.map((d) => (
+                <th key={d} className="w-5 text-center font-normal text-neutral-400">{d}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {MONTHS.map((moLabel, mi) => {
+              const daysInMonth = new Date(Date.UTC(year, mi + 1, 0)).getUTCDate();
+              return (
+                <tr key={mi}>
+                  <td className="sticky left-0 bg-white z-10 pr-2 font-medium text-neutral-600">{moLabel}</td>
+                  {dayCols.map((d) => {
+                    if (d > daysInMonth) return <td key={d} className="w-5 h-5" />;
+                    const day = `${year}-${pad(mi + 1)}-${pad(d)}`;
+                    const dow = new Date(Date.UTC(year, mi, d)).getUTCDay();
+                    const weekend = dow === 0 || dow === 6;
+                    const holiday = holidays.has(day);
+                    const entries = requests
+                      .filter((r) => r.status !== "rejected" && idToMember.has(r.staff_id) && r.start_date <= day && r.end_date >= day)
+                      .map((r) => ({ m: idToMember.get(r.staff_id)!, pending: r.status === "submitted" }));
+                    const bdays = visible.filter((m) => m.birth_date && m.birth_date.slice(5) === `${pad(mi + 1)}-${pad(d)}`);
+                    const isToday = day === today;
+                    const over = cap < UNLIMITED && entries.length > cap;
+
+                    let bg = "bg-white";
+                    let border = "border border-neutral-100";
+                    if (entries.length > 0) {
+                      bg = team === "all" ? "bg-neutral-700" : teamMeta(team).bar;
+                      border = "border border-transparent";
+                      if (entries.some((e) => e.pending) && entries.every((e) => e.pending)) bg += " opacity-50";
+                    } else if (holiday) {
+                      bg = "bg-rose-50";
+                    } else if (weekend) {
+                      bg = "bg-neutral-100";
+                    }
+                    const title = [
+                      day,
+                      holiday ? "Feiertag" : "",
+                      entries.length ? "Urlaub: " + entries.map((e) => e.m.name + (e.pending ? " (offen)" : "")).join(", ") : "",
+                      bdays.length ? "🎂 " + bdays.map((m) => m.name).join(", ") : "",
+                    ].filter(Boolean).join(" · ");
+
+                    return (
+                      <td key={d} className="p-0">
+                        <div
+                          title={title}
+                          className={`w-5 h-5 rounded-sm flex items-center justify-center ${bg} ${over ? "ring-1 ring-rose-500" : border} ${isToday ? "outline outline-1 outline-neutral-900" : ""} ${bdays.length ? "border-b-2 border-b-fuchsia-400" : ""}`}
+                        >
+                          {entries.length > 1 && <span className="text-white font-semibold leading-none">{entries.length}</span>}
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-3 text-[10px] text-neutral-500">
+        <span className="inline-flex items-center gap-1"><span className={`w-3 h-3 rounded-sm ${team === "all" ? "bg-neutral-700" : teamMeta(team).bar}`} /> Urlaub</span>
+        <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-neutral-700 opacity-50" /> nur beantragt</span>
+        <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-neutral-100" /> Wochenende</span>
+        <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-rose-50 border border-neutral-200" /> Feiertag (Bremen)</span>
+        <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-white border-b-2 border-b-fuchsia-400" /> Geburtstag</span>
+        <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm ring-1 ring-rose-500" /> über Kapazität</span>
+        <span>· Zahl = Anzahl gleichzeitig · Maus über Tag = Namen</span>
       </div>
     </div>
   );
