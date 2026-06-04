@@ -339,9 +339,15 @@ export default function BarcodesClient({
 }
 
 // Pixel-dimensionen des Label-Canvas (Aspect-ratio 50:25 = 2:1).
-// 600×300 = ~12 px/mm bei 50mm — gibt scharfe drucke bei 203/300 dpi.
-const LABEL_W = 600;
-const LABEL_H = 300;
+// 2000×1000 = 40 px/mm bei 50mm — entspricht 1016 dpi (>> 300 dpi).
+// User-feedback: vorherige 600×300 (12 px/mm) war zu unscharf nach
+// downscaling auf das druckziel.
+const LABEL_W = 2000;
+const LABEL_H = 1000;
+
+// Verhaeltnis-faktor: alles was vorher fuer 600×300 gerechnet wurde,
+// muss mal SCALE — so bleibt das layout identisch in mm.
+const SCALE = LABEL_W / 600;
 
 function Label({ variant }: { variant: Variant }) {
   // Komplette Label-Komposition in EIN canvas → PNG → <img>.
@@ -352,14 +358,16 @@ function Label({ variant }: { variant: Variant }) {
   useEffect(() => {
     try {
       // 1) Barcode-Canvas separat erzeugen (JsBarcode beansprucht canvas exklusiv)
+      // Hoehe halbiert (130 → 65 in 600-px-norm) — user-request: barcode war
+      // zu hoch. Hochskaliert mit SCALE fuer schaerfe.
       const barcodeCanvas = document.createElement("canvas");
       JsBarcode(barcodeCanvas, variant.barcode, {
         format: "CODE128",
         displayValue: true,
-        fontSize: 30,
-        height: 130,
+        fontSize: 30 * SCALE,
+        height: 65 * SCALE,
         margin: 0,
-        textMargin: 4,
+        textMargin: 4 * SCALE,
         background: "#ffffff",
         lineColor: "#000000",
       });
@@ -379,22 +387,22 @@ function Label({ variant }: { variant: Variant }) {
         : variant.productTitle;
       const titleLines = splitTitle(fullTitle, 38);
       ctx.fillStyle = "#000000";
-      ctx.font = "bold 22px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+      ctx.font = `bold ${22 * SCALE}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
-      const titleY = 12;
-      const lineHeight = 26;
+      const titleY = 12 * SCALE;
+      const lineHeight = 26 * SCALE;
       titleLines.forEach((line, i) => {
-        ctx.fillText(line, LABEL_W / 2, titleY + i * lineHeight, LABEL_W - 20);
+        ctx.fillText(line, LABEL_W / 2, titleY + i * lineHeight, LABEL_W - 20 * SCALE);
       });
 
       // Barcode unterhalb des Titels einbetten — proportionsgerecht
-      const titleBlockH = titleY + titleLines.length * lineHeight + 6;
+      const titleBlockH = titleY + titleLines.length * lineHeight + 6 * SCALE;
       const barcodeArea = {
-        x: 20,
+        x: 20 * SCALE,
         y: titleBlockH,
-        w: LABEL_W - 40,
-        h: LABEL_H - titleBlockH - 8,
+        w: LABEL_W - 40 * SCALE,
+        h: LABEL_H - titleBlockH - 8 * SCALE,
       };
       // Original aspect-ratio des barcode-canvas behalten
       const bcRatio = barcodeCanvas.width / barcodeCanvas.height;
@@ -406,6 +414,8 @@ function Label({ variant }: { variant: Variant }) {
       }
       const drawX = barcodeArea.x + (barcodeArea.w - drawW) / 2;
       const drawY = barcodeArea.y + (barcodeArea.h - drawH) / 2;
+      // Wichtig: image-smoothing aus damit barcode-kanten knackig bleiben
+      ctx.imageSmoothingEnabled = false;
       ctx.drawImage(barcodeCanvas, drawX, drawY, drawW, drawH);
 
       setLabelDataUrl(canvas.toDataURL("image/png"));
