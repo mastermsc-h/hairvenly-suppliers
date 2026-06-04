@@ -25,6 +25,7 @@ import {
 import type {
   StaffMember, TeamSetting, SalaryChange, StaffWarning, VacationRequest, VacationBlackout,
 } from "@/lib/types";
+import { Card, CardHead } from "../staff-ui";
 
 const inputCls =
   "mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 outline-none";
@@ -87,9 +88,9 @@ export default function MembersClient({
         />
       )}
 
-      <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-x-auto">
+      <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-sm overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-neutral-50">
+          <thead className="bg-neutral-50/80 border-b border-neutral-200">
             <tr>
               <Th>Name</Th>
               <Th>Team</Th>
@@ -121,7 +122,7 @@ export default function MembersClient({
                 />
               ) : (
                 <FragmentRow key={m.id}>
-                  <tr className="border-t border-neutral-100">
+                  <tr className={`border-t border-neutral-100 transition-colors ${expanded === m.id ? "bg-neutral-50" : "hover:bg-neutral-50/50"}`}>
                     <td className="px-4 py-3 font-medium align-top">
                       <span className="inline-flex items-center gap-2">
                         {m.name}
@@ -177,7 +178,7 @@ export default function MembersClient({
                     </td>
                   </tr>
                   {expanded === m.id && (
-                    <tr className="bg-neutral-50/60 border-t border-neutral-100">
+                    <tr className="border-t border-neutral-200 bg-gradient-to-b from-neutral-100/70 to-neutral-50/30">
                       <td colSpan={9} className="px-4 py-4 space-y-4">
                         <MemberVacation
                           member={m}
@@ -222,10 +223,9 @@ function TeamSettingsCard({
   onChange: () => void;
 }) {
   return (
-    <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
-      <div className="flex items-center gap-2 text-sm font-medium text-neutral-700 mb-1">
-        <Users2 size={16} /> Team-Besetzung
-      </div>
+    <Card>
+      <CardHead icon={<Users2 size={14} />} title="Team-Besetzung" sub="Max. gleichzeitig im Urlaub je Team" tint="violet" />
+      <div className="p-4 md:p-5">
       <p className="text-xs text-neutral-500 mb-4">
         Wie viele dürfen <b>gleichzeitig</b> im Urlaub sein? Bei Überschreitung gibt es im
         Urlaubskalender eine Warnung (nicht blockiert). Leer/0 wird als „unbegrenzt" behandelt.
@@ -247,7 +247,8 @@ function TeamSettingsCard({
           );
         })}
       </div>
-    </div>
+      </div>
+    </Card>
   );
 }
 
@@ -483,8 +484,7 @@ function FragmentRow({ children }: { children: React.ReactNode }) {
 
 function probationBadge(member: StaffMember, today: string) {
   const p = probation(member.employment_start, today);
-  if (!p) return null;
-  if (p.over) return { text: `Probezeit beendet (${p.end})`, cls: "bg-neutral-100 text-neutral-600" };
+  if (!p || p.over) return null; // nur anzeigen, solange die Probezeit noch läuft
   if (p.daysLeft <= 30) return { text: `Probezeit endet ${p.end} (in ${p.daysLeft} T)`, cls: "bg-amber-100 text-amber-800" };
   return { text: `Probezeit bis ${p.end}`, cls: "bg-emerald-100 text-emerald-800" };
 }
@@ -535,77 +535,77 @@ function AdminPanel({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
       {/* Eintritt / Probezeit */}
-      <div className="rounded-xl border border-neutral-200 bg-white p-3">
-        <div className="flex items-center gap-2 text-xs font-medium text-neutral-700 mb-2">
-          <Lock size={12} /> Eintritt & Probezeit
+      <Card>
+        <CardHead icon={<Lock size={14} />} title="Eintritt & Probezeit" tint="violet" />
+        <div className="p-4">
+          <div className="text-sm text-neutral-700">Eintritt: <b>{member.employment_start ?? "—"}</b></div>
+          {p ? (
+            <div className="text-sm mt-1">
+              Probezeit (6 Mon.) bis <b>{p.end}</b>{" "}
+              {p.over
+                ? <span className="text-neutral-500">— beendet</span>
+                : <span className={p.daysLeft <= 30 ? "text-amber-700 font-medium" : "text-emerald-700"}>— läuft (noch {p.daysLeft} Tage)</span>}
+            </div>
+          ) : (
+            <div className="text-sm text-neutral-400 mt-1">Kein Eintrittsdatum hinterlegt.</div>
+          )}
         </div>
-        <div className="text-sm text-neutral-700">Eintritt: <b>{member.employment_start ?? "—"}</b></div>
-        {p ? (
-          <div className="text-sm mt-1">
-            Probezeit (6 Mon.) bis <b>{p.end}</b>{" "}
-            {p.over
-              ? <span className="text-neutral-500">— beendet</span>
-              : <span className={p.daysLeft <= 30 ? "text-amber-700 font-medium" : "text-emerald-700"}>— läuft (noch {p.daysLeft} Tage)</span>}
-          </div>
-        ) : (
-          <div className="text-sm text-neutral-400 mt-1">Kein Eintrittsdatum hinterlegt.</div>
-        )}
-      </div>
+      </Card>
 
       {/* Gehalt */}
-      <div className="rounded-xl border border-neutral-200 bg-white p-3">
-        <div className="flex items-center gap-2 text-xs font-medium text-neutral-700 mb-2">
-          <TrendingUp size={12} /> Gehalt (mtl. brutto)
+      <Card>
+        <CardHead icon={<TrendingUp size={14} />} title="Gehalt" sub="monatl. brutto" tint="emerald" />
+        <div className="p-4">
+          {salary.length === 0 ? (
+            <div className="text-sm text-neutral-400">Noch kein Gehalt erfasst.</div>
+          ) : (
+            <ul className="space-y-1 mb-2">
+              {salary.map((s, i) => (
+                <li key={s.id} className="flex items-center justify-between text-sm">
+                  <span>
+                    <b>{fmtEur(s.amount)}</b>
+                    <span className="text-neutral-400"> ab {s.effective_date}</span>
+                    {i === 0 && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">aktuell</span>}
+                    {s.note && <span className="block text-[10px] text-neutral-400">{s.note}</span>}
+                  </span>
+                  <button onClick={() => { if (confirm("Eintrag löschen?")) { void (async () => { await deleteSalaryChange(s.id); onChange(); })(); } }} className="text-neutral-300 hover:text-rose-600">
+                    <Trash2 size={13} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <SalaryForm staffId={member.id} onChange={onChange} />
         </div>
-        {salary.length === 0 ? (
-          <div className="text-sm text-neutral-400">Noch kein Gehalt erfasst.</div>
-        ) : (
-          <ul className="space-y-1 mb-2">
-            {salary.map((s, i) => (
-              <li key={s.id} className="flex items-center justify-between text-sm">
-                <span>
-                  <b>{fmtEur(s.amount)}</b>
-                  <span className="text-neutral-400"> ab {s.effective_date}</span>
-                  {i === 0 && <span className="ml-1 text-[10px] text-emerald-700">aktuell</span>}
-                  {s.note && <span className="block text-[10px] text-neutral-400">{s.note}</span>}
-                </span>
-                <button onClick={() => { if (confirm("Eintrag löschen?")) { void (async () => { await deleteSalaryChange(s.id); onChange(); })(); } }} className="text-neutral-300 hover:text-rose-600">
-                  <Trash2 size={13} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <SalaryForm staffId={member.id} onChange={onChange} />
-      </div>
+      </Card>
 
       {/* Verwarnungen */}
-      <div className="rounded-xl border border-neutral-200 bg-white p-3">
-        <div className="flex items-center gap-2 text-xs font-medium text-neutral-700 mb-2">
-          <ShieldAlert size={12} /> Verwarnungen
-        </div>
-        {warnings.length === 0 ? (
-          <div className="text-sm text-neutral-400">Keine Verwarnungen.</div>
-        ) : (
-          <ul className="space-y-1 mb-2">
-            {warnings.map((w) => (
-              <li key={w.id} className="flex items-center justify-between text-sm">
-                <span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${w.type === "written" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-800"}`}>
-                    {w.type === "written" ? "schriftlich" : "mündlich"}
+      <Card>
+        <CardHead icon={<ShieldAlert size={14} />} title="Verwarnungen" tint="rose" />
+        <div className="p-4">
+          {warnings.length === 0 ? (
+            <div className="text-sm text-neutral-400">Keine Verwarnungen.</div>
+          ) : (
+            <ul className="space-y-1 mb-2">
+              {warnings.map((w) => (
+                <li key={w.id} className="flex items-center justify-between text-sm">
+                  <span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${w.type === "written" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-800"}`}>
+                      {w.type === "written" ? "schriftlich" : "mündlich"}
+                    </span>
+                    <span className="text-neutral-400"> {w.warning_date}</span>
+                    {w.reason && <span className="block text-[10px] text-neutral-500">{w.reason}</span>}
                   </span>
-                  <span className="text-neutral-400"> {w.warning_date}</span>
-                  {w.reason && <span className="block text-[10px] text-neutral-500">{w.reason}</span>}
-                </span>
-                <button onClick={() => { if (confirm("Verwarnung löschen?")) { void (async () => { await deleteWarning(w.id); onChange(); })(); } }} className="text-neutral-300 hover:text-rose-600">
-                  <Trash2 size={13} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <WarningForm staffId={member.id} onChange={onChange} />
-      </div>
+                  <button onClick={() => { if (confirm("Verwarnung löschen?")) { void (async () => { await deleteWarning(w.id); onChange(); })(); } }} className="text-neutral-300 hover:text-rose-600">
+                    <Trash2 size={13} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <WarningForm staffId={member.id} onChange={onChange} />
+        </div>
+      </Card>
     </div>
   );
 }
@@ -684,13 +684,11 @@ function MemberVacation({
   const sorted = [...requests].sort((a, b) => (a.start_date < b.start_date ? 1 : -1));
 
   return (
-    <div className="rounded-xl border border-neutral-200 bg-white p-3 space-y-3">
-      <div className="flex items-center gap-2 text-xs font-medium text-neutral-700">
-        <CalendarDays size={13} /> Urlaub {member.name} · {year}
-      </div>
-
+    <Card>
+      <CardHead icon={<CalendarDays size={14} />} title={`Urlaub · ${year}`} sub={member.name} tint="sky" />
+      <div className="p-4 space-y-3">
       {/* Saldo */}
-      <div className="flex flex-wrap gap-4 text-sm">
+      <div className="flex flex-wrap gap-4 text-sm rounded-xl bg-neutral-50/70 border border-neutral-100 px-3 py-2">
         <Stat label="Anspruch" value={member.annual_vacation_days} />
         <Stat label="Übertrag" value={bal.carryover} />
         <Stat label="Verbraucht" value={bal.used} />
@@ -742,7 +740,8 @@ function MemberVacation({
           </table>
         </div>
       )}
-    </div>
+      </div>
+    </Card>
   );
 }
 

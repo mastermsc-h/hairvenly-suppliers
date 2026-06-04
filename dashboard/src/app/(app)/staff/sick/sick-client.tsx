@@ -13,6 +13,7 @@ import {
   createSickDay, uploadSickCertificate, deleteSickDay, getCertificateSignedUrl,
 } from "@/lib/actions/staff";
 import type { StaffMember, SickDay } from "@/lib/types";
+import { Card, CardHead } from "../staff-ui";
 
 const inputCls =
   "mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 outline-none";
@@ -108,15 +109,15 @@ export default function SickClient({
       )}
 
       {/* Pro-Mitarbeiter-Übersicht */}
-      <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-x-auto">
+      <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-sm overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-neutral-50">
+          <thead className="bg-neutral-50/80 border-b border-neutral-200">
             <tr>
-              <th className="text-left px-4 py-2 text-xs uppercase text-neutral-500">Mitarbeiter</th>
-              <th className="text-left px-4 py-2 text-xs uppercase text-neutral-500">Team</th>
-              <th className="text-right px-4 py-2 text-xs uppercase text-neutral-500">Krankheitstage {year}</th>
-              <th className="text-right px-4 py-2 text-xs uppercase text-neutral-500">Meldungen</th>
-              <th className="text-right px-4 py-2 text-xs uppercase text-neutral-500">Fehlende AU</th>
+              <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Mitarbeiter</th>
+              <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Team</th>
+              <th className="text-right px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Krankheitstage {year}</th>
+              <th className="text-right px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Meldungen</th>
+              <th className="text-right px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Fehlende AU</th>
             </tr>
           </thead>
           <tbody>
@@ -124,7 +125,7 @@ export default function SickClient({
               <tr><td colSpan={5} className="px-4 py-8 text-center text-neutral-500">Keine Mitarbeiter.</td></tr>
             )}
             {perMember.map((r) => (
-              <tr key={r.member.id} className="border-t border-neutral-100">
+              <tr key={r.member.id} className="border-t border-neutral-100 hover:bg-neutral-50/50 transition-colors">
                 <td className="px-4 py-3 font-medium">{r.member.name}</td>
                 <td className="px-4 py-3"><span className={`text-xs px-2 py-0.5 rounded-full ${teamMeta(r.member.team).chip}`}>{teamMeta(r.member.team).label}</span></td>
                 <td className="px-4 py-3 text-right tabular-nums font-semibold">{r.total}</td>
@@ -141,18 +142,20 @@ export default function SickClient({
       </div>
 
       {/* Statistik: Monats-Trend */}
-      <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
-        <div className="text-sm font-medium text-neutral-700 mb-3">Krankheitstage je Monat {year}</div>
-        <ResponsiveContainer width="100%" height={240}>
-          <BarChart data={monthData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-            <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-            <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-            <Tooltip />
-            <Bar dataKey="days" fill="#f43f5e" radius={[4, 4, 0, 0]} name="Tage" />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+      <Card>
+        <CardHead icon={<AlertTriangle size={14} />} title={`Krankheitstage je Monat · ${year}`} tint="rose" />
+        <div className="p-4 md:p-5">
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={monthData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+              <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+              <Tooltip />
+              <Bar dataKey="days" fill="#f43f5e" radius={[4, 4, 0, 0]} name="Tage" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
 
       {/* Einzelmeldungen mit Upload */}
       <SickTable members={memberById} sickDays={yearSick} year={year} onChange={() => router.refresh()} />
@@ -234,17 +237,17 @@ function SickForm({ members, onDone, onCancel }: { members: StaffMember[]; onDon
 
 function SickTable({ members, sickDays, year, onChange }: { members: Map<string, StaffMember>; sickDays: SickDay[]; year: number; onChange: () => void }) {
   return (
-    <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-x-auto">
-      <div className="px-4 py-3 text-sm font-medium text-neutral-700 border-b border-neutral-100">Krankmeldungen {year}</div>
+    <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-sm overflow-x-auto">
+      <div className="px-4 py-3 text-sm font-semibold text-neutral-800 border-b border-neutral-100 bg-gradient-to-b from-neutral-50 to-white">Krankmeldungen {year}</div>
       <table className="w-full text-sm">
-        <thead className="bg-neutral-50">
+        <thead className="bg-neutral-50/80 border-b border-neutral-200">
           <tr>
-            <th className="text-left px-4 py-2 text-xs uppercase text-neutral-500">Mitarbeiter</th>
-            <th className="text-left px-4 py-2 text-xs uppercase text-neutral-500">Zeitraum</th>
-            <th className="text-right px-4 py-2 text-xs uppercase text-neutral-500">Tage</th>
-            <th className="text-left px-4 py-2 text-xs uppercase text-neutral-500">Kategorie</th>
-            <th className="text-left px-4 py-2 text-xs uppercase text-neutral-500">Bescheinigung</th>
-            <th className="text-right px-4 py-2 text-xs uppercase text-neutral-500">Aktion</th>
+            <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Mitarbeiter</th>
+            <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Zeitraum</th>
+            <th className="text-right px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Tage</th>
+            <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Kategorie</th>
+            <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Bescheinigung</th>
+            <th className="text-right px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Aktion</th>
           </tr>
         </thead>
         <tbody>
@@ -252,7 +255,7 @@ function SickTable({ members, sickDays, year, onChange }: { members: Map<string,
             <tr><td colSpan={6} className="px-4 py-8 text-center text-neutral-500">Keine Krankmeldungen in {year}.</td></tr>
           )}
           {sickDays.map((s) => (
-            <tr key={s.id} className="border-t border-neutral-100">
+            <tr key={s.id} className="border-t border-neutral-100 hover:bg-neutral-50/50 transition-colors">
               <td className="px-4 py-3 font-medium">{members.get(s.staff_id)?.name ?? "—"}</td>
               <td className="px-4 py-3 whitespace-nowrap">{s.start_date} – {s.end_date}</td>
               <td className="px-4 py-3 text-right tabular-nums">{s.days}</td>

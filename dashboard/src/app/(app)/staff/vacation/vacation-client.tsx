@@ -15,6 +15,7 @@ import {
   createVacationRequest, decideVacation, deleteVacation, addBlackout, deleteBlackout,
 } from "@/lib/actions/staff";
 import type { StaffMember, VacationRequest, TeamSetting, VacationBlackout } from "@/lib/types";
+import { Card, CardHead } from "../staff-ui";
 
 const inputCls =
   "mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 outline-none";
@@ -116,22 +117,22 @@ export default function VacationClient({
 
       {/* Widgets: heute abwesend · Geburtstage */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm">
-          <div className="flex items-center gap-2 text-sm font-medium text-neutral-700 mb-2">
-            <CalendarDays size={16} /> Heute abwesend
+        <Card>
+          <CardHead icon={<CalendarDays size={14} />} title="Heute abwesend" tint="sky" />
+          <div className="p-4">
+            {absentToday.length === 0 ? (
+              <p className="text-sm text-neutral-500">Heute ist niemand im Urlaub.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {absentToday.map((m) => (
+                  <span key={m.id} className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full ${teamMeta(m.team).chip}`}>
+                    {m.name}{m.is_trainee && <GraduationCap size={11} />}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
-          {absentToday.length === 0 ? (
-            <p className="text-sm text-neutral-500">Heute ist niemand im Urlaub.</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {absentToday.map((m) => (
-                <span key={m.id} className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full ${teamMeta(m.team).chip}`}>
-                  {m.name}{m.is_trainee && <GraduationCap size={11} />}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
+        </Card>
         <BirthdaysWidget birthdays={birthdays} />
       </div>
 
@@ -167,17 +168,17 @@ export default function VacationClient({
       )}
 
       {/* Saldo-Übersicht */}
-      <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-x-auto">
+      <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-sm overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-neutral-50">
+          <thead className="bg-neutral-50/80 border-b border-neutral-200">
             <tr>
-              <th className="text-left px-4 py-2 text-xs uppercase text-neutral-500">Mitarbeiter</th>
-              <th className="text-left px-4 py-2 text-xs uppercase text-neutral-500">Team</th>
-              <th className="text-right px-4 py-2 text-xs uppercase text-neutral-500">Anspruch</th>
-              <th className="text-right px-4 py-2 text-xs uppercase text-neutral-500">Übertrag</th>
-              <th className="text-right px-4 py-2 text-xs uppercase text-neutral-500">Verbraucht</th>
-              <th className="text-right px-4 py-2 text-xs uppercase text-neutral-500">Geplant</th>
-              <th className="text-right px-4 py-2 text-xs uppercase text-neutral-500">Verfügbar</th>
+              <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Mitarbeiter</th>
+              <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Team</th>
+              <th className="text-right px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Anspruch</th>
+              <th className="text-right px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Übertrag</th>
+              <th className="text-right px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Verbraucht</th>
+              <th className="text-right px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Geplant</th>
+              <th className="text-right px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Verfügbar</th>
             </tr>
           </thead>
           <tbody>
@@ -185,7 +186,7 @@ export default function VacationClient({
               <tr><td colSpan={7} className="px-4 py-8 text-center text-neutral-500">Keine Mitarbeiter — lege sie unter „Mitarbeiter" an.</td></tr>
             )}
             {rows.map((r) => (
-              <tr key={r.member.id} className="border-t border-neutral-100">
+              <tr key={r.member.id} className="border-t border-neutral-100 hover:bg-neutral-50/50 transition-colors">
                 <td className="px-4 py-3 font-medium">
                   <span className="inline-flex items-center gap-1.5">
                     {r.member.name}
@@ -226,10 +227,10 @@ export default function VacationClient({
       </div>
 
       {/* Team-Kapazitätskalender */}
+      <CapacityCalendar members={members} requests={requests} settings={settings} blackouts={blackouts} year={year} today={today} />
+
       {/* Kritische Zeiträume / Sperrzeiten verwalten */}
       <BlackoutConfig blackouts={blackouts} onChange={() => router.refresh()} />
-
-      <CapacityCalendar members={members} requests={requests} settings={settings} blackouts={blackouts} year={year} today={today} />
 
       {/* Jahresraster-Planner (ausklappbare Alternative) */}
       <div>
@@ -259,28 +260,28 @@ export default function VacationClient({
 
 function BirthdaysWidget({ birthdays }: { birthdays: ReturnType<typeof upcomingBirthdays> }) {
   return (
-    <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm">
-      <div className="flex items-center gap-2 text-sm font-medium text-neutral-700 mb-2">
-        <Cake size={16} /> Anstehende Geburtstage
+    <Card>
+      <CardHead icon={<Cake size={14} />} title="Anstehende Geburtstage" tint="fuchsia" />
+      <div className="p-4">
+        {birthdays.length === 0 ? (
+          <p className="text-sm text-neutral-500">Keine Geburtstage in den nächsten 60 Tagen.</p>
+        ) : (
+          <ul className="space-y-1.5 text-sm">
+            {birthdays.slice(0, 6).map((b) => (
+              <li key={b.member.id} className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${teamMeta(b.member.team).chip}`}>{teamMeta(b.member.team).label}</span>
+                  {b.member.name}
+                </span>
+                <span className="text-neutral-500 text-xs whitespace-nowrap">
+                  {b.date.slice(8, 10)}.{b.date.slice(5, 7)}. · {b.inDays === 0 ? "heute 🎉" : `in ${b.inDays} T`} · wird {b.turning}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
-      {birthdays.length === 0 ? (
-        <p className="text-sm text-neutral-500">Keine Geburtstage in den nächsten 60 Tagen.</p>
-      ) : (
-        <ul className="space-y-1 text-sm">
-          {birthdays.slice(0, 6).map((b) => (
-            <li key={b.member.id} className="flex items-center justify-between gap-2">
-              <span className="inline-flex items-center gap-1.5">
-                <span className={`text-xs px-2 py-0.5 rounded-full ${teamMeta(b.member.team).chip}`}>{teamMeta(b.member.team).label}</span>
-                {b.member.name}
-              </span>
-              <span className="text-neutral-500 text-xs whitespace-nowrap">
-                {b.date.slice(8, 10)}.{b.date.slice(5, 7)}. · {b.inDays === 0 ? "heute 🎉" : `in ${b.inDays} T`} · wird {b.turning}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+    </Card>
   );
 }
 
@@ -354,9 +355,9 @@ function CapacityCalendar({
         {" · "}<span className="text-rose-600">roter Rand oben = kritischer Zeitraum</span>
       </div>
 
-      <div className="grid grid-cols-7 gap-1">
+      <div className="grid grid-cols-7 gap-1.5">
         {WEEKDAYS.map((w) => (
-          <div key={w} className="text-[10px] uppercase text-neutral-400 text-center py-1">{w}</div>
+          <div key={w} className="text-[10px] font-medium uppercase tracking-wide text-neutral-400 text-center py-1">{w}</div>
         ))}
         {cells.map((d, i) => {
           if (d === null) return <div key={`e${i}`} />;
@@ -374,37 +375,43 @@ function CapacityCalendar({
           const bdays = teamMembers.filter((m) => m.birth_date && m.birth_date.slice(5) === `${pad(month + 1)}-${pad(d)}`);
           const isToday = day === today;
 
-          let bg = "bg-white";
+          let bg = "bg-white border-neutral-200/70";
           if (over) bg = "bg-rose-50 border-rose-300";
           else if (full) bg = "bg-amber-50 border-amber-300";
-          else if (onVac > 0) bg = "bg-emerald-50/60";
-          else if (critical) bg = "bg-rose-50/70";
-          else if (weekend || isHoliday) bg = "bg-neutral-50";
+          else if (onVac > 0) bg = "bg-emerald-50/50 border-emerald-200/70";
+          else if (critical) bg = "bg-rose-50/60 border-rose-200/70";
+          else if (weekend || isHoliday) bg = "bg-neutral-50 border-neutral-200/60";
 
-          const critBorder = critical ? "border-t-4 border-t-rose-400" : "";
+          const critBorder = critical ? "border-t-[3px] border-t-rose-400" : "";
           const critTitle = critical ? `Kritischer Zeitraum: ${blk.map((b) => b.label).join(", ")}` : undefined;
 
           return (
-            <div key={day} title={critTitle} className={`min-h-[68px] rounded-lg border p-1 text-[11px] ${bg} ${critBorder} ${isToday ? "ring-2 ring-neutral-900" : "border-neutral-200"}`}>
+            <div key={day} title={critTitle} className={`min-h-[72px] rounded-xl border p-1.5 text-[11px] transition-shadow hover:shadow-sm ${bg} ${critBorder} ${isToday ? "ring-2 ring-neutral-900 ring-offset-1" : ""}`}>
               <div className="flex items-center justify-between">
-                <span className={`font-medium ${weekend || isHoliday ? "text-neutral-400" : "text-neutral-700"}`}>{d}</span>
+                <span className={`grid place-items-center h-5 w-5 rounded-full text-[11px] font-semibold ${isToday ? "bg-neutral-900 text-white" : weekend || isHoliday ? "text-neutral-400" : "text-neutral-600"}`}>{d}</span>
                 {free !== null && (
-                  <span className={`text-[9px] px-1 rounded ${over ? "bg-rose-200 text-rose-800" : free === 0 ? "bg-amber-200 text-amber-800" : "bg-emerald-200 text-emerald-800"}`}>
-                    {over ? "über!" : `${free} frei`}
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${over ? "bg-rose-200 text-rose-800" : free === 0 ? "bg-amber-200 text-amber-800" : "bg-emerald-200 text-emerald-800"}`}>
+                    {over ? "voll!" : `${free} frei`}
                   </span>
                 )}
               </div>
-              {critical && onVac === 0 && (
-                <div className="text-[9px] text-rose-500 flex items-center gap-0.5"><Ban size={9} /> Sperrzeit</div>
-              )}
-              {bdays.map((m) => (
-                <div key={`b${m.id}`} className="text-fuchsia-600 truncate" title={`Geburtstag: ${m.name}`}>🎂 {m.name.split(" ")[0]}</div>
-              ))}
-              {entries.map((e) => (
-                <div key={e.memberId} className={`truncate ${e.pending ? "text-neutral-400 italic" : "text-neutral-700"}`} title={e.name + (e.pending ? " (beantragt)" : "")}>
-                  {e.name.split(" ")[0]}
-                </div>
-              ))}
+              <div className="mt-1 space-y-0.5">
+                {critical && onVac === 0 && (
+                  <div className="text-[9px] text-rose-500 flex items-center gap-0.5"><Ban size={9} /> Sperrzeit</div>
+                )}
+                {bdays.map((m) => (
+                  <div key={`b${m.id}`} className="text-fuchsia-600 truncate" title={`Geburtstag: ${m.name}`}>🎂 {m.name.split(" ")[0]}</div>
+                ))}
+                {entries.map((e) => {
+                  const tm = memberById.get(e.memberId);
+                  return (
+                    <div key={e.memberId} title={e.name + (e.pending ? " (beantragt)" : "")}
+                      className={`truncate rounded px-1 py-0.5 text-[10px] ${tm ? teamMeta(tm.team).chip : "bg-neutral-100 text-neutral-700"} ${e.pending ? "opacity-60 italic" : ""}`}>
+                      {e.name.split(" ")[0]}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           );
         })}
