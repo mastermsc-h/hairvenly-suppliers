@@ -178,9 +178,9 @@ export default function VacationClient({
         <ChevronDown size={15} className={`text-neutral-400 transition-transform ${showSaldo ? "rotate-180" : ""}`} />
       </button>
       {showSaldo && (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto scroll-always max-h-[42vh]">
         <table className="w-full text-sm">
-          <thead className="bg-neutral-50/80 border-b border-neutral-200">
+          <thead className="bg-neutral-50 border-b border-neutral-200 sticky top-0 z-10">
             <tr>
               <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Mitarbeiter</th>
               <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Team</th>

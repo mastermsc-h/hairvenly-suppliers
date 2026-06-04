@@ -61,3 +61,15 @@ textarea::placeholder {
   animation: hairvenly-pulse 1.6s ease-in-out infinite;
   transform-origin: center center;
 }
+
+/* Immer sichtbare, dezent gestylte Scrollleiste (z.B. Mitarbeiter-Tabelle) */
+.scroll-always {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;                 /* Firefox */
+  scrollbar-color: #cbd5e1 #f1f5f9;      /* Firefox: thumb / track */
+}
+.scroll-always::-webkit-scrollbar { width: 10px; }
+.scroll-always::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 8px; }
+.scroll-always::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; border: 2px solid #f1f5f9; }
+.scroll-always::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
