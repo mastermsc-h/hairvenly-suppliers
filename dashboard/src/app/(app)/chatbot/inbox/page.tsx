@@ -43,6 +43,7 @@ interface SessionStats {
   lastMsg?: string;
   lastMsgRole?: string;
   lastMsgAgentId?: string | null;
+  lastMsgAgentName?: string | null; // Name der/des zuletzt schreibenden Dashboard-MA (null = IG-App)
   lastMsgAutoSent?: boolean;       // war die letzte Bot-Message autonom?
   botCount: number;
   humanCount: number;
@@ -235,6 +236,27 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
       }
     }
 
+    // Namen der zuletzt schreibenden Dashboard-Mitarbeiter:innen auflösen, damit
+    // in der Übersicht neben "Manuell"/"Assistiert" steht, WER geantwortet hat.
+    // Nur Dashboard-Antworten tragen eine agent_id — IG-App-Antworten = null
+    // (Meta liefert keine User-Zuordnung) → dann bleibt der Name leer.
+    const agentIds = Array.from(new Set(
+      Object.values(stats)
+        .map(st => st.lastMsgAgentId)
+        .filter((x): x is string => !!x)
+    ));
+    if (agentIds.length > 0) {
+      const { data: agents } = await svc
+        .from("profiles")
+        .select("id, display_name, email")
+        .in("id", agentIds);
+      const nameById = new Map<string, string | null>(
+        (agents ?? []).map(a => [a.id as string, (a.display_name as string) || (a.email as string) || null])
+      );
+      for (const st of Object.values(stats)) {
+        if (st.lastMsgAgentId) st.lastMsgAgentName = nameById.get(st.lastMsgAgentId) ?? null;
+      }
+    }
   }
 
   // ── WAITLIST-CONFIRMATION-PENDING-DETECTOR ─────────────────────────────
@@ -1246,12 +1268,24 @@ export default async function ChatInboxPage({ searchParams }: PageProps) {
                             tooltipPrefix = `Modus ${label} — wartet auf nächste Aktion`;
                           }
                           return (
-                            <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${color}`}
-                              title={`${tooltipPrefix} · Modus aktuell: ${currentModeLabel[currentMode] || currentModeLabel.off}`}
-                            >
-                              {label}
-                            </span>
+                            <>
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${color}`}
+                                title={`${tooltipPrefix} · Modus aktuell: ${currentModeLabel[currentMode] || currentModeLabel.off}`}
+                              >
+                                {label}
+                              </span>
+                              {/* WER hat zuletzt geantwortet — nur bei Dashboard-Antworten
+                                  (Manuell/Assistiert mit agent_id). Autobot + IG-App = kein Name. */}
+                              {st.lastMsgAgentName ? (
+                                <span
+                                  className="inline-flex items-center gap-0.5 text-[10px] text-neutral-500"
+                                  title={`Zuletzt geantwortet: ${st.lastMsgAgentName} (über Dashboard)`}
+                                >
+                                  👤 {st.lastMsgAgentName}
+                                </span>
+                              ) : null}
+                            </>
                           );
                         })()}
                         {/* "Mitarbeiter eingegriffen"-Badge entfernt — redundant.
