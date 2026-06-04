@@ -47,6 +47,7 @@ export default function VacationClient({
   const [teamFilter, setTeamFilter] = useState<string>("all");
   const [adding, setAdding] = useState(false);
   const [showYear, setShowYear] = useState(false);
+  const [showSaldo, setShowSaldo] = useState(false);
 
   const byMember = useMemo(() => {
     const map = new Map<string, VacationRequest[]>();
@@ -167,8 +168,17 @@ export default function VacationClient({
         />
       )}
 
-      {/* Saldo-Übersicht */}
-      <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-sm overflow-x-auto">
+      {/* Saldo-Übersicht (Mitarbeiterliste) */}
+      <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-sm overflow-hidden">
+      <button onClick={() => setShowSaldo((s) => !s)} className="w-full flex items-center justify-between gap-3 px-4 md:px-5 py-3 bg-gradient-to-b from-neutral-50 to-white border-b border-neutral-100">
+        <span className="flex items-center gap-2.5">
+          <span className="h-7 w-7 rounded-lg grid place-items-center bg-emerald-100 text-emerald-600"><CalendarDays size={14} /></span>
+          <span className="text-sm font-semibold text-neutral-800">Mitarbeiter — Urlaubsstände <span className="text-neutral-400 font-normal">({rows.length})</span></span>
+        </span>
+        <ChevronDown size={15} className={`text-neutral-400 transition-transform ${showSaldo ? "rotate-180" : ""}`} />
+      </button>
+      {showSaldo && (
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-neutral-50/80 border-b border-neutral-200">
             <tr>
@@ -224,6 +234,8 @@ export default function VacationClient({
             ))}
           </tbody>
         </table>
+        </div>
+      )}
       </div>
 
       {/* Team-Kapazitätskalender */}
@@ -296,7 +308,7 @@ function CapacityCalendar({
   today: string;
 }) {
   const [team, setTeam] = useState<string>("all");
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [month, setMonth] = useState<number>(() => {
     const m = Number(today.slice(5, 7)) - 1;
     return today.startsWith(String(year)) ? m : 0;
