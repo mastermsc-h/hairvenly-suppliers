@@ -2,28 +2,38 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Save, Check, XCircle, AlertTriangle, Download, CalendarDays, Trash2 } from "lucide-react";
-import { TEAMS, teamMeta } from "@/lib/staff/teams";
-import { countWorkdays, vacationBalance } from "@/lib/staff/holidays";
 import {
-  createVacationRequest,
-  decideVacation,
-  deleteVacation,
+  Plus, Save, Check, XCircle, AlertTriangle, Download, CalendarDays, Trash2,
+  Cake, GraduationCap, ChevronLeft, ChevronRight,
+} from "lucide-react";
+import { TEAMS, teamMeta } from "@/lib/staff/teams";
+import { countWorkdays, vacationBalance, bremenHolidays } from "@/lib/staff/holidays";
+import {
+  maxOnVacation, teamOnDay, teamConflicts, upcomingBirthdays, UNLIMITED,
+} from "@/lib/staff/capacity";
+import {
+  createVacationRequest, decideVacation, deleteVacation,
 } from "@/lib/actions/staff";
-import type { StaffMember, VacationRequest } from "@/lib/types";
+import type { StaffMember, VacationRequest, TeamSetting } from "@/lib/types";
 
 const inputCls =
   "mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 outline-none";
 const labelCls = "text-xs font-medium text-neutral-600 uppercase tracking-wide";
 const MONTHS = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+const MONTHS_LONG = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
+const WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+
+function pad(n: number) { return n < 10 ? `0${n}` : `${n}`; }
 
 export default function VacationClient({
   members,
   requests,
+  settings,
   today,
 }: {
   members: StaffMember[];
   requests: VacationRequest[];
+  settings: TeamSetting[];
   today: string;
 }) {
   const router = useRouter();
@@ -62,11 +72,20 @@ export default function VacationClient({
     .map((r) => members.find((m) => m.id === r.staff_id))
     .filter(Boolean) as StaffMember[];
 
-  // Team-Überlappungswarnung: ≥2 aus einem Team heute gleichzeitig abwesend.
-  const overlapWarnings = TEAMS.map((t) => ({
-    team: t,
-    names: absentToday.filter((m) => m.team === t.value).map((m) => m.name),
-  })).filter((w) => w.names.length >= 2);
+  // Heutige Überschreitung der Team-Kapazität (Mindestbesetzung verletzt).
+  const overCapToday = TEAMS.map((t) => {
+    const cap = maxOnVacation(settings, t.value);
+    const names = absentToday.filter((m) => m.team === t.value).map((m) => m.name);
+    return { team: t, cap, names };
+  }).filter((w) => w.cap < UNLIMITED && w.names.length > w.cap);
+
+  // Konflikte über das ganze (gewählte) Jahr.
+  const conflicts = useMemo(
+    () => teamConflicts(members, requests, settings, year),
+    [members, requests, settings, year],
+  );
+
+  const birthdays = useMemo(() => upcomingBirthdays(members, today, 60), [members, today]);
 
   return (
     <div className="space-y-6">
@@ -90,7 +109,7 @@ export default function VacationClient({
         </button>
       </div>
 
-      {/* Heute abwesend + Überlappungswarnung */}
+      {/* Widgets: heute abwesend · Geburtstage */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm">
           <div className="flex items-center gap-2 text-sm font-medium text-neutral-700 mb-2">
@@ -101,34 +120,40 @@ export default function VacationClient({
           ) : (
             <div className="flex flex-wrap gap-2">
               {absentToday.map((m) => (
-                <span key={m.id} className={`text-xs px-2 py-1 rounded-full ${teamMeta(m.team).chip}`}>
-                  {m.name}
+                <span key={m.id} className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full ${teamMeta(m.team).chip}`}>
+                  {m.name}{m.is_trainee && <GraduationCap size={11} />}
                 </span>
               ))}
             </div>
           )}
         </div>
-        <div className={`rounded-2xl border p-4 shadow-sm ${overlapWarnings.length ? "bg-amber-50 border-amber-300" : "bg-white border-neutral-200"}`}>
-          <div className="flex items-center gap-2 text-sm font-medium text-neutral-700 mb-2">
-            <AlertTriangle size={16} className={overlapWarnings.length ? "text-amber-600" : "text-neutral-400"} /> Team-Überlappung heute
-          </div>
-          {overlapWarnings.length === 0 ? (
-            <p className="text-sm text-neutral-500">Keine kritischen Überschneidungen.</p>
-          ) : (
-            <ul className="text-sm text-amber-800 space-y-1">
-              {overlapWarnings.map((w) => (
-                <li key={w.team.value}>
-                  <b>{w.team.label}:</b> {w.names.join(", ")} ({w.names.length} gleichzeitig)
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <BirthdaysWidget birthdays={birthdays} />
       </div>
+
+      {/* Kapazitäts-Warnungen */}
+      {(overCapToday.length > 0 || conflicts.length > 0) && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 space-y-2">
+          <div className="flex items-center gap-2 text-sm font-medium text-amber-800">
+            <AlertTriangle size={16} className="text-amber-600" /> Team-Besetzung — Überschneidungen
+          </div>
+          {overCapToday.map((w) => (
+            <div key={`today-${w.team.value}`} className="text-sm text-amber-800">
+              <b>Heute · {w.team.label}:</b> {w.names.join(", ")} ({w.names.length} im Urlaub, erlaubt max. {w.cap})
+            </div>
+          ))}
+          {conflicts.map((c, i) => (
+            <div key={`conf-${i}`} className="text-sm text-amber-800">
+              <b>{teamMeta(c.team).label}</b> {c.from} – {c.to}: bis zu {c.peak} gleichzeitig (erlaubt max. {c.max}) — {c.names.join(", ")}
+            </div>
+          ))}
+        </div>
+      )}
 
       {adding && (
         <RequestForm
           members={members}
+          requests={requests}
+          settings={settings}
           onDone={() => { setAdding(false); router.refresh(); }}
           onCancel={() => setAdding(false)}
         />
@@ -154,7 +179,16 @@ export default function VacationClient({
             )}
             {rows.map((r) => (
               <tr key={r.member.id} className="border-t border-neutral-100">
-                <td className="px-4 py-3 font-medium">{r.member.name}</td>
+                <td className="px-4 py-3 font-medium">
+                  <span className="inline-flex items-center gap-1.5">
+                    {r.member.name}
+                    {r.member.is_trainee && (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                        <GraduationCap size={10} /> Azubi
+                      </span>
+                    )}
+                  </span>
+                </td>
                 <td className="px-4 py-3">
                   <span className={`text-xs px-2 py-0.5 rounded-full ${teamMeta(r.member.team).chip}`}>{teamMeta(r.member.team).label}</span>
                 </td>
@@ -184,11 +218,142 @@ export default function VacationClient({
         </table>
       </div>
 
+      {/* Team-Kapazitätskalender */}
+      <CapacityCalendar members={members} requests={requests} settings={settings} year={year} today={today} />
+
       {/* Timeline */}
       <Timeline members={visibleMembers} requests={requests} year={year} today={today} />
 
       {/* Anträge mit Workflow */}
       <RequestTable members={members} requests={requests} year={year} onChange={() => router.refresh()} />
+    </div>
+  );
+}
+
+function BirthdaysWidget({ birthdays }: { birthdays: ReturnType<typeof upcomingBirthdays> }) {
+  return (
+    <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm">
+      <div className="flex items-center gap-2 text-sm font-medium text-neutral-700 mb-2">
+        <Cake size={16} /> Anstehende Geburtstage
+      </div>
+      {birthdays.length === 0 ? (
+        <p className="text-sm text-neutral-500">Keine Geburtstage in den nächsten 60 Tagen.</p>
+      ) : (
+        <ul className="space-y-1 text-sm">
+          {birthdays.slice(0, 6).map((b) => (
+            <li key={b.member.id} className="flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5">
+                <span className={`text-xs px-2 py-0.5 rounded-full ${teamMeta(b.member.team).chip}`}>{teamMeta(b.member.team).label}</span>
+                {b.member.name}
+              </span>
+              <span className="text-neutral-500 text-xs whitespace-nowrap">
+                {b.date.slice(8, 10)}.{b.date.slice(5, 7)}. · {b.inDays === 0 ? "heute 🎉" : `in ${b.inDays} T`} · wird {b.turning}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function CapacityCalendar({
+  members, requests, settings, year, today,
+}: {
+  members: StaffMember[];
+  requests: VacationRequest[];
+  settings: TeamSetting[];
+  year: number;
+  today: string;
+}) {
+  const [team, setTeam] = useState<string>(TEAMS[0].value);
+  const [month, setMonth] = useState<number>(() => {
+    const m = Number(today.slice(5, 7)) - 1;
+    return today.startsWith(String(year)) ? m : 0;
+  });
+
+  const cap = maxOnVacation(settings, team);
+  const holidays = useMemo(() => bremenHolidays(year), [year]);
+  const teamMembers = useMemo(() => members.filter((m) => m.team === team), [members, team]);
+
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const firstDow = (new Date(Date.UTC(year, month, 1)).getUTCDay() + 6) % 7; // Mo=0
+  const cells: (number | null)[] = [
+    ...Array(firstDow).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+
+  function prev() { if (month === 0) setMonth(11); else setMonth(month - 1); }
+  function next() { if (month === 11) setMonth(0); else setMonth(month + 1); }
+
+  return (
+    <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <div className="flex items-center gap-2 text-sm font-medium text-neutral-700">
+          <CalendarDays size={16} /> Kapazitätskalender — freie Urlaubstage je Team
+        </div>
+        <div className="flex items-center gap-2">
+          <select value={team} onChange={(e) => setTeam(e.target.value)} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm">
+            {TEAMS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+          <button onClick={prev} className="p-1.5 rounded-lg border border-neutral-300 hover:bg-neutral-50"><ChevronLeft size={16} /></button>
+          <span className="text-sm font-medium w-28 text-center">{MONTHS_LONG[month]} {year}</span>
+          <button onClick={next} className="p-1.5 rounded-lg border border-neutral-300 hover:bg-neutral-50"><ChevronRight size={16} /></button>
+        </div>
+      </div>
+
+      <div className="text-xs text-neutral-500 mb-2">
+        {cap >= UNLIMITED
+          ? "Keine Begrenzung gesetzt — unter „Mitarbeiter → Team-Besetzung“ konfigurierbar."
+          : <>Max. <b>{cap}</b> gleichzeitig im Urlaub · grün = frei, gelb = voll, rot = überbucht</>}
+      </div>
+
+      <div className="grid grid-cols-7 gap-1">
+        {WEEKDAYS.map((w) => (
+          <div key={w} className="text-[10px] uppercase text-neutral-400 text-center py-1">{w}</div>
+        ))}
+        {cells.map((d, i) => {
+          if (d === null) return <div key={`e${i}`} />;
+          const day = `${year}-${pad(month + 1)}-${pad(d)}`;
+          const dow = (firstDow + (d - 1)) % 7;
+          const weekend = dow >= 5;
+          const isHoliday = holidays.has(day);
+          const entries = teamOnDay(teamMembers, requests, team, day);
+          const onVac = entries.length;
+          const over = cap < UNLIMITED && onVac > cap;
+          const full = cap < UNLIMITED && onVac === cap;
+          const free = cap < UNLIMITED ? cap - onVac : null;
+          const bdays = teamMembers.filter((m) => m.birth_date && m.birth_date.slice(5) === `${pad(month + 1)}-${pad(d)}`);
+          const isToday = day === today;
+
+          let bg = "bg-white";
+          if (over) bg = "bg-rose-50 border-rose-300";
+          else if (full) bg = "bg-amber-50 border-amber-300";
+          else if (onVac > 0) bg = "bg-emerald-50/60";
+          else if (weekend || isHoliday) bg = "bg-neutral-50";
+
+          return (
+            <div key={day} className={`min-h-[68px] rounded-lg border p-1 text-[11px] ${bg} ${isToday ? "ring-2 ring-neutral-900" : "border-neutral-200"}`}>
+              <div className="flex items-center justify-between">
+                <span className={`font-medium ${weekend || isHoliday ? "text-neutral-400" : "text-neutral-700"}`}>{d}</span>
+                {free !== null && (
+                  <span className={`text-[9px] px-1 rounded ${over ? "bg-rose-200 text-rose-800" : free === 0 ? "bg-amber-200 text-amber-800" : "bg-emerald-200 text-emerald-800"}`}>
+                    {over ? "über!" : `${free} frei`}
+                  </span>
+                )}
+              </div>
+              {bdays.map((m) => (
+                <div key={`b${m.id}`} className="text-fuchsia-600 truncate" title={`Geburtstag: ${m.name}`}>🎂 {m.name.split(" ")[0]}</div>
+              ))}
+              {entries.map((e) => (
+                <div key={e.memberId} className={`truncate ${e.pending ? "text-neutral-400 italic" : "text-neutral-700"}`} title={e.name + (e.pending ? " (beantragt)" : "")}>
+                  {e.name.split(" ")[0]}
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -245,7 +410,16 @@ function Timeline({ members, requests, year, today }: { members: StaffMember[]; 
   );
 }
 
-function RequestForm({ members, onDone, onCancel }: { members: StaffMember[]; onDone: () => void; onCancel: () => void }) {
+function RequestForm({
+  members, requests, settings, onDone, onCancel,
+}: {
+  members: StaffMember[];
+  requests: VacationRequest[];
+  settings: TeamSetting[];
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [staffId, setStaffId] = useState("");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [override, setOverride] = useState("");
@@ -253,6 +427,23 @@ function RequestForm({ members, onDone, onCancel }: { members: StaffMember[]; on
   const [pending, startT] = useTransition();
 
   const autoDays = start && end && end >= start ? countWorkdays(start, end) : null;
+
+  // Live-Warnung: würde dieser Antrag die Team-Kapazität überschreiten?
+  const capWarning = useMemo(() => {
+    const m = members.find((x) => x.id === staffId);
+    if (!m || !start || !end || end < start) return null;
+    const cap = maxOnVacation(settings, m.team);
+    if (cap >= UNLIMITED) return null;
+    const teamMembers = members.filter((x) => x.team === m.team);
+    let peak = 0;
+    for (let t = Date.parse(start); t <= Date.parse(end); t += 86400000) {
+      const day = new Date(t).toISOString().slice(0, 10);
+      // bereits geplante Urlauber des Teams an dem Tag (ohne diesen Mitarbeiter) + dieser neue Antrag
+      const existing = teamOnDay(teamMembers, requests, m.team, day).filter((e) => e.memberId !== m.id);
+      peak = Math.max(peak, existing.length + 1);
+    }
+    return peak > cap ? { team: m.team, peak, cap } : null;
+  }, [staffId, start, end, members, requests, settings]);
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -270,9 +461,9 @@ function RequestForm({ members, onDone, onCancel }: { members: StaffMember[]; on
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
           <label className={labelCls}>Mitarbeiter</label>
-          <select name="staff_id" required className={inputCls}>
+          <select name="staff_id" required value={staffId} onChange={(e) => setStaffId(e.target.value)} className={inputCls}>
             <option value="">— wählen —</option>
-            {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            {members.map((m) => <option key={m.id} value={m.id}>{m.name}{m.is_trainee ? " (Azubi)" : ""}</option>)}
           </select>
         </div>
         <div>
@@ -299,6 +490,12 @@ function RequestForm({ members, onDone, onCancel }: { members: StaffMember[]; on
           <input name="note" className={inputCls} />
         </div>
       </div>
+      {capWarning && (
+        <div className="flex items-center gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
+          <AlertTriangle size={15} className="text-amber-600 shrink-0" />
+          Achtung: In diesem Zeitraum wären im Team <b>{teamMeta(capWarning.team).label}</b> bis zu {capWarning.peak} gleichzeitig im Urlaub (erlaubt max. {capWarning.cap}). Antrag ist trotzdem möglich.
+        </div>
+      )}
       {error && <div className="text-rose-600 text-sm">{error}</div>}
       <div className="flex gap-2 justify-end">
         <button type="button" onClick={onCancel} className="text-sm text-neutral-600">Abbrechen</button>
@@ -387,10 +584,11 @@ function RowActions({ request, onChange }: { request: VacationRequest; onChange:
 }
 
 function exportCsv(rows: { member: StaffMember; used: number; planned: number; available: number; carryover: number }[], year: number) {
-  const head = ["Mitarbeiter", "Team", "Jahr", "Anspruch", "Uebertrag", "Verbraucht", "Geplant", "Verfuegbar"];
+  const head = ["Mitarbeiter", "Team", "Azubi", "Jahr", "Anspruch", "Uebertrag", "Verbraucht", "Geplant", "Verfuegbar"];
   const lines = rows.map((r) => [
     r.member.name,
     teamMeta(r.member.team).label,
+    r.member.is_trainee ? "ja" : "nein",
     year,
     r.member.annual_vacation_days,
     r.carryover,

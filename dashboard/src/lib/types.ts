@@ -477,9 +477,19 @@ export interface StaffMember {
   carryover_days: number;
   carryover_expires_on: string | null;
   employment_start: string | null;
+  is_trainee: boolean;
+  birth_date: string | null;
   active: boolean;
   profile_id: string | null;
   created_at: string;
+}
+
+export interface TeamSetting {
+  team: StaffTeam;
+  /** Maximale Anzahl Mitarbeiter, die gleichzeitig im Urlaub sein dürfen.
+   *  99 = praktisch unbegrenzt (keine Warnung), bis konfiguriert. */
+  max_on_vacation: number;
+  updated_at: string;
 }
 
 export interface VacationRequest {

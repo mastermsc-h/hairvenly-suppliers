@@ -41,6 +41,8 @@ export async function createStaffMember(_prev: unknown, formData: FormData) {
     carryover_days: numOr(formData.get("carryover_days"), 0),
     carryover_expires_on: str(formData.get("carryover_expires_on")),
     employment_start: str(formData.get("employment_start")),
+    is_trainee: formData.get("is_trainee") === "true",
+    birth_date: str(formData.get("birth_date")),
     active: true,
   });
   if (error) return { error: error.message };
@@ -62,6 +64,8 @@ export async function updateStaffMember(id: string, formData: FormData) {
     update.carryover_expires_on = str(formData.get("carryover_expires_on"));
   if (formData.has("employment_start"))
     update.employment_start = str(formData.get("employment_start"));
+  if (formData.has("is_trainee")) update.is_trainee = formData.get("is_trainee") === "true";
+  if (formData.has("birth_date")) update.birth_date = str(formData.get("birth_date"));
   if (formData.has("active")) update.active = formData.get("active") === "true";
 
   const { error } = await svc.from("staff_members").update(update).eq("id", id);
@@ -82,6 +86,23 @@ export async function deleteStaffMember(id: string) {
   if (paths.length) await svc.storage.from(BUCKET).remove(paths);
 
   const { error } = await svc.from("staff_members").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidateAll();
+  return { ok: true };
+}
+
+// ─── Team-Einstellungen (Mindestbesetzung) ──────────────────────
+
+export async function updateTeamSetting(team: string, maxOnVacation: number) {
+  await requireFeature(STAFF_FEATURE);
+  const svc = createServiceClient();
+  const max = Number.isFinite(maxOnVacation) && maxOnVacation >= 0 ? Math.floor(maxOnVacation) : 99;
+  const { error } = await svc
+    .from("team_settings")
+    .upsert(
+      { team, max_on_vacation: max, updated_at: new Date().toISOString() },
+      { onConflict: "team" },
+    );
   if (error) return { error: error.message };
   revalidateAll();
   return { ok: true };
