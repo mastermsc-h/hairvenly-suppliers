@@ -264,6 +264,19 @@ async function loadProductCatalog(): Promise<{
   txt += "Das sind INTERNE Bezeichnungen. Kundin spricht IMMER von der Haarqualität: ";
   txt += "'Russisch glatt' oder 'Usbekisch wellig'.\n";
 
+  // 🪶 SCHONUNGS-REIHENFOLGE — autoritative Quelle. NUR auf EXPLIZITE Nachfrage
+  // nennen ('was ist am schonendsten/besten?'), NIEMALS proaktiv (siehe Regel
+  // in get_salon_service_price). Gilt für DAUERHAFTE Verlängerung (6–12 Monate).
+  // Diese Reihenfolge ist die offizielle Hairvenly-Empfehlung — NICHT abweichen,
+  // NICHTS dazu erfinden. Wenn unsicher → an Stylistin/Beratung verweisen.
+  txt += "\n### 🪶 SCHONUNGS-REIHENFOLGE (NUR auf explizite Nachfrage nennen, NIE proaktiv!)\n";
+  txt += "Für die DAUERHAFTE Haarverlängerung (6–12 Monate), schonendste Methode zuerst:\n";
+  txt += "1. **Genius Tressen** — eingearbeitet mit silikonbeschichteten Mikroringen, zusätzlich mit Nähten stabilisiert. Schonendste dauerhafte Methode. (Classic Tressen sind ebenfalls schonend, aber eher für mittleres/dickeres Haar geeignet.)\n";
+  txt += "2. **Standard Tapes** (Russisch & Usbekisch)\n";
+  txt += "3. **Mini Tapes** — im Prinzip wie normale Tapes, aber mehr Gewicht pro Strähne und dadurch etwas schwerer.\n";
+  txt += "4. **Bondings** — eher weniger geeignet bei feinem oder strapaziertem Haar.\n";
+  txt += "❗ Clip-Ins & Ponytails gehören NICHT in diese Reihenfolge — das ist 'Do it yourself' (nicht dauerhaft eingearbeitet).\n";
+
   // validCombos: methodNameLower|length
   const valid = new Set<string>();
   const ml = new Map<string, Set<string>>();
