@@ -4,7 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, Save, Check, XCircle, AlertTriangle, Download, CalendarDays, Trash2,
-  Cake, GraduationCap, ChevronLeft, ChevronRight, ChevronDown, CalendarRange, Ban,
+  Cake, GraduationCap, ChevronLeft, ChevronRight, ChevronDown, CalendarRange, Ban, X,
 } from "lucide-react";
 import { TEAMS, teamMeta } from "@/lib/staff/teams";
 import { countWorkdays, vacationBalance, bremenHolidays } from "@/lib/staff/holidays";
@@ -239,7 +239,7 @@ export default function VacationClient({
       </div>
 
       {/* Team-Kapazitätskalender */}
-      <CapacityCalendar members={members} requests={requests} settings={settings} blackouts={blackouts} year={year} today={today} />
+      <CapacityCalendar members={members} requests={requests} settings={settings} blackouts={blackouts} isAdmin={isAdmin} year={year} today={today} onChange={() => router.refresh()} />
 
       {/* Kritische Zeiträume / Sperrzeiten verwalten */}
       <BlackoutConfig blackouts={blackouts} onChange={() => router.refresh()} />
@@ -298,17 +298,20 @@ function BirthdaysWidget({ birthdays }: { birthdays: ReturnType<typeof upcomingB
 }
 
 function CapacityCalendar({
-  members, requests, settings, blackouts, year, today,
+  members, requests, settings, blackouts, isAdmin, year, today, onChange,
 }: {
   members: StaffMember[];
   requests: VacationRequest[];
   settings: TeamSetting[];
   blackouts: VacationBlackout[];
+  isAdmin: boolean;
   year: number;
   today: string;
+  onChange: () => void;
 }) {
   const [team, setTeam] = useState<string>("all");
   const [open, setOpen] = useState(true);
+  const [quickDay, setQuickDay] = useState<string | null>(null);
   const [month, setMonth] = useState<number>(() => {
     const m = Number(today.slice(5, 7)) - 1;
     return today.startsWith(String(year)) ? m : 0;
@@ -398,7 +401,7 @@ function CapacityCalendar({
           const critTitle = critical ? `Kritischer Zeitraum: ${blk.map((b) => b.label).join(", ")}` : undefined;
 
           return (
-            <div key={day} title={critTitle} className={`min-h-[52px] rounded-lg border p-1 text-[10px] transition-shadow hover:shadow-sm ${bg} ${critBorder} ${isToday ? "ring-2 ring-neutral-900 ring-offset-1" : ""}`}>
+            <div key={day} title={critTitle ? critTitle + " · Klick: Urlaub eintragen" : "Klick: Urlaub eintragen"} onClick={() => setQuickDay(day)} className={`min-h-[52px] rounded-lg border p-1 text-[10px] cursor-pointer transition-shadow hover:shadow-sm hover:border-neutral-400 ${bg} ${critBorder} ${isToday ? "ring-2 ring-neutral-900 ring-offset-1" : ""}`}>
               <div className="flex items-center justify-between">
                 <span className={`grid place-items-center h-4 w-4 rounded-full text-[10px] font-semibold ${isToday ? "bg-neutral-900 text-white" : weekend || isHoliday ? "text-neutral-400" : "text-neutral-600"}`}>{d}</span>
                 {free !== null && (
@@ -429,6 +432,147 @@ function CapacityCalendar({
         })}
       </div>
       </>)}
+      {quickDay && (
+        <DayQuickEntry
+          day={quickDay}
+          members={members}
+          requests={requests}
+          blackouts={blackouts}
+          isAdmin={isAdmin}
+          onClose={() => setQuickDay(null)}
+          onChange={() => { setQuickDay(null); onChange(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function fmtDayLong(day: string): string {
+  const [y, m, d] = day.split("-");
+  return `${d}.${m}.${y}`;
+}
+
+function DayQuickEntry({
+  day, members, requests, blackouts, isAdmin, onClose, onChange,
+}: {
+  day: string;
+  members: StaffMember[];
+  requests: VacationRequest[];
+  blackouts: VacationBlackout[];
+  isAdmin: boolean;
+  onClose: () => void;
+  onChange: () => void;
+}) {
+  const [start, setStart] = useState(day);
+  const [end, setEnd] = useState(day);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startT] = useTransition();
+  const autoDays = start && end && end >= start ? countWorkdays(start, end) : null;
+
+  const byId = new Map(members.map((m) => [m.id, m]));
+  const onThisDay = requests
+    .filter((r) => r.status !== "rejected" && r.start_date <= day && r.end_date >= day)
+    .map((r) => ({ m: byId.get(r.staff_id), pending: r.status === "submitted" }))
+    .filter((x) => x.m) as { m: StaffMember; pending: boolean }[];
+  const blk = blackoutsForDay(day, blackouts, null);
+
+  function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    const fd = new FormData(e.currentTarget);
+    startT(async () => {
+      const res = await createVacationRequest(null, fd);
+      if (res?.error) { setError(res.error); return; }
+      onChange();
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/30 flex items-start sm:items-center justify-center p-4 overflow-y-auto" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md my-8" onClick={(e) => e.stopPropagation()}>
+        <CardHead
+          icon={<CalendarDays size={14} />}
+          title={fmtDayLong(day)}
+          sub="Urlaub eintragen"
+          tint="sky"
+          right={<button onClick={onClose} className="text-neutral-400 hover:text-neutral-700"><X size={18} /></button>}
+        />
+        <div className="p-4 space-y-3">
+          {blk.length > 0 && (
+            <div className="flex items-center gap-2 text-xs text-rose-800 bg-rose-50 border border-rose-300 rounded-lg px-2.5 py-1.5">
+              <Ban size={13} /> Kritischer Zeitraum: {blk.map((b) => b.label).join(", ")}
+            </div>
+          )}
+
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1">An diesem Tag im Urlaub</div>
+            {onThisDay.length === 0 ? (
+              <p className="text-sm text-neutral-500">Niemand.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {onThisDay.map(({ m, pending: pd }) => (
+                  <span key={m.id} className={`text-xs px-2 py-0.5 rounded-full ${teamMeta(m.team).chip} ${pd ? "opacity-60 italic" : ""}`}>
+                    {m.name}{pd ? " (offen)" : ""}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <form onSubmit={submit} className="space-y-2 border-t border-neutral-100 pt-3">
+            <div>
+              <label className={labelCls}>Mitarbeiter</label>
+              <select name="staff_id" required className={inputCls}>
+                <option value="">— wählen —</option>
+                {members.map((m) => <option key={m.id} value={m.id}>{m.name}{m.is_trainee ? " (Azubi)" : ""}</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className={labelCls}>Von</label>
+                <input name="start_date" type="date" required value={start} onChange={(e) => setStart(e.target.value)} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Bis</label>
+                <input name="end_date" type="date" required value={end} onChange={(e) => setEnd(e.target.value)} className={inputCls} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className={labelCls}>Tage {autoDays !== null && <span className="normal-case text-neutral-400">(auto {autoDays})</span>}</label>
+                <input name="days_override" type="number" step="0.5" min="0" placeholder={autoDays !== null ? String(autoDays) : "auto"} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Art</label>
+                <select name="paid" defaultValue="true" className={inputCls}>
+                  <option value="true">Bezahlt</option>
+                  <option value="false">Unbezahlt</option>
+                </select>
+              </div>
+            </div>
+            {isAdmin && (
+              <div>
+                <label className={labelCls}>Eintragen als</label>
+                <select name="status" defaultValue="approved" className={inputCls}>
+                  <option value="approved">Genehmigt (direkt)</option>
+                  <option value="submitted">Antrag (offen)</option>
+                </select>
+              </div>
+            )}
+            <div>
+              <label className={labelCls}>Notiz (optional)</label>
+              <input name="note" className={inputCls} />
+            </div>
+            {error && <div className="text-rose-600 text-sm">{error}</div>}
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" onClick={onClose} className="text-sm text-neutral-600">Abbrechen</button>
+              <button type="submit" disabled={pending} className="bg-neutral-900 text-white rounded-lg px-4 py-2 text-sm font-medium flex items-center gap-2">
+                <Save size={14} /> {pending ? "..." : isAdmin ? "Eintragen" : "Antrag"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
     </div>
   );
 }
