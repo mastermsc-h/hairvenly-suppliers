@@ -341,7 +341,7 @@ function CapacityCalendar({
     <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-2 text-sm font-medium text-neutral-700">
-          <CalendarDays size={16} /> Kapazitätskalender — freie Urlaubstage je Team
+          <CalendarDays size={16} /> Abwesenheits-Kalender (Monat)
           <ChevronDown size={15} className={`text-neutral-400 transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
         {open && (
