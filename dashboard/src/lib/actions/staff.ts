@@ -27,25 +27,38 @@ function revalidateAll() {
 // ─── Mitarbeiter-Stammdaten ──────────────────────────────────────
 
 export async function createStaffMember(_prev: unknown, formData: FormData) {
-  await requireFeature(STAFF_FEATURE);
+  const profile = await requireFeature(STAFF_FEATURE);
+  const isAdmin = profile.role === "admin" || profile.is_admin;
   const svc = createServiceClient();
   const name = str(formData.get("name"));
   const team = str(formData.get("team"));
   if (!name) return { error: "Name fehlt." };
   if (!team) return { error: "Team fehlt." };
 
-  const { error } = await svc.from("staff_members").insert({
+  const employmentStart = str(formData.get("employment_start"));
+  const { data: inserted, error } = await svc.from("staff_members").insert({
     name,
     team,
     annual_vacation_days: numOr(formData.get("annual_vacation_days"), 0),
     carryover_days: numOr(formData.get("carryover_days"), 0),
     carryover_expires_on: str(formData.get("carryover_expires_on")),
-    employment_start: str(formData.get("employment_start")),
+    employment_start: employmentStart,
     is_trainee: formData.get("is_trainee") === "true",
     birth_date: str(formData.get("birth_date")),
     active: true,
-  });
+  }).select("id").single();
   if (error) return { error: error.message };
+
+  // Startgehalt (brutto) optional gleich anlegen — nur Admins dürfen Gehalt setzen.
+  const initialSalary = formData.get("initial_salary");
+  if (isAdmin && inserted && initialSalary != null && String(initialSalary).trim() !== "") {
+    await svc.from("staff_salary_changes").insert({
+      staff_id: inserted.id,
+      effective_date: employmentStart ?? new Date().toISOString().slice(0, 10),
+      amount: numOr(initialSalary, 0),
+      note: str(formData.get("initial_salary_note")),
+    });
+  }
   revalidateAll();
   return { ok: true };
 }

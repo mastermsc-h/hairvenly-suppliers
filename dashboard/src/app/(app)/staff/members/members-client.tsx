@@ -71,6 +71,7 @@ export default function MembersClient({
 
       {adding && (
         <MemberForm
+          isAdmin={isAdmin}
           onDone={() => { setAdding(false); router.refresh(); }}
           onCancel={() => setAdding(false)}
         />
@@ -87,7 +88,6 @@ export default function MembersClient({
               <Th right>Übertrag</Th>
               <Th>Verfall Übertrag</Th>
               <Th>Eintritt</Th>
-              {isAdmin && <Th>Personal (Admin)</Th>}
               <Th>Status</Th>
               <Th right>Aktion</Th>
             </tr>
@@ -95,7 +95,7 @@ export default function MembersClient({
           <tbody>
             {members.length === 0 && (
               <tr>
-                <td colSpan={isAdmin ? 11 : 9} className="px-4 py-8 text-center text-neutral-500">
+                <td colSpan={9} className="px-4 py-8 text-center text-neutral-500">
                   Noch keine Mitarbeiter angelegt
                 </td>
               </tr>
@@ -105,14 +105,14 @@ export default function MembersClient({
                 <MemberEditRow
                   key={m.id}
                   member={m}
-                  colSpan={isAdmin ? 11 : 9}
+                  colSpan={9}
                   onCancel={() => setEditing(null)}
                   onSaved={() => { setEditing(null); router.refresh(); }}
                 />
               ) : (
                 <FragmentRow key={m.id}>
                   <tr className="border-t border-neutral-100">
-                    <td className="px-4 py-3 font-medium">
+                    <td className="px-4 py-3 font-medium align-top">
                       <span className="inline-flex items-center gap-2">
                         {m.name}
                         {m.is_trainee && (
@@ -121,6 +121,18 @@ export default function MembersClient({
                           </span>
                         )}
                       </span>
+                      {isAdmin && (
+                        <div className="mt-1">
+                          <AdminSummary
+                            member={m}
+                            salary={salaryByMember[m.id] ?? []}
+                            warnings={warningsByMember[m.id] ?? []}
+                            today={today}
+                            open={expanded === m.id}
+                            onToggle={() => setExpanded(expanded === m.id ? null : m.id)}
+                          />
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`text-xs px-2 py-0.5 rounded-full ${teamMeta(m.team).chip}`}>
@@ -132,18 +144,6 @@ export default function MembersClient({
                     <td className="px-4 py-3 text-right tabular-nums">{m.carryover_days || 0}</td>
                     <td className="px-4 py-3 text-neutral-600">{m.carryover_expires_on ?? "—"}</td>
                     <td className="px-4 py-3 text-neutral-600">{m.employment_start ?? "—"}</td>
-                    {isAdmin && (
-                      <td className="px-4 py-3">
-                        <AdminSummary
-                          member={m}
-                          salary={salaryByMember[m.id] ?? []}
-                          warnings={warningsByMember[m.id] ?? []}
-                          today={today}
-                          open={expanded === m.id}
-                          onToggle={() => setExpanded(expanded === m.id ? null : m.id)}
-                        />
-                      </td>
-                    )}
                     <td className="px-4 py-3">
                       {m.active ? (
                         <span className="text-emerald-700 text-xs font-medium">Aktiv</span>
@@ -160,7 +160,7 @@ export default function MembersClient({
                   </tr>
                   {isAdmin && expanded === m.id && (
                     <tr className="bg-neutral-50/60 border-t border-neutral-100">
-                      <td colSpan={11} className="px-4 py-4">
+                      <td colSpan={9} className="px-4 py-4">
                         <AdminPanel
                           member={m}
                           salary={salaryByMember[m.id] ?? []}
@@ -273,7 +273,7 @@ function Th({ children, right }: { children: React.ReactNode; right?: boolean })
   );
 }
 
-function MemberForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+function MemberForm({ isAdmin, onDone, onCancel }: { isAdmin: boolean; onDone: () => void; onCancel: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -329,6 +329,23 @@ function MemberForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => 
           </label>
         </div>
       </div>
+
+      {isAdmin && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 border-t border-neutral-100 pt-3">
+          <div className="md:col-span-3 flex items-center gap-2 text-xs font-medium text-neutral-600">
+            <Euro size={13} /> Gehalt (nur Admin) — Startgehalt, spätere Erhöhungen pro Mitarbeiter
+          </div>
+          <div>
+            <label className={labelCls}>Gehalt mtl. brutto (€)</label>
+            <input name="initial_salary" type="number" step="1" min="0" placeholder="z.B. 2800" className={inputCls} />
+          </div>
+          <div className="md:col-span-2">
+            <label className={labelCls}>Notiz (optional)</label>
+            <input name="initial_salary_note" placeholder="z.B. Einstiegsgehalt" className={inputCls} />
+          </div>
+        </div>
+      )}
+
       {error && <div className="text-rose-600 text-sm">{error}</div>}
       <div className="flex gap-2 justify-end">
         <button type="button" onClick={onCancel} className="text-sm text-neutral-600">Abbrechen</button>
