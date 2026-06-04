@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, Save, X, GraduationCap, Users2, Euro, ShieldAlert, Trash2,
-  ChevronDown, TrendingUp, Lock,
+  ChevronDown, TrendingUp, Lock, CalendarDays, Check, XCircle, Ban,
 } from "lucide-react";
 import { TEAMS, teamMeta } from "@/lib/staff/teams";
-import { maxOnVacation, UNLIMITED, probation } from "@/lib/staff/capacity";
+import { maxOnVacation, teamOnDay, blackoutsForDay, UNLIMITED, probation } from "@/lib/staff/capacity";
+import { countWorkdays, vacationBalance } from "@/lib/staff/holidays";
 import {
   createStaffMember,
   updateStaffMember,
@@ -17,8 +18,13 @@ import {
   deleteSalaryChange,
   addWarning,
   deleteWarning,
+  createVacationRequest,
+  decideVacation,
+  deleteVacation,
 } from "@/lib/actions/staff";
-import type { StaffMember, TeamSetting, SalaryChange, StaffWarning } from "@/lib/types";
+import type {
+  StaffMember, TeamSetting, SalaryChange, StaffWarning, VacationRequest, VacationBlackout,
+} from "@/lib/types";
 
 const inputCls =
   "mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 outline-none";
@@ -37,6 +43,8 @@ function fmtEur(n: number): string {
 export default function MembersClient({
   members,
   settings,
+  blackouts,
+  requestsByMember,
   isAdmin,
   today,
   salaryByMember,
@@ -44,6 +52,8 @@ export default function MembersClient({
 }: {
   members: StaffMember[];
   settings: TeamSetting[];
+  blackouts: VacationBlackout[];
+  requestsByMember: Record<string, VacationRequest[]>;
   isAdmin: boolean;
   today: string;
   salaryByMember: Record<string, SalaryChange[]>;
@@ -121,8 +131,8 @@ export default function MembersClient({
                           </span>
                         )}
                       </span>
-                      {isAdmin && (
-                        <div className="mt-1">
+                      <div className="mt-1">
+                        {isAdmin ? (
                           <AdminSummary
                             member={m}
                             salary={salaryByMember[m.id] ?? []}
@@ -131,8 +141,16 @@ export default function MembersClient({
                             open={expanded === m.id}
                             onToggle={() => setExpanded(expanded === m.id ? null : m.id)}
                           />
-                        </div>
-                      )}
+                        ) : (
+                          <button
+                            onClick={() => setExpanded(expanded === m.id ? null : m.id)}
+                            className="inline-flex items-center gap-1 text-xs text-neutral-600 hover:text-neutral-900"
+                          >
+                            <CalendarDays size={12} /> Urlaub & Anträge
+                            <ChevronDown size={13} className={`transition-transform ${expanded === m.id ? "rotate-180" : ""}`} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <span className={`text-xs px-2 py-0.5 rounded-full ${teamMeta(m.team).chip}`}>
@@ -158,16 +176,28 @@ export default function MembersClient({
                       <DeleteBtn id={m.id} name={m.name} onDone={() => router.refresh()} />
                     </td>
                   </tr>
-                  {isAdmin && expanded === m.id && (
+                  {expanded === m.id && (
                     <tr className="bg-neutral-50/60 border-t border-neutral-100">
-                      <td colSpan={9} className="px-4 py-4">
-                        <AdminPanel
+                      <td colSpan={9} className="px-4 py-4 space-y-4">
+                        <MemberVacation
                           member={m}
-                          salary={salaryByMember[m.id] ?? []}
-                          warnings={warningsByMember[m.id] ?? []}
+                          requests={requestsByMember[m.id] ?? []}
+                          allRequests={requestsByMember}
+                          members={members}
+                          settings={settings}
+                          blackouts={blackouts}
                           today={today}
                           onChange={() => router.refresh()}
                         />
+                        {isAdmin && (
+                          <AdminPanel
+                            member={m}
+                            salary={salaryByMember[m.id] ?? []}
+                            warnings={warningsByMember[m.id] ?? []}
+                            today={today}
+                            onChange={() => router.refresh()}
+                          />
+                        )}
                       </td>
                     </tr>
                   )}
@@ -613,6 +643,232 @@ function SalaryForm({ staffId, onChange }: { staffId: string; onChange: () => vo
       </button>
       {error && <span className="text-rose-600 text-[10px] w-full">{error}</span>}
     </form>
+  );
+}
+
+// ─── Urlaub direkt beim Mitarbeiter (für alle staff-Nutzer) ─────
+
+function vacStatusBadge(status: string) {
+  const map: Record<string, string> = {
+    submitted: "bg-sky-100 text-sky-800",
+    approved: "bg-emerald-100 text-emerald-800",
+    rejected: "bg-rose-100 text-rose-800",
+  };
+  const label: Record<string, string> = { submitted: "Offen", approved: "Genehmigt", rejected: "Abgelehnt" };
+  return <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${map[status]}`}>{label[status]}</span>;
+}
+
+function MemberVacation({
+  member, requests, allRequests, members, settings, blackouts, today, onChange,
+}: {
+  member: StaffMember;
+  requests: VacationRequest[];
+  allRequests: Record<string, VacationRequest[]>;
+  members: StaffMember[];
+  settings: TeamSetting[];
+  blackouts: VacationBlackout[];
+  today: string;
+  onChange: () => void;
+}) {
+  const year = Number(today.slice(0, 4));
+  const bal = vacationBalance(requests, {
+    year,
+    annualDays: member.annual_vacation_days,
+    carryoverDays: member.carryover_days,
+    carryoverExpiresOn: member.carryover_expires_on,
+    today,
+  });
+  const flatAll = useMemo(() => Object.values(allRequests).flat(), [allRequests]);
+  const sorted = [...requests].sort((a, b) => (a.start_date < b.start_date ? 1 : -1));
+
+  return (
+    <div className="rounded-xl border border-neutral-200 bg-white p-3 space-y-3">
+      <div className="flex items-center gap-2 text-xs font-medium text-neutral-700">
+        <CalendarDays size={13} /> Urlaub {member.name} · {year}
+      </div>
+
+      {/* Saldo */}
+      <div className="flex flex-wrap gap-4 text-sm">
+        <Stat label="Anspruch" value={member.annual_vacation_days} />
+        <Stat label="Übertrag" value={bal.carryover} />
+        <Stat label="Verbraucht" value={bal.used} />
+        <Stat label="Geplant" value={bal.planned} muted />
+        <div>
+          <div className="text-[10px] uppercase text-neutral-500">Verfügbar</div>
+          <span className={`inline-block mt-0.5 text-base font-bold tabular-nums px-2 py-0.5 rounded-lg ${
+            bal.available <= 0 ? "bg-rose-100 text-rose-700" : bal.available <= 5 ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"
+          }`}>{bal.available}</span>
+        </div>
+      </div>
+
+      {/* Antrag direkt anlegen */}
+      <MemberVacationForm member={member} requestsAll={flatAll} members={members} settings={settings} blackouts={blackouts} onChange={onChange} />
+
+      {/* Anträge / vergangene Urlaube */}
+      {sorted.length === 0 ? (
+        <p className="text-sm text-neutral-400">Noch keine Urlaube/Anträge.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-[10px] uppercase text-neutral-400 text-left">
+                <th className="py-1 pr-3">Zeitraum</th>
+                <th className="py-1 pr-3 text-right">Tage</th>
+                <th className="py-1 pr-3">Art</th>
+                <th className="py-1 pr-3">Status</th>
+                <th className="py-1 pr-3">Eingereicht</th>
+                <th className="py-1 text-right">Aktion</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r) => {
+                const past = r.end_date < today;
+                return (
+                  <tr key={r.id} className={`border-t border-neutral-100 ${past ? "text-neutral-400" : ""}`}>
+                    <td className="py-1.5 pr-3 whitespace-nowrap">{r.start_date} – {r.end_date}</td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums">{r.days}</td>
+                    <td className="py-1.5 pr-3">{r.paid ? "Bezahlt" : "Unbezahlt"}</td>
+                    <td className="py-1.5 pr-3">{vacStatusBadge(r.status)}{r.decided_at && <span className="block text-[9px] text-neutral-400">am {r.decided_at.slice(0, 10)}</span>}</td>
+                    <td className="py-1.5 pr-3 text-neutral-400">{r.submitted_at?.slice(0, 10)}</td>
+                    <td className="py-1.5 text-right whitespace-nowrap">
+                      <VacRowActions request={r} onChange={onChange} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value, muted }: { label: string; value: number; muted?: boolean }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase text-neutral-500">{label}</div>
+      <div className={`mt-0.5 tabular-nums font-medium ${muted ? "text-neutral-500" : "text-neutral-800"}`}>{value}</div>
+    </div>
+  );
+}
+
+function MemberVacationForm({
+  member, requestsAll, members, settings, blackouts, onChange,
+}: {
+  member: StaffMember;
+  requestsAll: VacationRequest[];
+  members: StaffMember[];
+  settings: TeamSetting[];
+  blackouts: VacationBlackout[];
+  onChange: () => void;
+}) {
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [override, setOverride] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startT] = useTransition();
+
+  const autoDays = start && end && end >= start ? countWorkdays(start, end) : null;
+
+  const warn = useMemo(() => {
+    if (!start || !end || end < start) return null;
+    const cap = maxOnVacation(settings, member.team);
+    const teamMembers = members.filter((x) => x.team === member.team);
+    let peak = 0;
+    const blk = new Set<string>();
+    for (let t = Date.parse(start); t <= Date.parse(end); t += 86400000) {
+      const day = new Date(t).toISOString().slice(0, 10);
+      if (cap < UNLIMITED) {
+        const existing = teamOnDay(teamMembers, requestsAll, member.team, day).filter((e) => e.memberId !== member.id);
+        peak = Math.max(peak, existing.length + 1);
+      }
+      blackoutsForDay(day, blackouts, member.team).forEach((b) => blk.add(b.label));
+    }
+    return {
+      cap: cap < UNLIMITED && peak > cap ? { peak, cap } : null,
+      blackouts: blk.size ? [...blk] : null,
+    };
+  }, [start, end, member, members, settings, blackouts, requestsAll]);
+
+  function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    fd.set("staff_id", member.id);
+    startT(async () => {
+      const res = await createVacationRequest(null, fd);
+      if (res?.error) { setError(res.error); return; }
+      form.reset();
+      setStart(""); setEnd(""); setOverride("");
+      onChange();
+    });
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-2 border-t border-neutral-100 pt-2">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="block">
+          <span className="text-[10px] uppercase text-neutral-500">Von</span>
+          <input name="start_date" type="date" required value={start} onChange={(e) => setStart(e.target.value)} className="block w-36 rounded border border-neutral-300 px-2 py-1 text-sm" />
+        </label>
+        <label className="block">
+          <span className="text-[10px] uppercase text-neutral-500">Bis</span>
+          <input name="end_date" type="date" required value={end} onChange={(e) => setEnd(e.target.value)} className="block w-36 rounded border border-neutral-300 px-2 py-1 text-sm" />
+        </label>
+        <label className="block">
+          <span className="text-[10px] uppercase text-neutral-500">Tage {autoDays !== null && <span className="normal-case text-neutral-400">(auto {autoDays})</span>}</span>
+          <input name="days_override" type="number" step="0.5" min="0" value={override} onChange={(e) => setOverride(e.target.value)} placeholder={autoDays !== null ? String(autoDays) : "auto"} className="block w-20 rounded border border-neutral-300 px-2 py-1 text-sm" />
+        </label>
+        <label className="block">
+          <span className="text-[10px] uppercase text-neutral-500">Art</span>
+          <select name="paid" defaultValue="true" className="block rounded border border-neutral-300 px-2 py-1 text-sm">
+            <option value="true">Bezahlt</option>
+            <option value="false">Unbezahlt</option>
+          </select>
+        </label>
+        <label className="block flex-1 min-w-[120px]">
+          <span className="text-[10px] uppercase text-neutral-500">Notiz</span>
+          <input name="note" className="block w-full rounded border border-neutral-300 px-2 py-1 text-sm" />
+        </label>
+        <button type="submit" disabled={pending} className="rounded-lg bg-neutral-900 text-white px-3 py-1.5 text-xs font-medium">
+          {pending ? "..." : "+ Urlaub eintragen"}
+        </button>
+      </div>
+      {warn?.cap && (
+        <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-300 rounded px-2 py-1">
+          Team {teamMeta(member.team).label}: bis zu {warn.cap.peak} gleichzeitig im Urlaub (max. {warn.cap.cap}).
+        </div>
+      )}
+      {warn?.blackouts && (
+        <div className="text-[11px] text-rose-800 bg-rose-50 border border-rose-300 rounded px-2 py-1 flex items-center gap-1">
+          <Ban size={12} /> Kritischer Zeitraum: {warn.blackouts.join(", ")} — trotzdem möglich.
+        </div>
+      )}
+      {error && <div className="text-rose-600 text-xs">{error}</div>}
+    </form>
+  );
+}
+
+function VacRowActions({ request, onChange }: { request: VacationRequest; onChange: () => void }) {
+  const [pending, start] = useTransition();
+  return (
+    <span className="inline-flex items-center gap-2">
+      {request.status === "submitted" && (
+        <>
+          <button disabled={pending} onClick={() => start(async () => { await decideVacation(request.id, "approved"); onChange(); })} className="text-emerald-700 hover:text-emerald-800" title="Genehmigen">
+            <Check size={15} />
+          </button>
+          <button disabled={pending} onClick={() => start(async () => { await decideVacation(request.id, "rejected"); onChange(); })} className="text-rose-600 hover:text-rose-700" title="Ablehnen">
+            <XCircle size={15} />
+          </button>
+        </>
+      )}
+      <button disabled={pending} onClick={() => { if (confirm("Antrag/Urlaub löschen?")) start(async () => { await deleteVacation(request.id); onChange(); }); }} className="text-neutral-300 hover:text-rose-600" title="Löschen">
+        <Trash2 size={14} />
+      </button>
+    </span>
   );
 }
 

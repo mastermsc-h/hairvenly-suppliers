@@ -2,6 +2,7 @@ import { requireFeature } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import type {
   FeatureKey, StaffMember, TeamSetting, SalaryChange, StaffWarning,
+  VacationRequest, VacationBlackout,
 } from "@/lib/types";
 import MembersClient from "./members-client";
 
@@ -13,10 +14,14 @@ export default async function StaffMembersPage() {
   const isAdmin = profile.role === "admin" || profile.is_admin;
   const svc = createServiceClient();
 
-  const [{ data }, { data: settings }] = await Promise.all([
+  const [{ data }, { data: settings }, { data: requests }, { data: blackouts }] = await Promise.all([
     svc.from("staff_members").select("*").order("active", { ascending: false }).order("name"),
     svc.from("team_settings").select("*"),
+    svc.from("vacation_requests").select("*").order("start_date", { ascending: false }),
+    svc.from("vacation_blackouts").select("*").order("start_md"),
   ]);
+
+  const requestsByMember = groupBy((requests ?? []) as VacationRequest[], (r) => r.staff_id);
 
   // Sensible Daten (Gehalt, Verwarnungen) NUR für Admins laden.
   let salaryByMember: Record<string, SalaryChange[]> = {};
@@ -44,6 +49,8 @@ export default async function StaffMembersPage() {
       <MembersClient
         members={(data ?? []) as StaffMember[]}
         settings={(settings ?? []) as TeamSetting[]}
+        blackouts={(blackouts ?? []) as VacationBlackout[]}
+        requestsByMember={requestsByMember}
         isAdmin={isAdmin}
         today={today}
         salaryByMember={salaryByMember}
