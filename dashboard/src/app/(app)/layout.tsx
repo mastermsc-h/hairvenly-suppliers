@@ -3,7 +3,7 @@ import { requireProfile, hasFeature } from "@/lib/auth";
 import { signOut } from "@/lib/actions/auth";
 import { t, type Locale } from "@/lib/i18n";
 import type { FeatureKey } from "@/lib/types";
-import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings, Truck, Globe2, Bot, Scissors } from "lucide-react";
+import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings, Truck, Globe2, Bot, Scissors, CalendarDays } from "lucide-react";
 import SidebarGroup from "./sidebar-group";
 import ChatbotInboxBadge from "./chatbot-inbox-badge";
 import LanguageSwitcher from "./language-switcher";
@@ -155,6 +155,23 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                     { href: "/salon-admin", label: t(locale, "nav.salon.overview"), exact: true },
                     { href: "/salon-admin/statistik", label: t(locale, "nav.salon.stats") },
                     { href: "/salon-admin/mitarbeiter", label: t(locale, "nav.salon.employees") },
+                  ]}
+                />
+              </>
+            )}
+
+            {/* Mitarbeiter-Management — Urlaub + Krankheit */}
+            {has("staff") && (
+              <>
+                <div className="border-t border-neutral-200 my-2" />
+                <SidebarGroup
+                  label={t(locale, "nav.staff")}
+                  icon={<CalendarDays size={16} />}
+                  href="/staff/vacation"
+                  items={[
+                    { href: "/staff/vacation", label: t(locale, "nav.staff.vacation") },
+                    { href: "/staff/sick", label: t(locale, "nav.staff.sick") },
+                    { href: "/staff/members", label: t(locale, "nav.staff.members") },
                   ]}
                 />
               </>

@@ -129,6 +129,7 @@ export const FEATURE_KEYS = [
   "shipping",
   "chatbot",
   "salon",
+  "staff",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
@@ -461,4 +462,53 @@ export interface PriceListFull extends SupplierPriceList {
       })[];
     })[];
   })[];
+}
+
+// ─── Mitarbeiter-Management ──────────────────────────────────────
+export type StaffTeam = "salon" | "marketing" | "kundenservice" | "lager";
+export type VacationStatus = "submitted" | "approved" | "rejected";
+export type SickCategory = "own" | "child";
+
+export interface StaffMember {
+  id: string;
+  name: string;
+  team: StaffTeam;
+  annual_vacation_days: number;
+  carryover_days: number;
+  carryover_expires_on: string | null;
+  employment_start: string | null;
+  active: boolean;
+  profile_id: string | null;
+  created_at: string;
+}
+
+export interface VacationRequest {
+  id: string;
+  staff_id: string;
+  start_date: string;
+  end_date: string;
+  days: number;
+  paid: boolean;
+  status: VacationStatus;
+  submitted_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface SickDay {
+  id: string;
+  staff_id: string;
+  start_date: string;
+  end_date: string;
+  days: number;
+  category: SickCategory;
+  certificate_required: boolean;
+  certificate_uploaded: boolean;
+  certificate_path: string | null;
+  certificate_file_name: string | null;
+  certificate_expires_on: string | null;
+  note: string | null;
+  created_at: string;
 }

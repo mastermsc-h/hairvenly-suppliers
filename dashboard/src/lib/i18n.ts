@@ -676,6 +676,10 @@ export const messages: Record<Locale, Record<string, string>> = {
     "nav.salon.overview": "Übersicht",
     "nav.salon.stats": "Statistik",
     "nav.salon.employees": "Mitarbeiter",
+    "nav.staff": "Mitarbeiter",
+    "nav.staff.vacation": "Urlaubskalender",
+    "nav.staff.sick": "Krankheitstage",
+    "nav.staff.members": "Mitarbeiter",
   },
 
   en: {
@@ -1352,6 +1356,10 @@ export const messages: Record<Locale, Record<string, string>> = {
     "nav.salon.overview": "Overview",
     "nav.salon.stats": "Statistics",
     "nav.salon.employees": "Employees",
+    "nav.staff": "Staff",
+    "nav.staff.vacation": "Vacation calendar",
+    "nav.staff.sick": "Sick days",
+    "nav.staff.members": "Employees",
   },
 
   tr: {
@@ -2053,6 +2061,10 @@ export const messages: Record<Locale, Record<string, string>> = {
     "nav.salon.overview": "Genel bakış",
     "nav.salon.stats": "İstatistik",
     "nav.salon.employees": "Çalışanlar",
+    "nav.staff": "Personel",
+    "nav.staff.vacation": "İzin takvimi",
+    "nav.staff.sick": "Hastalık günleri",
+    "nav.staff.members": "Çalışanlar",
   },
 };
 
