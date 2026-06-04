@@ -375,6 +375,14 @@ async function routeIncoming(opts: {
       .maybeSingle();
     const defaultMode = (settings?.default_bot_mode || "off") as "auto" | "assisted" | "off";
 
+    // 📲 WHATSAPP-BEOBACHTUNGSPHASE: Neue WhatsApp-Sessions starten IMMER
+    // manuell (bot_mode 'off'), egal was der globale Default ist. So sammeln
+    // wir echte WhatsApp-Chats zum Mitlesen / Auswerten / Bot-Trainieren, OHNE
+    // dass der Bot reingrätscht. Wenn ihr den Bot später auch auf WhatsApp
+    // automatisch antworten lassen wollt: dieses Override entfernen, dann gilt
+    // wieder der globale default_bot_mode wie bei Instagram.
+    const effectiveMode = opts.channel === "whatsapp" ? "off" : defaultMode;
+
     const { data: created } = await svc.from("chat_sessions").insert({
       channel: opts.channel,
       external_id: opts.externalId,
@@ -382,8 +390,8 @@ async function routeIncoming(opts: {
       customer_full_name: opts.customerFullName || null,
       bot_signature_name: picked,
       status: "active",
-      bot_mode: defaultMode,
-      bot_auto_reply: defaultMode === "auto",
+      bot_mode: effectiveMode,
+      bot_auto_reply: effectiveMode === "auto",
     }).select().single();
     session = created;
   } else if (opts.customerFullName && !session.customer_full_name) {
