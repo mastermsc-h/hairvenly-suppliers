@@ -102,16 +102,31 @@ export default function BarcodesClient({
         @media print {
           .no-print, .no-print * { display: none !important; }
           aside, [data-mobile-sidebar] { display: none !important; }
-          html, body { background: white !important; margin: 0 !important; padding: 0 !important; }
+          html, body {
+            background: white !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            line-height: 0 !important;
+            font-size: 0 !important;
+          }
           main { padding: 0 !important; overflow: visible !important; }
           @page { size: 50mm 25mm; margin: 0; }
-          .label-sheet { display: block; }
-          /* Jedes label = 1 SVG mit fixen 50mm x 25mm. Kein flow-overflow,
-             daher kann der browser nicht ueber seitengrenzen aufsplitten. */
+          .label-sheet { display: block; line-height: 0; font-size: 0; }
+          /* Jedes label = ein PNG-img in fixem container. KEINE descenders,
+             KEINE line-height, harter overflow:clip, 0.5mm safety-buffer.
+             Aelterer macOS Chrome rundet subpixel anders → ohne diese guards
+             ueberwucherte das img den container um ~0.1mm und triggerte
+             einen seitenumbruch. */
           .label {
             width: 50mm !important;
             height: 25mm !important;
+            max-height: 25mm !important;
             display: block !important;
+            position: relative !important;
+            overflow: hidden !important;
+            line-height: 0 !important;
+            font-size: 0 !important;
+            box-sizing: border-box !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
             page-break-after: always !important;
@@ -122,10 +137,15 @@ export default function BarcodesClient({
             break-after: auto !important;
           }
           .label-img {
-            display: block;
-            width: 50mm;
-            height: 25mm;
-            object-fit: contain;
+            display: block !important;
+            width: 50mm !important;
+            height: 24.5mm !important;
+            max-height: 24.5mm !important;
+            vertical-align: top !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: 0 !important;
+            object-fit: contain !important;
           }
         }
       `}</style>
