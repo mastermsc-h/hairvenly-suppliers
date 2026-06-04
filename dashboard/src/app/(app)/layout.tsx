@@ -170,8 +170,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                   href="/staff/vacation"
                   items={[
                     { href: "/staff/vacation", label: t(locale, "nav.staff.vacation") },
-                    { href: "/staff/sick", label: t(locale, "nav.staff.sick") },
-                    { href: "/staff/members", label: t(locale, "nav.staff.members") },
+                    // Krankheitstage + Mitarbeiter-Stammdaten/Gehalt nur für den echten Admin
+                    ...(profile.role === "admin"
+                      ? [
+                          { href: "/staff/sick", label: t(locale, "nav.staff.sick") },
+                          { href: "/staff/members", label: t(locale, "nav.staff.members") },
+                        ]
+                      : []),
                   ]}
                 />
               </>

@@ -1,13 +1,25 @@
 "use server";
 
+import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
-import { requireFeature, requireAdmin } from "@/lib/auth";
+import { requireFeature } from "@/lib/auth";
 import { countWorkdays, countCalendarDays } from "@/lib/staff/holidays";
 import type { FeatureKey } from "@/lib/types";
 
 const STAFF_FEATURE = "staff" as FeatureKey;
 const BUCKET = "staff-documents";
+
+/**
+ * Alle Mitarbeiter-Verwaltungsaktionen sind ausschließlich dem echten Admin
+ * (role === "admin") erlaubt — NICHT den Mitarbeitern (role === "employee",
+ * is_admin === true). Mitarbeiter sind im Mitarbeiter-Bereich Nur-Ansicht.
+ */
+async function requireStaffAdmin() {
+  const profile = await requireFeature(STAFF_FEATURE);
+  if (profile.role !== "admin") redirect("/staff/vacation");
+  return profile;
+}
 
 function str(v: FormDataEntryValue | null): string | null {
   const s = (v == null ? "" : String(v)).trim();
@@ -27,8 +39,7 @@ function revalidateAll() {
 // ─── Mitarbeiter-Stammdaten ──────────────────────────────────────
 
 export async function createStaffMember(_prev: unknown, formData: FormData) {
-  const profile = await requireFeature(STAFF_FEATURE);
-  const isAdmin = profile.role === "admin" || profile.is_admin;
+  await requireStaffAdmin();
   const svc = createServiceClient();
   const name = str(formData.get("name"));
   const team = str(formData.get("team"));
@@ -49,9 +60,9 @@ export async function createStaffMember(_prev: unknown, formData: FormData) {
   }).select("id").single();
   if (error) return { error: error.message };
 
-  // Startgehalt (brutto) optional gleich anlegen — nur Admins dürfen Gehalt setzen.
+  // Startgehalt (brutto) optional gleich anlegen.
   const initialSalary = formData.get("initial_salary");
-  if (isAdmin && inserted && initialSalary != null && String(initialSalary).trim() !== "") {
+  if (inserted && initialSalary != null && String(initialSalary).trim() !== "") {
     await svc.from("staff_salary_changes").insert({
       staff_id: inserted.id,
       effective_date: employmentStart ?? new Date().toISOString().slice(0, 10),
@@ -64,7 +75,7 @@ export async function createStaffMember(_prev: unknown, formData: FormData) {
 }
 
 export async function updateStaffMember(id: string, formData: FormData) {
-  await requireFeature(STAFF_FEATURE);
+  await requireStaffAdmin();
   const svc = createServiceClient();
   const update: Record<string, unknown> = {};
   if (formData.has("name")) update.name = str(formData.get("name"));
@@ -88,7 +99,7 @@ export async function updateStaffMember(id: string, formData: FormData) {
 }
 
 export async function deleteStaffMember(id: string) {
-  await requireFeature(STAFF_FEATURE);
+  await requireStaffAdmin();
   const svc = createServiceClient();
   // Bescheinigungs-Dateien des Mitarbeiters aus dem Bucket entfernen.
   const { data: sick } = await svc
@@ -107,7 +118,7 @@ export async function deleteStaffMember(id: string) {
 // ─── Team-Einstellungen (Mindestbesetzung) ──────────────────────
 
 export async function updateTeamSetting(team: string, maxOnVacation: number) {
-  await requireFeature(STAFF_FEATURE);
+  await requireStaffAdmin();
   const svc = createServiceClient();
   const max = Number.isFinite(maxOnVacation) && maxOnVacation >= 0 ? Math.floor(maxOnVacation) : 99;
   const { error } = await svc
@@ -124,7 +135,7 @@ export async function updateTeamSetting(team: string, maxOnVacation: number) {
 // ─── Kritische Zeiträume / Sperrzeiten ──────────────────────────
 
 export async function addBlackout(_prev: unknown, formData: FormData) {
-  await requireFeature(STAFF_FEATURE);
+  await requireStaffAdmin();
   const svc = createServiceClient();
   const label = str(formData.get("label"));
   const start = str(formData.get("start_date")); // volles Datum, nur MM-DD wird genutzt
@@ -145,7 +156,7 @@ export async function addBlackout(_prev: unknown, formData: FormData) {
 }
 
 export async function deleteBlackout(id: string) {
-  await requireFeature(STAFF_FEATURE);
+  await requireStaffAdmin();
   const svc = createServiceClient();
   const { error } = await svc.from("vacation_blackouts").delete().eq("id", id);
   if (error) return { error: error.message };
@@ -156,8 +167,7 @@ export async function deleteBlackout(id: string) {
 // ─── Urlaubsanträge ──────────────────────────────────────────────
 
 export async function createVacationRequest(_prev: unknown, formData: FormData) {
-  const profile = await requireFeature(STAFF_FEATURE);
-  const isAdmin = profile.role === "admin" || profile.is_admin;
+  const profile = await requireStaffAdmin();
   const svc = createServiceClient();
   const staffId = str(formData.get("staff_id"));
   const start = str(formData.get("start_date"));
@@ -173,9 +183,8 @@ export async function createVacationRequest(_prev: unknown, formData: FormData) 
     ? numOr(override, auto)
     : auto;
 
-  // Admins können direkt "genehmigt" eintragen (in den Kalender), sonst Antrag.
-  const wantApproved = formData.get("status") === "approved";
-  const directApprove = isAdmin && wantApproved;
+  // Admin kann direkt "genehmigt" eintragen (in den Kalender) oder als Antrag.
+  const directApprove = formData.get("status") === "approved";
 
   const { error } = await svc.from("vacation_requests").insert({
     staff_id: staffId,
@@ -194,7 +203,7 @@ export async function createVacationRequest(_prev: unknown, formData: FormData) 
 }
 
 export async function updateVacationRequest(id: string, formData: FormData) {
-  await requireFeature(STAFF_FEATURE);
+  await requireStaffAdmin();
   const svc = createServiceClient();
   const start = str(formData.get("start_date"));
   const end = str(formData.get("end_date"));
@@ -217,7 +226,7 @@ export async function updateVacationRequest(id: string, formData: FormData) {
 }
 
 export async function decideVacation(id: string, decision: "approved" | "rejected") {
-  const profile = await requireFeature(STAFF_FEATURE);
+  const profile = await requireStaffAdmin();
   const svc = createServiceClient();
   const { error } = await svc
     .from("vacation_requests")
@@ -233,7 +242,7 @@ export async function decideVacation(id: string, decision: "approved" | "rejecte
 }
 
 export async function deleteVacation(id: string) {
-  await requireFeature(STAFF_FEATURE);
+  await requireStaffAdmin();
   const svc = createServiceClient();
   const { error } = await svc.from("vacation_requests").delete().eq("id", id);
   if (error) return { error: error.message };
@@ -244,7 +253,7 @@ export async function deleteVacation(id: string) {
 // ─── Krankheitstage ──────────────────────────────────────────────
 
 export async function createSickDay(_prev: unknown, formData: FormData) {
-  await requireFeature(STAFF_FEATURE);
+  await requireStaffAdmin();
   const svc = createServiceClient();
   const staffId = str(formData.get("staff_id"));
   const start = str(formData.get("start_date"));
@@ -272,7 +281,7 @@ export async function createSickDay(_prev: unknown, formData: FormData) {
 }
 
 export async function uploadSickCertificate(sickId: string, formData: FormData) {
-  await requireFeature(STAFF_FEATURE);
+  await requireStaffAdmin();
   const svc = createServiceClient();
   const file = formData.get("file") as File | null;
   if (!file || file.size === 0) return { error: "Keine Datei ausgewählt." };
@@ -299,7 +308,7 @@ export async function uploadSickCertificate(sickId: string, formData: FormData) 
 }
 
 export async function deleteSickDay(id: string) {
-  await requireFeature(STAFF_FEATURE);
+  await requireStaffAdmin();
   const svc = createServiceClient();
   const { data: row } = await svc
     .from("sick_days")
@@ -315,7 +324,8 @@ export async function deleteSickDay(id: string) {
 
 /** Signierte URL (10 Min) für die Vorschau/Download einer Bescheinigung. */
 export async function getCertificateSignedUrl(filePath: string): Promise<string | null> {
-  await requireFeature(STAFF_FEATURE);
+  const profile = await requireFeature(STAFF_FEATURE);
+  if (profile.role !== "admin") return null;
   const svc = createServiceClient();
   const { data, error } = await svc.storage
     .from(BUCKET)
@@ -324,12 +334,12 @@ export async function getCertificateSignedUrl(filePath: string): Promise<string 
   return data.signedUrl;
 }
 
-// ─── Gehalt + Verwarnungen (NUR ADMIN) ──────────────────────────
-// requireAdmin() leitet Nicht-Admins weg → diese sensiblen Daten sind
-// ausschließlich für Admins schreib-/lesbar (DB zusätzlich per RLS gesperrt).
+// ─── Gehalt + Verwarnungen (NUR ECHTER ADMIN, role==="admin") ────
+// requireStaffAdmin() leitet Mitarbeiter weg → sensible Daten nur für den Admin.
+// DB zusätzlich per RLS gesperrt (nur Service-Role).
 
 export async function addSalaryChange(staffId: string, formData: FormData) {
-  await requireAdmin();
+  await requireStaffAdmin();
   const svc = createServiceClient();
   const effective = str(formData.get("effective_date"));
   const amount = formData.get("amount");
@@ -347,7 +357,7 @@ export async function addSalaryChange(staffId: string, formData: FormData) {
 }
 
 export async function deleteSalaryChange(id: string) {
-  await requireAdmin();
+  await requireStaffAdmin();
   const svc = createServiceClient();
   const { error } = await svc.from("staff_salary_changes").delete().eq("id", id);
   if (error) return { error: error.message };
@@ -356,7 +366,7 @@ export async function deleteSalaryChange(id: string) {
 }
 
 export async function addWarning(staffId: string, formData: FormData) {
-  await requireAdmin();
+  await requireStaffAdmin();
   const svc = createServiceClient();
   const date = str(formData.get("warning_date"));
   const type = str(formData.get("type"));
@@ -374,7 +384,7 @@ export async function addWarning(staffId: string, formData: FormData) {
 }
 
 export async function deleteWarning(id: string) {
-  await requireAdmin();
+  await requireStaffAdmin();
   const svc = createServiceClient();
   const { error } = await svc.from("staff_warnings").delete().eq("id", id);
   if (error) return { error: error.message };

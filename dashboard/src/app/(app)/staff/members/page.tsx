@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { requireFeature } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import type {
@@ -11,7 +12,9 @@ const STAFF_FEATURE = "staff" as FeatureKey;
 
 export default async function StaffMembersPage() {
   const profile = await requireFeature(STAFF_FEATURE);
-  const isAdmin = profile.role === "admin" || profile.is_admin;
+  // Mitarbeiter-Stammdaten/Gehalt/Krankheit nur für den echten Admin.
+  if (profile.role !== "admin") redirect("/staff/vacation");
+  const isAdmin = true;
   const svc = createServiceClient();
 
   const [{ data }, { data: settings }, { data: requests }, { data: blackouts }] = await Promise.all([

@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { requireFeature } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { FeatureKey, StaffMember, SickDay } from "@/lib/types";
@@ -7,7 +8,9 @@ export const dynamic = "force-dynamic";
 const STAFF_FEATURE = "staff" as FeatureKey;
 
 export default async function SickPage() {
-  await requireFeature(STAFF_FEATURE);
+  const profile = await requireFeature(STAFF_FEATURE);
+  // Krankheitstage sind sensibel → nur für den echten Admin.
+  if (profile.role !== "admin") redirect("/staff/vacation");
   const svc = createServiceClient();
 
   const [{ data: members }, { data: sick }] = await Promise.all([

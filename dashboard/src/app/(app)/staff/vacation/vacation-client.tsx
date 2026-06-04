@@ -108,12 +108,16 @@ export default function VacationClient({
           {TEAMS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
         <div className="flex-1" />
-        <button onClick={() => exportCsv(rows, year)} className="flex items-center gap-2 rounded-lg border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50">
-          <Download size={15} /> CSV-Export
-        </button>
-        <button onClick={() => setAdding((a) => !a)} className="bg-neutral-900 text-white rounded-lg px-4 py-2 text-sm font-medium flex items-center gap-2">
-          <Plus size={16} /> Urlaubsantrag
-        </button>
+        {isAdmin && (
+          <>
+            <button onClick={() => exportCsv(rows, year)} className="flex items-center gap-2 rounded-lg border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50">
+              <Download size={15} /> CSV-Export
+            </button>
+            <button onClick={() => setAdding((a) => !a)} className="bg-neutral-900 text-white rounded-lg px-4 py-2 text-sm font-medium flex items-center gap-2">
+              <Plus size={16} /> Urlaub eintragen
+            </button>
+          </>
+        )}
       </div>
 
       {/* Widgets: heute abwesend · Geburtstage */}
@@ -137,8 +141,8 @@ export default function VacationClient({
         <BirthdaysWidget birthdays={birthdays} />
       </div>
 
-      {/* Kapazitäts-Warnungen */}
-      {(overCapToday.length > 0 || conflicts.length > 0) && (
+      {/* Kapazitäts-Warnungen (nur Admin) */}
+      {isAdmin && (overCapToday.length > 0 || conflicts.length > 0) && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 space-y-2">
           <div className="flex items-center gap-2 text-sm font-medium text-amber-800">
             <AlertTriangle size={16} className="text-amber-600" /> Team-Besetzung — Überschneidungen
@@ -168,7 +172,8 @@ export default function VacationClient({
         />
       )}
 
-      {/* Saldo-Übersicht (Mitarbeiterliste) */}
+      {/* Saldo-Übersicht (Mitarbeiterliste) — nur Admin (kumulierte Stände) */}
+      {isAdmin && (
       <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-sm overflow-hidden">
       <button onClick={() => setShowSaldo((s) => !s)} className="w-full flex items-center justify-between gap-3 px-4 md:px-5 py-3 bg-gradient-to-b from-neutral-50 to-white border-b border-neutral-100">
         <span className="flex items-center gap-2.5">
@@ -237,12 +242,13 @@ export default function VacationClient({
         </div>
       )}
       </div>
+      )}
 
       {/* Team-Kapazitätskalender */}
       <CapacityCalendar members={members} requests={requests} settings={settings} blackouts={blackouts} isAdmin={isAdmin} year={year} today={today} onChange={() => router.refresh()} />
 
-      {/* Kritische Zeiträume / Sperrzeiten verwalten */}
-      <BlackoutConfig blackouts={blackouts} onChange={() => router.refresh()} />
+      {/* Kritische Zeiträume / Sperrzeiten verwalten — nur Admin */}
+      {isAdmin && <BlackoutConfig blackouts={blackouts} onChange={() => router.refresh()} />}
 
       {/* Jahresraster-Planner (ausklappbare Alternative) */}
       <div>
@@ -264,8 +270,8 @@ export default function VacationClient({
       {/* Timeline */}
       <Timeline members={visibleMembers} requests={requests} year={year} today={today} />
 
-      {/* Anträge mit Workflow */}
-      <RequestTable members={members} requests={requests} year={year} onChange={() => router.refresh()} />
+      {/* Anträge mit Workflow — nur Admin */}
+      {isAdmin && <RequestTable members={members} requests={requests} year={year} onChange={() => router.refresh()} />}
     </div>
   );
 }
@@ -452,7 +458,7 @@ function fmtDayLong(day: string): string {
   return `${d}.${m}.${y}`;
 }
 
-function QuickReqRow({ req, member, onRefresh }: { req: VacationRequest; member: StaffMember; onRefresh: () => void }) {
+function QuickReqRow({ req, member, isAdmin, onRefresh }: { req: VacationRequest; member: StaffMember; isAdmin: boolean; onRefresh: () => void }) {
   const [editing, setEditing] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -469,7 +475,7 @@ function QuickReqRow({ req, member, onRefresh }: { req: VacationRequest; member:
     });
   }
 
-  if (editing) {
+  if (editing && isAdmin) {
     return (
       <form onSubmit={save} className="rounded-lg border border-neutral-200 bg-neutral-50 p-2 space-y-2">
         <div className="text-xs font-medium text-neutral-700">{member.name}</div>
@@ -501,16 +507,18 @@ function QuickReqRow({ req, member, onRefresh }: { req: VacationRequest; member:
         <span className="text-[11px] text-neutral-500 ml-1.5">{req.start_date}–{req.end_date} · {req.days}T{req.paid ? "" : " · unbez."}</span>
         <span className="ml-1.5">{vacStatusBadgeMini(req.status)}</span>
       </div>
-      <div className="flex items-center gap-1.5 shrink-0">
-        {req.status === "submitted" && (
-          <>
-            <button disabled={pending} onClick={() => start(async () => { await decideVacation(req.id, "approved"); onRefresh(); })} className="text-emerald-700 hover:text-emerald-800" title="Genehmigen"><Check size={15} /></button>
-            <button disabled={pending} onClick={() => start(async () => { await decideVacation(req.id, "rejected"); onRefresh(); })} className="text-rose-600 hover:text-rose-700" title="Ablehnen"><XCircle size={15} /></button>
-          </>
-        )}
-        <button onClick={() => setEditing(true)} className="text-neutral-400 hover:text-neutral-700" title="Bearbeiten"><Pencil size={14} /></button>
-        <button disabled={pending} onClick={() => { if (confirm("Eintrag löschen?")) start(async () => { await deleteVacation(req.id); onRefresh(); }); }} className="text-neutral-400 hover:text-rose-600" title="Löschen"><Trash2 size={14} /></button>
-      </div>
+      {isAdmin && (
+        <div className="flex items-center gap-1.5 shrink-0">
+          {req.status === "submitted" && (
+            <>
+              <button disabled={pending} onClick={() => start(async () => { await decideVacation(req.id, "approved"); onRefresh(); })} className="text-emerald-700 hover:text-emerald-800" title="Genehmigen"><Check size={15} /></button>
+              <button disabled={pending} onClick={() => start(async () => { await decideVacation(req.id, "rejected"); onRefresh(); })} className="text-rose-600 hover:text-rose-700" title="Ablehnen"><XCircle size={15} /></button>
+            </>
+          )}
+          <button onClick={() => setEditing(true)} className="text-neutral-400 hover:text-neutral-700" title="Bearbeiten"><Pencil size={14} /></button>
+          <button disabled={pending} onClick={() => { if (confirm("Eintrag löschen?")) start(async () => { await deleteVacation(req.id); onRefresh(); }); }} className="text-neutral-400 hover:text-rose-600" title="Löschen"><Trash2 size={14} /></button>
+        </div>
+      )}
     </div>
   );
 }
@@ -563,7 +571,7 @@ function DayQuickEntry({
         <CardHead
           icon={<CalendarDays size={14} />}
           title={fmtDayLong(day)}
-          sub="Urlaub eintragen / bearbeiten"
+          sub={isAdmin ? "Urlaub eintragen / bearbeiten" : "Wer ist an dem Tag im Urlaub"}
           tint="sky"
           right={<button onClick={onClose} className="text-neutral-400 hover:text-neutral-700"><X size={18} /></button>}
         />
@@ -581,12 +589,13 @@ function DayQuickEntry({
             ) : (
               <div className="space-y-1.5">
                 {onThisDay.map(({ r, m }) => (
-                  <QuickReqRow key={r.id} req={r} member={m} onRefresh={onRefresh} />
+                  <QuickReqRow key={r.id} req={r} member={m} isAdmin={isAdmin} onRefresh={onRefresh} />
                 ))}
               </div>
             )}
           </div>
 
+          {isAdmin && (<>
           <div className="text-[10px] uppercase tracking-wide text-neutral-400 pt-1">Neuen Urlaub eintragen</div>
           <form onSubmit={submit} className="space-y-2 border-t border-neutral-100 pt-2">
             <div>
@@ -640,6 +649,7 @@ function DayQuickEntry({
               </button>
             </div>
           </form>
+          </>)}
         </div>
       </div>
     </div>
