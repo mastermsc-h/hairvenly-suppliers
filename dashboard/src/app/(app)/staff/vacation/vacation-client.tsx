@@ -296,7 +296,7 @@ function CapacityCalendar({
   today: string;
 }) {
   const [team, setTeam] = useState<string>("all");
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [month, setMonth] = useState<number>(() => {
     const m = Number(today.slice(5, 7)) - 1;
     return today.startsWith(String(year)) ? m : 0;
@@ -355,9 +355,9 @@ function CapacityCalendar({
         {" · "}<span className="text-rose-600">roter Rand oben = kritischer Zeitraum</span>
       </div>
 
-      <div className="grid grid-cols-7 gap-1.5">
+      <div className="grid grid-cols-7 gap-1">
         {WEEKDAYS.map((w) => (
-          <div key={w} className="text-[10px] font-medium uppercase tracking-wide text-neutral-400 text-center py-1">{w}</div>
+          <div key={w} className="text-[10px] font-medium uppercase tracking-wide text-neutral-400 text-center py-0.5">{w}</div>
         ))}
         {cells.map((d, i) => {
           if (d === null) return <div key={`e${i}`} />;
@@ -386,16 +386,16 @@ function CapacityCalendar({
           const critTitle = critical ? `Kritischer Zeitraum: ${blk.map((b) => b.label).join(", ")}` : undefined;
 
           return (
-            <div key={day} title={critTitle} className={`min-h-[72px] rounded-xl border p-1.5 text-[11px] transition-shadow hover:shadow-sm ${bg} ${critBorder} ${isToday ? "ring-2 ring-neutral-900 ring-offset-1" : ""}`}>
+            <div key={day} title={critTitle} className={`min-h-[52px] rounded-lg border p-1 text-[10px] transition-shadow hover:shadow-sm ${bg} ${critBorder} ${isToday ? "ring-2 ring-neutral-900 ring-offset-1" : ""}`}>
               <div className="flex items-center justify-between">
-                <span className={`grid place-items-center h-5 w-5 rounded-full text-[11px] font-semibold ${isToday ? "bg-neutral-900 text-white" : weekend || isHoliday ? "text-neutral-400" : "text-neutral-600"}`}>{d}</span>
+                <span className={`grid place-items-center h-4 w-4 rounded-full text-[10px] font-semibold ${isToday ? "bg-neutral-900 text-white" : weekend || isHoliday ? "text-neutral-400" : "text-neutral-600"}`}>{d}</span>
                 {free !== null && (
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${over ? "bg-rose-200 text-rose-800" : free === 0 ? "bg-amber-200 text-amber-800" : "bg-emerald-200 text-emerald-800"}`}>
+                  <span className={`text-[8px] px-1 py-0.5 rounded-full font-medium ${over ? "bg-rose-200 text-rose-800" : free === 0 ? "bg-amber-200 text-amber-800" : "bg-emerald-200 text-emerald-800"}`}>
                     {over ? "voll!" : `${free} frei`}
                   </span>
                 )}
               </div>
-              <div className="mt-1 space-y-0.5">
+              <div className="mt-0.5 space-y-0.5">
                 {critical && onVac === 0 && (
                   <div className="text-[9px] text-rose-500 flex items-center gap-0.5"><Ban size={9} /> Sperrzeit</div>
                 )}
@@ -719,7 +719,7 @@ function RequestForm({
 }
 
 function RequestTable({ members, requests, year, onChange }: { members: StaffMember[]; requests: VacationRequest[]; year: number; onChange: () => void }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const name = (id: string) => members.find((m) => m.id === id)?.name ?? "—";
   const list = requests.filter((r) => r.start_date.slice(0, 4) === String(year));
   const openCount = list.filter((r) => r.status === "submitted").length;
