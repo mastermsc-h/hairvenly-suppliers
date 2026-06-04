@@ -92,7 +92,7 @@ export default function VacationClient({
     [members, requests, settings, year],
   );
 
-  const birthdays = useMemo(() => upcomingBirthdays(members, today, 60), [members, today]);
+  const birthdays = useMemo(() => upcomingBirthdays(members, today, 30), [members, today]);
 
   return (
     <div className="space-y-6">
@@ -276,7 +276,7 @@ function BirthdaysWidget({ birthdays }: { birthdays: ReturnType<typeof upcomingB
       <CardHead icon={<Cake size={14} />} title="Anstehende Geburtstage" tint="fuchsia" />
       <div className="p-4">
         {birthdays.length === 0 ? (
-          <p className="text-sm text-neutral-500">Keine Geburtstage in den nächsten 60 Tagen.</p>
+          <p className="text-sm text-neutral-500">Keine Geburtstage in den nächsten 30 Tagen.</p>
         ) : (
           <ul className="space-y-1.5 text-sm">
             {birthdays.slice(0, 6).map((b) => (
