@@ -93,6 +93,24 @@ export function teamConflicts(
   return out;
 }
 
+export interface Probation {
+  end: string;       // Ablaufdatum (Eintritt + 6 Monate)
+  daysLeft: number;  // verbleibende Tage (negativ wenn vorbei)
+  over: boolean;     // bereits abgelaufen
+}
+
+/** Probezeit-Ablauf = Eintrittsdatum + 6 Monate. `today` wird hereingereicht. */
+export function probation(employmentStart: string | null, today: string): Probation | null {
+  if (!employmentStart) return null;
+  const [y, m, d] = employmentStart.split("-").map(Number);
+  // 6 Monate addieren (Date normalisiert Monatsüberlauf automatisch).
+  const endDate = new Date(Date.UTC(y, m - 1 + 6, d));
+  const end = ymd(endDate.getTime());
+  const [ty, tm, td] = today.split("-").map(Number);
+  const daysLeft = Math.round((endDate.getTime() - Date.UTC(ty, tm - 1, td)) / 86400000);
+  return { end, daysLeft, over: daysLeft < 0 };
+}
+
 export interface UpcomingBirthday {
   member: StaffMember;
   date: string;   // nächstes Vorkommen "YYYY-MM-DD"

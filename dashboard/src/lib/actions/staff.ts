@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
-import { requireFeature } from "@/lib/auth";
+import { requireFeature, requireAdmin } from "@/lib/auth";
 import { countWorkdays, countCalendarDays } from "@/lib/staff/holidays";
 import type { FeatureKey } from "@/lib/types";
 
@@ -247,4 +247,62 @@ export async function getCertificateSignedUrl(filePath: string): Promise<string 
     .createSignedUrl(filePath, 60 * 10);
   if (error) return null;
   return data.signedUrl;
+}
+
+// ─── Gehalt + Verwarnungen (NUR ADMIN) ──────────────────────────
+// requireAdmin() leitet Nicht-Admins weg → diese sensiblen Daten sind
+// ausschließlich für Admins schreib-/lesbar (DB zusätzlich per RLS gesperrt).
+
+export async function addSalaryChange(staffId: string, formData: FormData) {
+  await requireAdmin();
+  const svc = createServiceClient();
+  const effective = str(formData.get("effective_date"));
+  const amount = formData.get("amount");
+  if (!effective) return { error: "Datum fehlt." };
+  if (amount == null || String(amount).trim() === "") return { error: "Betrag fehlt." };
+  const { error } = await svc.from("staff_salary_changes").insert({
+    staff_id: staffId,
+    effective_date: effective,
+    amount: numOr(amount, 0),
+    note: str(formData.get("note")),
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/staff/members");
+  return { ok: true };
+}
+
+export async function deleteSalaryChange(id: string) {
+  await requireAdmin();
+  const svc = createServiceClient();
+  const { error } = await svc.from("staff_salary_changes").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/staff/members");
+  return { ok: true };
+}
+
+export async function addWarning(staffId: string, formData: FormData) {
+  await requireAdmin();
+  const svc = createServiceClient();
+  const date = str(formData.get("warning_date"));
+  const type = str(formData.get("type"));
+  if (!date) return { error: "Datum fehlt." };
+  if (type !== "oral" && type !== "written") return { error: "Art fehlt." };
+  const { error } = await svc.from("staff_warnings").insert({
+    staff_id: staffId,
+    warning_date: date,
+    type,
+    reason: str(formData.get("reason")),
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/staff/members");
+  return { ok: true };
+}
+
+export async function deleteWarning(id: string) {
+  await requireAdmin();
+  const svc = createServiceClient();
+  const { error } = await svc.from("staff_warnings").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/staff/members");
+  return { ok: true };
 }

@@ -492,6 +492,28 @@ export interface TeamSetting {
   updated_at: string;
 }
 
+export type WarningType = "oral" | "written";
+
+/** Gehaltsstand/-erhöhung (sensibel, nur Admin). Aktuelles Gehalt = neuester Eintrag. */
+export interface SalaryChange {
+  id: string;
+  staff_id: string;
+  effective_date: string;
+  amount: number;
+  note: string | null;
+  created_at: string;
+}
+
+/** Verwarnung (sensibel, nur Admin). */
+export interface StaffWarning {
+  id: string;
+  staff_id: string;
+  warning_date: string;
+  type: WarningType;
+  reason: string | null;
+  created_at: string;
+}
+
 export interface VacationRequest {
   id: string;
   staff_id: string;
