@@ -186,6 +186,7 @@ export default function MembersClient({
                           members={members}
                           settings={settings}
                           blackouts={blackouts}
+                          isAdmin={isAdmin}
                           today={today}
                           onChange={() => router.refresh()}
                         />
@@ -659,7 +660,7 @@ function vacStatusBadge(status: string) {
 }
 
 function MemberVacation({
-  member, requests, allRequests, members, settings, blackouts, today, onChange,
+  member, requests, allRequests, members, settings, blackouts, isAdmin, today, onChange,
 }: {
   member: StaffMember;
   requests: VacationRequest[];
@@ -667,6 +668,7 @@ function MemberVacation({
   members: StaffMember[];
   settings: TeamSetting[];
   blackouts: VacationBlackout[];
+  isAdmin: boolean;
   today: string;
   onChange: () => void;
 }) {
@@ -702,7 +704,7 @@ function MemberVacation({
       </div>
 
       {/* Antrag direkt anlegen */}
-      <MemberVacationForm member={member} requestsAll={flatAll} members={members} settings={settings} blackouts={blackouts} onChange={onChange} />
+      <MemberVacationForm member={member} requestsAll={flatAll} members={members} settings={settings} blackouts={blackouts} isAdmin={isAdmin} onChange={onChange} />
 
       {/* Anträge / vergangene Urlaube */}
       {sorted.length === 0 ? (
@@ -754,13 +756,14 @@ function Stat({ label, value, muted }: { label: string; value: number; muted?: b
 }
 
 function MemberVacationForm({
-  member, requestsAll, members, settings, blackouts, onChange,
+  member, requestsAll, members, settings, blackouts, isAdmin, onChange,
 }: {
   member: StaffMember;
   requestsAll: VacationRequest[];
   members: StaffMember[];
   settings: TeamSetting[];
   blackouts: VacationBlackout[];
+  isAdmin: boolean;
   onChange: () => void;
 }) {
   const [start, setStart] = useState("");
@@ -828,12 +831,21 @@ function MemberVacationForm({
             <option value="false">Unbezahlt</option>
           </select>
         </label>
+        {isAdmin && (
+          <label className="block">
+            <span className="text-[10px] uppercase text-neutral-500">Eintragen als</span>
+            <select name="status" defaultValue="approved" className="block rounded border border-neutral-300 px-2 py-1 text-sm">
+              <option value="approved">Genehmigt</option>
+              <option value="submitted">Antrag (offen)</option>
+            </select>
+          </label>
+        )}
         <label className="block flex-1 min-w-[120px]">
           <span className="text-[10px] uppercase text-neutral-500">Notiz</span>
           <input name="note" className="block w-full rounded border border-neutral-300 px-2 py-1 text-sm" />
         </label>
         <button type="submit" disabled={pending} className="rounded-lg bg-neutral-900 text-white px-3 py-1.5 text-xs font-medium">
-          {pending ? "..." : "+ Urlaub eintragen"}
+          {pending ? "..." : isAdmin ? "+ Urlaub eintragen" : "+ Antrag"}
         </button>
       </div>
       {warn?.cap && (

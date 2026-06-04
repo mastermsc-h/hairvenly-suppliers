@@ -156,7 +156,8 @@ export async function deleteBlackout(id: string) {
 // ─── Urlaubsanträge ──────────────────────────────────────────────
 
 export async function createVacationRequest(_prev: unknown, formData: FormData) {
-  await requireFeature(STAFF_FEATURE);
+  const profile = await requireFeature(STAFF_FEATURE);
+  const isAdmin = profile.role === "admin" || profile.is_admin;
   const svc = createServiceClient();
   const staffId = str(formData.get("staff_id"));
   const start = str(formData.get("start_date"));
@@ -172,13 +173,19 @@ export async function createVacationRequest(_prev: unknown, formData: FormData) 
     ? numOr(override, auto)
     : auto;
 
+  // Admins können direkt "genehmigt" eintragen (in den Kalender), sonst Antrag.
+  const wantApproved = formData.get("status") === "approved";
+  const directApprove = isAdmin && wantApproved;
+
   const { error } = await svc.from("vacation_requests").insert({
     staff_id: staffId,
     start_date: start,
     end_date: end,
     days,
     paid: formData.get("paid") !== "false",
-    status: "submitted",
+    status: directApprove ? "approved" : "submitted",
+    decided_at: directApprove ? new Date().toISOString() : null,
+    decided_by: directApprove ? profile.id : null,
     note: str(formData.get("note")),
   });
   if (error) return { error: error.message };

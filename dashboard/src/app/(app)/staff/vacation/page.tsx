@@ -7,7 +7,8 @@ export const dynamic = "force-dynamic";
 const STAFF_FEATURE = "staff" as FeatureKey;
 
 export default async function VacationPage() {
-  await requireFeature(STAFF_FEATURE);
+  const profile = await requireFeature(STAFF_FEATURE);
+  const isAdmin = profile.role === "admin" || profile.is_admin;
   const svc = createServiceClient();
 
   const [{ data: members }, { data: requests }, { data: settings }, { data: blackouts }] = await Promise.all([
@@ -32,6 +33,7 @@ export default async function VacationPage() {
         requests={(requests ?? []) as VacationRequest[]}
         settings={(settings ?? []) as TeamSetting[]}
         blackouts={(blackouts ?? []) as VacationBlackout[]}
+        isAdmin={isAdmin}
         today={today}
       />
     </div>

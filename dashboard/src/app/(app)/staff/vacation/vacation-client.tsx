@@ -30,12 +30,14 @@ export default function VacationClient({
   requests,
   settings,
   blackouts,
+  isAdmin,
   today,
 }: {
   members: StaffMember[];
   requests: VacationRequest[];
   settings: TeamSetting[];
   blackouts: VacationBlackout[];
+  isAdmin: boolean;
   today: string;
 }) {
   const router = useRouter();
@@ -158,6 +160,7 @@ export default function VacationClient({
           requests={requests}
           settings={settings}
           blackouts={blackouts}
+          isAdmin={isAdmin}
           onDone={() => { setAdding(false); router.refresh(); }}
           onCancel={() => setAdding(false)}
         />
@@ -291,15 +294,25 @@ function CapacityCalendar({
   year: number;
   today: string;
 }) {
-  const [team, setTeam] = useState<string>(TEAMS[0].value);
+  const [team, setTeam] = useState<string>("all");
+  const [open, setOpen] = useState(true);
   const [month, setMonth] = useState<number>(() => {
     const m = Number(today.slice(5, 7)) - 1;
     return today.startsWith(String(year)) ? m : 0;
   });
 
-  const cap = maxOnVacation(settings, team);
+  const all = team === "all";
+  const cap = all ? UNLIMITED : maxOnVacation(settings, team);
   const holidays = useMemo(() => bremenHolidays(year), [year]);
-  const teamMembers = useMemo(() => members.filter((m) => m.team === team), [members, team]);
+  const teamMembers = useMemo(() => (all ? members : members.filter((m) => m.team === team)), [members, team, all]);
+  const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
+  const teamIds = useMemo(() => new Set(teamMembers.map((m) => m.id)), [teamMembers]);
+  function entriesOnDay(day: string) {
+    if (!all) return teamOnDay(teamMembers, requests, team, day);
+    return requests
+      .filter((r) => r.status !== "rejected" && teamIds.has(r.staff_id) && r.start_date <= day && r.end_date >= day)
+      .map((r) => ({ memberId: r.staff_id, name: memberById.get(r.staff_id)!.name, pending: r.status === "submitted" }));
+  }
 
   const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   const firstDow = (new Date(Date.UTC(year, month, 1)).getUTCDay() + 6) % 7; // Mo=0
@@ -314,24 +327,31 @@ function CapacityCalendar({
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-        <div className="flex items-center gap-2 text-sm font-medium text-neutral-700">
+        <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-2 text-sm font-medium text-neutral-700">
           <CalendarDays size={16} /> Kapazitätskalender — freie Urlaubstage je Team
-        </div>
-        <div className="flex items-center gap-2">
-          <select value={team} onChange={(e) => setTeam(e.target.value)} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm">
-            {TEAMS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
-          <button onClick={prev} className="p-1.5 rounded-lg border border-neutral-300 hover:bg-neutral-50"><ChevronLeft size={16} /></button>
-          <span className="text-sm font-medium w-28 text-center">{MONTHS_LONG[month]} {year}</span>
-          <button onClick={next} className="p-1.5 rounded-lg border border-neutral-300 hover:bg-neutral-50"><ChevronRight size={16} /></button>
-        </div>
+          <ChevronDown size={15} className={`text-neutral-400 transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+        {open && (
+          <div className="flex items-center gap-2">
+            <select value={team} onChange={(e) => setTeam(e.target.value)} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm">
+              <option value="all">Alle Teams</option>
+              {TEAMS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+            <button onClick={prev} className="p-1.5 rounded-lg border border-neutral-300 hover:bg-neutral-50"><ChevronLeft size={16} /></button>
+            <span className="text-sm font-medium w-28 text-center">{MONTHS_LONG[month]} {year}</span>
+            <button onClick={next} className="p-1.5 rounded-lg border border-neutral-300 hover:bg-neutral-50"><ChevronRight size={16} /></button>
+          </div>
+        )}
       </div>
 
+      {open && (<>
       <div className="text-xs text-neutral-500 mb-2">
-        {cap >= UNLIMITED
+        {all
+          ? "Alle Teams — Abwesenheiten gesamt. Für freie Slots/Mindestbesetzung ein Team wählen."
+          : cap >= UNLIMITED
           ? "Keine Begrenzung gesetzt — unter „Mitarbeiter → Team-Besetzung“ konfigurierbar."
           : <>Max. <b>{cap}</b> gleichzeitig im Urlaub · grün = frei, gelb = voll, rot = überbucht</>}
-        {" · "}<span className="text-rose-600">rot schraffierter Rand = kritischer Zeitraum</span>
+        {" · "}<span className="text-rose-600">roter Rand oben = kritischer Zeitraum</span>
       </div>
 
       <div className="grid grid-cols-7 gap-1">
@@ -344,9 +364,9 @@ function CapacityCalendar({
           const dow = (firstDow + (d - 1)) % 7;
           const weekend = dow >= 5;
           const isHoliday = holidays.has(day);
-          const blk = blackoutsForDay(day, blackouts, team);
+          const blk = blackoutsForDay(day, blackouts, all ? null : team);
           const critical = blk.length > 0;
-          const entries = teamOnDay(teamMembers, requests, team, day);
+          const entries = entriesOnDay(day);
           const onVac = entries.length;
           const over = cap < UNLIMITED && onVac > cap;
           const full = cap < UNLIMITED && onVac === cap;
@@ -389,6 +409,7 @@ function CapacityCalendar({
           );
         })}
       </div>
+      </>)}
     </div>
   );
 }
@@ -507,6 +528,7 @@ function YearPlanner({
 }
 
 function Timeline({ members, requests, year, today }: { members: StaffMember[]; requests: VacationRequest[]; year: number; today: string }) {
+  const [open, setOpen] = useState(false);
   const yearStart = Date.UTC(year, 0, 1);
   const yearLen = (Date.UTC(year + 1, 0, 1) - yearStart) / 86400000;
   const pct = (dateStr: string) => {
@@ -521,7 +543,11 @@ function Timeline({ members, requests, year, today }: { members: StaffMember[]; 
 
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
-      <div className="text-sm font-medium text-neutral-700 mb-3">Timeline {year} — wer ist wann weg</div>
+      <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between text-sm font-medium text-neutral-700 mb-3">
+        <span>Timeline {year} — wer ist wann weg</span>
+        <ChevronDown size={15} className={`text-neutral-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (<>
       <div className="flex text-[10px] text-neutral-400 mb-1 pl-28">
         {MONTHS.map((mo) => <div key={mo} className="flex-1">{mo}</div>)}
       </div>
@@ -554,17 +580,19 @@ function Timeline({ members, requests, year, today }: { members: StaffMember[]; 
         </div>
       )}
       <div className="mt-3 text-[10px] text-neutral-400">Volle Balken = genehmigt · blasse Balken = beantragt (offen)</div>
+      </>)}
     </div>
   );
 }
 
 function RequestForm({
-  members, requests, settings, blackouts, onDone, onCancel,
+  members, requests, settings, blackouts, isAdmin, onDone, onCancel,
 }: {
   members: StaffMember[];
   requests: VacationRequest[];
   settings: TeamSetting[];
   blackouts: VacationBlackout[];
+  isAdmin: boolean;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -650,6 +678,15 @@ function RequestForm({
           <label className={labelCls}>Notiz (optional)</label>
           <input name="note" className={inputCls} />
         </div>
+        {isAdmin && (
+          <div>
+            <label className={labelCls}>Eintragen als</label>
+            <select name="status" defaultValue="approved" className={inputCls}>
+              <option value="approved">Genehmigt (direkt im Kalender)</option>
+              <option value="submitted">Antrag (offen, später genehmigen)</option>
+            </select>
+          </div>
+        )}
       </div>
       {capWarning && (
         <div className="flex items-center gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
@@ -667,7 +704,7 @@ function RequestForm({
       <div className="flex gap-2 justify-end">
         <button type="button" onClick={onCancel} className="text-sm text-neutral-600">Abbrechen</button>
         <button type="submit" disabled={pending} className="bg-neutral-900 text-white rounded-lg px-4 py-2 text-sm font-medium flex items-center gap-2">
-          <Save size={14} /> {pending ? "..." : "Antrag anlegen"}
+          <Save size={14} /> {pending ? "..." : isAdmin ? "Urlaub eintragen" : "Antrag anlegen"}
         </button>
       </div>
     </form>
@@ -675,12 +712,18 @@ function RequestForm({
 }
 
 function RequestTable({ members, requests, year, onChange }: { members: StaffMember[]; requests: VacationRequest[]; year: number; onChange: () => void }) {
+  const [open, setOpen] = useState(true);
   const name = (id: string) => members.find((m) => m.id === id)?.name ?? "—";
   const list = requests.filter((r) => r.start_date.slice(0, 4) === String(year));
+  const openCount = list.filter((r) => r.status === "submitted").length;
 
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-x-auto">
-      <div className="px-4 py-3 text-sm font-medium text-neutral-700 border-b border-neutral-100">Anträge {year}</div>
+      <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-neutral-700 border-b border-neutral-100">
+        <span>Anträge {year} {openCount > 0 && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-800">{openCount} offen</span>}</span>
+        <ChevronDown size={15} className={`text-neutral-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
       <table className="w-full text-sm">
         <thead className="bg-neutral-50">
           <tr>
@@ -715,6 +758,7 @@ function RequestTable({ members, requests, year, onChange }: { members: StaffMem
           ))}
         </tbody>
       </table>
+      )}
     </div>
   );
 }
