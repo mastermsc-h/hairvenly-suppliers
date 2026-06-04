@@ -4,7 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, Save, Check, XCircle, AlertTriangle, Download, CalendarDays, Trash2,
-  Cake, GraduationCap, ChevronLeft, ChevronRight, ChevronDown, CalendarRange, Ban, X,
+  Cake, GraduationCap, ChevronLeft, ChevronRight, ChevronDown, CalendarRange, Ban, X, Pencil,
 } from "lucide-react";
 import { TEAMS, teamMeta } from "@/lib/staff/teams";
 import { countWorkdays, vacationBalance, bremenHolidays } from "@/lib/staff/holidays";
@@ -12,7 +12,7 @@ import {
   maxOnVacation, teamOnDay, teamConflicts, upcomingBirthdays, blackoutsForDay, UNLIMITED,
 } from "@/lib/staff/capacity";
 import {
-  createVacationRequest, decideVacation, deleteVacation, addBlackout, deleteBlackout,
+  createVacationRequest, updateVacationRequest, decideVacation, deleteVacation, addBlackout, deleteBlackout,
 } from "@/lib/actions/staff";
 import type { StaffMember, VacationRequest, TeamSetting, VacationBlackout } from "@/lib/types";
 import { Card, CardHead } from "../staff-ui";
@@ -440,7 +440,7 @@ function CapacityCalendar({
           blackouts={blackouts}
           isAdmin={isAdmin}
           onClose={() => setQuickDay(null)}
-          onChange={() => { setQuickDay(null); onChange(); }}
+          onRefresh={onChange}
         />
       )}
     </div>
@@ -452,8 +452,77 @@ function fmtDayLong(day: string): string {
   return `${d}.${m}.${y}`;
 }
 
+function QuickReqRow({ req, member, onRefresh }: { req: VacationRequest; member: StaffMember; onRefresh: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function save(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    const fd = new FormData(e.currentTarget);
+    start(async () => {
+      const res = await updateVacationRequest(req.id, fd);
+      if (res?.error) { setError(res.error); return; }
+      setEditing(false);
+      onRefresh();
+    });
+  }
+
+  if (editing) {
+    return (
+      <form onSubmit={save} className="rounded-lg border border-neutral-200 bg-neutral-50 p-2 space-y-2">
+        <div className="text-xs font-medium text-neutral-700">{member.name}</div>
+        <div className="grid grid-cols-2 gap-2">
+          <input name="start_date" type="date" required defaultValue={req.start_date} className="rounded border border-neutral-300 px-2 py-1 text-sm" />
+          <input name="end_date" type="date" required defaultValue={req.end_date} className="rounded border border-neutral-300 px-2 py-1 text-sm" />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <input name="days_override" type="number" step="0.5" min="0" placeholder="Tage auto" defaultValue={req.days} className="rounded border border-neutral-300 px-2 py-1 text-sm" />
+          <select name="paid" defaultValue={String(req.paid)} className="rounded border border-neutral-300 px-2 py-1 text-sm">
+            <option value="true">Bezahlt</option>
+            <option value="false">Unbezahlt</option>
+          </select>
+        </div>
+        <input name="note" defaultValue={req.note ?? ""} placeholder="Notiz" className="w-full rounded border border-neutral-300 px-2 py-1 text-sm" />
+        {error && <div className="text-rose-600 text-[11px]">{error}</div>}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => setEditing(false)} className="text-xs text-neutral-500">Abbrechen</button>
+          <button type="submit" disabled={pending} className="text-xs font-medium text-neutral-900"><Save size={13} className="inline" /> Speichern</button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg border border-neutral-100 px-2 py-1.5">
+      <div className="min-w-0">
+        <span className={`text-xs px-2 py-0.5 rounded-full ${teamMeta(member.team).chip}`}>{member.name}</span>
+        <span className="text-[11px] text-neutral-500 ml-1.5">{req.start_date}–{req.end_date} · {req.days}T{req.paid ? "" : " · unbez."}</span>
+        <span className="ml-1.5">{vacStatusBadgeMini(req.status)}</span>
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        {req.status === "submitted" && (
+          <>
+            <button disabled={pending} onClick={() => start(async () => { await decideVacation(req.id, "approved"); onRefresh(); })} className="text-emerald-700 hover:text-emerald-800" title="Genehmigen"><Check size={15} /></button>
+            <button disabled={pending} onClick={() => start(async () => { await decideVacation(req.id, "rejected"); onRefresh(); })} className="text-rose-600 hover:text-rose-700" title="Ablehnen"><XCircle size={15} /></button>
+          </>
+        )}
+        <button onClick={() => setEditing(true)} className="text-neutral-400 hover:text-neutral-700" title="Bearbeiten"><Pencil size={14} /></button>
+        <button disabled={pending} onClick={() => { if (confirm("Eintrag löschen?")) start(async () => { await deleteVacation(req.id); onRefresh(); }); }} className="text-neutral-400 hover:text-rose-600" title="Löschen"><Trash2 size={14} /></button>
+      </div>
+    </div>
+  );
+}
+
+function vacStatusBadgeMini(status: string) {
+  const map: Record<string, string> = { submitted: "bg-sky-100 text-sky-800", approved: "bg-emerald-100 text-emerald-800", rejected: "bg-rose-100 text-rose-800" };
+  const label: Record<string, string> = { submitted: "offen", approved: "ok", rejected: "abgel." };
+  return <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${map[status]}`}>{label[status]}</span>;
+}
+
 function DayQuickEntry({
-  day, members, requests, blackouts, isAdmin, onClose, onChange,
+  day, members, requests, blackouts, isAdmin, onClose, onRefresh,
 }: {
   day: string;
   members: StaffMember[];
@@ -461,7 +530,7 @@ function DayQuickEntry({
   blackouts: VacationBlackout[];
   isAdmin: boolean;
   onClose: () => void;
-  onChange: () => void;
+  onRefresh: () => void;
 }) {
   const [start, setStart] = useState(day);
   const [end, setEnd] = useState(day);
@@ -472,8 +541,8 @@ function DayQuickEntry({
   const byId = new Map(members.map((m) => [m.id, m]));
   const onThisDay = requests
     .filter((r) => r.status !== "rejected" && r.start_date <= day && r.end_date >= day)
-    .map((r) => ({ m: byId.get(r.staff_id), pending: r.status === "submitted" }))
-    .filter((x) => x.m) as { m: StaffMember; pending: boolean }[];
+    .map((r) => ({ r, m: byId.get(r.staff_id) }))
+    .filter((x) => x.m) as { r: VacationRequest; m: StaffMember }[];
   const blk = blackoutsForDay(day, blackouts, null);
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
@@ -483,7 +552,8 @@ function DayQuickEntry({
     startT(async () => {
       const res = await createVacationRequest(null, fd);
       if (res?.error) { setError(res.error); return; }
-      onChange();
+      onRefresh();
+      onClose();
     });
   }
 
@@ -493,7 +563,7 @@ function DayQuickEntry({
         <CardHead
           icon={<CalendarDays size={14} />}
           title={fmtDayLong(day)}
-          sub="Urlaub eintragen"
+          sub="Urlaub eintragen / bearbeiten"
           tint="sky"
           right={<button onClick={onClose} className="text-neutral-400 hover:text-neutral-700"><X size={18} /></button>}
         />
@@ -509,17 +579,16 @@ function DayQuickEntry({
             {onThisDay.length === 0 ? (
               <p className="text-sm text-neutral-500">Niemand.</p>
             ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {onThisDay.map(({ m, pending: pd }) => (
-                  <span key={m.id} className={`text-xs px-2 py-0.5 rounded-full ${teamMeta(m.team).chip} ${pd ? "opacity-60 italic" : ""}`}>
-                    {m.name}{pd ? " (offen)" : ""}
-                  </span>
+              <div className="space-y-1.5">
+                {onThisDay.map(({ r, m }) => (
+                  <QuickReqRow key={r.id} req={r} member={m} onRefresh={onRefresh} />
                 ))}
               </div>
             )}
           </div>
 
-          <form onSubmit={submit} className="space-y-2 border-t border-neutral-100 pt-3">
+          <div className="text-[10px] uppercase tracking-wide text-neutral-400 pt-1">Neuen Urlaub eintragen</div>
+          <form onSubmit={submit} className="space-y-2 border-t border-neutral-100 pt-2">
             <div>
               <label className={labelCls}>Mitarbeiter</label>
               <select name="staff_id" required className={inputCls}>

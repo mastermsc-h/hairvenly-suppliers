@@ -193,6 +193,29 @@ export async function createVacationRequest(_prev: unknown, formData: FormData) 
   return { ok: true };
 }
 
+export async function updateVacationRequest(id: string, formData: FormData) {
+  await requireFeature(STAFF_FEATURE);
+  const svc = createServiceClient();
+  const start = str(formData.get("start_date"));
+  const end = str(formData.get("end_date"));
+  if (!start || !end) return { error: "Start und Ende sind Pflicht." };
+  if (end < start) return { error: "Enddatum liegt vor dem Startdatum." };
+  const auto = countWorkdays(start, end);
+  const override = formData.get("days_override");
+  const days = override != null && String(override).trim() !== "" ? numOr(override, auto) : auto;
+  const update: Record<string, unknown> = {
+    start_date: start,
+    end_date: end,
+    days,
+    paid: formData.get("paid") !== "false",
+    note: str(formData.get("note")),
+  };
+  const { error } = await svc.from("vacation_requests").update(update).eq("id", id);
+  if (error) return { error: error.message };
+  revalidateAll();
+  return { ok: true };
+}
+
 export async function decideVacation(id: string, decision: "approved" | "rejected") {
   const profile = await requireFeature(STAFF_FEATURE);
   const svc = createServiceClient();
