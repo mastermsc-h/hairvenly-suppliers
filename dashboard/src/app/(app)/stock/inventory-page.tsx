@@ -929,12 +929,14 @@ function SingleLabel({ title, barcode }: { title: string; barcode: string }) {
   useEffect(() => {
     try {
       // 1) Barcode-Canvas separat erzeugen
+      // height=65 (halbiert von vorher 130) → bars sind im finalen druck
+      // ungefaehr halb so hoch, mehr weissraum oben/unten fuer titel.
       const barcodeCanvas = document.createElement("canvas");
       JsBarcode(barcodeCanvas, barcode, {
         format: "CODE128",
         displayValue: true,
         fontSize: 30,
-        height: 130,
+        height: 65,
         margin: 0,
         textMargin: 4,
         background: "#ffffff",
