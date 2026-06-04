@@ -492,6 +492,17 @@ export interface TeamSetting {
   updated_at: string;
 }
 
+/** Kritischer Zeitraum / Sperrzeit (wiederkehrend pro Jahr, "MM-DD"). */
+export interface VacationBlackout {
+  id: string;
+  label: string;
+  start_md: string;
+  end_md: string;
+  team: StaffTeam | null; // null = alle Teams
+  note: string | null;
+  created_at: string;
+}
+
 export type WarningType = "oral" | "written";
 
 /** Gehaltsstand/-erhöhung (sensibel, nur Admin). Aktuelles Gehalt = neuester Eintrag. */

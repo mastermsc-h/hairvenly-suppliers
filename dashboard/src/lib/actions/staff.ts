@@ -121,6 +121,38 @@ export async function updateTeamSetting(team: string, maxOnVacation: number) {
   return { ok: true };
 }
 
+// ─── Kritische Zeiträume / Sperrzeiten ──────────────────────────
+
+export async function addBlackout(_prev: unknown, formData: FormData) {
+  await requireFeature(STAFF_FEATURE);
+  const svc = createServiceClient();
+  const label = str(formData.get("label"));
+  const start = str(formData.get("start_date")); // volles Datum, nur MM-DD wird genutzt
+  const end = str(formData.get("end_date"));
+  if (!label) return { error: "Bezeichnung fehlt." };
+  if (!start || !end) return { error: "Von und Bis sind Pflicht." };
+  const teamRaw = str(formData.get("team"));
+  const { error } = await svc.from("vacation_blackouts").insert({
+    label,
+    start_md: start.slice(5),
+    end_md: end.slice(5),
+    team: teamRaw === "all" ? null : teamRaw,
+    note: str(formData.get("note")),
+  });
+  if (error) return { error: error.message };
+  revalidateAll();
+  return { ok: true };
+}
+
+export async function deleteBlackout(id: string) {
+  await requireFeature(STAFF_FEATURE);
+  const svc = createServiceClient();
+  const { error } = await svc.from("vacation_blackouts").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidateAll();
+  return { ok: true };
+}
+
 // ─── Urlaubsanträge ──────────────────────────────────────────────
 
 export async function createVacationRequest(_prev: unknown, formData: FormData) {

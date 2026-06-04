@@ -1,6 +1,6 @@
 import { requireFeature } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
-import type { FeatureKey, StaffMember, VacationRequest, TeamSetting } from "@/lib/types";
+import type { FeatureKey, StaffMember, VacationRequest, TeamSetting, VacationBlackout } from "@/lib/types";
 import VacationClient from "./vacation-client";
 
 export const dynamic = "force-dynamic";
@@ -10,10 +10,11 @@ export default async function VacationPage() {
   await requireFeature(STAFF_FEATURE);
   const svc = createServiceClient();
 
-  const [{ data: members }, { data: requests }, { data: settings }] = await Promise.all([
+  const [{ data: members }, { data: requests }, { data: settings }, { data: blackouts }] = await Promise.all([
     svc.from("staff_members").select("*").eq("active", true).order("name"),
     svc.from("vacation_requests").select("*").order("start_date", { ascending: false }),
     svc.from("team_settings").select("*"),
+    svc.from("vacation_blackouts").select("*").order("start_md"),
   ]);
 
   const today = new Date().toISOString().slice(0, 10);
@@ -30,6 +31,7 @@ export default async function VacationPage() {
         members={(members ?? []) as StaffMember[]}
         requests={(requests ?? []) as VacationRequest[]}
         settings={(settings ?? []) as TeamSetting[]}
+        blackouts={(blackouts ?? []) as VacationBlackout[]}
         today={today}
       />
     </div>

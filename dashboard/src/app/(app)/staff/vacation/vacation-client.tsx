@@ -4,17 +4,17 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, Save, Check, XCircle, AlertTriangle, Download, CalendarDays, Trash2,
-  Cake, GraduationCap, ChevronLeft, ChevronRight, ChevronDown, CalendarRange,
+  Cake, GraduationCap, ChevronLeft, ChevronRight, ChevronDown, CalendarRange, Ban,
 } from "lucide-react";
 import { TEAMS, teamMeta } from "@/lib/staff/teams";
 import { countWorkdays, vacationBalance, bremenHolidays } from "@/lib/staff/holidays";
 import {
-  maxOnVacation, teamOnDay, teamConflicts, upcomingBirthdays, UNLIMITED,
+  maxOnVacation, teamOnDay, teamConflicts, upcomingBirthdays, blackoutsForDay, UNLIMITED,
 } from "@/lib/staff/capacity";
 import {
-  createVacationRequest, decideVacation, deleteVacation,
+  createVacationRequest, decideVacation, deleteVacation, addBlackout, deleteBlackout,
 } from "@/lib/actions/staff";
-import type { StaffMember, VacationRequest, TeamSetting } from "@/lib/types";
+import type { StaffMember, VacationRequest, TeamSetting, VacationBlackout } from "@/lib/types";
 
 const inputCls =
   "mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 outline-none";
@@ -29,11 +29,13 @@ export default function VacationClient({
   members,
   requests,
   settings,
+  blackouts,
   today,
 }: {
   members: StaffMember[];
   requests: VacationRequest[];
   settings: TeamSetting[];
+  blackouts: VacationBlackout[];
   today: string;
 }) {
   const router = useRouter();
@@ -155,6 +157,7 @@ export default function VacationClient({
           members={members}
           requests={requests}
           settings={settings}
+          blackouts={blackouts}
           onDone={() => { setAdding(false); router.refresh(); }}
           onCancel={() => setAdding(false)}
         />
@@ -220,7 +223,10 @@ export default function VacationClient({
       </div>
 
       {/* Team-Kapazitätskalender */}
-      <CapacityCalendar members={members} requests={requests} settings={settings} year={year} today={today} />
+      {/* Kritische Zeiträume / Sperrzeiten verwalten */}
+      <BlackoutConfig blackouts={blackouts} onChange={() => router.refresh()} />
+
+      <CapacityCalendar members={members} requests={requests} settings={settings} blackouts={blackouts} year={year} today={today} />
 
       {/* Jahresraster-Planner (ausklappbare Alternative) */}
       <div>
@@ -234,7 +240,7 @@ export default function VacationClient({
         </button>
         {showYear && (
           <div className="mt-3">
-            <YearPlanner members={members} requests={requests} settings={settings} year={year} today={today} />
+            <YearPlanner members={members} requests={requests} settings={settings} blackouts={blackouts} year={year} today={today} />
           </div>
         )}
       </div>
@@ -276,11 +282,12 @@ function BirthdaysWidget({ birthdays }: { birthdays: ReturnType<typeof upcomingB
 }
 
 function CapacityCalendar({
-  members, requests, settings, year, today,
+  members, requests, settings, blackouts, year, today,
 }: {
   members: StaffMember[];
   requests: VacationRequest[];
   settings: TeamSetting[];
+  blackouts: VacationBlackout[];
   year: number;
   today: string;
 }) {
@@ -324,6 +331,7 @@ function CapacityCalendar({
         {cap >= UNLIMITED
           ? "Keine Begrenzung gesetzt — unter „Mitarbeiter → Team-Besetzung“ konfigurierbar."
           : <>Max. <b>{cap}</b> gleichzeitig im Urlaub · grün = frei, gelb = voll, rot = überbucht</>}
+        {" · "}<span className="text-rose-600">rot schraffierter Rand = kritischer Zeitraum</span>
       </div>
 
       <div className="grid grid-cols-7 gap-1">
@@ -336,6 +344,8 @@ function CapacityCalendar({
           const dow = (firstDow + (d - 1)) % 7;
           const weekend = dow >= 5;
           const isHoliday = holidays.has(day);
+          const blk = blackoutsForDay(day, blackouts, team);
+          const critical = blk.length > 0;
           const entries = teamOnDay(teamMembers, requests, team, day);
           const onVac = entries.length;
           const over = cap < UNLIMITED && onVac > cap;
@@ -348,10 +358,14 @@ function CapacityCalendar({
           if (over) bg = "bg-rose-50 border-rose-300";
           else if (full) bg = "bg-amber-50 border-amber-300";
           else if (onVac > 0) bg = "bg-emerald-50/60";
+          else if (critical) bg = "bg-rose-50/70";
           else if (weekend || isHoliday) bg = "bg-neutral-50";
 
+          const critBorder = critical ? "border-t-4 border-t-rose-400" : "";
+          const critTitle = critical ? `Kritischer Zeitraum: ${blk.map((b) => b.label).join(", ")}` : undefined;
+
           return (
-            <div key={day} className={`min-h-[68px] rounded-lg border p-1 text-[11px] ${bg} ${isToday ? "ring-2 ring-neutral-900" : "border-neutral-200"}`}>
+            <div key={day} title={critTitle} className={`min-h-[68px] rounded-lg border p-1 text-[11px] ${bg} ${critBorder} ${isToday ? "ring-2 ring-neutral-900" : "border-neutral-200"}`}>
               <div className="flex items-center justify-between">
                 <span className={`font-medium ${weekend || isHoliday ? "text-neutral-400" : "text-neutral-700"}`}>{d}</span>
                 {free !== null && (
@@ -360,6 +374,9 @@ function CapacityCalendar({
                   </span>
                 )}
               </div>
+              {critical && onVac === 0 && (
+                <div className="text-[9px] text-rose-500 flex items-center gap-0.5"><Ban size={9} /> Sperrzeit</div>
+              )}
               {bdays.map((m) => (
                 <div key={`b${m.id}`} className="text-fuchsia-600 truncate" title={`Geburtstag: ${m.name}`}>🎂 {m.name.split(" ")[0]}</div>
               ))}
@@ -377,11 +394,12 @@ function CapacityCalendar({
 }
 
 function YearPlanner({
-  members, requests, settings, year, today,
+  members, requests, settings, blackouts, year, today,
 }: {
   members: StaffMember[];
   requests: VacationRequest[];
   settings: TeamSetting[];
+  blackouts: VacationBlackout[];
   year: number;
   today: string;
 }) {
@@ -432,6 +450,8 @@ function YearPlanner({
                     const bdays = visible.filter((m) => m.birth_date && m.birth_date.slice(5) === `${pad(mi + 1)}-${pad(d)}`);
                     const isToday = day === today;
                     const over = cap < UNLIMITED && entries.length > cap;
+                    const blk = blackoutsForDay(day, blackouts, team === "all" ? null : team);
+                    const critical = blk.length > 0;
 
                     let bg = "bg-white";
                     let border = "border border-neutral-100";
@@ -439,6 +459,8 @@ function YearPlanner({
                       bg = team === "all" ? "bg-neutral-700" : teamMeta(team).bar;
                       border = "border border-transparent";
                       if (entries.some((e) => e.pending) && entries.every((e) => e.pending)) bg += " opacity-50";
+                    } else if (critical) {
+                      bg = "bg-rose-100";
                     } else if (holiday) {
                       bg = "bg-rose-50";
                     } else if (weekend) {
@@ -447,6 +469,7 @@ function YearPlanner({
                     const title = [
                       day,
                       holiday ? "Feiertag" : "",
+                      critical ? "Kritischer Zeitraum: " + blk.map((b) => b.label).join(", ") : "",
                       entries.length ? "Urlaub: " + entries.map((e) => e.m.name + (e.pending ? " (offen)" : "")).join(", ") : "",
                       bdays.length ? "🎂 " + bdays.map((m) => m.name).join(", ") : "",
                     ].filter(Boolean).join(" · ");
@@ -455,7 +478,7 @@ function YearPlanner({
                       <td key={d} className="p-0">
                         <div
                           title={title}
-                          className={`w-5 h-5 rounded-sm flex items-center justify-center ${bg} ${over ? "ring-1 ring-rose-500" : border} ${isToday ? "outline outline-1 outline-neutral-900" : ""} ${bdays.length ? "border-b-2 border-b-fuchsia-400" : ""}`}
+                          className={`w-5 h-5 rounded-sm flex items-center justify-center ${bg} ${over ? "ring-1 ring-rose-500" : border} ${critical ? "border-t-2 border-t-rose-500" : ""} ${isToday ? "outline outline-1 outline-neutral-900" : ""} ${bdays.length ? "border-b-2 border-b-fuchsia-400" : ""}`}
                         >
                           {entries.length > 1 && <span className="text-white font-semibold leading-none">{entries.length}</span>}
                         </div>
@@ -474,6 +497,7 @@ function YearPlanner({
         <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-neutral-700 opacity-50" /> nur beantragt</span>
         <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-neutral-100" /> Wochenende</span>
         <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-rose-50 border border-neutral-200" /> Feiertag (Bremen)</span>
+        <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-rose-100 border-t-2 border-t-rose-500" /> kritischer Zeitraum</span>
         <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-white border-b-2 border-b-fuchsia-400" /> Geburtstag</span>
         <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm ring-1 ring-rose-500" /> über Kapazität</span>
         <span>· Zahl = Anzahl gleichzeitig · Maus über Tag = Namen</span>
@@ -535,11 +559,12 @@ function Timeline({ members, requests, year, today }: { members: StaffMember[]; 
 }
 
 function RequestForm({
-  members, requests, settings, onDone, onCancel,
+  members, requests, settings, blackouts, onDone, onCancel,
 }: {
   members: StaffMember[];
   requests: VacationRequest[];
   settings: TeamSetting[];
+  blackouts: VacationBlackout[];
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -551,6 +576,18 @@ function RequestForm({
   const [pending, startT] = useTransition();
 
   const autoDays = start && end && end >= start ? countWorkdays(start, end) : null;
+
+  // Live-Warnung: fällt der Antrag in einen kritischen Zeitraum?
+  const blackoutWarning = useMemo(() => {
+    const m = members.find((x) => x.id === staffId);
+    if (!start || !end || end < start) return null;
+    const hits = new Set<string>();
+    for (let t = Date.parse(start); t <= Date.parse(end); t += 86400000) {
+      const day = new Date(t).toISOString().slice(0, 10);
+      blackoutsForDay(day, blackouts, m ? m.team : null).forEach((b) => hits.add(b.label));
+    }
+    return hits.size ? [...hits] : null;
+  }, [staffId, start, end, members, blackouts]);
 
   // Live-Warnung: würde dieser Antrag die Team-Kapazität überschreiten?
   const capWarning = useMemo(() => {
@@ -618,6 +655,12 @@ function RequestForm({
         <div className="flex items-center gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
           <AlertTriangle size={15} className="text-amber-600 shrink-0" />
           Achtung: In diesem Zeitraum wären im Team <b>{teamMeta(capWarning.team).label}</b> bis zu {capWarning.peak} gleichzeitig im Urlaub (erlaubt max. {capWarning.cap}). Antrag ist trotzdem möglich.
+        </div>
+      )}
+      {blackoutWarning && (
+        <div className="flex items-center gap-2 text-sm text-rose-800 bg-rose-50 border border-rose-300 rounded-lg px-3 py-2">
+          <Ban size={15} className="text-rose-600 shrink-0" />
+          Achtung: Der Zeitraum fällt in einen <b>kritischen Zeitraum</b> ({blackoutWarning.join(", ")}), in dem möglichst kein Urlaub genommen werden soll. Antrag ist trotzdem möglich.
         </div>
       )}
       {error && <div className="text-rose-600 text-sm">{error}</div>}
@@ -728,4 +771,110 @@ function exportCsv(rows: { member: StaffMember; used: number; planned: number; a
   a.download = `urlaubsstaende_${year}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function mdLabel(md: string): string {
+  // "MM-DD" → "DD.MM."
+  const [m, d] = md.split("-");
+  return `${d}.${m}.`;
+}
+
+function BlackoutConfig({ blackouts, onChange }: { blackouts: VacationBlackout[]; onChange: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    start(async () => {
+      const res = await addBlackout(null, fd);
+      if (res?.error) { setError(res.error); return; }
+      form.reset();
+      setAdding(false);
+      onChange();
+    });
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
+      <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between text-sm font-medium text-neutral-700">
+        <span className="flex items-center gap-2"><Ban size={16} className="text-rose-500" /> Kritische Zeiträume (kein Urlaub erwünscht) · {blackouts.length}</span>
+        <ChevronDown size={15} className={`text-neutral-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-3">
+          {blackouts.length === 0 ? (
+            <p className="text-sm text-neutral-500">Noch keine kritischen Zeiträume angelegt.</p>
+          ) : (
+            <ul className="space-y-1">
+              {blackouts.map((b) => (
+                <li key={b.id} className="flex items-center justify-between text-sm border border-rose-100 bg-rose-50/50 rounded-lg px-3 py-2">
+                  <span>
+                    <span className="inline-flex items-center gap-1 text-rose-700 font-medium"><Ban size={13} /> {b.label}</span>
+                    <span className="text-neutral-500"> · {mdLabel(b.start_md)} – {mdLabel(b.end_md)} (jedes Jahr)</span>
+                    <span className="ml-1 text-xs text-neutral-400">{b.team ? teamMeta(b.team).label : "alle Teams"}</span>
+                    {b.note && <span className="block text-[11px] text-neutral-400">{b.note}</span>}
+                  </span>
+                  <button
+                    onClick={() => { if (confirm("Zeitraum löschen?")) start(async () => { await deleteBlackout(b.id); onChange(); }); }}
+                    className="text-neutral-300 hover:text-rose-600"
+                    title="Löschen"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {adding ? (
+            <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end border-t border-neutral-100 pt-3">
+              <label className="block md:col-span-2">
+                <span className="text-[10px] uppercase text-neutral-500">Bezeichnung</span>
+                <input name="label" required placeholder="z.B. Weihnachtsgeschäft" className="block w-full rounded border border-neutral-300 px-2 py-1 text-sm" />
+              </label>
+              <label className="block">
+                <span className="text-[10px] uppercase text-neutral-500">Von (Jahr egal)</span>
+                <input name="start_date" type="date" required className="block w-full rounded border border-neutral-300 px-2 py-1 text-sm" />
+              </label>
+              <label className="block">
+                <span className="text-[10px] uppercase text-neutral-500">Bis (Jahr egal)</span>
+                <input name="end_date" type="date" required className="block w-full rounded border border-neutral-300 px-2 py-1 text-sm" />
+              </label>
+              <label className="block">
+                <span className="text-[10px] uppercase text-neutral-500">Team</span>
+                <select name="team" defaultValue="all" className="block w-full rounded border border-neutral-300 px-2 py-1 text-sm">
+                  <option value="all">Alle Teams</option>
+                  {TEAMS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </label>
+              <label className="block md:col-span-4">
+                <span className="text-[10px] uppercase text-neutral-500">Notiz (optional)</span>
+                <input name="note" className="block w-full rounded border border-neutral-300 px-2 py-1 text-sm" />
+              </label>
+              <div className="flex items-center gap-2">
+                <button type="submit" disabled={pending} className="rounded-lg bg-neutral-900 text-white px-3 py-1.5 text-xs font-medium">
+                  {pending ? "..." : "Speichern"}
+                </button>
+                <button type="button" onClick={() => setAdding(false)} className="text-xs text-neutral-500">Abbrechen</button>
+              </div>
+              {error && <span className="text-rose-600 text-[10px] md:col-span-5">{error}</span>}
+            </form>
+          ) : (
+            <button onClick={() => setAdding(true)} className="flex items-center gap-1 text-sm text-neutral-700 hover:text-neutral-900">
+              <Plus size={15} /> Zeitraum hinzufügen
+            </button>
+          )}
+          <p className="text-[10px] text-neutral-400">
+            Das Datum wird ohne Jahr gespeichert — der Zeitraum gilt automatisch in jedem Jahr.
+          </p>
+        </div>
+      )}
+    </div>
+  );
 }

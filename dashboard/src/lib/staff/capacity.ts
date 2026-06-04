@@ -2,9 +2,28 @@
 // und wie viele freie Urlaubs-Slots hat ein Team an einem Tag.
 // Reine Funktionen (kein Date.now — "today" wird hereingereicht).
 
-import type { StaffMember, VacationRequest, TeamSetting } from "@/lib/types";
+import type { StaffMember, VacationRequest, TeamSetting, VacationBlackout } from "@/lib/types";
 
 export const UNLIMITED = 99;
+
+/** Liegt "MM-DD" im (ggf. über den Jahreswechsel laufenden) Bereich? */
+function mdInRange(md: string, startMd: string, endMd: string): boolean {
+  return startMd <= endMd
+    ? md >= startMd && md <= endMd
+    : md >= startMd || md <= endMd; // Wrap (z.B. 12-20 .. 01-05)
+}
+
+/** Kritische Zeiträume (Sperrzeiten), die an einem Tag für ein Team gelten. */
+export function blackoutsForDay(
+  day: string,
+  blackouts: VacationBlackout[],
+  team: string | null,
+): VacationBlackout[] {
+  const md = day.slice(5); // "MM-DD"
+  return blackouts.filter(
+    (b) => mdInRange(md, b.start_md, b.end_md) && (b.team == null || team == null || b.team === team),
+  );
+}
 
 /** Max. gleichzeitig im Urlaub für ein Team (Default UNLIMITED). */
 export function maxOnVacation(settings: TeamSetting[], team: string): number {
