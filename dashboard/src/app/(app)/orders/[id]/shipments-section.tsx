@@ -144,6 +144,15 @@ function ShipmentCard({
                 <Check size={9} /> angekommen {date(shipment.arrived_at)}
               </span>
             )}
+            {shipment.inbound_delivery_id && (
+              <a
+                href={`/inbound-deliveries/${shipment.inbound_delivery_id}`}
+                className="inline-flex items-center gap-0.5 text-blue-600 hover:underline"
+                title="Zum Wareneingang"
+              >
+                <Truck size={9} /> aus Wareneingang ↗
+              </a>
+            )}
           </div>
         </div>
         {canEdit && (

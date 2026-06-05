@@ -393,7 +393,8 @@ export async function commitLieferschein(payload: {
             eta: payload.eta,
             shipped_at: payload.shipped_at,
             arrived_at: payload.arrived_at,
-            notes: `Auto-erzeugt aus Wareneingang ${del.id}`,
+            notes: null,
+            inbound_delivery_id: del.id,
           })
           .select("id")
           .single();

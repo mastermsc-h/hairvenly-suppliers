@@ -243,6 +243,7 @@ export interface OrderShipment {
   arrived_at: string | null;
   notes: string | null;
   created_by: string | null;
+  inbound_delivery_id?: string | null;
   created_at: string;
   updated_at: string;
 }

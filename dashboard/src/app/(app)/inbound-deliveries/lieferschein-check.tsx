@@ -214,6 +214,35 @@ export default function LieferscheinCheck({ suppliers, compact }: { suppliers: S
                     </table>
                   </div>
 
+                  {/* Zusammenfassung Teillieferungen-Erzeugung */}
+                  {createShipments && (() => {
+                    const byOrder = new Map<string, { label: string; positions: number; grams: number }>();
+                    for (const r of rows ?? []) {
+                      if (r.status !== "matched") continue;
+                      for (const a of r.allocations ?? []) {
+                        const cur = byOrder.get(a.order_id) ?? { label: a.order_label, positions: 0, grams: 0 };
+                        cur.positions++;
+                        cur.grams += a.allocate_g;
+                        byOrder.set(a.order_id, cur);
+                      }
+                    }
+                    if (byOrder.size === 0) return null;
+                    return (
+                      <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-sm">
+                        <div className="font-medium text-purple-900 mb-1">
+                          {byOrder.size === 1 ? "1 Teillieferung wird automatisch erzeugt:" : `${byOrder.size} Teillieferungen werden automatisch erzeugt:`}
+                        </div>
+                        <ul className="text-xs text-purple-800 space-y-0.5">
+                          {[...byOrder.entries()].map(([orderId, info]) => (
+                            <li key={orderId}>
+                              <strong>{info.label}</strong> ← {info.positions} {info.positions === 1 ? "Position" : "Positionen"} · {info.grams} g
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })()}
+
                   <div className="flex items-center justify-between gap-2 pt-3 border-t border-neutral-100">
                     <button type="button" onClick={() => { setAnalysis(null); setRows(null); }} className="px-3 py-2 rounded-lg text-sm bg-neutral-100 hover:bg-neutral-200 text-neutral-700">
                       ← Zurück
