@@ -45,6 +45,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {profile.role === "supplier" && (
           <NavLink href="/orders" icon={<Package size={16} />} label={t(locale, "nav.orders")} />
         )}
+        <NavLink href="/inbound-deliveries" icon={<Truck size={16} />} label={t(locale, "nav.inbound_deliveries")} />
         {profile.role !== "supplier" && (
           <>
             {has("wizard") && <NavLink href="/orders/wizard" icon={<FilePlus size={16} />} label={t(locale, "nav.wizard")} />}

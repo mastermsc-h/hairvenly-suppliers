@@ -201,6 +201,34 @@ export interface OrderDocument {
   file_path: string;
   file_name: string;
   shipment_id: string | null;
+  inbound_delivery_id?: string | null;
+  created_at: string;
+}
+
+export interface InboundDelivery {
+  id: string;
+  supplier_id: string;
+  label: string | null;
+  tracking_number: string | null;
+  tracking_url: string | null;
+  eta: string | null;
+  shipped_at: string | null;
+  arrived_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InboundDeliveryItem {
+  id: string;
+  inbound_delivery_id: string;
+  color_id: string | null;
+  method_name: string;
+  length_value: string;
+  color_name: string;
+  quantity: number;
+  unit: string;
+  notes: string | null;
   created_at: string;
 }
 

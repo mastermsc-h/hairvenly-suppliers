@@ -5,6 +5,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     // Navigation
     "nav.overview": "Auslandsbestellungen",
     "nav.orders": "Bestellungen",
+    "nav.inbound_deliveries": "Wareneingänge",
     "nav.users": "Benutzer",
     "nav.logout": "Abmelden",
     "nav.logged_in_as": "Angemeldet als",
@@ -686,6 +687,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     // Navigation
     "nav.overview": "Foreign Orders",
     "nav.orders": "Orders",
+    "nav.inbound_deliveries": "Incoming Deliveries",
     "nav.users": "Users",
     "nav.logout": "Log out",
     "nav.logged_in_as": "Logged in as",
@@ -1366,6 +1368,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     // Navigation
     "nav.overview": "Yurtdışı Siparişleri",
     "nav.orders": "Siparişler",
+    "nav.inbound_deliveries": "Mal Girişleri",
     "nav.users": "Kullanıcılar",
     "nav.logout": "Çıkış Yap",
     "nav.logged_in_as": "Giriş yapan",
