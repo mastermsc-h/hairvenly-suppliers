@@ -24,6 +24,7 @@ export interface PushItemResult {
   item_id: string;
   display: string; // human-readable line: "Tape · 50cm · #1B"
   grams: number;
+  ordered_grams?: number; // gesetzt wenn != grams (Mehrlieferung)
   pieces: number | null;
   grams_per_piece: number | null;
   status: PushItemStatus;
@@ -200,6 +201,7 @@ interface DbItem {
   length_value: string | null;
   color_name: string | null;
   quantity: number;
+  delivered_quantity: number | null;
   unit: string | null;
   pushed_to_shopify_at: string | null;
   shopify_push_qty: number | null;
@@ -208,6 +210,11 @@ interface DbItem {
     | { name_shopify: string | null; shopify_url: string | null }
     | { name_shopify: string | null; shopify_url: string | null }[]
     | null;
+}
+
+/** Tatsächlich für Shopify-Push relevante Menge: delivered wenn gesetzt, sonst quantity. */
+function effectiveGrams(it: { quantity: number; delivered_quantity: number | null }): number {
+  return Number(it.delivered_quantity ?? it.quantity ?? 0);
 }
 
 function formatDisplay(it: DbItem): string {
@@ -254,7 +261,7 @@ export async function pushOrderItemsToShopify(
     let q = supabase
       .from("order_items")
       .select(
-        "id, order_id, color_id, method_name, length_value, color_name, quantity, unit, pushed_to_shopify_at, shopify_push_qty, shipment_id, product_colors:color_id ( name_shopify, shopify_url )",
+        "id, order_id, color_id, method_name, length_value, color_name, quantity, delivered_quantity, unit, pushed_to_shopify_at, shopify_push_qty, shipment_id, product_colors:color_id ( name_shopify, shopify_url )",
       )
       .eq("order_id", orderId);
     if (shipmentId) {
@@ -346,7 +353,8 @@ export async function pushOrderItemsToShopify(
       const shopifyUrl = pc?.shopify_url ?? null;
       const cleanColor = it.color_id ? cleanNamesByColorId.get(it.color_id) ?? null : null;
       const display = formatDisplay(it);
-      const grams = Number(it.quantity || 0);
+      const grams = effectiveGrams(it);
+      const orderedGrams = Number(it.quantity || 0);
       const gPerPiece = gramsPerPiece(it.method_name, it.length_value);
       const pieces = gPerPiece && grams > 0 ? Math.round(grams / gPerPiece) : null;
 
@@ -354,6 +362,7 @@ export async function pushOrderItemsToShopify(
         item_id: it.id,
         display,
         grams,
+        ordered_grams: grams !== orderedGrams ? orderedGrams : undefined,
         pieces,
         grams_per_piece: gPerPiece,
         shopify_url: shopifyUrl,
@@ -496,7 +505,7 @@ export async function previewShopifyPush(
     let q = supabase
       .from("order_items")
       .select(
-        "id, order_id, color_id, method_name, length_value, color_name, quantity, unit, pushed_to_shopify_at, shopify_push_qty, shipment_id, product_colors:color_id ( name_shopify, shopify_url )",
+        "id, order_id, color_id, method_name, length_value, color_name, quantity, delivered_quantity, unit, pushed_to_shopify_at, shopify_push_qty, shipment_id, product_colors:color_id ( name_shopify, shopify_url )",
       )
       .eq("order_id", orderId);
     if (shipmentId) {
@@ -543,7 +552,8 @@ export async function previewShopifyPush(
         let pc: { name_shopify: string | null; shopify_url: string | null } | null = Array.isArray(it.product_colors) ? it.product_colors[0] : it.product_colors;
         if (!pc?.name_shopify && fallbackMapping.has(it.id)) pc = fallbackMapping.get(it.id)!;
         const nameShopify = pc?.name_shopify ?? null;
-        const grams = Number(it.quantity || 0);
+        const grams = effectiveGrams(it);
+        const orderedGrams = Number(it.quantity || 0);
         const gPerPiece = gramsPerPiece(it.method_name, it.length_value);
         const pieces = gPerPiece && grams > 0 ? Math.round(grams / gPerPiece) : null;
         const status: PushItemStatus = !nameShopify
@@ -555,6 +565,7 @@ export async function previewShopifyPush(
           item_id: it.id,
           display: formatDisplay(it),
           grams,
+          ordered_grams: grams !== orderedGrams ? orderedGrams : undefined,
           pieces,
           grams_per_piece: gPerPiece,
           status,

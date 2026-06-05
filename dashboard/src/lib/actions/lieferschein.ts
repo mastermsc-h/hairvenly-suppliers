@@ -379,7 +379,7 @@ export async function commitLieferschein(payload: {
         const excessBlock = [
           `⚠ Mehrlieferung gegenüber Bestellpositionen: +${totalExcess} g insgesamt`,
           ...lines,
-          "(Differenz nicht als Bestand erfasst — beim nächsten Wareneingang berücksichtigen oder manuell aufnehmen)",
+          "(Mehrlieferung als delivered_quantity erfasst → wird beim Shopify-Push mit eingepflegt.)",
         ].join("\n");
         notesField = notesField ? `${notesField}\n\n${excessBlock}` : excessBlock;
       }
@@ -401,7 +401,26 @@ export async function commitLieferschein(payload: {
         .single();
       if (shErr || !shipment) return { ok: false, error: shErr?.message ?? "Teillieferung konnte nicht angelegt werden" };
 
+      // Zuerst alle Items dem Shipment zuordnen
       await supabase.from("order_items").update({ shipment_id: shipment.id }).in("id", info.items);
+
+      // Pro betroffener Bestellposition die tatsächliche Liefermenge setzen
+      // (Ordered + Excess). Bei Mehrlieferung landet der Überschuss damit
+      // auch im Shopify-Push, ist aber sauber als Differenz erkennbar.
+      for (const r of payload.rows) {
+        if (r.status !== "matched") continue;
+        for (const a of r.allocations ?? []) {
+          if (a.order_id !== orderId) continue;
+          // shipment_only-Modus → Excess der ganzen Lieferschein-Zeile
+          // gehört zu DIESER Bestellung (es gibt keine andere allocation
+          // weil byOrder.size === 1).
+          const delivered = a.allocate_g + (r.excess_grams ?? 0);
+          await supabase
+            .from("order_items")
+            .update({ delivered_quantity: delivered })
+            .eq("id", a.order_item_id);
+        }
+      }
 
       revalidatePath(`/orders/${orderId}`);
       return { ok: true, shipment_id: shipment.id, order_id: orderId, shipments_created: 1 };

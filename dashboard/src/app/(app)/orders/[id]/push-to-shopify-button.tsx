@@ -194,7 +194,14 @@ export default function PushToShopifyButton({ orderId, shipmentId, label, compac
                           />
                         </td>
                         <td className="px-2 py-1.5">{p.display}</td>
-                        <td className="px-2 py-1.5 text-right text-neutral-600">{p.grams} g</td>
+                        <td className="px-2 py-1.5 text-right text-neutral-600">
+                          {p.grams} g
+                          {p.ordered_grams != null && p.ordered_grams !== p.grams && (
+                            <div className="text-[9px] text-orange-600 font-medium" title={`Bestellt: ${p.ordered_grams} g · Geliefert: ${p.grams} g`}>
+                              {p.grams > p.ordered_grams ? "+" : ""}{p.grams - p.ordered_grams} g vs. bestellt
+                            </div>
+                          )}
+                        </td>
                         <td className="px-2 py-1.5 text-right font-medium">
                           {p.pieces != null ? (
                             <span className="text-emerald-700">{p.pieces}</span>
@@ -300,7 +307,14 @@ export default function PushToShopifyButton({ orderId, shipmentId, label, compac
                   <tr key={r.item_id}>
                     <td className="px-2 py-1.5"><StatusIcon status={r.status} /></td>
                     <td className="px-2 py-1.5">{r.display}</td>
-                    <td className="px-2 py-1.5 text-right text-neutral-600">{r.grams} g</td>
+                    <td className="px-2 py-1.5 text-right text-neutral-600">
+                      {r.grams} g
+                      {r.ordered_grams != null && r.ordered_grams !== r.grams && (
+                        <div className="text-[9px] text-orange-600 font-medium" title={`Bestellt: ${r.ordered_grams} g`}>
+                          {r.grams > r.ordered_grams ? "+" : ""}{r.grams - r.ordered_grams} g
+                        </div>
+                      )}
+                    </td>
                     <td className="px-2 py-1.5 text-right font-medium">
                       {r.pieces != null ? r.pieces : "—"}
                     </td>

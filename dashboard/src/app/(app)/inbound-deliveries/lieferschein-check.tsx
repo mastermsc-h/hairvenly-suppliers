@@ -354,7 +354,7 @@ export default function LieferscheinCheck({
                                     className="mt-0.5"
                                   />
                                   <span className="text-orange-900">
-                                    Bestätigen: die Differenz wird <strong>nicht als Bestand erfasst</strong>, aber als Hinweis in der Teillieferungs-Notiz festgehalten.
+                                    Bestätigen: die Mehrlieferung wird <strong>vollständig als geliefert erfasst</strong> (Shopify-Push bucht +{totalExcess} g zusätzlich ein) — und die Differenz zur Bestellung wird in der Teillieferungs-Notiz festgehalten.
                                   </span>
                                 </label>
                               </div>
