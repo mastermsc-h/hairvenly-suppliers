@@ -7,7 +7,17 @@ import { analyzeLieferschein, commitLieferschein, type ParsedRow, type AnalyzeRe
 
 interface SupplierOpt { id: string; name: string; }
 
-export default function LieferscheinCheck({ suppliers, compact }: { suppliers: SupplierOpt[]; compact?: boolean }) {
+export default function LieferscheinCheck({
+  suppliers,
+  compact,
+  triggerClass,
+  triggerLabel,
+}: {
+  suppliers: SupplierOpt[];
+  compact?: boolean;
+  triggerClass?: string;
+  triggerLabel?: React.ReactNode;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [supplierId, setSupplierId] = useState(suppliers[0]?.id ?? "");
@@ -112,12 +122,18 @@ export default function LieferscheinCheck({ suppliers, compact }: { suppliers: S
         type="button"
         onClick={() => setOpen(true)}
         className={
-          compact
-            ? "inline-flex items-center gap-1 text-xs text-neutral-500 hover:text-green-700"
-            : "inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium"
+          triggerClass
+            ? triggerClass
+            : compact
+              ? "inline-flex items-center gap-1 text-xs text-neutral-500 hover:text-green-700"
+              : "inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium"
         }
       >
-        <FileSpreadsheet size={compact ? 14 : 16} /> Lieferschein-Check
+        {triggerLabel ?? (
+          <>
+            <FileSpreadsheet size={compact ? 14 : 16} /> Lieferschein-Check
+          </>
+        )}
       </button>
 
       {open && (

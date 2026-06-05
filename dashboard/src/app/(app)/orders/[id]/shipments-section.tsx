@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useTransition, useRef } from "react";
-import { Package, Plus, X, Check, Pencil, Trash2, Truck, ExternalLink, Calendar } from "lucide-react";
+import { Package, Plus, X, Check, Pencil, Trash2, Truck, ExternalLink, Calendar, FileSpreadsheet } from "lucide-react";
 import { createShipment, updateShipment, deleteShipment, setItemsShipment } from "@/lib/actions/shipments";
 import { date } from "@/lib/format";
 import type { OrderShipment, OrderItem, OrderDocument } from "@/lib/types";
+import LieferscheinCheck from "@/app/(app)/inbound-deliveries/lieferschein-check";
 
 export default function ShipmentsSection({
   orderId,
@@ -12,12 +13,16 @@ export default function ShipmentsSection({
   items,
   documents,
   canEdit,
+  supplierId,
+  supplierName,
 }: {
   orderId: string;
   shipments: OrderShipment[];
   items: OrderItem[];
   documents: OrderDocument[];
   canEdit: boolean;
+  supplierId?: string;
+  supplierName?: string;
 }) {
   const [creating, setCreating] = useState(false);
 
@@ -35,13 +40,22 @@ export default function ShipmentsSection({
           )}
         </h2>
         {canEdit && (
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg border border-neutral-300 text-neutral-700 hover:bg-neutral-50 transition"
-          >
-            <Plus size={12} /> Neue Teillieferung
-          </button>
+          <div className="flex items-center gap-2">
+            {supplierId && supplierName && (
+              <LieferscheinCheck
+                suppliers={[{ id: supplierId, name: supplierName }]}
+                triggerClass="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white transition"
+                triggerLabel={<><FileSpreadsheet size={12} /> Lieferschein-Check</>}
+              />
+            )}
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg border border-neutral-300 text-neutral-700 hover:bg-neutral-50 transition"
+            >
+              <Plus size={12} /> Neue Teillieferung
+            </button>
+          </div>
         )}
       </div>
 

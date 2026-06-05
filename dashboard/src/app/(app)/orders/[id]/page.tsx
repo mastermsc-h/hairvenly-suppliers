@@ -261,6 +261,8 @@ export default async function OrderDetailPage({
             items={items}
             documents={docs}
             canEdit={canEditShipments}
+            supplierId={o.supplier_id}
+            supplierName={sup?.name ?? ""}
           />
 
           {/* Shopify-Push: Bestand aus Bestellpositionen in Shopify einpflegen */}
