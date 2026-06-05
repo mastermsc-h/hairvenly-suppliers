@@ -53,38 +53,49 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
       .select("id, label, supplier_id, order_date, tracking_number, tracking_url, status, eta")
       .order("order_date", { ascending: false }),
     supabase.from("suppliers").select("id, name, regions"),
-    supabase.from("order_shipments").select("order_id, eta, arrived_at"),
-    // Join order_items with product_colors to know the Shopify product name per item
+    supabase.from("order_shipments").select("id, order_id, eta, arrived_at"),
+    // Items + shipment_id, damit wir per-Item das ETA aus dem zugehörigen
+    // Shipment ableiten können wenn item.eta selbst null ist.
     supabase
       .from("order_items")
-      .select("order_id, eta, product_colors!color_id(name_shopify)"),
+      .select("order_id, eta, shipment_id, product_colors!color_id(name_shopify)"),
   ]);
 
-  // Group shipment ETAs per order (only un-arrived, only with ETA set)
+  // Map: shipment_id → eta (nur nicht-angekommene Shipments)
+  const shipmentEtaById = new Map<string, string>();
   const shipmentsByOrder = new Map<string, string[]>();
-  for (const s of (shipmentRows ?? []) as { order_id: string; eta: string | null; arrived_at: string | null }[]) {
+  for (const s of (shipmentRows ?? []) as { id: string; order_id: string; eta: string | null; arrived_at: string | null }[]) {
     if (s.arrived_at) continue;
     if (!s.eta) continue;
+    shipmentEtaById.set(s.id, s.eta);
     if (!shipmentsByOrder.has(s.order_id)) shipmentsByOrder.set(s.order_id, []);
     shipmentsByOrder.get(s.order_id)!.push(s.eta);
   }
   for (const arr of shipmentsByOrder.values()) arr.sort();
 
-  // Per-order, per-Shopify-name ETA index
+  // Per-order, per-Shopify-name ETA index.
+  // KORREKTUR Teillieferungen: wenn item.eta NULL ist aber das Item in einem
+  // Shipment liegt, nehmen wir das Shipment-ETA als per-Position-ETA. So bekommt
+  // jedes Item das ETA seiner konkreten Teillieferung — nicht das earliest aller
+  // Teillieferungen, was bei mehreren parallel laufenden Teilen falsch wäre.
   type ItemRow = {
     order_id: string;
     eta: string | null;
+    shipment_id: string | null;
     product_colors: { name_shopify: string | null } | { name_shopify: string | null }[] | null;
   };
   const itemEtasByOrder = new Map<string, Map<string, Set<string>>>();
   for (const it of (itemRows ?? []) as ItemRow[]) {
     const pc = Array.isArray(it.product_colors) ? it.product_colors[0] : it.product_colors;
     const shopify = pc?.name_shopify;
-    if (!shopify || !it.eta) continue;
+    if (!shopify) continue;
+    // Fallback-Kette: item.eta → shipment.eta (falls in Teillieferung)
+    const effectiveEta = it.eta ?? (it.shipment_id ? shipmentEtaById.get(it.shipment_id) ?? null : null);
+    if (!effectiveEta) continue;
     if (!itemEtasByOrder.has(it.order_id)) itemEtasByOrder.set(it.order_id, new Map());
     const m = itemEtasByOrder.get(it.order_id)!;
     if (!m.has(shopify)) m.set(shopify, new Set());
-    m.get(shopify)!.add(it.eta);
+    m.get(shopify)!.add(effectiveEta);
   }
 
   const map: Record<string, OrderMeta> = {};
