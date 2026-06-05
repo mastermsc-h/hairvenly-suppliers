@@ -708,7 +708,13 @@ export async function triggerSuggestionGeneration(supplierName: string, budgetKg
 // editierbaren Status ist (bis inkl. "in_production"). Setzt
 // orders.pending_resync = true, damit das UI den Re-Sync-Banner zeigt.
 
-const EDITABLE_STATUSES = ["draft", "sent_to_supplier", "confirmed", "in_production"] as const;
+// Positionen sind in jedem aktiven Status editierbar — auch nach shipped,
+// damit nachträgliche Korrekturen (z.B. nachgereichter Lieferschein-Eintrag,
+// vergessene Position) möglich sind. Gesperrt nur in den Endzuständen.
+const EDITABLE_STATUSES = [
+  "draft", "sent_to_supplier", "confirmed", "in_production",
+  "ready_to_ship", "shipped", "in_customs", "delivered",
+] as const;
 
 async function requireOrderEditor(orderId: string) {
   const profile = await requireProfile();

@@ -35,7 +35,13 @@ interface Props {
 
 const fmt = (n: number) => new Intl.NumberFormat("de-DE").format(n);
 
-const EDITABLE_STATUSES: OrderStatus[] = ["draft", "sent_to_supplier", "confirmed", "in_production"];
+// Positionen in jedem aktiven Status bearbeitbar — gesperrt nur in
+// Endzuständen (cancelled, stocked) damit historische Bestände nicht
+// mehr verändert werden können.
+const EDITABLE_STATUSES: OrderStatus[] = [
+  "draft", "sent_to_supplier", "confirmed", "in_production",
+  "ready_to_ship", "shipped", "in_customs", "delivered",
+];
 
 const METHOD_COLORS: Record<string, { bg: string; text: string; border: string; chip: string }> = {
   Bondings: { bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200", chip: "bg-purple-100 text-purple-700" },
