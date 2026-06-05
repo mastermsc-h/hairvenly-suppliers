@@ -65,7 +65,7 @@
 
 ## Lieferanten
 - Amanda (6 Wochen Lieferzeit)
-- Eyfel Ebru CN+TR (8 Wochen CN, 2 Wochen TR, regions: ["CN", "TR"])
+- Ebru (CN + TR) (8 Wochen CN, 2 Wochen TR, regions: ["CN", "TR"])
 - Aria (6 Wochen)
 
 ## Supabase
