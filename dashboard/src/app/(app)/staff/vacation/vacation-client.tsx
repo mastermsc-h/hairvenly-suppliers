@@ -48,6 +48,7 @@ export default function VacationClient({
   const [adding, setAdding] = useState(false);
   const [showYear, setShowYear] = useState(false);
   const [showSaldo, setShowSaldo] = useState(false);
+  const [saldoFull, setSaldoFull] = useState(false);
 
   const byMember = useMemo(() => {
     const map = new Map<string, VacationRequest[]>();
@@ -182,8 +183,14 @@ export default function VacationClient({
         </span>
         <ChevronDown size={15} className={`text-neutral-400 transition-transform ${showSaldo ? "rotate-180" : ""}`} />
       </button>
-      {showSaldo && (
-        <div className="overflow-x-auto scroll-always max-h-[42vh]">
+      {showSaldo && (<>
+        <div className="flex items-center justify-end gap-3 px-4 py-2 text-xs border-b border-neutral-100 bg-neutral-50/40">
+          <button onClick={() => setSaldoFull((f) => !f)} className="text-neutral-600 hover:text-neutral-900 font-medium">
+            {saldoFull ? "Kompakt (scrollbar)" : "Alle anzeigen"}
+          </button>
+          {!saldoFull && <span className="text-neutral-400">· Rand unten ziehen zum Vergrößern ↕</span>}
+        </div>
+        <div className={saldoFull ? "overflow-x-auto" : "overflow-x-auto scroll-always resize-y h-[44vh] min-h-[160px]"}>
         <table className="w-full text-sm">
           <thead className="bg-neutral-50 border-b border-neutral-200 sticky top-0 z-10">
             <tr>
@@ -240,7 +247,7 @@ export default function VacationClient({
           </tbody>
         </table>
         </div>
-      )}
+      </>)}
       </div>
       )}
 
