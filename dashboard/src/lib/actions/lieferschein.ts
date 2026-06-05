@@ -327,15 +327,67 @@ export async function commitLieferschein(payload: {
   shipped_at: string | null;
   arrived_at: string | null;
   notes: string | null;
-  create_shipments: boolean;
+  /**
+   * "full"           — Wareneingang + Items + Teillieferung(en) in allen
+   *                    betroffenen Bestellungen
+   * "shipment_only"  — nur 1 Teillieferung in der einzigen betroffenen
+   *                    Bestellung (kein Wareneingang). Nur erlaubt wenn
+   *                    genau 1 Bestellung gematcht und kein Überschuss.
+   */
+  mode: "full" | "shipment_only";
   rows: ParsedRow[];
-}): Promise<{ ok: boolean; error?: string; inbound_delivery_id?: string; shipments_created?: number }> {
+}): Promise<{ ok: boolean; error?: string; inbound_delivery_id?: string; shipment_id?: string; order_id?: string; shipments_created?: number }> {
   try {
     const profile = await requireProfile();
     if (!profile.is_admin) return { ok: false, error: "Nur Admins" };
     const supabase = await createClient();
 
-    // 1) Create inbound_delivery
+    // Group allocations by order
+    const byOrder = new Map<string, { items: string[]; allocG: number }>();
+    for (const r of payload.rows) {
+      if (r.status !== "matched") continue;
+      for (const a of r.allocations ?? []) {
+        const cur = byOrder.get(a.order_id) ?? { items: [], allocG: 0 };
+        cur.items.push(a.order_item_id);
+        cur.allocG += a.allocate_g;
+        byOrder.set(a.order_id, cur);
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Mode: shipment_only — nur Teillieferung anlegen, kein Wareneingang
+    // ────────────────────────────────────────────────────────────
+    if (payload.mode === "shipment_only") {
+      if (byOrder.size !== 1) {
+        return { ok: false, error: "Modus 'Nur Teillieferung' erfordert genau 1 betroffene Bestellung" };
+      }
+      const [[orderId, info]] = [...byOrder.entries()];
+      const { data: shipment, error: shErr } = await supabase
+        .from("order_shipments")
+        .insert({
+          order_id: orderId,
+          label: payload.label,
+          tracking_number: payload.tracking_number,
+          tracking_url: payload.tracking_url,
+          eta: payload.eta,
+          shipped_at: payload.shipped_at,
+          arrived_at: payload.arrived_at,
+          notes: payload.notes,
+          inbound_delivery_id: null,
+        })
+        .select("id")
+        .single();
+      if (shErr || !shipment) return { ok: false, error: shErr?.message ?? "Teillieferung konnte nicht angelegt werden" };
+
+      await supabase.from("order_items").update({ shipment_id: shipment.id }).in("id", info.items);
+
+      revalidatePath(`/orders/${orderId}`);
+      return { ok: true, shipment_id: shipment.id, order_id: orderId, shipments_created: 1 };
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Mode: full — Wareneingang + Items + (N Teillieferungen)
+    // ────────────────────────────────────────────────────────────
     const { data: del, error: delErr } = await supabase
       .from("inbound_deliveries")
       .insert({
@@ -352,7 +404,6 @@ export async function commitLieferschein(payload: {
       .single();
     if (delErr || !del) return { ok: false, error: delErr?.message ?? "Wareneingang konnte nicht angelegt werden" };
 
-    // 2) Items
     const items = payload.rows
       .filter((r) => r.status === "matched" && r.color_id && r.grams > 0)
       .map((r) => ({
@@ -370,42 +421,25 @@ export async function commitLieferschein(payload: {
     }
 
     let shipmentsCreated = 0;
-    if (payload.create_shipments) {
-      // Group allocations by order_id → create one Teillieferung per affected order
-      const byOrder = new Map<string, { items: string[]; allocG: number }>();
-      for (const r of payload.rows) {
-        if (r.status !== "matched") continue;
-        for (const a of r.allocations ?? []) {
-          const cur = byOrder.get(a.order_id) ?? { items: [], allocG: 0 };
-          cur.items.push(a.order_item_id);
-          cur.allocG += a.allocate_g;
-          byOrder.set(a.order_id, cur);
-        }
-      }
-      for (const [orderId, info] of byOrder.entries()) {
-        const { data: shipment, error: shErr } = await supabase
-          .from("order_shipments")
-          .insert({
-            order_id: orderId,
-            label: payload.label ? `Aus ${payload.label}` : `Aus Wareneingang`,
-            tracking_number: payload.tracking_number,
-            tracking_url: payload.tracking_url,
-            eta: payload.eta,
-            shipped_at: payload.shipped_at,
-            arrived_at: payload.arrived_at,
-            notes: null,
-            inbound_delivery_id: del.id,
-          })
-          .select("id")
-          .single();
-        if (shErr || !shipment) continue;
-        // Link the order_items
-        await supabase
-          .from("order_items")
-          .update({ shipment_id: shipment.id })
-          .in("id", info.items);
-        shipmentsCreated++;
-      }
+    for (const [orderId, info] of byOrder.entries()) {
+      const { data: shipment, error: shErr } = await supabase
+        .from("order_shipments")
+        .insert({
+          order_id: orderId,
+          label: payload.label ? `Aus ${payload.label}` : `Aus Wareneingang`,
+          tracking_number: payload.tracking_number,
+          tracking_url: payload.tracking_url,
+          eta: payload.eta,
+          shipped_at: payload.shipped_at,
+          arrived_at: payload.arrived_at,
+          notes: null,
+          inbound_delivery_id: del.id,
+        })
+        .select("id")
+        .single();
+      if (shErr || !shipment) continue;
+      await supabase.from("order_items").update({ shipment_id: shipment.id }).in("id", info.items);
+      shipmentsCreated++;
     }
 
     revalidatePath("/inbound-deliveries");

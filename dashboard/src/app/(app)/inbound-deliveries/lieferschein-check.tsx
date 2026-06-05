@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FileSpreadsheet, Upload, X, Loader2, CheckCircle2, AlertTriangle, XCircle, Package, ChevronRight } from "lucide-react";
 import { analyzeLieferschein, commitLieferschein, type ParsedRow, type AnalyzeResult } from "@/lib/actions/lieferschein";
@@ -23,7 +23,23 @@ export default function LieferscheinCheck({ suppliers, compact }: { suppliers: S
   const [shippedAt, setShippedAt] = useState("");
   const [arrivedAt, setArrivedAt] = useState("");
   const [notes, setNotes] = useState("");
-  const [createShipments, setCreateShipments] = useState(true);
+  const [mode, setMode] = useState<"full" | "shipment_only">("full");
+
+  // Smart default: wenn Analyse zeigt 1 Bestellung + kein Überschuss → Modus
+  // automatisch auf "shipment_only" (User-Wunsch: bei 1 Bestellung reicht
+  // eine Teillieferung, kein Wareneingang-Overhead).
+  useEffect(() => {
+    if (!rows) return;
+    const orderIds = new Set<string>();
+    let hasExcess = false;
+    for (const r of rows) {
+      if (r.status !== "matched") continue;
+      if ((r.excess_grams ?? 0) > 0) hasExcess = true;
+      for (const a of r.allocations ?? []) orderIds.add(a.order_id);
+    }
+    if (orderIds.size === 1 && !hasExcess) setMode("shipment_only");
+    else setMode("full");
+  }, [rows]);
 
   function close() {
     setOpen(false);
@@ -69,12 +85,14 @@ export default function LieferscheinCheck({ suppliers, compact }: { suppliers: S
         shipped_at: shippedAt || null,
         arrived_at: arrivedAt || null,
         notes: notes || null,
-        create_shipments: createShipments,
+        mode,
         rows,
       });
-      if (res.ok && res.inbound_delivery_id) {
+      if (res.ok) {
         close();
-        router.push(`/inbound-deliveries/${res.inbound_delivery_id}`);
+        if (res.inbound_delivery_id) router.push(`/inbound-deliveries/${res.inbound_delivery_id}`);
+        else if (res.order_id) router.push(`/orders/${res.order_id}`);
+        else router.refresh();
       } else {
         alert(`Fehler: ${res.error}`);
       }
@@ -188,10 +206,6 @@ export default function LieferscheinCheck({ suppliers, compact }: { suppliers: S
                       <label className="text-[10px] text-neutral-500 uppercase">Angekommen<input type="date" value={arrivedAt} onChange={(e) => setArrivedAt(e.target.value)} className="w-full rounded-lg border border-neutral-300 px-2 py-1 text-sm mt-0.5" /></label>
                     </div>
                     <textarea placeholder="Notiz" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-sm" />
-                    <label className="flex items-center gap-2 text-sm text-neutral-700 pt-1">
-                      <input type="checkbox" checked={createShipments} onChange={(e) => setCreateShipments(e.target.checked)} className="rounded" />
-                      Teillieferungen in betroffenen Bestellungen automatisch erzeugen
-                    </label>
                   </div>
 
                   {/* Rows preview */}
@@ -214,11 +228,13 @@ export default function LieferscheinCheck({ suppliers, compact }: { suppliers: S
                     </table>
                   </div>
 
-                  {/* Zusammenfassung Teillieferungen-Erzeugung */}
-                  {createShipments && (() => {
+                  {/* Modus-Wahl: Wareneingang vs nur Teillieferung */}
+                  {(() => {
                     const byOrder = new Map<string, { label: string; positions: number; grams: number }>();
+                    let hasExcess = false;
                     for (const r of rows ?? []) {
                       if (r.status !== "matched") continue;
+                      if ((r.excess_grams ?? 0) > 0) hasExcess = true;
                       for (const a of r.allocations ?? []) {
                         const cur = byOrder.get(a.order_id) ?? { label: a.order_label, positions: 0, grams: 0 };
                         cur.positions++;
@@ -226,19 +242,67 @@ export default function LieferscheinCheck({ suppliers, compact }: { suppliers: S
                         byOrder.set(a.order_id, cur);
                       }
                     }
-                    if (byOrder.size === 0) return null;
+                    const singleOrder = byOrder.size === 1;
+                    const canShipmentOnly = singleOrder && !hasExcess;
+                    const orderList = [...byOrder.entries()];
+
                     return (
-                      <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-sm">
-                        <div className="font-medium text-purple-900 mb-1">
-                          {byOrder.size === 1 ? "1 Teillieferung wird automatisch erzeugt:" : `${byOrder.size} Teillieferungen werden automatisch erzeugt:`}
-                        </div>
-                        <ul className="text-xs text-purple-800 space-y-0.5">
-                          {[...byOrder.entries()].map(([orderId, info]) => (
-                            <li key={orderId}>
-                              <strong>{info.label}</strong> ← {info.positions} {info.positions === 1 ? "Position" : "Positionen"} · {info.grams} g
-                            </li>
-                          ))}
-                        </ul>
+                      <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-3 text-sm space-y-2">
+                        <div className="text-xs font-medium text-neutral-600 uppercase tracking-wide">Was soll angelegt werden?</div>
+
+                        {/* Option 1: nur Teillieferung */}
+                        <label className={`flex items-start gap-2 p-2 rounded cursor-pointer border ${mode === "shipment_only" ? "border-green-400 bg-green-50" : "border-transparent hover:bg-white"} ${!canShipmentOnly ? "opacity-50 cursor-not-allowed" : ""}`}>
+                          <input
+                            type="radio"
+                            name="mode"
+                            value="shipment_only"
+                            checked={mode === "shipment_only"}
+                            disabled={!canShipmentOnly}
+                            onChange={() => setMode("shipment_only")}
+                            className="mt-0.5"
+                          />
+                          <div className="flex-1">
+                            <div className="font-medium text-neutral-900">
+                              Nur Teillieferung anlegen
+                              {singleOrder && orderList[0] && (
+                                <span className="text-purple-700"> in „{orderList[0][1].label}"</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-neutral-500 mt-0.5">
+                              {canShipmentOnly
+                                ? `${orderList[0]?.[1].positions} Positionen · ${orderList[0]?.[1].grams} g — kein separater Wareneingang`
+                                : !singleOrder
+                                  ? `Nicht möglich (${byOrder.size} Bestellungen betroffen)`
+                                  : "Nicht möglich (Überschuss vorhanden — geht in lose Ware → braucht Wareneingang)"}
+                            </div>
+                          </div>
+                        </label>
+
+                        {/* Option 2: Wareneingang */}
+                        <label className={`flex items-start gap-2 p-2 rounded cursor-pointer border ${mode === "full" ? "border-purple-400 bg-purple-50" : "border-transparent hover:bg-white"}`}>
+                          <input
+                            type="radio"
+                            name="mode"
+                            value="full"
+                            checked={mode === "full"}
+                            onChange={() => setMode("full")}
+                            className="mt-0.5"
+                          />
+                          <div className="flex-1">
+                            <div className="font-medium text-neutral-900">
+                              Wareneingang anlegen
+                              <span className="text-purple-700"> + {byOrder.size} {byOrder.size === 1 ? "Teillieferung" : "Teillieferungen"}</span>
+                            </div>
+                            <div className="text-xs text-neutral-500 mt-0.5">
+                              {byOrder.size > 0 ? (
+                                <>betrifft: {orderList.map(([, i]) => `${i.label} (${i.positions}, ${i.grams}g)`).join(", ")}</>
+                              ) : (
+                                <>Alle Positionen gehen in lose Ware (keine offene Bestellung gematcht)</>
+                              )}
+                              {hasExcess && <span className="text-orange-600"> · inkl. Überschuss in lose Ware</span>}
+                            </div>
+                          </div>
+                        </label>
                       </div>
                     );
                   })()}
@@ -258,7 +322,7 @@ export default function LieferscheinCheck({ suppliers, compact }: { suppliers: S
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
                       >
                         {pending && <Loader2 size={14} className="animate-spin" />}
-                        Wareneingang anlegen ({analysis.matched} Positionen)
+                        {mode === "shipment_only" ? "Teillieferung anlegen" : "Wareneingang anlegen"} ({analysis.matched} Positionen)
                       </button>
                     </div>
                   </div>
