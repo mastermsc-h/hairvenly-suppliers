@@ -4,6 +4,7 @@ import { requireProfile } from "@/lib/auth";
 import { date as fmtDate } from "@/lib/format";
 import { Truck, Calendar, Plus, Package } from "lucide-react";
 import type { InboundDelivery } from "@/lib/types";
+import LieferscheinCheck from "./lieferschein-check";
 
 type SupplierLite = { id: string; name: string; region: string | null };
 
@@ -54,12 +55,15 @@ export default async function InboundDeliveriesPage() {
           </p>
         </div>
         {profile.is_admin && (
-          <Link
-            href="/inbound-deliveries/new"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800"
-          >
-            <Plus size={16} /> Neuer Wareneingang
-          </Link>
+          <div className="flex items-center gap-2">
+            <LieferscheinCheck suppliers={usableSuppliers.map((s) => ({ id: s.id, name: s.name }))} />
+            <Link
+              href="/inbound-deliveries/new"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800"
+            >
+              <Plus size={16} /> Neuer Wareneingang
+            </Link>
+          </div>
         )}
       </div>
 
