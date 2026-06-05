@@ -44,14 +44,19 @@ export default async function OrdersArchivePage() {
   const showDocs = showAllDocs || showPackingLists;
   const showInvoices = hasFeature(profile, "invoices") || isSupplierRole;
 
-  // Scope to own supplier for supplier role.
-  // Archive: stocked/cancelled AND fully paid (no open balance).
-  // If we still owe money on the order, it stays in the active view.
+  // Archiv-Logik (synchron zur Dashboard-Logik):
+  //   - cancelled → immer im Archiv (auch ohne Rechnung)
+  //   - stocked → nur wenn invoice_total > 0 UND remaining_balance ≈ 0
+  //
+  // Wir machen das mit zwei OR-verknüpften Bedingungen via PostgREST .or():
+  //   (status=cancelled) OR (status=stocked AND invoice_total>0 AND remaining_balance<=0.009)
   let ordersQuery = supabase
     .from("orders_with_totals")
     .select("*")
-    .in("status", ["stocked", "cancelled"])
-    .lte("remaining_balance", 0.009);
+    .or(
+      "status.eq.cancelled," +
+        "and(status.eq.stocked,invoice_total.gt.0,remaining_balance.lte.0.009)",
+    );
   if (isSupplierRole && mySupplierId) {
     ordersQuery = ordersQuery.eq("supplier_id", mySupplierId);
   }
