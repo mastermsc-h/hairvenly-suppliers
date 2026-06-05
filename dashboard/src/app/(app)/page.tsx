@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { ExternalLink, Package, Wallet, Plus, Archive, Weight, Split } from "lucide-react";
+import { ExternalLink, Package, Wallet, Plus, Archive, Weight, Split, Truck } from "lucide-react";
+import SupplierLieferscheinButton from "./supplier-lieferschein-button";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { usd, date } from "@/lib/format";
@@ -257,13 +258,24 @@ export default async function DashboardPage() {
             );
 
             const addBtn = (
-              <div className="px-4 md:px-5 py-2 border-t border-neutral-100 bg-neutral-50/40">
+              <div className="px-4 md:px-5 py-2 border-t border-neutral-100 bg-neutral-50/40 flex items-center gap-4 flex-wrap">
                 <Link
                   href={`/orders/new?supplier_id=${s.id}`}
                   className="inline-flex items-center gap-1 text-xs text-neutral-500 hover:text-indigo-700"
                 >
                   <Plus size={14} /> {t(locale, "dashboard.new_order")}
                 </Link>
+                {profile.is_admin && (
+                  <>
+                    <Link
+                      href={`/inbound-deliveries?supplier=${s.id}`}
+                      className="inline-flex items-center gap-1 text-xs text-neutral-500 hover:text-purple-700"
+                    >
+                      <Truck size={14} /> Wareneingänge
+                    </Link>
+                    <SupplierLieferscheinButton supplierId={s.id} supplierName={s.name} />
+                  </>
+                )}
               </div>
             );
 

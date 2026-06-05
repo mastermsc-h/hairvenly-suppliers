@@ -168,9 +168,13 @@ export async function analyzeLieferschein(formData: FormData): Promise<AnalyzeRe
       for (const a of e.color_aliases) colorLookup.set(mk(a), { id: e.color_id, name: e.color_name });
     }
 
-    // Parse xlsx
+    // Parse xlsx — xlsx erwartet Uint8Array bei type:"array", nicht raw ArrayBuffer
     const arrayBuf = await file.arrayBuffer();
-    const wb = XLSX.read(arrayBuf, { type: "array" });
+    const u8 = new Uint8Array(arrayBuf);
+    const wb = XLSX.read(u8, { type: "array" });
+    if (!wb.SheetNames || wb.SheetNames.length === 0) {
+      return { ok: false, error: "Excel-Datei enthält keine Tabellenblätter", total_positions: 0, matched: 0, total_grams: 0, matched_grams: 0 };
+    }
     const ws = wb.Sheets[wb.SheetNames[0]];
     const sheetRows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null, blankrows: false });
 

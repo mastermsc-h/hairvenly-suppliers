@@ -7,7 +7,7 @@ import { analyzeLieferschein, commitLieferschein, type ParsedRow, type AnalyzeRe
 
 interface SupplierOpt { id: string; name: string; }
 
-export default function LieferscheinCheck({ suppliers }: { suppliers: SupplierOpt[] }) {
+export default function LieferscheinCheck({ suppliers, compact }: { suppliers: SupplierOpt[]; compact?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [supplierId, setSupplierId] = useState(suppliers[0]?.id ?? "");
@@ -32,15 +32,28 @@ export default function LieferscheinCheck({ suppliers }: { suppliers: SupplierOp
     setRows(null);
   }
 
+  const [clientError, setClientError] = useState<string | null>(null);
+
   function runAnalysis() {
-    if (!file || !supplierId) return;
+    setClientError(null);
+    if (!file || !supplierId) {
+      setClientError(!supplierId ? "Lieferant fehlt" : "Datei fehlt");
+      return;
+    }
     startTransition(async () => {
-      const fd = new FormData();
-      fd.set("supplier_id", supplierId);
-      fd.set("file", file);
-      const result = await analyzeLieferschein(fd);
-      setAnalysis(result);
-      setRows(result.rows ?? null);
+      try {
+        const fd = new FormData();
+        fd.set("supplier_id", supplierId);
+        fd.set("file", file);
+        const result = await analyzeLieferschein(fd);
+        if (!result.ok) {
+          setClientError(result.error || "Unbekannter Fehler bei der Analyse");
+        }
+        setAnalysis(result);
+        setRows(result.rows ?? null);
+      } catch (e) {
+        setClientError(e instanceof Error ? e.message : String(e));
+      }
     });
   }
 
@@ -73,9 +86,13 @@ export default function LieferscheinCheck({ suppliers }: { suppliers: SupplierOp
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium"
+        className={
+          compact
+            ? "inline-flex items-center gap-1 text-xs text-neutral-500 hover:text-green-700"
+            : "inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium"
+        }
       >
-        <FileSpreadsheet size={16} /> Lieferschein-Check
+        <FileSpreadsheet size={compact ? 14 : 16} /> Lieferschein-Check
       </button>
 
       {open && (
@@ -119,6 +136,11 @@ export default function LieferscheinCheck({ suppliers }: { suppliers: SupplierOp
                     Der Parser nutzt die Lieferanten-Aliase aus dem Farbcode-Katalog. Chinesisch/türkisch werden auf eure Methoden/Längen/Farben gemappt.
                     Stand: nur xlsx — PDF/Bild-OCR folgt.
                   </p>
+                  {clientError && (
+                    <div className="px-3 py-2 rounded bg-red-50 border border-red-200 text-red-700 text-sm">
+                      Fehler: {clientError}
+                    </div>
+                  )}
                   <div className="flex justify-end gap-2">
                     <button type="button" onClick={close} className="px-4 py-2 rounded-lg text-sm font-medium bg-neutral-100 hover:bg-neutral-200 text-neutral-700">
                       Abbrechen

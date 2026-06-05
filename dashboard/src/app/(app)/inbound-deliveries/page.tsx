@@ -17,12 +17,20 @@ function deriveStatus(d: InboundDelivery): { label: string; cls: string } {
   return { label: "angekündigt", cls: "bg-neutral-100 text-neutral-600 border-neutral-200" };
 }
 
-export default async function InboundDeliveriesPage() {
+export default async function InboundDeliveriesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ supplier?: string }>;
+}) {
   const profile = await requireProfile();
   const supabase = await createClient();
+  const { supplier: supplierFilter } = await searchParams;
+
+  let deliveriesQuery = supabase.from("inbound_deliveries").select("*").order("created_at", { ascending: false });
+  if (supplierFilter) deliveriesQuery = deliveriesQuery.eq("supplier_id", supplierFilter);
 
   const [{ data: deliveriesData }, { data: suppliersData }, { data: itemCounts }] = await Promise.all([
-    supabase.from("inbound_deliveries").select("*").order("created_at", { ascending: false }),
+    deliveriesQuery,
     supabase.from("suppliers").select("id, name, region").order("sort_order").order("name"),
     supabase.from("inbound_delivery_items").select("inbound_delivery_id, quantity"),
   ]);
@@ -49,9 +57,19 @@ export default async function InboundDeliveriesPage() {
     <div className="max-w-6xl mx-auto py-6 px-4">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold text-neutral-900">Wareneingänge</h1>
+          <h1 className="text-2xl font-semibold text-neutral-900">
+            Wareneingänge
+            {supplierFilter && (
+              <span className="ml-2 text-base font-normal text-neutral-500">
+                — {suppliersById.get(supplierFilter)?.name ?? "?"}
+              </span>
+            )}
+          </h1>
           <p className="text-sm text-neutral-500 mt-1">
             Physische Sendungen — eine Sendung kann mehrere Bestellungen abdecken
+            {supplierFilter && (
+              <Link href="/inbound-deliveries" className="ml-2 text-xs text-blue-600 hover:underline">alle anzeigen</Link>
+            )}
           </p>
         </div>
         {profile.is_admin && (
