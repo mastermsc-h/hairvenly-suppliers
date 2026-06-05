@@ -428,6 +428,10 @@ interface RespondResult {
 interface RespondOptions {
   /** Wenn true: Text NICHT in chat_messages speichern (für Bot-Begleitung-Entwurf) */
   assisted?: boolean;
+  /** Überschreibt die kundenseitige Signatur ("Ava von X"). Wird gesetzt, wenn
+   *  eine eingeloggte MA assistiert (Entwurf generiert) → dann signiert die
+   *  Antwort mit dem Namen der MA statt "Hairvenly". */
+  signatureOverride?: string;
 }
 
 /**
@@ -445,7 +449,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   // Session laden — inkl. category für Skip-Check
   const { data: session } = await svc
     .from("chat_sessions")
-    .select("id, bot_signature_name, channel, status, category")
+    .select("id, bot_signature_name, signature_manual, channel, status, category")
     .eq("id", sessionId)
     .single();
   if (!session) return { success: false, error: "session not found" };
@@ -560,7 +564,17 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     }
   }
 
-  const signatureName = session.bot_signature_name || "Lara";
+  // 🎭 Persona-Avatar (für Persönlichkeit/Tonfall + avatar-spezifische Trainings).
+  const avatarName = session.bot_signature_name || "Lara";
+  // ✍️ Kundenseitige Signatur ("Ava von X") — getrennt vom Persona-Avatar:
+  //   - Autobot (Standard) → "Hairvenly" (KEIN Fake-Personenname; ehrlich = Salon-Bot)
+  //   - MA hat den Ava manuell gesetzt (signature_manual) → dieser Name (MA hat Chat übernommen)
+  //   - explizite Override (eingeloggte MA assistiert) → deren Name
+  const signatureName =
+    opts.signatureOverride
+    || ((session as { signature_manual?: boolean }).signature_manual
+          ? (session.bot_signature_name || "Hairvenly")
+          : "Hairvenly");
 
   // Persona
   const { data: persona } = await svc
@@ -574,7 +588,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     .from("chatbot_avatars")
     .select("name, personality")
     .eq("active", true);
-  const avatarRow = (avatars || []).find(a => a.name === signatureName) || (avatars || [])[0];
+  const avatarRow = (avatars || []).find(a => a.name === avatarName) || (avatars || [])[0];
 
   // System-Prompt zusammenbauen
   //
@@ -949,7 +963,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
       .eq("active", true)
       .eq("pinned", true)
-      .eq("avatar_name", signatureName)
+      .eq("avatar_name", avatarName)
       .order("created_at", { ascending: false })
       .limit(3),
     // 2) Themen-Match — max 3 (vorher 15)
@@ -957,7 +971,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       ? svc.from("chatbot_training")
           .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
           .eq("active", true)
-          .or(`avatar_name.is.null,avatar_name.eq.${signatureName}`)
+          .or(`avatar_name.is.null,avatar_name.eq.${avatarName}`)
           .or(keywords.map(k => `user_message.ilike.%${k}%,feedback.ilike.%${k}%`).join(","))
           .order("created_at", { ascending: false })
           .limit(3)
@@ -966,7 +980,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     svc.from("chatbot_training")
       .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
       .eq("active", true)
-      .or(`avatar_name.is.null,avatar_name.eq.${signatureName}`)
+      .or(`avatar_name.is.null,avatar_name.eq.${avatarName}`)
       .order("created_at", { ascending: false })
       .limit(2),
   ]);

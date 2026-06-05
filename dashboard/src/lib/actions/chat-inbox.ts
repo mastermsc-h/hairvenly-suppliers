@@ -141,6 +141,33 @@ function swapSignatureInDraft(text: string, oldName: string, newName: string): s
   return lines.join("\n");
 }
 
+/**
+ * Ersetzt den Namen NACH "Ava von …" in den letzten Zeilen durch newName —
+ * egal welcher Name vorher dort stand ("Hairvenly", Avatar, andere MA).
+ * Genutzt bei der Freigabe eines Entwurfs: die abgeschickte Antwort trägt den
+ * Namen der freigebenden, eingeloggten MA (User-Regel: "Ava von <Person>" nur
+ * bei eingeloggter Assistenz). Nur 1. Treffer in den letzten 5 Zeilen.
+ */
+function reSignToAgent(text: string, newName: string): string {
+  if (!text || !newName) return text;
+  const lines = text.split("\n");
+  const startIdx = Math.max(0, lines.length - 5);
+  const re = /(\/?\s*Ava\s+von\s+)\S+/i;
+  for (let i = startIdx; i < lines.length; i++) {
+    if (re.test(lines[i])) {
+      lines[i] = lines[i].replace(re, `$1${newName}`);
+      break;
+    }
+  }
+  return lines.join("\n");
+}
+
+/** Anzeigename der eingeloggten MA für die Signatur (Vorname/Display, sonst neutral). */
+async function getAgentSignatureName(svc: ReturnType<typeof createServiceClient>, userId: string): Promise<string> {
+  const { data: prof } = await svc.from("profiles").select("display_name, email").eq("id", userId).maybeSingle();
+  return (prof?.display_name as string) || (prof?.email ? (prof.email as string).split("@")[0] : "Hairvenly");
+}
+
 /** Setzt den Avatar (Bot-Signatur) für eine Session */
 export async function setSessionAvatar(sessionId: string, avatarName: string) {
   const svc = createServiceClient();
@@ -162,7 +189,10 @@ export async function setSessionAvatar(sessionId: string, avatarName: string) {
     .maybeSingle();
   const oldName: string | null = oldSession?.bot_signature_name || null;
 
-  await svc.from("chat_sessions").update({ bot_signature_name: avatarName }).eq("id", sessionId);
+  // signature_manual=true: MA hat den Ava bewusst gesetzt → ab jetzt signiert
+  // AUCH der Autobot mit diesem Namen (statt "Hairvenly"). So zeigt sich ein
+  // Personenname nur, wenn ihn eine MA absichtlich gewählt hat.
+  await svc.from("chat_sessions").update({ bot_signature_name: avatarName, signature_manual: true }).eq("id", sessionId);
 
   // Pending Drafts retro-rewriten — nur Signatur tauschen, Inhalt bleibt.
   if (oldName && oldName !== avatarName) {
@@ -489,6 +519,15 @@ export async function approveDraft(
   const original = draft.original_text.trim();
   const wasEdited = final !== original;
 
+  // ✍️ Re-Signatur: Die ABGESCHICKTE Antwort trägt den Namen der freigebenden,
+  // eingeloggten MA ("Ava von <Person>" nur bei Assistenz). Für das TRAINING
+  // dagegen neutralisieren wir auf "Hairvenly", damit der Bot keine persönlichen
+  // Namen lernt (Autobot signiert ja "Hairvenly").
+  const approverName = await getAgentSignatureName(svc, user.id);
+  const finalForSend = reSignToAgent(final, approverName);
+  const finalForTraining = reSignToAgent(final, "Hairvenly");
+  const originalForTraining = reSignToAgent(original, "Hairvenly");
+
   // Session-Daten für Channel + Avatar
   const { data: session } = await svc
     .from("chat_sessions")
@@ -503,7 +542,7 @@ export async function approveDraft(
   const { data: insertedMsg } = await svc.from("chat_messages").insert({
     session_id:   draft.session_id,
     role:         "assistant",
-    content:      final,
+    content:      finalForSend,
     tool_calls:   draft.tool_calls,
     tool_results: draft.tool_results,
     auto_sent:    false,
@@ -605,8 +644,8 @@ export async function approveDraft(
 
       const { data: insertedTraining, error: trainErr } = await svc.from("chatbot_training").insert({
         user_message:    trigger.content,
-        good_answer:     final,
-        bad_answer:      hasRefineFeedback ? (refineHistory[0] as { prev_text?: string })?.prev_text || (wasEdited ? original : null) : (wasEdited ? original : null),
+        good_answer:     finalForTraining,
+        bad_answer:      hasRefineFeedback ? (refineHistory[0] as { prev_text?: string })?.prev_text || (wasEdited ? originalForTraining : null) : (wasEdited ? originalForTraining : null),
         feedback:        feedbackParts.join("\n\n") || "Bot-Begleitung Approval",
         // avatar_name=null → ALLE Avatare lernen aus dieser Korrektur (Avatar-übergreifend).
         // Vorher: nur derjenige Avatar der die Session gerade hatte. Jetzt: universelles Lernen.
@@ -650,7 +689,7 @@ export async function approveDraft(
       import("@/lib/messaging/meta"),
       import("@/lib/chatbot/respond"),
     ]);
-    const parts = splitLongMessage(final);
+    const parts = splitLongMessage(finalForSend);
     let firstMid: string | undefined;
     for (let i = 0; i < parts.length; i++) {
       const r = await sendInstagramMessage(session.external_id, parts[i]);
@@ -663,7 +702,7 @@ export async function approveDraft(
     }
   } else if (session.channel === "whatsapp" && session.external_id) {
     const { sendWhatsAppMessage } = await import("@/lib/messaging/meta");
-    const r = await sendWhatsAppMessage(session.external_id, final);
+    const r = await sendWhatsAppMessage(session.external_id, finalForSend);
     if (!r.success) console.error("[approveDraft] WA send failed:", r.error);
     else if (r.message_id && insertedMsg?.id) {
       await svc.from("chat_messages").update({ external_id: r.message_id }).eq("id", insertedMsg.id);
@@ -813,7 +852,9 @@ export async function generateDraftOnDemand(
 
   try {
     const { respondAsBot } = await import("@/lib/chatbot/respond");
-    const result = await respondAsBot(sessionId, { assisted: true });
+    // Eingeloggte MA assistiert → Entwurf signiert mit ihrem Namen (nicht "Hairvenly").
+    const agentName = await getAgentSignatureName(svc, user.id);
+    const result = await respondAsBot(sessionId, { assisted: true, signatureOverride: agentName });
     if (!result.success || !result.text) {
       return { ok: false, reason: result.error || "Generierung fehlgeschlagen" };
     }

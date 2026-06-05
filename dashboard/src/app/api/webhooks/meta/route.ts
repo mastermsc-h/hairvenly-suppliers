@@ -578,15 +578,16 @@ async function routeIncoming(opts: {
         reply = `Hallöchen Liebes 💕\n\nDu hast es als Einmal-Ansicht geschickt — sobald jemand es einmal öffnet, ist es weg. Ich kann es leider nicht sehen 🥲 Und unsere Stylistin später auch nicht.\n\nMagst du es einfach als ganz normales Foto noch mal schicken? Dann kann unsere Farb-Expertin es sich in Ruhe anschauen und dir eine passende Empfehlung geben ✨\n\n${handoffTime} 💌`;
         logType = "Einmal-Foto";
       } else {
-        // Kürzere Audio/Video-Antwort (User-Anweisung 2026-05-28):
-        // - "Bin nur ein süßer kleiner Bot…"-Teil raus (zu viel)
-        // - "kann ich" → "können wir" (weniger Bot-Outing)
-        // - "sofort" raus
-        // - Kollegin-Zeile raus (greift sowieso nur wenn Rapport schon da ist)
-        // Voraussetzung dafür ist der Rapport-Check oben — diese Antwort
-        // kommt nur, wenn der Autobot in dieser Session schon mal aktiv war.
-        const mediaWord = noTextWithAudio ? "Audios" : "Videos";
-        reply = `Hallöchen 💕\n\n${mediaWord} können wir derzeit leider nicht abhören 🥲\n\nMagst du mir kurz aufschreiben worum's geht? Dann helfe ich dir weiter ✨`;
+        // Audio/Video-Autobot-Hinweis (User-Anweisung 2026-06-04):
+        // - "Bin nur ein süßer kleiner Bot…"-Teil raus
+        // - Kollegin-Zeile wieder rein ("später")
+        // - Autobot signiert "Ava von Hairvenly" (kein Fake-Personenname)
+        // Voraussetzung ist der Rapport-Check oben — diese Antwort kommt nur,
+        // wenn der Autobot in dieser Session schon mal aktiv war.
+        const mediaLine = noTextWithAudio
+          ? "Audios kann ich leider derzeit nicht abhören 🥲"
+          : "Videos kann ich leider derzeit nicht ansehen 🥲";
+        reply = `Hey Liebes 💕\n\n${mediaLine}\n\nMagst du mir kurz aufschreiben, worum's geht? Dann helfe ich dir sofort weiter ✨\n\nSonst meldet sich später eine Kollegin bei dir 💌\n\n/Ava von Hairvenly`;
         // handoffTime intentionally not used hier — Rapport ist bereits da
         void handoffTime;
         logType = noTextWithAudio ? "Audio" : "Video";
