@@ -149,11 +149,41 @@ export default function LieferscheinCheck({ suppliers, compact }: { suppliers: S
                     </div>
                     <div className="md:col-span-2">
                       <label className="block text-xs font-medium text-neutral-600 uppercase tracking-wide mb-1">Lieferschein-Datei (.xlsx)</label>
+                      <label
+                        htmlFor="lieferschein-file-input"
+                        className={`flex items-center gap-2 w-full rounded-lg border-2 border-dashed cursor-pointer transition px-3 py-3 ${
+                          file
+                            ? "border-emerald-400 bg-emerald-50 text-emerald-800"
+                            : "border-neutral-300 bg-neutral-50 hover:border-neutral-400 hover:bg-neutral-100 text-neutral-700"
+                        }`}
+                      >
+                        <Upload size={16} className="shrink-0" />
+                        <span className="text-sm flex-1 truncate">
+                          {file ? (
+                            <>
+                              <span className="font-medium">{file.name}</span>
+                              <span className="text-xs text-emerald-700/70 ml-2">({Math.round(file.size / 1024)} KB)</span>
+                            </>
+                          ) : (
+                            <>Datei auswählen <span className="text-neutral-400">(.xlsx)</span></>
+                          )}
+                        </span>
+                        {file && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.preventDefault(); setFile(null); }}
+                            className="text-xs text-emerald-700 hover:text-red-600 px-2 py-0.5 rounded hover:bg-white"
+                          >
+                            entfernen
+                          </button>
+                        )}
+                      </label>
                       <input
+                        id="lieferschein-file-input"
                         type="file"
                         accept=".xlsx,.xls"
                         onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                        className="w-full text-sm"
+                        className="sr-only"
                       />
                     </div>
                   </div>
