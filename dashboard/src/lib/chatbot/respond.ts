@@ -614,7 +614,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   // Booking-Provider-Konstanten (Treatwell) — werden in beiden Prompt-
   // Modi referenziert (Verbose + Lean + categoryHardRule).
   const bookingProvider = BUSINESS_CONFIG.booking_provider_name;
-  const bookingUrl      = BUSINESS_CONFIG.planity_url; // key bleibt zur Kompatibilität
+  const bookingUrl      = BUSINESS_CONFIG.booking_url;
 
   // PRODUKTKATALOG-MATRIX — verbindliche Methoden×Längen aus der DB
   // Das verhindert Halluzinationen wie "55cm Standard Russisch Tapes" (gibt's nicht!).
@@ -679,7 +679,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   systemPrompt += `  • Wenn die Kundin nach Termin-Verfügbarkeit fragt → IMMER auf den Buchungs-Link verweisen: 'Du kannst die freien Termine direkt selbst sehen und buchen unter ${bookingUrl} 💕'\n`;
   systemPrompt += `  • Wenn die Kundin schon ${bookingProvider} erwähnt hat → kurz bestätigen ('Genau, da siehst du alle freien Slots') + NICHT den Link nochmal posten.\n`;
   systemPrompt += `  • Bei Wunsch-Datum + Wunsch-Uhrzeit von der Kundin → NIE bestätigen oder ablehnen, sondern: 'Schau bitte direkt in ${bookingProvider} ob das passt — dort siehst du live ob frei.'\n`;
-  systemPrompt += `  • 🚫 Wir nutzen KEIN Planity mehr — wir sind seit Mai 2026 auf ${bookingProvider}. Erwähne NIEMALS Planity oder einen planity.com-Link.\n`;
+  systemPrompt += `  • Buchungs-System: ${bookingProvider} (eingebettet auf ${bookingUrl}). Erwähne KEINE anderen Buchungs-Plattformen — auch nicht falls in alten Chat-Kontexten irgendwas anderes stand.\n`;
   } // ── END VERBOSE-RULES-BLOCK (closes the leanPrompt-else) ──────────
 
   // GESCHÄFTSZEIT-KONTEXT — DYNAMISCH! Pro Anfrage anders (open/closing_soon/closed).
@@ -1346,10 +1346,10 @@ VERBOTEN (führt zu falschen Versprechen!):
    dann darfst du den Namen reflektieren, aber NICHT bestätigen dass sie an
    einem konkreten Datum verfügbar ist.
 
-❌ NIEMALS Planity erwähnen oder einen planity.com-Link posten — wir nutzen
-   das seit Mai 2026 NICHT mehr. Falls die Kundin selbst Planity erwähnt,
-   freundlich korrigieren: "Wir haben den Buchungs-Anbieter gewechselt, neue
-   Termine bitte über ${bookingProvider}: ${bookingUrl} 💕"
+❌ Termin-Buchung läuft AUSSCHLIESSLICH über ${bookingProvider} auf ${bookingUrl}.
+   Keine anderen Buchungs-Plattformen erwähnen. Falls die Kundin einen anderen
+   Anbieter (z.B. Planity, Treatwell.com direkt, Booksy) nennt: freundlich
+   leiten: "Termine machst du bei uns am besten direkt hier: ${bookingUrl} 💕"
 
 WENN die Kundin schon ${bookingProvider} erwähnt hat ("hab schon gesehen über ${bookingProvider.toLowerCase()}"):
 → Nur kurze Bestätigung, KEIN Link nochmal posten. Z.B.: "Super, dann bist du goldrichtig 💕 Wir freuen uns auf dich!"

@@ -313,7 +313,7 @@ flowchart LR
 |---|---|---|
 | `color_advice` | Bypass `isHighConfidence` → Draft | `webhooks/meta/route.ts` |
 | `gewerbe` | Bypass + Force assisted + UI-Warning | `webhooks/meta/route.ts` + `respond.ts` |
-| `appointment` | Hard-Rule Planity-only | System-Prompt |
+| `appointment` | Hard-Rule Treatwell-only (eingebettet auf hairvenly.de/pages/termin-vereinbaren) | System-Prompt |
 
 ---
 

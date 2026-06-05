@@ -1,4 +1,4 @@
--- Salon-Service-Preise (Hairvenly Bremen) — gepflegt von Planity-Seite
+-- Salon-Service-Preise (Hairvenly Bremen) — Quelle: Treatwell-Widget auf hairvenly.de
 -- Damit Chatbot Preise + Dauer für Einarbeitung, Coloration etc. nennen kann.
 create table if not exists salon_services (
   id          uuid primary key default gen_random_uuid(),

@@ -330,11 +330,11 @@ export function renderContactResponse(intent: ContactIntent): string {
       ].join("\n");
 
     case "appointment":
-      // Termin-Anfrage → Buchungs-Link (Treatwell, vorher Planity)
+      // Termin-Anfrage → Buchungs-Link (Treatwell-Widget auf hairvenly.de)
       return [
         "Klar 💕 — Termine kannst du direkt online buchen, dort siehst du live alle freien Slots:",
         "",
-        c.planity_url,
+        c.booking_url,
         "",
         `Falls etwas Bestimmtes wichtig ist (z.B. Farbberatung mit Foto-Vorab-Check), sag gerne kurz Bescheid.`,
       ].join("\n");

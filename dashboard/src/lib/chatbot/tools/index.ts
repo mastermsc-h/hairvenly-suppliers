@@ -1385,7 +1385,7 @@ const getSalonServicePrice: ToolDef = {
       "Nutze es wenn Kundin nach Service-Preisen fragt ('was kostet einarbeiten?', " +
       "'wie viel kostet eine Verlängerung?', 'was kostet Bondings 100g?'). " +
       "Optional Filter nach Service-Begriff (z.B. 'bonding', 'tape', 'balayage'). " +
-      `Bot soll am Ende immer auch auf ${BUSINESS_CONFIG.booking_provider_name} verweisen: ${BUSINESS_CONFIG.planity_url}`,
+      `Bot soll am Ende immer auch auf ${BUSINESS_CONFIG.booking_provider_name} verweisen: ${BUSINESS_CONFIG.booking_url}`,
     input_schema: {
       type: "object",
       properties: {
@@ -1449,7 +1449,7 @@ const getSalonServicePrice: ToolDef = {
       return {
         output: JSON.stringify({
           status: "not_found",
-          message: `Kein passender Service gefunden. Verweise die Kundin auf ${BUSINESS_CONFIG.booking_provider_name} für die volle Preisliste: ${BUSINESS_CONFIG.planity_url}`,
+          message: `Kein passender Service gefunden. Verweise die Kundin auf ${BUSINESS_CONFIG.booking_provider_name} für die volle Preisliste: ${BUSINESS_CONFIG.booking_url}`,
         }),
       };
     }
@@ -1478,10 +1478,10 @@ const getSalonServicePrice: ToolDef = {
           "'schonender/besser' ist (z.B. 'Tressen sind schonender als Tapes'). NUR wenn die Kundin " +
           "EXPLIZIT fragt ('was ist besser/schonender?'). Sonst sachlich bei der gestellten Frage bleiben. " +
           `Füge IMMER am Ende den ${BUSINESS_CONFIG.booking_provider_name}-Link hinzu für 'alle Preise + Termin buchen': ` +
-          `${BUSINESS_CONFIG.planity_url} — formuliere natürlich, nicht wie Liste.`,
+          `${BUSINESS_CONFIG.booking_url} — formuliere natürlich, nicht wie Liste.`,
         services,
         // Key bleibt "booking_link" — Tool-Output ist nicht prompt-cached
-        booking_link: BUSINESS_CONFIG.planity_url,
+        booking_link: BUSINESS_CONFIG.booking_url,
         booking_provider: BUSINESS_CONFIG.booking_provider_name,
       }),
     };

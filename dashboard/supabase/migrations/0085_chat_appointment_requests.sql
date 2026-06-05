@@ -10,7 +10,7 @@
 --     Felder (Linie, Länge, Methode, Farbe)
 --   - Status-Lifecycle ist anders: Reservierung = waiting/notified/cancelled,
 --     Termin = pending/confirmed/rescheduled/cancelled/completed
---   - Sauberer für künftige Planity-Kalender-Integration
+--   - Sauberer für künftige Treatwell-Kalender-Integration (sobald API verfügbar)
 
 CREATE TABLE IF NOT EXISTS chat_appointment_requests (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -92,7 +92,7 @@ const renderTests = [
   { intent: "email_correction" as const,    mustContain: [BUSINESS_CONFIG.email] },
   { intent: "opening_hours" as const,       mustContain: [BUSINESS_CONFIG.opening_hours_text] },
   { intent: "hours_correction" as const,    mustContain: [BUSINESS_CONFIG.opening_hours_text] },
-  { intent: "appointment" as const,         mustContain: [BUSINESS_CONFIG.planity_url] },
+  { intent: "appointment" as const,         mustContain: [BUSINESS_CONFIG.booking_url] },
 ];
 let renderPass = 0, renderFail = 0;
 for (const rt of renderTests) {

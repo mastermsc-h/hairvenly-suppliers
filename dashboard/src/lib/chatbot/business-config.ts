@@ -13,12 +13,10 @@ export const BUSINESS_CONFIG = {
   brand_name: "Hairvenly",
   website: "hairvenly.de",
   website_url: "https://hairvenly.de",
-  // Termin-Buchungs-System: Treatwell (seit 28.05.2026, vorher Planity).
-  // Key bleibt vorerst `planity_url` für Code-Kompatibilität — die ganze
-  // Pipeline (intent-contact, sanitizers, system-prompt) liest aus diesem
-  // einen Wert. Migration des Key-Namens auf `booking_url` separat falls
-  // gewünscht.
-  planity_url: "https://buchung.treatwell.de/ort/hairvenly-extensions-hair-studio/",
+  // Termin-Buchung: eingebettete Treatwell-Widget-Seite auf hairvenly.de.
+  // Branded Landing-Page mit Adresse + Öffnungszeiten + Treatwell-Widget,
+  // statt direkt zu buchung.treatwell.de. Bot verlinkt IMMER auf diese URL.
+  booking_url: "https://hairvenly.de/pages/termin-vereinbaren",
   booking_provider_name: "Treatwell",
 
   // Physische Adresse

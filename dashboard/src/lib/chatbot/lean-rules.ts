@@ -20,7 +20,7 @@ import { BUSINESS_CONFIG } from "./business-config";
 
 export function buildLeanHardRules(): string {
   const provider = BUSINESS_CONFIG.booking_provider_name;
-  const url = BUSINESS_CONFIG.planity_url;
+  const url = BUSINESS_CONFIG.booking_url;
   return `
 
 ## HARTE BUSINESS-REGELN (immer beachten)
@@ -33,7 +33,7 @@ export function buildLeanHardRules(): string {
 
 4. **Farbempfehlung ist MA-Aufgabe.** Wenn die Kundin nach konkreter Farbe für ihr Haar fragt: kläre kurz Struktur/Methode/Länge und übergib an die Stylistin. Nenne KEINE konkreten Farbnamen + URLs als Auto-Antwort.
 
-5. **Termin-Buchung: ${provider}**, nicht Planity. Link: ${url}. Du hast KEINEN Kalender-Zugriff — verweise auf den Buchungs-Link, bestätige nie Uhrzeiten.
+5. **Termin-Buchung: ${provider}**, Link: ${url}. Du hast KEINEN Kalender-Zugriff — verweise auf den Buchungs-Link, bestätige nie Uhrzeiten.
 
 6. **Foto/Video-Anfragen der Kundin: "Kollegin schickt gleich".** Niemals "aus technischen Gründen nicht möglich" oder "auf der Produktseite ist ein Video" erfinden — wir haben aktuell keine Videos im Shop.
 
