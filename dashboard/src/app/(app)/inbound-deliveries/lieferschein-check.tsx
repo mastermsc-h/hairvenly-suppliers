@@ -24,21 +24,21 @@ export default function LieferscheinCheck({ suppliers, compact }: { suppliers: S
   const [arrivedAt, setArrivedAt] = useState("");
   const [notes, setNotes] = useState("");
   const [mode, setMode] = useState<"full" | "shipment_only">("full");
+  const [acceptExcess, setAcceptExcess] = useState(false);
 
-  // Smart default: wenn Analyse zeigt 1 Bestellung + kein Überschuss → Modus
-  // automatisch auf "shipment_only" (User-Wunsch: bei 1 Bestellung reicht
-  // eine Teillieferung, kein Wareneingang-Overhead).
+  // Smart default: wenn Analyse zeigt 1 Bestellung → Modus automatisch
+  // auf "shipment_only" (User-Wunsch). Überschuss erlaubt, aber muss
+  // dann manuell bestätigt werden.
   useEffect(() => {
     if (!rows) return;
     const orderIds = new Set<string>();
-    let hasExcess = false;
     for (const r of rows) {
       if (r.status !== "matched") continue;
-      if ((r.excess_grams ?? 0) > 0) hasExcess = true;
       for (const a of r.allocations ?? []) orderIds.add(a.order_id);
     }
-    if (orderIds.size === 1 && !hasExcess) setMode("shipment_only");
+    if (orderIds.size === 1) setMode("shipment_only");
     else setMode("full");
+    setAcceptExcess(false);
   }, [rows]);
 
   function close() {
@@ -49,6 +49,13 @@ export default function LieferscheinCheck({ suppliers, compact }: { suppliers: S
   }
 
   const [clientError, setClientError] = useState<string | null>(null);
+
+  // Wenn shipment_only-Modus + es gibt Überschuss → User muss explizit zustimmen
+  const needsExcessConfirm = (() => {
+    if (!rows) return false;
+    const hasExcess = rows.some((r) => r.status === "matched" && (r.excess_grams ?? 0) > 0);
+    return hasExcess && !acceptExcess;
+  })();
 
   function runAnalysis() {
     setClientError(null);
@@ -243,8 +250,16 @@ export default function LieferscheinCheck({ suppliers, compact }: { suppliers: S
                       }
                     }
                     const singleOrder = byOrder.size === 1;
-                    const canShipmentOnly = singleOrder && !hasExcess;
+                    const canShipmentOnly = singleOrder;
                     const orderList = [...byOrder.entries()];
+                    // List of excess positions for the confirmation block
+                    const excessList = (rows ?? [])
+                      .filter((r) => r.status === "matched" && (r.excess_grams ?? 0) > 0)
+                      .map((r) => ({
+                        name: `${r.method_name} ${r.length_value} #${r.color_name}`,
+                        excess: r.excess_grams ?? 0,
+                      }));
+                    const totalExcess = excessList.reduce((s, e) => s + e.excess, 0);
 
                     return (
                       <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-3 text-sm space-y-2">
@@ -271,10 +286,33 @@ export default function LieferscheinCheck({ suppliers, compact }: { suppliers: S
                             <div className="text-xs text-neutral-500 mt-0.5">
                               {canShipmentOnly
                                 ? `${orderList[0]?.[1].positions} Positionen · ${orderList[0]?.[1].grams} g — kein separater Wareneingang`
-                                : !singleOrder
-                                  ? `Nicht möglich (${byOrder.size} Bestellungen betroffen)`
-                                  : "Nicht möglich (Überschuss vorhanden — geht in lose Ware → braucht Wareneingang)"}
+                                : `Nicht möglich (${byOrder.size} Bestellungen betroffen)`}
                             </div>
+                            {/* Confirmation für Überschuss bei shipment_only */}
+                            {canShipmentOnly && mode === "shipment_only" && hasExcess && (
+                              <div className="mt-2 p-2 rounded bg-orange-50 border border-orange-200 text-xs">
+                                <div className="font-medium text-orange-900 mb-1 flex items-start gap-1">
+                                  <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                                  <span>Differenz zum Bestellten: <strong>+{totalExcess} g</strong> bei {excessList.length} {excessList.length === 1 ? "Position" : "Positionen"}</span>
+                                </div>
+                                <ul className="text-orange-800 ml-4 space-y-0.5 mb-2">
+                                  {excessList.map((e, i) => (
+                                    <li key={i}>{e.name}: +{e.excess} g</li>
+                                  ))}
+                                </ul>
+                                <label className="flex items-start gap-2 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={acceptExcess}
+                                    onChange={(e) => setAcceptExcess(e.target.checked)}
+                                    className="mt-0.5"
+                                  />
+                                  <span className="text-orange-900">
+                                    Bestätigen: die Differenz wird <strong>nicht als Bestand erfasst</strong>, aber als Hinweis in der Teillieferungs-Notiz festgehalten.
+                                  </span>
+                                </label>
+                              </div>
+                            )}
                           </div>
                         </label>
 
@@ -318,8 +356,9 @@ export default function LieferscheinCheck({ suppliers, compact }: { suppliers: S
                       <button
                         type="button"
                         onClick={commit}
-                        disabled={pending || analysis.matched === 0}
+                        disabled={pending || analysis.matched === 0 || (mode === "shipment_only" && needsExcessConfirm)}
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
+                        title={mode === "shipment_only" && needsExcessConfirm ? "Bitte Überschuss-Hinweis bestätigen" : undefined}
                       >
                         {pending && <Loader2 size={14} className="animate-spin" />}
                         {mode === "shipment_only" ? "Teillieferung anlegen" : "Wareneingang anlegen"} ({analysis.matched} Positionen)

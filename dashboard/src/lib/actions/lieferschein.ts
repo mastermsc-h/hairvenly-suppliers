@@ -362,6 +362,28 @@ export async function commitLieferschein(payload: {
         return { ok: false, error: "Modus 'Nur Teillieferung' erfordert genau 1 betroffene Bestellung" };
       }
       const [[orderId, info]] = [...byOrder.entries()];
+
+      // Überschuss aus dem Lieferschein als sichtbarer Hinweis in den Notes
+      // festhalten — damit der User später die Differenz zwischen Bestellung
+      // und tatsächlicher Lieferung sieht, auch wenn kein Wareneingang
+      // angelegt wurde.
+      const excessRows = payload.rows.filter(
+        (r) => r.status === "matched" && (r.excess_grams ?? 0) > 0,
+      );
+      let notesField = payload.notes;
+      if (excessRows.length > 0) {
+        const totalExcess = excessRows.reduce((s, r) => s + (r.excess_grams ?? 0), 0);
+        const lines = excessRows.map(
+          (r) => `  • ${r.method_name} ${r.length_value} #${r.color_name}: bestellt vs. geliefert → +${r.excess_grams} g`,
+        );
+        const excessBlock = [
+          `⚠ Mehrlieferung gegenüber Bestellpositionen: +${totalExcess} g insgesamt`,
+          ...lines,
+          "(Differenz nicht als Bestand erfasst — beim nächsten Wareneingang berücksichtigen oder manuell aufnehmen)",
+        ].join("\n");
+        notesField = notesField ? `${notesField}\n\n${excessBlock}` : excessBlock;
+      }
+
       const { data: shipment, error: shErr } = await supabase
         .from("order_shipments")
         .insert({
@@ -372,7 +394,7 @@ export async function commitLieferschein(payload: {
           eta: payload.eta,
           shipped_at: payload.shipped_at,
           arrived_at: payload.arrived_at,
-          notes: payload.notes,
+          notes: notesField,
           inbound_delivery_id: null,
         })
         .select("id")
