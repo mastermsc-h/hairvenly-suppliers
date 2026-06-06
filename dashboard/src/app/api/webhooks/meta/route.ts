@@ -706,20 +706,22 @@ async function routeIncoming(opts: {
     console.log(`[meta-webhook] kill-switch BYPASSED — autoOverrideType=${autoOverrideType} ist kontrollierte Vorbereitungs-Antwort`);
   }
 
-  // 🚫 KATEGORIE-HARTAUSNAHMEN (User-Anweisungen 02.06): Diese Kategorien
-  // dürfen AKTUELL NIEMALS automatisch beantwortet werden — auch nicht im
-  // auto-Modus, auch nicht via autoOverrideType.
-  //   • color_advice — Farbberatung ist Stylistinnen-Aufgabe (subjektiv,
-  //     Foto-Interpretation).
-  //   • models — Model-Anfragen sind individuell (Casting/Konditionen) und
-  //     müssen manuell von der MA bearbeitet werden.
-  // Der explizite "Antwort generieren"-Klick der MA läuft über einen anderen
-  // Pfad (generateDraftOnDemand in chat-inbox.ts), ist also NICHT betroffen —
-  // die MA kann weiterhin bewusst einen Entwurf anfordern.
-  // Wieder freischalten: Kategorie aus NO_AUTOBOT_CATEGORIES entfernen.
+  // 🚫 KATEGORIE-HARTAUSNAHMEN: color_advice & models werden NICHT proaktiv
+  // automatisch beantwortet — ABER nur in den vorsichtigen Modi (selective_auto
+  // / Default). Sie sind sensibel (Farbberatung = subjektiv/Foto; Modelle =
+  // individuelle Konditionen) und sollen im Default Stylistinnen-Sache bleiben.
+  //
+  // 🔑 AUSNAHME (User-Anweisung 06.06): "Wenn ICH auf Auto-Antwort stelle, ist
+  // das das höchste Gebot — ich hab es ja manuell so eingestellt." Hat die MA
+  // den Chat BEWUSST auf bot_mode='auto' (Auto-Antwort) gesetzt, antwortet der
+  // Bot auf ALLES, auch Farbberatung/Modelle. Die Hartausnahme greift also NUR,
+  // wenn der Chat NICHT manuell auf volle Auto-Antwort steht.
+  //
+  // Der explizite "Antwort generieren"-Klick (generateDraftOnDemand) ist
+  // ohnehin nie betroffen.
   const NO_AUTOBOT_CATEGORIES = new Set(["color_advice", "models"]);
-  if (sessionCategory && NO_AUTOBOT_CATEGORIES.has(sessionCategory)) {
-    console.log(`[meta-webhook] NO-AUTOBOT-CATEGORY (${sessionCategory}) — kein Autobot, session=${session.id.slice(0,8)}`);
+  if (botMode !== "auto" && sessionCategory && NO_AUTOBOT_CATEGORIES.has(sessionCategory)) {
+    console.log(`[meta-webhook] NO-AUTOBOT-CATEGORY (${sessionCategory}, mode=${botMode}) — kein Autobot, session=${session.id.slice(0,8)}`);
     return;
   }
 
