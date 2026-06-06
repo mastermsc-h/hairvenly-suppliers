@@ -86,8 +86,9 @@ WICHTIGE REGELN:
 - Bei "habt ihr X" / "auf Lager" / "noch da" OHNE Farb-Empfehlungsbitte → availability
 - Bei "kann ich vorbeikommen" / "im Laden" / "Showroom" → appointment
 - Bei "we have hair to sell" / "eleman ariyor" / Friseur-Outreach → partnership
-- Bei konkretem Beratungswunsch zur Verlängerung → color_advice
+- 🧩 METHODEN-/EIGNUNGS-Fragen sind KEINE color_advice → general: "welche Extensions/Methode passt bei feinem/dünnem/kaputtem/lockigem Haar?", "was ist am schonendsten/besten?", "Tressen oder Tapes oder Bondings?", "welche Methode hält am besten?". Das ist Methoden-/Eignungsberatung (KEINE Farb-Beratung) und soll vom Bot beantwortet werden. color_advice ist NUR für FARBE/Farbton/Farb-Match — NICHT für die Methoden-/Technik-Wahl.
 - Bei "ich würde gerne Modell sein" / "sucht ihr Modelle" / Casting-Anfrage → models
+- ⏱️ Richte dich nach dem AKTUELLEN Anliegen der NEUESTEN Kundennachricht — nicht nach älteren Themen weiter oben im Verlauf. Wenn die letzte Nachricht eine Methoden-Frage ist, ist die Kategorie general (auch wenn vorher über Farbe gesprochen wurde).
 
 Antworte AUSSCHLIESSLICH mit dem Kategorie-Key in Kleinbuchstaben (z.B. "availability") — kein Erklärtext, keine Anführungszeichen, kein Punkt.`;
   try {

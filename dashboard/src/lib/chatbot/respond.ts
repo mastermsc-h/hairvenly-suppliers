@@ -276,6 +276,7 @@ async function loadProductCatalog(): Promise<{
   txt += "3. **Mini Tapes** — im Prinzip wie normale Tapes, aber mehr Gewicht pro Strähne und dadurch etwas schwerer.\n";
   txt += "4. **Bondings** — eher weniger geeignet bei feinem oder strapaziertem Haar.\n";
   txt += "❗ Clip-Ins & Ponytails gehören NICHT in diese Reihenfolge — das ist 'Do it yourself' (nicht dauerhaft eingearbeitet).\n";
+  txt += "👉 ANTWORT-MUSTER bei 'was ist am schonendsten/besten?' (auch bei feinem/dünnem Haar): KURZ bleiben (2–3 Sätze). Nenne die **Genius Tressen** als schonendste Methode UND empfiehl im SELBEN Atemzug kurz die **Standard Tapes** als ebenfalls sehr schonende, beliebte Alternative. Nicht ausschweifen, keine lange Liste.\n";
 
   // validCombos: methodNameLower|length
   const valid = new Set<string>();
