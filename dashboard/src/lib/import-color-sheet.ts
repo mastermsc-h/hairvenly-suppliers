@@ -58,6 +58,7 @@ export async function importColorSheet(): Promise<ColorImportResult> {
 
   const col = (re: RegExp) => hdr.findIndex(h => re.test(h || ""));
   const iName = 0;
+  const iKurz = col(/Kurzbeschreibung/i);   // → description (kurzer Farbton-Text)
   const iWella = col(/Helligkeit/i);
   const iUnder = col(/Unterton/i);
   const iType = col(/Farbe Typ/i);
@@ -74,7 +75,7 @@ export async function importColorSheet(): Promise<ColorImportResult> {
     const rawName = (x[iName] || "").toUpperCase().trim().replace(/\s+/g, " ");
     const dbName = NAME_ALIAS[rawName] || rawName;
     const wella = (x[iWella] || "").trim();
-    const fields = {
+    const fields: Record<string, unknown> = {
       wella_level: wella || null,
       brightness_level: parseBrightness(wella),
       undertone: (x[iUnder] || "").trim() || null,
@@ -84,6 +85,10 @@ export async function importColorSheet(): Promise<ColorImportResult> {
       ki_description: (x[iKi] || "").trim() || null,
       ki_abgrenzung: (x[iAbg] || "").trim() || null,
     };
+    // Kurzbeschreibung → description. NUR setzen wenn im Sheet vorhanden, damit
+    // ein Import mit leerer Zelle eine vorhandene Beschreibung NICHT löscht.
+    const kurz = iKurz >= 0 ? (x[iKurz] || "").trim() : "";
+    if (kurz) fields.description = kurz;
 
     // Match auf russische Linie (Sheet ist die russische Farbpalette).
     const { data: matches, error } = await svc
