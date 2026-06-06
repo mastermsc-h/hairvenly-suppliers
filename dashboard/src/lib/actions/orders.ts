@@ -150,9 +150,10 @@ export async function updateOrder(orderId: string, formData: FormData) {
   }
 
   // AUTO-PROPAGATION: Wenn ETA geändert wurde, automatisch auf alle Positionen
-  // ohne Teillieferung übernehmen — User-Anweisung 06.06: 'wenn ich die eta
-  // aus der bestellung anpasse, dann soll automatisch das auf alle
-  // verbliebenen positionen übernommen werden'.
+  // ohne Teillieferung übernehmen UND ins Google Sheet schreiben.
+  // User-Anweisung 06.06: 'wenn ich die eta aus der bestellung anpasse, dann
+  // soll automatisch das auf alle verbliebenen positionen übernommen werden'
+  // + 'sheet soll auch automatisch geupdatet werden'.
   // Items mit shipment_id bleiben unberührt (ihre ETA kommt aus der Teillieferung).
   if (Object.prototype.hasOwnProperty.call(update, "eta") && update.eta !== prevOrder?.eta) {
     const newEta = update.eta as string | null;
@@ -162,8 +163,9 @@ export async function updateOrder(orderId: string, formData: FormData) {
         .update({ eta: newEta })
         .eq("order_id", orderId)
         .is("shipment_id", null)
-        .select("id");
-      const n = propagated?.length ?? 0;
+        .select("id, method_name, length_value, color_name");
+      const items = propagated ?? [];
+      const n = items.length;
       if (n > 0) {
         await logEvent(
           supabase,
@@ -172,6 +174,36 @@ export async function updateOrder(orderId: string, formData: FormData) {
           "eta_propagated",
           `ETA-Änderung auf ${n} Position(en) ohne Teillieferung automatisch übernommen (${newEta})`,
         );
+
+        // Sheet-Schreibung: laden sheet_url, schreiben pro Item-Zeile.
+        // Sheet-Fehler werden NICHT als orders.update-Fehler zurückgegeben —
+        // DB-Update soll auch bei Sheet-Problem persistiert bleiben.
+        const { data: orderForSheet } = await supabase
+          .from("orders")
+          .select("sheet_url")
+          .eq("id", orderId)
+          .single();
+        if (orderForSheet?.sheet_url) {
+          try {
+            const { writeOrderSheetEtas } = await import("@/lib/google-sheets");
+            const etas = new Map<string, string>();
+            for (const it of items) {
+              const key = `${(it.method_name || "").toLowerCase()}|${(it.length_value || "").toLowerCase()}|${(it.color_name || "").replace(/^#/, "").toLowerCase()}`;
+              etas.set(key, newEta);
+            }
+            const res = await writeOrderSheetEtas(orderForSheet.sheet_url, etas);
+            if (res.error) {
+              console.warn(`[updateOrder] Sheet-Write fehlgeschlagen für ${orderId}: ${res.error}`);
+              await logEvent(supabase, orderId, profile.id, "sheet_sync_error",
+                `Sheet-ETA-Schreibung fehlgeschlagen: ${res.error}`);
+            } else {
+              await logEvent(supabase, orderId, profile.id, "sheet_sync",
+                `ETA im Sheet aktualisiert: ${res.updated} Position(en)${res.created_eta_column ? " (ETA-Spalte neu angelegt)" : ""}`);
+            }
+          } catch (e) {
+            console.warn(`[updateOrder] Sheet-Write exception:`, e);
+          }
+        }
       }
     }
   }
