@@ -1255,6 +1255,16 @@ const getAvailableColors: ToolDef = {
               `Wenn du eine spezifische Farbe wie RAW empfehlen willst, ruf get_stock_eta für genau diese ` +
               `Methode auf um die echte Verfügbarkeit zu prüfen. ` : "") +
           `${colors.length} ECHTE Farben gefunden — NUR diese darfst du dem Kunden nennen. ` +
+          "🟢 PFLICHT-VERFÜGBARKEITS-CHECK (User-Regel 06.06): Bevor du eine konkrete Farbe empfiehlst, " +
+          "rufe IMMER get_stock_eta für genau diese Farbe + Methode + Länge auf und richte die Aussage " +
+          "EXAKT nach dem Ergebnis: " +
+          "(1) auf Lager → kurz 'sofort da'. " +
+          "(2) nicht auf Lager, aber ETA bekannt → KEINE 'sofort'-Aussage, sondern kurz 'kommt ca. am <ETA>'. " +
+          "(3) weder Lager noch ETA → ehrlich sagen 'die haben wir aktuell leider nicht auf Lager 🥲' UND " +
+          "im selben Atemzug eine ÄHNLICHE Farbe aus dem Feld similar_in_same_line als Alternative anbieten " +
+          "('magst du dir stattdessen <Alternative> anschauen? Die ist farblich ganz nah dran 💕'). " +
+          "NIEMALS 'sofort verfügbar/da/auf Lager' behaupten ohne get_stock_eta-Beleg — sonst wird die Antwort " +
+          "blockiert und nicht automatisch gesendet. " +
           "🚨 MAX 2 EMPFEHLUNGEN: Nenne NIEMALS mehr als 2 Farben pro Antwort (User-Regel 02.06: " +
           "3 sind zu viel Text). Wähle die 2 BESTEN passenden aus, kurz gehalten — lieber 2 starke " +
           "Treffer als eine lange Liste. " +
