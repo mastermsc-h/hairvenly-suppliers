@@ -215,11 +215,32 @@ export async function updateColor(id: string, formData: FormData) {
   const description = (formData.get("description") as string)?.trim() || null;
   const equivalent_in_other_line = (formData.get("equivalent_in_other_line") as string)?.trim() || null;
   const bot_active_raw = formData.get("bot_active");
-  const updates: Record<string, unknown> = { name_hairvenly, name_supplier, name_shopify };
+  // Vollständig partielles Update: jedes Feld nur setzen, wenn es im FormData
+  // vorhanden ist. So kann ein reiner Detail-Speichern (nur KI-/ähnliche-Farben-
+  // Felder) die Namen/URL NICHT versehentlich überschreiben — und umgekehrt.
+  const updates: Record<string, unknown> = {};
+  if (formData.has("name_hairvenly")) updates.name_hairvenly = name_hairvenly;
+  if (formData.has("name_supplier")) updates.name_supplier = name_supplier;
+  if (formData.has("name_shopify")) updates.name_shopify = name_shopify;
   if (formData.has("shopify_url")) updates.shopify_url = shopify_url;
   if (formData.has("description")) updates.description = description;
   if (formData.has("equivalent_in_other_line")) updates.equivalent_in_other_line = equivalent_in_other_line;
   if (bot_active_raw !== null) updates.bot_active = bot_active_raw === "true" || bot_active_raw === "on";
+
+  // Kuratierungs-/KI-Spalten (Hybrid: Dashboard = Master). Jeweils nur updaten
+  // wenn das Feld im FormData enthalten ist → der schlanke Zeilen-Speichern
+  // (ohne diese Keys) überschreibt sie NICHT.
+  const textFields = [
+    "similar_in_same_line", "wella_level", "brightness_level", "undertone",
+    "color_type", "base_tone", "highlights", "ki_description", "ki_abgrenzung",
+  ];
+  for (const f of textFields) {
+    if (formData.has(f)) updates[f] = ((formData.get(f) as string) ?? "").trim() || null;
+  }
+  if (formData.has("similar_reviewed")) {
+    const v = formData.get("similar_reviewed");
+    updates.similar_reviewed = v === "true" || v === "on";
+  }
 
   const { error } = await supabase
     .from("product_colors")

@@ -265,6 +265,41 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
   const [equiv, setEquiv] = useState(color.equivalent_in_other_line ?? "");
   const [botActive, setBotActive] = useState(color.bot_active ?? true);
 
+  // ── Detail-/Kuratierungs-Felder (Hybrid: Dashboard = Master) ──
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsSaved, setDetailsSaved] = useState(false);
+  const [simSame, setSimSame] = useState(color.similar_in_same_line ?? "");
+  const [equivD, setEquivD] = useState(color.equivalent_in_other_line ?? "");
+  const [wella, setWella] = useState(color.wella_level ?? "");
+  const [brightness, setBrightness] = useState(color.brightness_level ?? "");
+  const [undertone, setUndertone] = useState(color.undertone ?? "");
+  const [colorType, setColorType] = useState(color.color_type ?? "");
+  const [baseTone, setBaseTone] = useState(color.base_tone ?? "");
+  const [highlights, setHighlights] = useState(color.highlights ?? "");
+  const [kiDesc, setKiDesc] = useState(color.ki_description ?? "");
+  const [kiAbgr, setKiAbgr] = useState(color.ki_abgrenzung ?? "");
+  const [simReviewed, setSimReviewed] = useState(color.similar_reviewed ?? false);
+
+  const handleSaveDetails = () => {
+    const fd = new FormData();
+    fd.set("similar_in_same_line", simSame);
+    fd.set("equivalent_in_other_line", equivD);
+    fd.set("wella_level", wella);
+    fd.set("brightness_level", brightness);
+    fd.set("undertone", undertone);
+    fd.set("color_type", colorType);
+    fd.set("base_tone", baseTone);
+    fd.set("highlights", highlights);
+    fd.set("ki_description", kiDesc);
+    fd.set("ki_abgrenzung", kiAbgr);
+    fd.set("similar_reviewed", simReviewed ? "true" : "false");
+    startTransition(async () => {
+      await updateColor(color.id, fd);
+      setDetailsSaved(true);
+      setTimeout(() => setDetailsSaved(false), 1800);
+    });
+  };
+
   const buildFd = (newBotActive?: boolean) => {
     const fd = new FormData();
     fd.set("name_hairvenly", nameH);
@@ -339,7 +374,9 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
     );
   }
 
+  const fieldCls = "w-full rounded border border-neutral-300 px-2 py-1 text-xs";
   return (
+    <>
     <tr className="group hover:bg-neutral-50/50">
       <td className="py-1.5 text-neutral-900 font-medium">#{color.name_hairvenly}</td>
       <td className="py-1.5 text-neutral-500">{color.name_supplier || "—"}</td>
@@ -368,12 +405,74 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
         </button>
       </td>
       <td className="py-1.5">
-        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
-          <button onClick={() => setEditing(true)} className="text-neutral-400 hover:text-neutral-700"><Pencil size={12} /></button>
-          <button onClick={handleDelete} disabled={pending} className="text-neutral-400 hover:text-red-500"><Trash2 size={12} /></button>
+        <div className="flex gap-1.5 items-center">
+          <button
+            onClick={() => setDetailsOpen((o) => !o)}
+            title="Details: Helligkeit/Wella, Unterton, ähnliche Farben, KI-Texte"
+            className="text-neutral-400 hover:text-neutral-800"
+          >
+            {detailsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </button>
+          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
+            <button onClick={() => setEditing(true)} className="text-neutral-400 hover:text-neutral-700"><Pencil size={12} /></button>
+            <button onClick={handleDelete} disabled={pending} className="text-neutral-400 hover:text-red-500"><Trash2 size={12} /></button>
+          </div>
         </div>
       </td>
     </tr>
+    {detailsOpen && (
+      <tr className="bg-neutral-50/70">
+        <td colSpan={8} className="px-3 py-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+            <label className="text-[11px] text-neutral-600 md:col-span-2">
+              <span className="font-medium">🔁 Ähnliche Farben — GLEICHE Linie</span> (Ausverkauf-Alternativen, kommagetrennt)
+              <input value={simSame} onChange={(e) => setSimSame(e.target.value)} placeholder="z.B. RAW, ESPRESSO BROWN" className={fieldCls} />
+            </label>
+            <label className="text-[11px] text-neutral-600 md:col-span-2">
+              <span className="font-medium">↔️ Ähnliche Farben — ANDERE Linie</span> (Entsprechung, kommagetrennt)
+              <input value={equivD} onChange={(e) => setEquivD(e.target.value)} placeholder="z.B. LATTE BROWN, AUTUMN" className={fieldCls} />
+            </label>
+            <label className="text-[11px] text-neutral-600">Helligkeit / Wella-Level
+              <input value={wella} onChange={(e) => setWella(e.target.value)} placeholder="z.B. 5/37" className={fieldCls} />
+            </label>
+            <label className="text-[11px] text-neutral-600">Helligkeit (Zahl)
+              <input value={brightness} onChange={(e) => setBrightness(e.target.value)} placeholder="z.B. 5" className={fieldCls} />
+            </label>
+            <label className="text-[11px] text-neutral-600">Unterton
+              <input value={undertone} onChange={(e) => setUndertone(e.target.value)} placeholder="warm / kühl / neutral" className={fieldCls} />
+            </label>
+            <label className="text-[11px] text-neutral-600">Farbe Typ
+              <input value={colorType} onChange={(e) => setColorType(e.target.value)} placeholder="einheitlich / Balayage / Ombré …" className={fieldCls} />
+            </label>
+            <label className="text-[11px] text-neutral-600">Grundton
+              <input value={baseTone} onChange={(e) => setBaseTone(e.target.value)} placeholder="z.B. Dunkelbraun" className={fieldCls} />
+            </label>
+            <label className="text-[11px] text-neutral-600">Highlights
+              <input value={highlights} onChange={(e) => setHighlights(e.target.value)} placeholder="z.B. goldene Strähnen" className={fieldCls} />
+            </label>
+            <label className="text-[11px] text-neutral-600 md:col-span-2">KI-Beschreibung
+              <textarea value={kiDesc} onChange={(e) => setKiDesc(e.target.value)} rows={2} className={fieldCls} />
+            </label>
+            <label className="text-[11px] text-neutral-600 md:col-span-2">KI-Abgrenzung (wovon unterscheiden)
+              <textarea value={kiAbgr} onChange={(e) => setKiAbgr(e.target.value)} rows={2} className={fieldCls} />
+            </label>
+            <label className="text-[11px] text-neutral-600 flex items-center gap-2 mt-1">
+              <input type="checkbox" checked={simReviewed} onChange={(e) => setSimReviewed(e.target.checked)} />
+              ähnliche Farben von Hand geprüft (similar_reviewed)
+            </label>
+          </div>
+          <div className="flex items-center gap-3 mt-3">
+            <button onClick={handleSaveDetails} disabled={pending}
+              className="bg-neutral-900 text-white text-xs font-medium rounded-lg px-3 py-1.5 inline-flex items-center gap-1.5 disabled:opacity-50">
+              {pending ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Details speichern
+            </button>
+            {detailsSaved && <span className="text-xs text-emerald-600">✓ gespeichert</span>}
+            <span className="text-[11px] text-neutral-400">Diese Felder pflegt das Dashboard (kein Sheet-Sync überschreibt sie).</span>
+          </div>
+        </td>
+      </tr>
+    )}
+    </>
   );
 }
 

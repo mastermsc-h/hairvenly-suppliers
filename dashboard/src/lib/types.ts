@@ -287,6 +287,17 @@ export interface ProductColor {
   bot_active: boolean;
   sort_order: number;
   updated_at: string | null;
+  // Kuratierungs-/KI-Spalten (Dashboard = Master, Hybrid-Modell)
+  similar_in_same_line?: string | null;
+  similar_reviewed?: boolean | null;
+  wella_level?: string | null;
+  brightness_level?: string | null;
+  undertone?: string | null;
+  color_type?: string | null;
+  base_tone?: string | null;
+  highlights?: string | null;
+  ki_description?: string | null;
+  ki_abgrenzung?: string | null;
 }
 
 export interface OrderItem {
