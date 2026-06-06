@@ -128,6 +128,13 @@ export async function updateOrder(orderId: string, formData: FormData) {
     setNum("weight_kg");
   }
 
+  // Lade vorherige eta für Vergleich (Auto-Propagation bei Änderung)
+  const { data: prevOrder } = await supabase
+    .from("orders")
+    .select("eta")
+    .eq("id", orderId)
+    .single();
+
   const { error } = await supabase.from("orders").update(update).eq("id", orderId);
   if (error) return { error: error.message };
 
@@ -140,6 +147,33 @@ export async function updateOrder(orderId: string, formData: FormData) {
       "field_change",
       `Felder aktualisiert: ${changedKeys.join(", ")}`,
     );
+  }
+
+  // AUTO-PROPAGATION: Wenn ETA geändert wurde, automatisch auf alle Positionen
+  // ohne Teillieferung übernehmen — User-Anweisung 06.06: 'wenn ich die eta
+  // aus der bestellung anpasse, dann soll automatisch das auf alle
+  // verbliebenen positionen übernommen werden'.
+  // Items mit shipment_id bleiben unberührt (ihre ETA kommt aus der Teillieferung).
+  if (Object.prototype.hasOwnProperty.call(update, "eta") && update.eta !== prevOrder?.eta) {
+    const newEta = update.eta as string | null;
+    if (newEta) {
+      const { data: propagated } = await supabase
+        .from("order_items")
+        .update({ eta: newEta })
+        .eq("order_id", orderId)
+        .is("shipment_id", null)
+        .select("id");
+      const n = propagated?.length ?? 0;
+      if (n > 0) {
+        await logEvent(
+          supabase,
+          orderId,
+          profile.id,
+          "eta_propagated",
+          `ETA-Änderung auf ${n} Position(en) ohne Teillieferung automatisch übernommen (${newEta})`,
+        );
+      }
+    }
   }
 
   // Sync status change to Google Sheet (if sheet_url exists)
