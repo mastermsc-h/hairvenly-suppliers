@@ -123,6 +123,54 @@ export async function updateShipment(shipmentId: string, formData: FormData) {
   return { ok: true };
 }
 
+/**
+ * Setzt arrived_at auf das übergebene Datum (Default: heute) — One-Click
+ * vom Shipment-Karten-Header aus.
+ * - Mit Datum: nutzt das Datum
+ * - Ohne Datum: heute (Server-Time)
+ * - Setzt zusätzlich shipped_at falls noch nicht gesetzt (kann nicht
+ *   ankommen ohne vorher abzuschicken — UX-Bequemlichkeit)
+ *
+ * Damit ist die Teillieferung aus dem 'Unterwegs'-Index draußen
+ * (siehe order-name-map: arrived_at gesetzt → wird übersprungen).
+ */
+export async function markShipmentArrived(
+  shipmentId: string,
+  arrivedDate?: string,
+) {
+  const profile = await requireProfile();
+  const supabase = await createClient();
+
+  const today = arrivedDate || new Date().toISOString().slice(0, 10);
+
+  const { data: shipment } = await supabase
+    .from("order_shipments")
+    .select("order_id, shipped_at")
+    .eq("id", shipmentId)
+    .single();
+  if (!shipment) return { error: "Teillieferung nicht gefunden." };
+
+  const update: Record<string, string> = { arrived_at: today };
+  if (!shipment.shipped_at) update.shipped_at = today;
+
+  const { error } = await supabase
+    .from("order_shipments")
+    .update(update)
+    .eq("id", shipmentId);
+  if (error) return { error: error.message };
+
+  await logEvent(
+    supabase,
+    shipment.order_id,
+    profile.id,
+    "shipment",
+    `Teillieferung als angekommen markiert (${today})`,
+  );
+
+  revalidatePath(`/orders/${shipment.order_id}`);
+  return { ok: true };
+}
+
 export async function deleteShipment(shipmentId: string) {
   const profile = await requireProfile();
   const supabase = await createClient();

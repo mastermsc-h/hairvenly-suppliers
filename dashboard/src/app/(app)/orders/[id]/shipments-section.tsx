@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useRef } from "react";
 import { Package, Plus, X, Check, Pencil, Trash2, Truck, ExternalLink, Calendar, FileSpreadsheet } from "lucide-react";
-import { createShipment, updateShipment, deleteShipment, setItemsShipment } from "@/lib/actions/shipments";
+import { createShipment, updateShipment, deleteShipment, setItemsShipment, markShipmentArrived } from "@/lib/actions/shipments";
 import { date } from "@/lib/format";
 import type { OrderShipment, OrderItem, OrderDocument } from "@/lib/types";
 import LieferscheinCheck from "@/app/(app)/inbound-deliveries/lieferschein-check";
@@ -171,6 +171,22 @@ function ShipmentCard({
         </div>
         {canEdit && (
           <div className="flex items-center gap-1 shrink-0">
+            {!shipment.arrived_at && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!confirm("Teillieferung als angekommen markieren (heute)?")) return;
+                  start(async () => {
+                    await markShipmentArrived(shipment.id);
+                  });
+                }}
+                disabled={pending}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition"
+                title="Als angekommen markieren — Heute als Ankunftsdatum setzen, Teillieferung wird aus 'Unterwegs' entfernt"
+              >
+                <Check size={11} /> angekommen
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setEditing(true)}
