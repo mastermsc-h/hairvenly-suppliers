@@ -2551,11 +2551,18 @@ KEINE Farbnamen nennen — die MA macht das.`;
   // Verhindert Doppel-Sends: Bug 2026-05-30 — Bot generierte zweimal
   // dieselbe Preis+Farb-Antwort auf 2 separate [Foto]-Trigger innerhalb 12h.
   // Token-Cosine-Similarity gegen die letzte Bot-Antwort, Schwelle 0.7.
+  //
+  // WICHTIGE Verfeinerung (User-Bug 06.06): Echo soll nur als Doppel-Send
+  // gelten wenn ZWISCHEN den beiden Bot-Antworten KEINE User-Nachricht steht.
+  // Hat der User dazwischen geantwortet (z.B. "ich habe glattes Haar"), ist
+  // eine ähnliche Folge-Antwort legitim (Bot bestätigt Info die er schon
+  // implizit hatte) — nicht als Echo Force-Draft. Sonst blockiert der Schutz
+  // im autobot-Modus jede natürliche Wiederholung von Preis/Farb-Infos.
   if (!needsManualReview && finalText.length >= 100) {
     try {
       const { data: lastBotMsg } = await svc
         .from("chat_messages")
-        .select("content, created_at")
+        .select("id, content, created_at")
         .eq("session_id", sessionId)
         .eq("role", "assistant")
         .is("deleted_at", null)
@@ -2565,12 +2572,26 @@ KEINE Farbnamen nennen — die MA macht das.`;
       if (lastBotMsg?.content) {
         const ageHours = (Date.now() - new Date(lastBotMsg.created_at).getTime()) / 3600000;
         if (ageHours <= 24) {
-          const { computeBotAnswerSimilarity } = await import("./intent-conversation-reopen");
-          const sim = computeBotAnswerSimilarity(finalText, lastBotMsg.content as string);
-          if (sim >= 0.7) {
-            console.warn(`[respond] ECHO-DETECTED session=${sessionId.slice(0,8)} — similarity=${sim.toFixed(2)} to bot-msg ${ageHours.toFixed(1)}h ago`);
-            needsManualReview = true;
-            manualReviewReason = `Bot hat in den letzten ${ageHours.toFixed(0)}h schon eine sehr ähnliche Antwort geschickt (Ähnlichkeit ${(sim * 100).toFixed(0)}%). Mögliches Doppel-Send. MA prüfen.`;
+          // Sind seit der letzten Bot-Antwort User-Nachrichten reingekommen?
+          const { count: userMsgsSince } = await svc
+            .from("chat_messages")
+            .select("id", { count: "exact", head: true })
+            .eq("session_id", sessionId)
+            .eq("role", "user")
+            .is("deleted_at", null)
+            .gt("created_at", lastBotMsg.created_at);
+          const userResponded = (userMsgsSince ?? 0) > 0;
+
+          if (!userResponded) {
+            const { computeBotAnswerSimilarity } = await import("./intent-conversation-reopen");
+            const sim = computeBotAnswerSimilarity(finalText, lastBotMsg.content as string);
+            if (sim >= 0.7) {
+              console.warn(`[respond] ECHO-DETECTED session=${sessionId.slice(0,8)} — similarity=${sim.toFixed(2)} to bot-msg ${ageHours.toFixed(1)}h ago (no user response in between → echt Doppel-Send)`);
+              needsManualReview = true;
+              manualReviewReason = `Bot hat in den letzten ${ageHours.toFixed(0)}h schon eine sehr ähnliche Antwort geschickt (Ähnlichkeit ${(sim * 100).toFixed(0)}%) — und der User hat in der Zwischenzeit NICHT geantwortet. Mögliches Doppel-Send. MA prüfen.`;
+            }
+          } else {
+            console.log(`[respond] echo-check skipped session=${sessionId.slice(0,8)} — user responded ${userMsgsSince}× since last bot-msg`);
           }
         }
       }

@@ -62,10 +62,18 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
   ]);
 
   // Map: shipment_id → eta (nur nicht-angekommene Shipments)
+  // arrivedShipmentIds: alle bereits angekommenen Teillieferungen — Items darin
+  // gelten als physisch da und werden NIE als "unterwegs" geführt, selbst wenn
+  // ihr item.eta noch in der Zukunft liegt (das ist nur der ursprünglich
+  // geplante Liefertermin).
   const shipmentEtaById = new Map<string, string>();
+  const arrivedShipmentIds = new Set<string>();
   const shipmentsByOrder = new Map<string, string[]>();
   for (const s of (shipmentRows ?? []) as { id: string; order_id: string; eta: string | null; arrived_at: string | null }[]) {
-    if (s.arrived_at) continue;
+    if (s.arrived_at) {
+      arrivedShipmentIds.add(s.id);
+      continue;
+    }
     if (!s.eta) continue;
     shipmentEtaById.set(s.id, s.eta);
     if (!shipmentsByOrder.has(s.order_id)) shipmentsByOrder.set(s.order_id, []);
@@ -74,10 +82,12 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
   for (const arr of shipmentsByOrder.values()) arr.sort();
 
   // Per-order, per-Shopify-name ETA index.
-  // KORREKTUR Teillieferungen: wenn item.eta NULL ist aber das Item in einem
-  // Shipment liegt, nehmen wir das Shipment-ETA als per-Position-ETA. So bekommt
-  // jedes Item das ETA seiner konkreten Teillieferung — nicht das earliest aller
-  // Teillieferungen, was bei mehreren parallel laufenden Teilen falsch wäre.
+  // Regeln:
+  //   1. Item ist in einem ANGEKOMMENEN Shipment → komplett überspringen
+  //      (es ist da, kein "kommt ca." mehr nötig)
+  //   2. item.eta gesetzt UND in nicht-angekommenem Shipment / kein Shipment
+  //      → diese ETA nehmen
+  //   3. item.eta null und in Shipment → shipment.eta nehmen
   type ItemRow = {
     order_id: string;
     eta: string | null;
@@ -89,6 +99,9 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
     const pc = Array.isArray(it.product_colors) ? it.product_colors[0] : it.product_colors;
     const shopify = pc?.name_shopify;
     if (!shopify) continue;
+    // KRITISCH: Items aus angekommenen Shipments NICHT in den Unterwegs-Index
+    // aufnehmen, auch wenn ihr item.eta noch in der Zukunft liegt.
+    if (it.shipment_id && arrivedShipmentIds.has(it.shipment_id)) continue;
     // Fallback-Kette: item.eta → shipment.eta (falls in Teillieferung)
     const effectiveEta = it.eta ?? (it.shipment_id ? shipmentEtaById.get(it.shipment_id) ?? null : null);
     if (!effectiveEta) continue;
