@@ -152,6 +152,27 @@ function buildAnkunftFromMeta(meta: OrderMeta, productName?: string): string | n
 }
 
 /**
+ * Prüft ob das gesuchte Shopify-Produkt in einer angekommenen Teillieferung
+ * dieser Bestellung war (und es keine weitere offene Position dieses Produkts
+ * mehr gibt). Wenn ja → das Sheet zeigt die Bestellung noch als unterwegs,
+ * obwohl sie physisch angekommen ist → perOrder-Eintrag soll entfernt werden.
+ */
+function isProductArrivedInOrder(meta: OrderMeta, productName: string): boolean {
+  if (!meta.arrivedShopifyNames || meta.arrivedShopifyNames.size === 0) return false;
+  // Wenn es noch offene per-Position-ETAs für dieses Produkt gibt → nicht "fertig"
+  if (meta.itemEtasByShopify.has(productName)) return false;
+  for (const dbKey of meta.itemEtasByShopify.keys()) {
+    if (fuzzyMatchProductKey(productName, dbKey)) return false;
+  }
+  // Keine offenen Positionen — ist der Name in arrivedShopifyNames?
+  if (meta.arrivedShopifyNames.has(productName)) return true;
+  for (const arrivedName of meta.arrivedShopifyNames) {
+    if (fuzzyMatchProductKey(productName, arrivedName)) return true;
+  }
+  return false;
+}
+
+/**
  * For each perOrder entry whose name maps to a known order in our DB,
  * override the `ankunft` (ETA) field with the order's manually-set ETA.
  *
@@ -202,8 +223,15 @@ export function filterArchivedFromStock(
   if (!orderIdByName) return items;
   return items.map((item) => {
     // 1) Filter out archived orders
-    const kept = item.perOrder.filter((o) => !isArchived(orderIdByName[o.name]));
-    // 2) Override ankunft using per-position / shipment / order ETAs (in that priority)
+    let kept = item.perOrder.filter((o) => !isArchived(orderIdByName[o.name]));
+    // 2) Filter out orders where this product is in an arrived Teillieferung
+    //    (Sheet meldet weiter unterwegs, aber DB sagt: ist physisch da)
+    kept = kept.filter((o) => {
+      const meta = orderIdByName[o.name];
+      if (!meta) return true;
+      return !isProductArrivedInOrder(meta, item.product);
+    });
+    // 3) Override ankunft using per-position / shipment / order ETAs (in that priority)
     const withEta = kept.map((o) => {
       const meta = orderIdByName[o.name];
       if (!meta) return o;
@@ -211,9 +239,9 @@ export function filterArchivedFromStock(
       if (!newAnkunft || newAnkunft === o.ankunft) return o;
       return { ...o, ankunft: newAnkunft };
     });
-    const archivedRemoved = kept.length !== item.perOrder.length;
+    const dropped = kept.length !== item.perOrder.length;
     const etaChanged = withEta.some((o, i) => o.ankunft !== kept[i].ankunft);
-    if (!archivedRemoved && !etaChanged) return item;
+    if (!dropped && !etaChanged) return item;
     const unterwegsG = withEta.reduce((s, o) => s + (o.menge || 0), 0);
     return { ...item, perOrder: withEta, unterwegsG };
   });
