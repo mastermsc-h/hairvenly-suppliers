@@ -126,7 +126,7 @@ function buildAnkunftFromMeta(meta: OrderMeta, productName?: string): string | n
     if (meta.arrivedShopifyNames && meta.arrivedShopifyNames.size > 0) {
       if (meta.arrivedShopifyNames.has(productName)) return null;
       for (const arrivedName of meta.arrivedShopifyNames) {
-        if (fuzzyMatchProductKey(productName, arrivedName)) return null;
+        if (strictFuzzyMatch(productName, arrivedName)) return null;
       }
     }
   }
@@ -152,22 +152,59 @@ function buildAnkunftFromMeta(meta: OrderMeta, productName?: string): string | n
 }
 
 /**
+ * Identifiziert den Produkt-TYP aus einem Shopify-Namen — damit nicht
+ * verschiedene Produkte (Tape vs Clip-Ins vs Bondings) versehentlich als
+ * "gleicher Artikel" gematcht werden, nur weil die Farbe gleich ist.
+ * Returns null wenn keine eindeutige Zuordnung erkannt.
+ */
+function productTypeOf(name: string): string | null {
+  const n = name.toLowerCase();
+  // Reihenfolge wichtig: spezifischere zuerst (mini tape vor tape, etc.)
+  if (n.includes("mini tape")) return "minitape";
+  if (n.includes("clip extensions") || n.includes("clip-ins") || n.includes("clipins")) return "clip";
+  if (n.includes("bondings") || n.includes("bonding")) return "bondings";
+  if (n.includes("genius weft")) return "geniusweft";
+  if (n.includes("classic weft")) return "classicweft";
+  if (n.includes("invisible butterfly") || n.includes("butterfly")) return "butterfly";
+  if (n.includes("tressen") || n.includes("weft")) return "weft";
+  if (n.includes("tape extensions") || /\btape\b/.test(n)) return "tape"; // Standard Tape
+  if (n.includes("ponytail")) return "ponytail";
+  return null;
+}
+
+/**
+ * Strict-fuzzy: wie fuzzyMatchProductKey aber zusätzlich die Produkt-Typen
+ * müssen übereinstimmen (oder mindestens einer null sein). Verhindert das
+ * versehentliche Matchen Std-Tape ↔ Clip-Ins über gleiche Farbnamen.
+ */
+function strictFuzzyMatch(a: string, b: string): boolean {
+  const ta = productTypeOf(a);
+  const tb = productTypeOf(b);
+  if (ta && tb && ta !== tb) return false; // verschiedene Produkttypen → niemals match
+  return fuzzyMatchProductKey(a, b);
+}
+
+/**
  * Prüft ob das gesuchte Shopify-Produkt in einer angekommenen Teillieferung
  * dieser Bestellung war (und es keine weitere offene Position dieses Produkts
  * mehr gibt). Wenn ja → das Sheet zeigt die Bestellung noch als unterwegs,
  * obwohl sie physisch angekommen ist → perOrder-Eintrag soll entfernt werden.
+ *
+ * Wichtig: 'gleicher Produkt-Typ' (Tape vs Clip vs Bondings) wird strikt
+ * unterschieden — sonst hält eine offene Clip-Ins-Position die angekommene
+ * Std-Tape-Position fälschlich als 'noch unterwegs'.
  */
 function isProductArrivedInOrder(meta: OrderMeta, productName: string): boolean {
   if (!meta.arrivedShopifyNames || meta.arrivedShopifyNames.size === 0) return false;
-  // Wenn es noch offene per-Position-ETAs für dieses Produkt gibt → nicht "fertig"
+  // Noch offene per-Position-ETA für DASSELBE Produkt (gleicher Typ)?
   if (meta.itemEtasByShopify.has(productName)) return false;
   for (const dbKey of meta.itemEtasByShopify.keys()) {
-    if (fuzzyMatchProductKey(productName, dbKey)) return false;
+    if (strictFuzzyMatch(productName, dbKey)) return false;
   }
-  // Keine offenen Positionen — ist der Name in arrivedShopifyNames?
+  // Keine offenen Positionen desselben Typs — ist der Name in arrivedShopifyNames?
   if (meta.arrivedShopifyNames.has(productName)) return true;
   for (const arrivedName of meta.arrivedShopifyNames) {
-    if (fuzzyMatchProductKey(productName, arrivedName)) return true;
+    if (strictFuzzyMatch(productName, arrivedName)) return true;
   }
   return false;
 }
