@@ -27,6 +27,7 @@ import OrderItemsSection from "./order-items-section";
 import StatusDropdown from "./status-dropdown";
 import ShipmentsSection from "./shipments-section";
 import SyncEtaButton from "./sync-eta-button";
+import PropagateEtaButton from "./propagate-eta-button";
 import PushToShopifyButton from "./push-to-shopify-button";
 
 export default async function OrderDetailPage({
@@ -223,6 +224,7 @@ export default async function OrderDetailPage({
                         {t(locale, "order.open_sheet")} <ExternalLink size={12} />
                       </a>
                       {profile.is_admin && <SyncEtaButton orderId={o.id} />}
+                      {profile.is_admin && <PropagateEtaButton orderId={o.id} orderEta={o.eta} />}
                     </div>
                   ) : (
                     "—"

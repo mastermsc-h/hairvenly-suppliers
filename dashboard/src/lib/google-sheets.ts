@@ -850,6 +850,129 @@ export async function readOrderSheetEtas(
   }
 }
 
+/** Format ISO date "YYYY-MM-DD" → "DD.MM.YYYY" für Sheet-Zellen. */
+function formatGermanDate(iso: string): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return iso;
+  return `${m[3]}.${m[2]}.${m[1]}`;
+}
+
+/**
+ * Schreibt für alle übergebenen (method|length|color) Keys einen ETA-Wert in
+ * die ETA-Spalte des Order-Sheets. Nutzt dieselbe Header-Erkennung wie
+ * readOrderSheetEtas. Wenn die ETA-Spalte nicht existiert (z.B. weil das Sheet
+ * sie noch nicht hat), wird der ersten freien Spalte rechts vom Item-Header
+ * eine neue ETA-Header-Zelle hinzugefügt.
+ */
+export async function writeOrderSheetEtas(
+  sheetUrl: string,
+  etas: Map<string, string>, // key: "method|length|color (lowercase, no #)" → ISO date
+): Promise<{ updated?: number; created_eta_column?: boolean; error?: string }> {
+  if (etas.size === 0) return { updated: 0 };
+
+  const m = sheetUrl.match(/\/spreadsheets\/d\/([^/]+).*[?&]gid=(\d+)/);
+  if (!m) return { error: "Sheet-URL konnte nicht geparst werden" };
+  const spreadsheetId = m[1];
+  const sheetGid = Number(m[2]);
+
+  try {
+    const auth = getAuth();
+    const sheets = google.sheets({ version: "v4", auth });
+
+    const { data: meta } = await sheets.spreadsheets.get({
+      spreadsheetId,
+      fields: "sheets.properties",
+    });
+    const tab = meta.sheets?.find((s) => s.properties?.sheetId === sheetGid);
+    if (!tab?.properties?.title) return { error: "Tab nicht gefunden" };
+    const tabName = tab.properties.title;
+
+    const { data } = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${tabName}'!A1:K1000`,
+    });
+    const rows = data.values ?? [];
+    if (rows.length < 4) return { updated: 0 };
+
+    // Find columns same way as readOrderSheetEtas
+    let itemHeaderRow = -1;
+    let colMethod = -1, colLength = -1, colColor = -1, colEta = -1;
+    for (let i = 0; i < Math.min(rows.length, 20); i++) {
+      const r = rows[i] ?? [];
+      const cells = r.map((c) => String(c ?? "").trim().toLowerCase());
+      const fcIdx = cells.findIndex((c) => c === "farbcode" || c === "color" || c === "farbe");
+      if (fcIdx >= 0 && itemHeaderRow < 0) {
+        itemHeaderRow = i;
+        colColor = fcIdx;
+        colMethod = cells.findIndex((c) => c === "method" || c === "methode");
+        colLength = cells.findIndex(
+          (c) => c === "length/variant" || c === "length" || c === "länge" || c === "laenge" || c === "variant" || c === "länge/variante",
+        );
+      }
+      if (colEta < 0) {
+        const eIdx = cells.findIndex(
+          (c) => c === "eta" || c === "ankunft" || c === "ankunftsdatum",
+        );
+        if (eIdx >= 0) colEta = eIdx;
+      }
+    }
+    if (itemHeaderRow < 0 || colColor < 0) return { error: "Item-Header (Farbcode) nicht gefunden" };
+
+    let createdEtaCol = false;
+    // If no ETA column anywhere → add as new header column right after the last known column
+    if (colEta < 0) {
+      const headerRow = rows[itemHeaderRow] ?? [];
+      colEta = Math.max(colMethod + 1, colLength + 1, colColor + 1, headerRow.length);
+      const colLetter = String.fromCharCode(65 + colEta); // A=65; works up to Z which is enough for K-range
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `'${tabName}'!${colLetter}${itemHeaderRow + 1}`,
+        valueInputOption: "RAW",
+        requestBody: { values: [["ETA"]] },
+      });
+      createdEtaCol = true;
+    }
+
+    // Build per-row updates
+    const updates: { range: string; values: string[][] }[] = [];
+    let lastMethod = "";
+    let lastLength = "";
+    let updated = 0;
+    for (let i = itemHeaderRow + 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r || r.length === 0) continue;
+      const method = (colMethod >= 0 ? String(r[colMethod] ?? "").trim() : "") || lastMethod;
+      const length = (colLength >= 0 ? String(r[colLength] ?? "").trim() : "") || lastLength;
+      const colorRaw = colColor >= 0 ? String(r[colColor] ?? "").trim() : "";
+      if (method && method.toLowerCase() !== "subtotal") lastMethod = method;
+      if (length) lastLength = length;
+      if (!colorRaw) continue;
+      if (method.toLowerCase() === "subtotal") continue;
+      const key = `${(method || "").toLowerCase()}|${(length || "").toLowerCase()}|${colorRaw.replace(/^#/, "").toLowerCase()}`;
+      const newEta = etas.get(key);
+      if (!newEta) continue;
+      const colLetter = String.fromCharCode(65 + colEta);
+      updates.push({
+        range: `'${tabName}'!${colLetter}${i + 1}`,
+        values: [[formatGermanDate(newEta)]],
+      });
+      updated++;
+    }
+    if (updates.length > 0) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          valueInputOption: "USER_ENTERED",
+          data: updates,
+        },
+      });
+    }
+    return { updated, created_eta_column: createdEtaCol };
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /** Parse "DD.MM.YYYY" → ISO "YYYY-MM-DD". Returns null if invalid. */
 function parseGermanDate(s: string): string | null {
   const m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);

@@ -472,6 +472,71 @@ export async function generateAndUploadPDF(orderId: string): Promise<{ signedUrl
  *   sheet (method, length, color, qty, eta) + tries to link to product_colors
  *   for color_id via Hairvenly name matching.
  */
+/**
+ * Order-ETA als Quelle der Wahrheit nehmen und auf alle Positionen anwenden.
+ * Items in Teillieferungen (shipment_id gesetzt) bleiben unberührt — ihr ETA
+ * kommt aus dem Shipment. Optional wird die ETA-Spalte im Google Sheet
+ * gleichzeitig aktualisiert, damit der nächste Sheet-Sync nicht wieder die
+ * alten Werte reinholt.
+ */
+export async function propagateOrderEtaToItems(
+  orderId: string,
+  opts: { writeToSheet?: boolean } = {},
+): Promise<{ updated_db?: number; updated_sheet?: number; created_eta_col?: boolean; error?: string }> {
+  const profile = await requireProfile();
+  const supabase = await createClient();
+
+  const { data: order } = await supabase
+    .from("orders")
+    .select("id, eta, sheet_url, label")
+    .eq("id", orderId)
+    .single();
+  if (!order) return { error: "Bestellung nicht gefunden" };
+  if (!order.eta) return { error: "Diese Bestellung hat keine ETA gesetzt" };
+
+  // 1) DB: alle Items ohne shipment_id → eta = order.eta
+  const { data: updatedItems, error: upErr } = await supabase
+    .from("order_items")
+    .update({ eta: order.eta })
+    .eq("order_id", orderId)
+    .is("shipment_id", null)
+    .select("id, method_name, length_value, color_name");
+  if (upErr) return { error: upErr.message };
+
+  const updatedDb = updatedItems?.length ?? 0;
+
+  // Logging
+  await supabase.from("order_events").insert({
+    order_id: orderId,
+    event_type: "eta_propagated",
+    message: `Order-ETA (${order.eta}) auf ${updatedDb} Positionen ohne Teillieferung übernommen.`,
+    actor_id: profile.id,
+  });
+
+  // 2) Sheet (optional)
+  let updatedSheet = 0;
+  let createdEtaCol = false;
+  if (opts.writeToSheet && order.sheet_url && updatedItems && updatedItems.length > 0) {
+    const gs = await import("@/lib/google-sheets");
+    const etas = new Map<string, string>();
+    for (const it of updatedItems) {
+      const key = `${(it.method_name || "").toLowerCase()}|${(it.length_value || "").toLowerCase()}|${(it.color_name || "").replace(/^#/, "").toLowerCase()}`;
+      etas.set(key, order.eta as string);
+    }
+    const r = await gs.writeOrderSheetEtas(order.sheet_url, etas);
+    if (r.error) {
+      // Sheet-Fehler nicht als Gesamtfehler zurückgeben — DB-Update bleibt gültig
+      console.warn("[propagateOrderEtaToItems] Sheet-Write Fehler:", r.error);
+    } else {
+      updatedSheet = r.updated ?? 0;
+      createdEtaCol = !!r.created_eta_column;
+    }
+  }
+
+  revalidatePath(`/orders/${orderId}`);
+  return { updated_db: updatedDb, updated_sheet: updatedSheet, created_eta_col: createdEtaCol };
+}
+
 export async function syncOrderItemsEtaFromSheet(
   orderId: string,
 ): Promise<{ updated?: number; imported?: number; error?: string }> {
