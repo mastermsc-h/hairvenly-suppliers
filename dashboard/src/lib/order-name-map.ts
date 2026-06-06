@@ -21,6 +21,13 @@ export interface OrderMeta {
    * Used by stock views to show a product-specific ETA when one is set.
    */
   itemEtasByShopify: Map<string, string[]>;
+  /**
+   * Shopify-Namen deren Items ALLE in angekommenen Teillieferungen waren.
+   * Wenn ein Produkt hier drin ist UND nicht in itemEtasByShopify → komplett
+   * 'da', kein ETA-Fallback auf order.eta nötig (sonst zeigt der Bot
+   * fälschlich 'kommt am Order-ETA' für längst angekommene Ware).
+   */
+  arrivedShopifyNames: Set<string>;
 }
 
 /** Statuses where the order is considered archived and should be hidden everywhere. */
@@ -95,13 +102,22 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
     product_colors: { name_shopify: string | null } | { name_shopify: string | null }[] | null;
   };
   const itemEtasByOrder = new Map<string, Map<string, Set<string>>>();
+  // Pro Order: Set der Shopify-Namen deren Items in einer angekommenen
+  // Teillieferung lagen — Marker für "ist da" (siehe buildAnkunftFromMeta).
+  const arrivedShopifyByOrder = new Map<string, Set<string>>();
   for (const it of (itemRows ?? []) as ItemRow[]) {
     const pc = Array.isArray(it.product_colors) ? it.product_colors[0] : it.product_colors;
     const shopify = pc?.name_shopify;
     if (!shopify) continue;
     // KRITISCH: Items aus angekommenen Shipments NICHT in den Unterwegs-Index
-    // aufnehmen, auch wenn ihr item.eta noch in der Zukunft liegt.
-    if (it.shipment_id && arrivedShipmentIds.has(it.shipment_id)) continue;
+    // aufnehmen, auch wenn ihr item.eta noch in der Zukunft liegt. Aber den
+    // Shopify-Namen in arrivedShopifyByOrder vermerken, damit der Bot später
+    // weiß "ist physisch da" statt fälschlich order.eta als Fallback zu nehmen.
+    if (it.shipment_id && arrivedShipmentIds.has(it.shipment_id)) {
+      if (!arrivedShopifyByOrder.has(it.order_id)) arrivedShopifyByOrder.set(it.order_id, new Set());
+      arrivedShopifyByOrder.get(it.order_id)!.add(shopify);
+      continue;
+    }
     // Fallback-Kette: item.eta → shipment.eta (falls in Teillieferung)
     const effectiveEta = it.eta ?? (it.shipment_id ? shipmentEtaById.get(it.shipment_id) ?? null : null);
     if (!effectiveEta) continue;
@@ -170,6 +186,7 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
       eta: o.eta ?? null,
       shipmentEtas: shipmentsByOrder.get(o.id) ?? [],
       itemEtasByShopify,
+      arrivedShopifyNames: arrivedShopifyByOrder.get(o.id) ?? new Set<string>(),
     };
 
     const iso = toIsoDate(o.order_date);

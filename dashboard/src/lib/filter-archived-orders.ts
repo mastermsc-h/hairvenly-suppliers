@@ -116,6 +116,19 @@ function buildAnkunftFromMeta(meta: OrderMeta, productName?: string): string | n
     if (earliestFuzzy) {
       return `ca. Ankunft: ${formatDeDate(earliestFuzzy)}`;
     }
+
+    // (c) Wenn KEINE per-Position-ETA gefunden ABER der Shopify-Name in
+    //     arrivedShopifyNames steht → alle Items dieses Produkts waren in
+    //     einer angekommenen Teillieferung. Bot soll NICHT auf order.eta
+    //     zurückfallen — das Produkt ist physisch da.
+    //     Fuzzy-Variante: auch wenn nur ein arrivedShopify-Eintrag fuzzy
+    //     matched, gilt das als "ist da" für diese Bestellung.
+    if (meta.arrivedShopifyNames && meta.arrivedShopifyNames.size > 0) {
+      if (meta.arrivedShopifyNames.has(productName)) return null;
+      for (const arrivedName of meta.arrivedShopifyNames) {
+        if (fuzzyMatchProductKey(productName, arrivedName)) return null;
+      }
+    }
   }
   // 2) Partial shipments — use earliest un-arrived ETA
   if (meta.shipmentEtas.length > 0) {
