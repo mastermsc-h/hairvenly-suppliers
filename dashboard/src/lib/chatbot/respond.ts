@@ -450,7 +450,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   // Session laden — inkl. category für Skip-Check
   const { data: session } = await svc
     .from("chat_sessions")
-    .select("id, bot_signature_name, signature_manual, channel, status, category")
+    .select("id, bot_signature_name, signature_manual, bot_mode, channel, status, category")
     .eq("id", sessionId)
     .single();
   if (!session) return { success: false, error: "session not found" };
@@ -2615,7 +2615,14 @@ KEINE Farbnamen nennen — die MA macht das.`;
   //   - Komplette Vorbereitungs-Antwort ohne Farbnamen → kein Draft-Force
   //   - Bot listet Farben als Frage "magst du A oder B?" → DRAFT-Force
   //     (das ist auch Empfehlung)
-  if (!needsManualReview) {
+  //
+  // 🔑 AUSNAHME (User-Anweisung 06.06): Im manuell gesetzten Voll-Auto-Modus
+  // ("Auto-Antwort", bot_mode=auto) ist Farbempfehlung ausdrücklich erlaubt —
+  // die MA hat den Chat bewusst auf vollautomatisch gestellt. Diese POLICY-
+  // Sperre gilt daher nur in den vorsichtigen Modi. Die SICHERHEITS-Netze
+  // (Preis/Verfügbarkeit/Öffnungszeiten/kaputte Ausgabe) bleiben auch im
+  // auto-Modus aktiv — falsche/kaputte Antworten werden NIE automatisch gesendet.
+  if (!needsManualReview && session.bot_mode !== "auto") {
     const lines = finalText.split(/\n/);
     // (a-1) CAPS-Color-Names am Zeilenanfang (mind. 4 Großbuchstaben am Stück
     //       am Anfang einer Zeile, danach Trennzeichen — , — - usw.)
@@ -2636,6 +2643,24 @@ KEINE Farbnamen nennen — die MA macht das.`;
       console.warn(`[respond] COLOR-RECOMMENDATION-DETECTED session=${sessionId.slice(0,8)} — capsColors=${capsColorCount} urls=${urlCount} → forcing draft`);
       needsManualReview = true;
       manualReviewReason = "Bot hat eigenständig konkrete Farben empfohlen — Farbempfehlung ist Mitarbeiter-Aufgabe (Stylistin-Verantwortung). Antwort wird als Draft gespeichert, nicht automatisch gesendet.";
+    }
+  }
+
+  // ── MALFORMED-OUTPUT-GUARD (SICHERHEIT — gilt in ALLEN Modi, auch auto) ──
+  // Fängt kaputte Ausgaben ab, bevor sie automatisch gesendet werden:
+  //   - defekter Markdown-Link [Label](nicht-http…), z.B. "[BITTER CACAO](-copy)"
+  //   - leeres/kaputtes Bold "****" (Farbname wurde rausgestrippt)
+  // Ursache sind meist fehlerhafte Produktdaten (Shopify-Duplikate mit
+  // "-copy"/"-kopie"-Handles). Solche Antworten dürfen NIE autobot-gesendet
+  // werden → Force-Draft, MA korrigiert. Bewusst NACH allen anderen Checks und
+  // OHNE auto-Ausnahme: Sicherheit hat Vorrang vor "auto sendet alles".
+  if (!needsManualReview) {
+    const brokenLinkRe = /\]\(\s*(?!https?:\/\/)[^)\s][^)]*\)/;
+    const emptyBoldRe = /\*\*\s*\*\*/;
+    if (brokenLinkRe.test(finalText) || emptyBoldRe.test(finalText)) {
+      console.warn(`[respond] MALFORMED-OUTPUT session=${sessionId.slice(0,8)} — defekter Link/Bold (vermutlich kaputte Produktdaten)`);
+      needsManualReview = true;
+      manualReviewReason = "Die Antwort enthält eine kaputte Stelle (defekter Produkt-Link wie '](-copy)' oder leeres '****') — meist durch fehlerhafte/duplizierte Farbdaten in Shopify. Antwort als Entwurf gespeichert, NICHT automatisch gesendet. MA bitte Link/Farbe prüfen.";
     }
   }
 
