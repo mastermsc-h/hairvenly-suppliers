@@ -744,10 +744,19 @@ async function routeIncoming(opts: {
       .gt("created_at", sixHoursAgo)
       .order("created_at", { ascending: false })
       .limit(1);
-    const maActive = (recentHumanMsgs || []).some(m => (m as { auto_sent?: boolean }).auto_sent !== true);
-    if (maActive) {
-      console.log(`[meta-webhook] MA-ACTIVE-GUARD — manuelle MA-Antwort in letzten 6h, Bot greift NICHT ein, session=${session.id.slice(0,8)}`);
-      return;
+    const lastHuman = (recentHumanMsgs || []).find(m => (m as { auto_sent?: boolean }).auto_sent !== true);
+    if (lastHuman) {
+      // 🛡️ Schutz greift — ABER nur, wenn der Autobot NICHT nach dieser manuellen
+      // Antwort erneut aktiviert wurde. Hat die MA danach bewusst auf "Auto-
+      // Antwort" gedrückt (auto_activated_at >= letzte manuelle Antwort), ist der
+      // Schutz absichtlich aufgehoben → Bot darf wieder übernehmen.
+      const autoArmedAt = (session as { auto_activated_at?: string | null }).auto_activated_at;
+      const reArmedAfterHuman = !!autoArmedAt && new Date(autoArmedAt) >= new Date(lastHuman.created_at);
+      if (!reArmedAfterHuman) {
+        console.log(`[meta-webhook] MA-ACTIVE-GUARD — manuelle MA-Antwort in letzten 6h (Autobot nicht erneut aktiviert), Bot greift NICHT ein, session=${session.id.slice(0,8)}`);
+        return;
+      }
+      console.log(`[meta-webhook] MA-ACTIVE-GUARD übersteuert — Autobot wurde nach der manuellen Antwort bewusst erneut aktiviert, session=${session.id.slice(0,8)}`);
     }
   }
 

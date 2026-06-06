@@ -55,6 +55,7 @@ interface Props {
     customer_name: string | null;
     customer_full_name: string | null;
     bot_auto_reply: boolean;
+    auto_activated_at?: string | null;
     bot_mode: "auto" | "selective_auto" | "assisted" | "off";
     human_only?: boolean;
     team_notes?: string | null;
@@ -105,6 +106,16 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
   const [showModeSettings, setShowModeSettings] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // 🛡️ GRÄTSCH-SCHUTZ (MA-Aktiv-Guard) — Live-Anzeige.
+  // nowTs wird erst nach Mount gesetzt (kein Hydration-Mismatch) und tickt, damit
+  // der Timer runterläuft.
+  const [nowTs, setNowTs] = useState<number | null>(null);
+  useEffect(() => {
+    setNowTs(Date.now());
+    const t = setInterval(() => setNowTs(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -258,6 +269,46 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
       router.refresh();
     });
   }
+
+  // 🛡️ Autobot nach manueller Antwort BEWUSST wieder übernehmen lassen — hebt den
+  // Grätsch-Schutz auf (setBotMode aktualisiert auto_activated_at) und triggert
+  // ggf. direkt eine Antwort auf offene Kundennachrichten. Behält den aktuellen
+  // Autobot-Modus bei (auto bzw. selective_auto).
+  async function handleReArmAutobot() {
+    const m = session.bot_mode === "selective_auto" ? "selective_auto" : "auto";
+    setModeSwitching(m);
+    startTransition(async () => {
+      try {
+        await setBotMode(session.id, m);
+        router.refresh();
+      } finally { setModeSwitching(null); }
+    });
+  }
+
+  // Ist der Grätsch-Schutz gerade aktiv? Aktiv = Autobot-Modus (auto/selective_auto),
+  // aber die letzte MANUELLE MA-Antwort liegt < 6h zurück UND ist NEUER als die
+  // letzte Autobot-Aktivierung → der Bot pausiert bewusst.
+  const SIX_H_MS = 6 * 3600 * 1000;
+  const guardInfo = (() => {
+    if (nowTs === null) return null; // erst nach Mount (Hydration-sicher)
+    if (session.bot_mode !== "auto" && session.bot_mode !== "selective_auto") return null;
+    const lastHuman = [...messages].reverse().find(m => m.role === "human_agent");
+    if (!lastHuman) return null;
+    const humanAt = new Date(lastHuman.created_at).getTime();
+    if (nowTs - humanAt > SIX_H_MS) return null; // Schutzfenster (6h) abgelaufen
+    const armedAt = session.auto_activated_at ? new Date(session.auto_activated_at).getTime() : 0;
+    if (armedAt >= humanAt) return null; // Autobot nach der manuellen Antwort reaktiviert
+    return { expiresAt: humanAt + SIX_H_MS, remainingMs: humanAt + SIX_H_MS - nowTs };
+  })();
+  const guardRemainingLabel = guardInfo
+    ? (() => {
+        const mins = Math.max(0, Math.round(guardInfo.remainingMs / 60000));
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        const until = new Date(guardInfo.expiresAt).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+        return `${h > 0 ? `${h} Std ` : ""}${m} Min (bis ${until} Uhr)`;
+      })()
+    : "";
 
   async function handleClose() {
     startTransition(async () => {
@@ -716,6 +767,28 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             })}
           </div>
         </details>
+      )}
+
+      {/* 🛡️ Grätsch-Schutz-Banner: Autobot pausiert, weil zuletzt manuell
+          geantwortet wurde. Mit Timer + Button zum bewussten Reaktivieren. */}
+      {guardInfo && (
+        <div className="mx-4 mt-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3">
+          <span className="text-lg leading-none mt-0.5">🛡️</span>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-amber-900">Grätsch-Schutz aktiv — Autobot pausiert</div>
+            <div className="text-[12px] text-amber-800 mt-0.5">
+              Zuletzt hat eine Mitarbeiterin manuell geantwortet, deshalb hält sich der Autobot zurück und antwortet <strong>nicht</strong> automatisch. Noch aktiv für <strong>{guardRemainingLabel}</strong>.
+            </div>
+          </div>
+          <button
+            onClick={handleReArmAutobot}
+            disabled={isPending || modeSwitching !== null}
+            className="shrink-0 h-8 px-3 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 inline-flex items-center gap-1.5 disabled:opacity-50 shadow-sm"
+            title="Hebt den Grätsch-Schutz bewusst auf — der Autobot übernimmt diesen Chat wieder."
+          >
+            🤖 Autobot erneut aktivieren
+          </button>
+        </div>
       )}
 
       {/* Messages */}

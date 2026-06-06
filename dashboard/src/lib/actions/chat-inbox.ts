@@ -271,6 +271,13 @@ export async function setBotMode(sessionId: string, mode: "auto" | "selective_au
   await svc.from("chat_sessions").update({
     bot_mode: mode,
     bot_auto_reply: mode === "auto",
+    // 🛡️ Bei (Wieder-)Aktivierung eines Autobot-Modus den Aktivierungs-Zeitpunkt
+    // merken. Der MA-Aktiv-Guard ("Grätsch-Schutz") hebt sich dadurch bewusst
+    // auf: Drückt die MA erneut auf Auto-Antwort, ist auto_activated_at neuer als
+    // die letzte manuelle Antwort → Bot darf wieder übernehmen.
+    ...(mode === "auto" || mode === "selective_auto"
+      ? { auto_activated_at: new Date().toISOString() }
+      : {}),
   }).eq("id", sessionId);
 
   // Helper: gibt es offene Customer-Messages (= Kundin hat zuletzt geschrieben,
