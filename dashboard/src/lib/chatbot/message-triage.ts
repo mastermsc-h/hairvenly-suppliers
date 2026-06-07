@@ -74,6 +74,30 @@ export function hasRealIntent(text: string): boolean {
 }
 
 /**
+ * Verweist der Text DEMONSTRATIV auf etwas Visuelles, das der Bot NICHT sehen
+ * kann (z.B. die Farbe in einer Story/einem Bild)? → "diese Farbe", "diesen
+ * Ton", "die hier", "das da", "sowas", "genau das".
+ *
+ * Hintergrund (User-Bug 08.06): Kundin antwortet auf eine STORY mit "Kann ich
+ * diese Farbe in 60cm finden?". Der Bot kann die Story NICHT sehen → er hat
+ * keine Farbe → er HALLUZINIERTE "#2E". Solche Bezüge dürfen NICHT automatisch
+ * beantwortet werden (nur wenn ein echtes Foto dabei ist, das wir analysieren
+ * können — das wird in shouldBotIgnore über REAL_MEDIA_TYPES abgefangen).
+ */
+export function referencesUnseenVisual(text: string): boolean {
+  const t = stripAttachmentLabels(text).toLowerCase();
+  if (!t) return false;
+  // Demonstrativ-Bezug auf eine FARBE/einen Ton ("diese Farbe", "diesen Ton" …)
+  if (/\b(diese|diesen|dieser|dieses)\s+(farbe|farbton|ton|t[oö]ne|nuance|colou?r)\b/.test(t)) return true;
+  // "die hier" / "das da" usw.
+  if (/\b(die|das|den)\s+(hier|da)\b/.test(t)) return true;
+  // "sowas", "so eine", "genau das/die"
+  if (/\bso\s?(was|ein|eine|einen)\b/.test(t)) return true;
+  if (/\bgenau\s+(das|die|den|sowas)\b/.test(t)) return true;
+  return false;
+}
+
+/**
  * Reine Emoji-/Mini-Bestätigungs-Reaktion ohne Inhalt?
  * ("😍", "❤️", "ok", "danke", "👍" …)
  */
@@ -120,9 +144,15 @@ export function shouldBotIgnore(text: string, attachments: TriageAttachment[] = 
 
   const hasEngagement = atts.some(a => ENGAGEMENT_TYPES.has(a.type));
 
-  // Engagement-Attachment (Story-Mention etc.) → nur antworten bei echtem Anliegen.
+  // Engagement-Attachment (Story-Mention/-Reply etc.):
   if (hasEngagement) {
-    return !hasRealIntent(text);
+    if (!hasRealIntent(text)) return true;            // kein Anliegen → ignorieren
+    // Anliegen DA, aber es bezieht sich demonstrativ auf die Story/das Bild,
+    // das wir NICHT sehen ("diese Farbe in 60cm?"). Der Bot würde die Farbe
+    // raten/halluzinieren → NICHT automatisch antworten. Die MA sieht die
+    // Story auf Instagram und antwortet (oder fragt nach dem Farbnamen).
+    if (referencesUnseenVisual(text)) return true;
+    return false;
   }
 
   // Kein Anhang: reine Emoji/Mini-Ack ohne Anliegen → ignorieren.

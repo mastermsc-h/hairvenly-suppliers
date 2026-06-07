@@ -46,6 +46,12 @@ const IGNORE = [
   ["geteilter Post", "[Beitrag]", [{ type: "ig_post" }]],
   ["geteiltes Reel", "", [{ type: "ig_reel" }]],
   ["share leer", "", [{ type: "share" }]],
+  // Bug 08.06: Story-Reply mit demonstrativem Bezug auf die (unsichtbare)
+  // Story-Farbe → Bot würde die Farbe raten/halluzinieren (#2E) → IGNORIEREN.
+  ["Story-Reply diese Farbe", "Kann ich diese Farbe bei euch in Onlineshop in 60 cm finden?", [{ type: "story_reply" }]],
+  ["Story-Reply das hier", "habt ihr das hier auch in 60cm?", [{ type: "story_reply" }]],
+  ["Story-Reply diesen Ton", "gibt es diesen Ton auch als Tape?", [{ type: "story_reply" }]],
+  ["Story-Reply sowas", "sowas in blond, habt ihr das?", [{ type: "story_reply" }]],
 ];
 for (const [name, text, atts] of IGNORE) check("IGNORE " + name, shouldBotIgnore(text, atts), true);
 
@@ -56,6 +62,10 @@ const ANSWER = [
   ["Story-Mention + Frage", "habt ihr die Tapes noch?", [{ type: "story_mention" }]],
   ["Story-Reply + Frage", "wie viel kostet das?", [{ type: "story_reply" }]],
   ["Story-Reply + Anliegen", "ich haette interesse an tapes", [{ type: "story_reply" }]],
+  // Story-Reply mit KONKRETER Frage ohne Bildbezug → weiter beantworten (kein Über-Blocken).
+  ["Story-Reply konkrete Frage", "habt ihr 60cm Tapes auf Lager?", [{ type: "story_reply" }]],
+  // "diese Farbe" MIT echtem Foto → Bot kann analysieren → antworten.
+  ["Foto + diese Farbe", "diese Farbe in 60cm?", [{ type: "image", url: "u" }]],
   ["Verfuegbarkeit", "habt ihr 5p18a auf lager?", []],
   ["Preis", "was kostet eine verlaengerung", []],
   ["Termin", "kann ich einen termin buchen?", []],
