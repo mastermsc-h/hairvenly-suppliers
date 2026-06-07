@@ -20,7 +20,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 // bis 300s (5 Min) maxDuration.
 export const maxDuration = 300;
 import { verifyMetaSignature, getInstagramUsername, getInstagramUserInfo, sendInstagramMessage } from "@/lib/messaging/meta";
-import { shouldBotIgnore, isClosingAcknowledgement } from "@/lib/chatbot/message-triage";
+import { shouldBotIgnore, isClosingAcknowledgement, referencesUnseenVisual } from "@/lib/chatbot/message-triage";
 
 // GET: Webhook-Verification von Meta beim Setup
 export async function GET(req: NextRequest) {
@@ -682,6 +682,16 @@ async function routeIncoming(opts: {
     }
   }
 
+  // 💶 SACHLICHE SELF-SERVE-FOLGEFRAGE (Preis/Gramm/Menge/Lager/Verfügbarkeit/
+  // Länge): faktisch + tool-gestützt → soll IMMER beantwortet werden, AUCH wenn
+  // die Session als color_advice getaggt ist (User-Feedback 08.06: "wie teuer
+  // 7 Packungen, wieviel Gramm?" blieb unbeantwortet, weil Session=Farbberatung).
+  // Bezieht sich die Frage demonstrativ auf etwas Unsichtbares ("diese Farbe …"),
+  // zählt sie NICHT als sachlich (Halluzinations-Schutz) → bleibt gesperrt.
+  const FACTUAL_FOLLOWUP_RE = /\b(wie\s*viel|wieviel|wie\s*teuer|was\s+kostet|preis|kostet|kosten|gramm|packung|paket|st[üu]ck|€|euro|auf\s*lager|verf[üu]gbar|lieferzeit|wann\s+(kommt|wieder|da)|in\s*\d+\s*cm)\b/i;
+  const isFactualSelfServe =
+    FACTUAL_FOLLOWUP_RE.test(opts.text || "") && !referencesUnseenVisual(opts.text || "");
+
   // 🛑 GRANULAR KILL-SWITCH (via lib/chatbot/settings.ts)
   // User-Anweisung 2026-06-02: Wenn ein Chat BEWUSST auf "auto" (Auto-Antwort)
   // gestellt ist, soll der Bot IMMER automatisch antworten — EGAL welches
@@ -694,12 +704,14 @@ async function routeIncoming(opts: {
   // wurde, sondern global vorsichtig agieren soll.
   // AUSNAHME wie bisher: autoOverrideType (intro / color_no_photo) umgeht den
   // Kill-Switch ebenfalls. Manual-Trigger ("Antwort generieren") ist nicht betroffen.
-  if (!autoOverrideType && effectiveBotMode !== "auto") {
+  if (!autoOverrideType && effectiveBotMode !== "auto" && !isFactualSelfServe) {
     const { isProactiveGenerationEnabled } = await import("@/lib/chatbot/settings");
     if (!(await isProactiveGenerationEnabled(sessionCategory))) {
       console.log(`[meta-webhook] PROACTIVE-DISABLED (mode=${effectiveBotMode}, category=${sessionCategory ?? "none"}) — skip bot session=${session.id.slice(0,8)}`);
       return;
     }
+  } else if (isFactualSelfServe && effectiveBotMode !== "auto") {
+    console.log(`[meta-webhook] kill-switch BYPASSED — sachliche Self-Service-Frage (Preis/Menge/Lager) wird beantwortet trotz category=${sessionCategory ?? "none"}, session=${session.id.slice(0,8)}`);
   } else if (effectiveBotMode === "auto") {
     console.log(`[meta-webhook] kill-switch BYPASSED — bot_mode=auto (bewusste Auto-Antwort, antwortet immer) session=${session.id.slice(0,8)}`);
   } else {
@@ -719,8 +731,10 @@ async function routeIncoming(opts: {
   //
   // Der explizite "Antwort generieren"-Klick (generateDraftOnDemand) ist
   // ohnehin nie betroffen.
+  // Sachliche Self-Service-Folgefragen (Preis/Menge/Lager …) sind auch in einer
+  // color_advice-Session erlaubt — nur echte Farb-/Modell-BERATUNG bleibt gesperrt.
   const NO_AUTOBOT_CATEGORIES = new Set(["color_advice", "models"]);
-  if (botMode !== "auto" && sessionCategory && NO_AUTOBOT_CATEGORIES.has(sessionCategory)) {
+  if (botMode !== "auto" && !isFactualSelfServe && sessionCategory && NO_AUTOBOT_CATEGORIES.has(sessionCategory)) {
     console.log(`[meta-webhook] NO-AUTOBOT-CATEGORY (${sessionCategory}, mode=${botMode}) — kein Autobot, session=${session.id.slice(0,8)}`);
     return;
   }
