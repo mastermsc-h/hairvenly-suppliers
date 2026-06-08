@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ExternalLink, Package, Wallet, Plus, Archive, Weight, Split, Truck } from "lucide-react";
 import SupplierLieferscheinButton from "./supplier-lieferschein-button";
 import ShipmentSubRow from "./shipment-subrow";
+import ToggleShipmentsButton from "./toggle-shipments-button";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { usd, date } from "@/lib/format";
@@ -321,12 +322,10 @@ export default async function DashboardPage() {
                                 {o.label}
                               </Link>
                               {ordersWithShipments.has(o.id) && (
-                                <span
-                                  className="inline-flex items-center gap-0.5 text-[9px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5 py-0.5"
-                                  title="Diese Bestellung ist in Teillieferungen aufgeteilt"
-                                >
-                                  <Split size={9} /> Teillieferungen
-                                </span>
+                                <ToggleShipmentsButton
+                                  orderId={o.id}
+                                  count={(shipmentsByOrder.get(o.id) ?? []).length}
+                                />
                               )}
                             </div>
                             {(o.tags ?? []).length > 0 && (

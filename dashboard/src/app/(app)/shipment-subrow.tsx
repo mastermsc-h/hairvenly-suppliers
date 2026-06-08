@@ -68,7 +68,11 @@ export default function ShipmentSubRow({
   const lieferschein = docs.find((d) => d.kind === "packing_details");
 
   return (
-    <tr className="bg-purple-50/30 border-l-4 border-purple-300 hover:bg-purple-50/60 transition">
+    <tr
+      data-ship-of={shipment.order_id}
+      style={{ display: "none" }}
+      className="bg-purple-50/30 border-l-4 border-purple-300 hover:bg-purple-50/60 transition"
+    >
       {/* BEZEICHNUNG */}
       <td className="px-5 py-1.5 pl-10">
         <div className="inline-flex items-center gap-1.5 text-xs">
@@ -98,11 +102,11 @@ export default function ShipmentSubRow({
               type="button"
               onClick={markArrived}
               disabled={pending}
-              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 disabled:opacity-50"
-              title="Als angekommen markieren — heute"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-white text-neutral-600 border border-neutral-300 hover:bg-neutral-50 hover:text-neutral-900 hover:border-neutral-400 disabled:opacity-50"
+              title="Klicken: arrived_at = heute. Teillieferung verschwindet danach aus 'Unterwegs' und Chatbot."
             >
-              {pending ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
-              angekommen
+              {pending && <Loader2 size={10} className="animate-spin" />}
+              als angekommen markieren
             </button>
           )}
         </div>
