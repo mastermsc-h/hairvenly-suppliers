@@ -359,7 +359,7 @@ export default async function DashboardPage() {
                             {(() => {
                               const ships = shipmentsByOrder.get(o.id);
                               if (ships && ships.length > 0) {
-                                return <div className="mt-0.5"><ShipmentsCell shipments={ships} /></div>;
+                                return <div className="mt-0.5"><ShipmentsCell shipments={ships} canEdit={profile.is_admin} /></div>;
                               }
                               return (
                                 <TrackingCell
@@ -446,7 +446,7 @@ export default async function DashboardPage() {
                             {(() => {
                               const ships = shipmentsByOrder.get(o.id);
                               if (ships && ships.length > 0) {
-                                return <div className="mt-1"><ShipmentsCell shipments={ships} /></div>;
+                                return <div className="mt-1"><ShipmentsCell shipments={ships} canEdit={profile.is_admin} /></div>;
                               }
                               return (
                                 <TrackingCell

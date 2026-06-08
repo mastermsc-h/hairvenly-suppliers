@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronDown, ChevronRight, Truck, Calendar, ExternalLink, Package } from "lucide-react";
+import { useState, useTransition } from "react";
+import { ChevronDown, ChevronRight, Truck, Calendar, ExternalLink, Package, Check, Loader2 } from "lucide-react";
 import { date as fmtDate } from "@/lib/format";
+import { markShipmentArrived } from "@/lib/actions/shipments";
 
 export interface ShipmentLite {
   id: string;
@@ -84,8 +85,20 @@ export function ShipmentProgress({
  * Collapsed: "▸ 2 Teillieferungen" pill button
  * Expanded: list of Teil 1/2/... with their own ETA + tracking link + status
  */
-export default function ShipmentsCell({ shipments }: { shipments: ShipmentLite[] }) {
+export default function ShipmentsCell({ shipments, canEdit = false }: { shipments: ShipmentLite[]; canEdit?: boolean }) {
   const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [pendingId, setPendingId] = useState<string | null>(null);
+
+  function markArrived(id: string, label: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm(`${label} als angekommen markieren (heute)?`)) return;
+    setPendingId(id);
+    startTransition(async () => {
+      await markShipmentArrived(id);
+      setPendingId(null);
+    });
+  }
 
   if (shipments.length === 0) return null;
 
@@ -118,6 +131,18 @@ export default function ShipmentsCell({ shipments }: { shipments: ShipmentLite[]
                     <span className={`w-1 h-1 rounded-full ${st.dot}`} />
                     {st.label}
                   </span>
+                  {canEdit && !s.arrived_at && (
+                    <button
+                      type="button"
+                      onClick={(e) => markArrived(s.id, label, e)}
+                      disabled={pending && pendingId === s.id}
+                      className="ml-auto inline-flex items-center gap-0.5 px-1 py-px rounded text-[9px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 disabled:opacity-50"
+                      title={`${label} als angekommen markieren (heute) — wird aus 'Unterwegs' & Chatbot entfernt`}
+                    >
+                      {pending && pendingId === s.id ? <Loader2 size={9} className="animate-spin" /> : <Check size={9} />}
+                      angekommen
+                    </button>
+                  )}
                 </div>
                 {s.eta && (
                   <div className="text-purple-700/80 inline-flex items-center gap-0.5">
