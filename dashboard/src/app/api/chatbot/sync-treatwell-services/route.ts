@@ -22,7 +22,7 @@ import { requireProfile } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { scrapeTreatwellServices, type TreatwellService } from "@/lib/treatwell/scraper";
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 interface SalonServiceRow {
   id: string;
@@ -105,101 +105,91 @@ export async function POST() {
     );
   }
 
-  // 2) Bestehende salon_services laden (für Diff + Deaktivieren obsoleter)
-  const svc = createServiceClient();
-  const { data: existingRaw } = await svc
-    .from("salon_services")
-    .select("id, category, service, price_min, price_max, duration_min, notes, display_order, active");
-  const existing = (existingRaw || []) as SalonServiceRow[];
-  const existingByLabel = new Map<string, SalonServiceRow>();
-  for (const row of existing) {
-    existingByLabel.set(row.service.toLowerCase().trim(), row);
-  }
+  // 2) Verarbeitung — KOMPLETT in try/catch, damit die Route IMMER JSON
+  // zurückgibt (vorher: unhandled Fehler im Upsert → HTML-500 "An error o…",
+  // der Client konnte es nicht parsen).
+  try {
+    const svc = createServiceClient();
+    const { data: existingRaw, error: loadErr } = await svc
+      .from("salon_services")
+      .select("id, category, service, price_min, price_max, duration_min, notes, display_order, active");
+    if (loadErr) throw new Error(`Laden der salon_services fehlgeschlagen: ${loadErr.message}`);
+    const existing = (existingRaw || []) as SalonServiceRow[];
+    const existingByLabel = new Map<string, SalonServiceRow>();
+    for (const row of existing) existingByLabel.set(row.service.toLowerCase().trim(), row);
 
-  // 3) Pro Scrape-Eintrag: upsert
-  let inserted = 0;
-  let updated = 0;
-  let unchanged = 0;
-  const seenLabels = new Set<string>();
-  // display_order: Reihenfolge der Scrape behalten — 10er-Schritte für spätere Einschübe
-  let order = 10;
-  for (const s of scrape.services) {
-    const label = buildServiceLabel(s);
-    const labelKey = label.toLowerCase().trim();
-    seenLabels.add(labelKey);
-    const category = mapCategory(s);
-    const noteParts: string[] = [];
-    if (s.treatment_id) noteParts.push(`tw_id=${s.treatment_id}`);
-    if (s.description) noteParts.push(s.description);
-    const notes = noteParts.join(" | ") || null;
-    const row = {
-      category,
-      service: label,
-      price_min: s.price_min,
-      price_max: s.price_max,
-      duration_min: s.duration_min,
-      notes,
-      display_order: order,
-      active: true,
-    };
-    order += 10;
+    // 3) Inserts/Updates SAMMELN (nicht sequenziell awaiten → sonst Timeout bei
+    //    ~100 Services). Danach in parallelen Batches ausführen.
+    let inserted = 0, updated = 0, unchanged = 0;
+    const seenLabels = new Set<string>();
+    const ops: Promise<unknown>[] = [];
+    let order = 10;
+    for (const s of scrape.services) {
+      const label = buildServiceLabel(s);
+      const labelKey = label.toLowerCase().trim();
+      seenLabels.add(labelKey);
+      const category = mapCategory(s);
+      const noteParts: string[] = [];
+      if (s.treatment_id) noteParts.push(`tw_id=${s.treatment_id}`);
+      if (s.description) noteParts.push(s.description);
+      const notes = noteParts.join(" | ") || null;
+      const row = {
+        category, service: label,
+        price_min: s.price_min, price_max: s.price_max,
+        duration_min: s.duration_min, notes, display_order: order, active: true,
+      };
+      order += 10;
 
-    const old = existingByLabel.get(labelKey);
-    if (!old) {
-      await svc.from("salon_services").insert(row);
-      inserted++;
-    } else {
-      // Diff: nur updaten wenn sich was geändert hat
-      const changed =
-        old.category !== row.category ||
-        old.price_min !== row.price_min ||
-        old.price_max !== row.price_max ||
-        old.duration_min !== row.duration_min ||
-        !old.active ||
-        (old.notes || "") !== (row.notes || "");
-      if (changed) {
-        await svc
-          .from("salon_services")
-          .update({
-            category: row.category,
-            price_min: row.price_min,
-            price_max: row.price_max,
-            duration_min: row.duration_min,
-            notes: row.notes,
-            display_order: row.display_order,
-            active: true,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", old.id);
-        updated++;
+      const old = existingByLabel.get(labelKey);
+      if (!old) {
+        ops.push(Promise.resolve(svc.from("salon_services").insert(row)));
+        inserted++;
       } else {
-        unchanged++;
+        const changed =
+          old.category !== row.category ||
+          old.price_min !== row.price_min ||
+          old.price_max !== row.price_max ||
+          old.duration_min !== row.duration_min ||
+          !old.active ||
+          (old.notes || "") !== (row.notes || "");
+        if (changed) {
+          ops.push(Promise.resolve(svc.from("salon_services").update({
+            category: row.category, price_min: row.price_min, price_max: row.price_max,
+            duration_min: row.duration_min, notes: row.notes, display_order: row.display_order,
+            active: true, updated_at: new Date().toISOString(),
+          }).eq("id", old.id)));
+          updated++;
+        } else { unchanged++; }
       }
     }
-  }
 
-  // 4) Obsolet gewordene Services auf active=false setzen
-  //    (nicht hart löschen — Historie/Audit bleibt)
-  const toDeactivate = existing.filter(
-    (r) => r.active && !seenLabels.has(r.service.toLowerCase().trim())
-  );
-  let deactivated = 0;
-  for (const row of toDeactivate) {
-    await svc
-      .from("salon_services")
-      .update({ active: false, updated_at: new Date().toISOString() })
-      .eq("id", row.id);
-    deactivated++;
-  }
+    // 4) Obsolet gewordene Services auf active=false (nicht hart löschen)
+    const toDeactivate = existing.filter(
+      (r) => r.active && !seenLabels.has(r.service.toLowerCase().trim())
+    );
+    for (const row of toDeactivate) {
+      ops.push(Promise.resolve(svc.from("salon_services").update({
+        active: false, updated_at: new Date().toISOString(),
+      }).eq("id", row.id)));
+    }
 
-  return NextResponse.json({
-    ok: true,
-    source_url: scrape.sourceUrl,
-    scraped_at: scrape.scrapedAt,
-    scraped_count: scrape.services.length,
-    inserted,
-    updated,
-    unchanged,
-    deactivated,
-  });
+    // In Batches von 25 parallel ausführen — schnell + pooler-schonend.
+    for (let i = 0; i < ops.length; i += 25) {
+      await Promise.all(ops.slice(i, i + 25));
+    }
+
+    return NextResponse.json({
+      ok: true,
+      source_url: scrape.sourceUrl,
+      scraped_at: scrape.scrapedAt,
+      scraped_count: scrape.services.length,
+      inserted, updated, unchanged, deactivated: toDeactivate.length,
+    });
+  } catch (e) {
+    console.error("[sync-treatwell] Verarbeitung fehlgeschlagen:", e);
+    return NextResponse.json(
+      { error: "Verarbeitung fehlgeschlagen", details: (e as Error).message },
+      { status: 500 }
+    );
+  }
 }
