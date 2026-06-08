@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown, AlertTriangle, Mail, CornerUpLeft, Info } from "lucide-react";
+import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown, AlertTriangle, Mail, CornerUpLeft, Info, BookmarkPlus, Loader2 } from "lucide-react";
 import CategorySelector from "./category-selector";
 import AdditionalCategoriesSelector from "./additional-categories-selector";
 import AddToWaitlistButton from "./add-to-waitlist-button";
@@ -105,6 +105,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
   const [generating, setGenerating] = useState(false);
   const [showModeSettings, setShowModeSettings] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [faqQuestion, setFaqQuestion] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // 🛡️ GRÄTSCH-SCHUTZ (MA-Aktiv-Guard) — Live-Anzeige.
@@ -805,6 +806,7 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             signatureName={session.bot_signature_name}
             onDeleted={() => setMessages(curr => curr.filter(x => x.id !== m.id))}
             onImageClick={(url) => setLightboxImage(url)}
+            onSaveFaq={(q) => setFaqQuestion(q)}
           />
         ))}
       </div>
@@ -833,6 +835,15 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             onClick={(e) => e.stopPropagation()}
           />
         </div>
+      )}
+
+      {/* 📌 Als-FAQ-speichern-Popup (aus der Kundennachricht heraus) */}
+      {faqQuestion !== null && (
+        <SaveFaqModal
+          question={faqQuestion}
+          initialTopic={categoryToFaqTopic(session.category)}
+          onClose={() => setFaqQuestion(null)}
+        />
       )}
 
       {/* Input — nur wenn übernommen */}
@@ -970,7 +981,84 @@ function formatMsgTime(iso: string): string {
   return `${d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" })} · ${time}`;
 }
 
-function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Message; signatureName: string | null; onDeleted: () => void; onImageClick?: (url: string) => void }) {
+// Session-Kategorie → FAQ-Thema (Vorauswahl im Speichern-Popup).
+const FAQ_TOPICS = ["produkte","farbberatung","preise","lager","versand","pflege","reklamation","rabatt","zahlung","gewerbe","termine","anfaenger","modell","kooperation","gewinnspiel","sonstiges"] as const;
+function categoryToFaqTopic(cat: string | null | undefined): string {
+  const map: Record<string, string> = {
+    color_advice: "farbberatung", pricing: "preise", availability: "lager",
+    appointment: "termine", order_status: "versand", complaint: "reklamation",
+    gewerbe: "gewerbe", models: "modell", partnership: "kooperation",
+  };
+  return (cat && map[cat]) || "sonstiges";
+}
+
+/** Popup: Kundenfrage als FAQ speichern → Bot beantwortet sie künftig automatisch. */
+function SaveFaqModal({ question, initialTopic, onClose }: { question: string; initialTopic: string; onClose: () => void }) {
+  const [q, setQ] = useState(question);
+  const [topic, setTopic] = useState(initialTopic);
+  const [answer, setAnswer] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  async function save() {
+    if (!answer.trim()) { setError("Bitte eine Antwort eingeben."); return; }
+    if (!q.trim()) { setError("Die Frage darf nicht leer sein."); return; }
+    setSaving(true); setError(null);
+    try {
+      const res = await fetch("/api/chatbot/faq", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic, question: q.trim(), answer: answer.trim() }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || `Fehler ${res.status}`);
+      }
+      setSaved(true);
+      setTimeout(onClose, 1000);
+    } catch (e) { setError((e as Error).message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-neutral-900 inline-flex items-center gap-2"><BookmarkPlus size={16} className="text-pink-600" /> Als FAQ speichern</h2>
+          <button onClick={onClose} className="text-neutral-400 hover:text-neutral-700"><X size={18} /></button>
+        </div>
+        <p className="text-xs text-neutral-500">Der Bot nutzt diese Frage + Antwort ab sofort automatisch, wenn Kundinnen Ähnliches fragen.</p>
+        <label className="block text-xs font-medium text-neutral-600">Thema
+          <select value={topic} onChange={(e) => setTopic(e.target.value)} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900">
+            {FAQ_TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </label>
+        <label className="block text-xs font-medium text-neutral-600">Frage (Kundin)
+          <textarea value={q} onChange={(e) => setQ(e.target.value)} rows={2} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900" />
+        </label>
+        <label className="block text-xs font-medium text-neutral-600">Antwort (was der Bot sagen soll)
+          <textarea value={answer} onChange={(e) => setAnswer(e.target.value)} rows={4} autoFocus placeholder="z.B. Ja, die Mini Tapes sind glatt — du kannst sie aber lockig stylen 💕" className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900" />
+        </label>
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        <div className="flex items-center justify-end gap-2 pt-1">
+          {saved ? (
+            <span className="text-sm text-emerald-600 inline-flex items-center gap-1"><Check size={15} /> gespeichert</span>
+          ) : (
+            <>
+              <button onClick={onClose} className="px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100 rounded-lg">Abbrechen</button>
+              <button onClick={save} disabled={saving} className="bg-neutral-900 text-white text-sm font-medium rounded-lg px-4 py-2 disabled:opacity-50 inline-flex items-center gap-1.5">
+                {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Speichern
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MessageRow({ msg, signatureName, onDeleted, onImageClick, onSaveFaq }: { msg: Message; signatureName: string | null; onDeleted: () => void; onImageClick?: (url: string) => void; onSaveFaq?: (question: string) => void }) {
   const time = formatMsgTime(msg.created_at);
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
@@ -1140,7 +1228,18 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick }: { msg: Mess
           )}
           <div className="text-[10px] text-neutral-400 mt-0.5">Kunde · {time}</div>
         </div>
-        <div className="self-start">{DeleteBtn}</div>
+        <div className="self-start flex flex-col items-center gap-1">
+          {onSaveFaq && (msg.content || "").trim() && (
+            <button
+              onClick={() => onSaveFaq((msg.content || "").trim())}
+              title="Diese Frage als FAQ speichern — damit der Bot sie künftig automatisch beantwortet"
+              className="opacity-30 group-hover:opacity-100 transition text-neutral-400 hover:text-pink-600"
+            >
+              <BookmarkPlus size={14} />
+            </button>
+          )}
+          {DeleteBtn}
+        </div>
       </div>
     );
   }
