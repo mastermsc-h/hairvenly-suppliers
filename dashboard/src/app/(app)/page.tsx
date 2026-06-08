@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ExternalLink, Package, Wallet, Plus, Archive, Weight, Split, Truck } from "lucide-react";
 import SupplierLieferscheinButton from "./supplier-lieferschein-button";
+import ShipmentSubRow from "./shipment-subrow";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { usd, date } from "@/lib/format";
@@ -309,7 +310,7 @@ export default async function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-100">
-                      {openOrders.map((o) => (
+                      {openOrders.map((o) => [
                         <tr key={o.id} className="odd:bg-white even:bg-neutral-50/60 hover:bg-indigo-50/40 transition">
                           <td className="px-5 py-2.5">
                             <div className="inline-flex items-center gap-1.5">
@@ -356,22 +357,14 @@ export default async function DashboardPage() {
                                 {Number(o.weight_kg)} kg
                               </div>
                             )}
-                            {(() => {
-                              const ships = shipmentsByOrder.get(o.id);
-                              if (ships && ships.length > 0) {
-                                return <div className="mt-0.5"><ShipmentsCell shipments={ships} canEdit={profile.is_admin} /></div>;
-                              }
-                              return (
-                                <TrackingCell
-                                  orderId={o.id}
-                                  number={o.tracking_number}
-                                  url={o.tracking_url}
-                                  canEdit={canEditOrder}
-                                  maxWidth={140}
-                                  locale={locale}
-                                />
-                              );
-                            })()}
+                            <TrackingCell
+                              orderId={o.id}
+                              number={o.tracking_number}
+                              url={o.tracking_url}
+                              canEdit={canEditOrder}
+                              maxWidth={140}
+                              locale={locale}
+                            />
                           </td>
                           {showDocs && (
                             <td className="px-5 py-2.5">
@@ -405,8 +398,24 @@ export default async function DashboardPage() {
                               locale={locale}
                             />
                           </td>
-                        </tr>
-                      ))}
+                        </tr>,
+                        // Sub-Rows: pro Teillieferung eine eigene Zeile mit
+                        // Status / Liefertermin / Lieferschein-Dokument
+                        ...(shipmentsByOrder.get(o.id) ?? []).map((ship, sIdx) => {
+                          const shipDocs = (visibleDocsFor(o.id) ?? []).filter((d) => d.shipment_id === ship.id);
+                          const restCols = (showInvoices ? 2 : 0) + 1; // Invoice/Open + Notes
+                          return (
+                            <ShipmentSubRow
+                              key={`sub-${ship.id}`}
+                              shipment={ship}
+                              index={sIdx}
+                              docs={shipDocs}
+                              canEdit={profile.is_admin}
+                              colspan_invoice={restCols}
+                            />
+                          );
+                        }),
+                      ])}
                     </tbody>
                   </table>
                   {/* Mobile card list */}
