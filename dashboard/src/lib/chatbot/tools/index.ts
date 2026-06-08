@@ -1129,7 +1129,7 @@ const getAvailableColors: ToolDef = {
     // Eindeutige Farbnamen — sammle Methoden, Längen, URLs UND Stock-Status.
     // WICHTIG: variants[] enthält URL PRO Methode+Länge — der Bot soll daraus
     // den richtigen Link wählen, nicht "shopify_url" der nur die erste Variante ist.
-    type ColorVariant = { method: string; length: string; shopify_url: string | null };
+    type ColorVariant = { method: string; length: string; shopify_url: string | null; in_stock: boolean; eta: string | null };
     type ColorEntry = {
       lengths: Set<string>;
       methods: Set<string>;
@@ -1174,10 +1174,23 @@ const getAvailableColors: ToolDef = {
       const methodName = r.length?.method?.name || "";
       if (lenStr) entry.lengths.add(lenStr);
       if (methodName) entry.methods.add(methodName);
-      // Pro Methode+Länge eine Variante mit der KORREKTEN URL
+      // Pro Methode+Länge eine Variante mit der KORREKTEN URL + dem EXAKTEN
+      // Bestand DIESER Variante. Verhindert den Bug (08.06): Farbe X gilt als
+      // "auf Lager", weil eine ANDERE Methode (z.B. Mini Tape) Bestand hat —
+      // der Bot überträgt das fälschlich auf die ausverkauften Standard Tapes.
       if (methodName && r.shopify_url) {
         const dup = entry.variants.some(v => v.method === methodName && v.length === lenStr && v.shopify_url === r.shopify_url);
-        if (!dup) entry.variants.push({ method: methodName, length: lenStr, shopify_url: r.shopify_url });
+        if (!dup) {
+          const vStock = r.name_shopify ? stockByName.get(normN(r.name_shopify)) : null;
+          const vUw = r.name_shopify ? unterwegsByName.get(normN(r.name_shopify)) : null;
+          entry.variants.push({
+            method: methodName,
+            length: lenStr,
+            shopify_url: r.shopify_url,
+            in_stock: !!(vStock && vStock.totalWeight > 0),
+            eta: vUw?.etaText || null,
+          });
+        }
       }
       if (r.shopify_url && !entry.shopify_url) entry.shopify_url = r.shopify_url;
 
@@ -1232,13 +1245,16 @@ const getAvailableColors: ToolDef = {
       variants: info.variants,
       // shopify_url bleibt als Quick-Fallback für Cases ohne spezifische Methode
       shopify_url: info.shopify_url,
-      in_stock: info.in_stock,
+      // ⚠️ in_stock_any_variant = IRGENDEINE Variante der Farbe ist auf Lager
+      // (z.B. nur die Mini Tapes). NIEMALS daraus schließen, dass eine BESTIMMTE
+      // Methode auf Lager ist — dafür variants[].in_stock prüfen!
+      in_stock_any_variant: info.in_stock,
       eta: info.eta,
     }));
 
-    // Sortiere: in_stock zuerst, dann mit ETA, dann ohne
+    // Sortiere: (irgendeine Variante) auf Lager zuerst, dann mit ETA, dann ohne
     colors.sort((a, b) => {
-      if (a.in_stock !== b.in_stock) return a.in_stock ? -1 : 1;
+      if (a.in_stock_any_variant !== b.in_stock_any_variant) return a.in_stock_any_variant ? -1 : 1;
       if (!!a.eta !== !!b.eta) return a.eta ? -1 : 1;
       return 0;
     });
@@ -1258,6 +1274,10 @@ const getAvailableColors: ToolDef = {
           "🟢 PFLICHT-VERFÜGBARKEITS-CHECK (User-Regel 06.06): Bevor du eine konkrete Farbe empfiehlst, " +
           "rufe IMMER get_stock_eta für genau diese Farbe + Methode + Länge auf und richte die Aussage " +
           "EXAKT nach dem Ergebnis: " +
+          "⚠️ BESTAND IST PRO VARIANTE (Methode+Länge): nutze variants[].in_stock der GENAU passenden " +
+          "Methode+Länge. 'in_stock_any_variant' heißt nur, dass IRGENDEINE Variante Bestand hat (z.B. nur " +
+          "die Mini Tapes) — daraus NIEMALS ableiten, dass die Standard Tapes auf Lager sind! Bug 08.06: " +
+          "EBONY war als Mini Tape da, der Bot sagte fälschlich 'EBONY Standard Tapes auf Lager'. " +
           "(1) auf Lager → kurz 'sofort da'. " +
           "(2) nicht auf Lager, aber ETA bekannt → KEINE 'sofort'-Aussage, sondern kurz 'kommt ca. am <ETA>'. " +
           "(3) weder Lager noch ETA → ehrlich sagen 'die haben wir aktuell leider nicht auf Lager 🥲' UND " +
