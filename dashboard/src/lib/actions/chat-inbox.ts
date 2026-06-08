@@ -98,6 +98,16 @@ export async function sendHumanMessage(sessionId: string, content: string) {
   revalidatePath(`/chatbot/inbox/${sessionId}`);
 }
 
+/** Markiert eine Kundennachricht als "in die FAQ gespeichert" (nur UI-Marker,
+ *  damit das 📌-Icon farbig wird und man nicht doppelt speichert). */
+export async function markMessageSavedToFaq(messageId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  const svc = createServiceClient();
+  await svc.from("chat_messages").update({ saved_to_faq_at: new Date().toISOString() }).eq("id", messageId);
+}
+
 /** Gibt Session zurück an den Bot (Mitarbeiter ist fertig) */
 export async function resumeBot(sessionId: string) {
   const svc = createServiceClient();

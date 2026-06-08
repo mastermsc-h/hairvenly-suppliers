@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown, AlertTriangle, Mail, CornerUpLeft, Info, BookmarkPlus, Loader2 } from "lucide-react";
+import { Bot, User, UserCheck, Send, Hand, RotateCcw, X, Wrench, Sparkles, Trash2, Power, Check, Wand2, ChevronDown, AlertTriangle, Mail, CornerUpLeft, Info, BookmarkPlus, BookmarkCheck, Loader2 } from "lucide-react";
 import CategorySelector from "./category-selector";
 import AdditionalCategoriesSelector from "./additional-categories-selector";
 import AddToWaitlistButton from "./add-to-waitlist-button";
@@ -28,6 +28,7 @@ import {
   markSessionAsOpened,
   toggleHumanOnly,
   deleteMessage,
+  markMessageSavedToFaq,
 } from "@/lib/actions/chat-inbox";
 import { cancelReservation } from "@/lib/actions/chat-reservations";
 
@@ -42,6 +43,7 @@ interface Message {
   teach_feedback_at?: string | null;
   teach_sentiment?: "positive" | "correction" | null;
   reply_to?: { id?: string | null; role: string; content_preview: string } | null;
+  saved_to_faq_at?: string | null;
   created_at: string;
 }
 
@@ -105,7 +107,10 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
   const [generating, setGenerating] = useState(false);
   const [showModeSettings, setShowModeSettings] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
-  const [faqQuestion, setFaqQuestion] = useState<string | null>(null);
+  const [faqTarget, setFaqTarget] = useState<{ question: string; messageId: string } | null>(null);
+  const [savedFaqIds, setSavedFaqIds] = useState<Set<string>>(
+    () => new Set(initialMessages.filter(m => m.saved_to_faq_at).map(m => m.id))
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // 🛡️ GRÄTSCH-SCHUTZ (MA-Aktiv-Guard) — Live-Anzeige.
@@ -806,7 +811,8 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
             signatureName={session.bot_signature_name}
             onDeleted={() => setMessages(curr => curr.filter(x => x.id !== m.id))}
             onImageClick={(url) => setLightboxImage(url)}
-            onSaveFaq={(q) => setFaqQuestion(q)}
+            onSaveFaq={(q) => setFaqTarget({ question: q, messageId: m.id })}
+            faqSaved={savedFaqIds.has(m.id)}
           />
         ))}
       </div>
@@ -838,11 +844,17 @@ export default function ChatSessionView({ session, initialMessages, avatarOption
       )}
 
       {/* 📌 Als-FAQ-speichern-Popup (aus der Kundennachricht heraus) */}
-      {faqQuestion !== null && (
+      {faqTarget !== null && (
         <SaveFaqModal
-          question={faqQuestion}
+          question={faqTarget.question}
           initialTopic={categoryToFaqTopic(session.category)}
-          onClose={() => setFaqQuestion(null)}
+          onClose={() => setFaqTarget(null)}
+          onSaved={() => {
+            const id = faqTarget.messageId;
+            setSavedFaqIds(prev => new Set(prev).add(id));
+            setMessages(curr => curr.map(x => x.id === id ? { ...x, saved_to_faq_at: new Date().toISOString() } : x));
+            startTransition(() => { void markMessageSavedToFaq(id).catch(() => {}); });
+          }}
         />
       )}
 
@@ -993,7 +1005,7 @@ function categoryToFaqTopic(cat: string | null | undefined): string {
 }
 
 /** Popup: Kundenfrage als FAQ speichern → Bot beantwortet sie künftig automatisch. */
-function SaveFaqModal({ question, initialTopic, onClose }: { question: string; initialTopic: string; onClose: () => void }) {
+function SaveFaqModal({ question, initialTopic, onClose, onSaved }: { question: string; initialTopic: string; onClose: () => void; onSaved: () => void }) {
   const [q, setQ] = useState(question);
   const [topic, setTopic] = useState(initialTopic);
   const [answer, setAnswer] = useState("");
@@ -1015,6 +1027,7 @@ function SaveFaqModal({ question, initialTopic, onClose }: { question: string; i
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error || `Fehler ${res.status}`);
       }
+      onSaved();
       setSaved(true);
       setTimeout(onClose, 1000);
     } catch (e) { setError((e as Error).message); }
@@ -1058,7 +1071,7 @@ function SaveFaqModal({ question, initialTopic, onClose }: { question: string; i
   );
 }
 
-function MessageRow({ msg, signatureName, onDeleted, onImageClick, onSaveFaq }: { msg: Message; signatureName: string | null; onDeleted: () => void; onImageClick?: (url: string) => void; onSaveFaq?: (question: string) => void }) {
+function MessageRow({ msg, signatureName, onDeleted, onImageClick, onSaveFaq, faqSaved }: { msg: Message; signatureName: string | null; onDeleted: () => void; onImageClick?: (url: string) => void; onSaveFaq?: (question: string) => void; faqSaved?: boolean }) {
   const time = formatMsgTime(msg.created_at);
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
@@ -1230,13 +1243,23 @@ function MessageRow({ msg, signatureName, onDeleted, onImageClick, onSaveFaq }: 
         </div>
         <div className="self-start flex flex-col items-center gap-1">
           {onSaveFaq && (msg.content || "").trim() && (
-            <button
-              onClick={() => onSaveFaq((msg.content || "").trim())}
-              title="Diese Frage als FAQ speichern — damit der Bot sie künftig automatisch beantwortet"
-              className="opacity-30 group-hover:opacity-100 transition text-neutral-400 hover:text-pink-600"
-            >
-              <BookmarkPlus size={14} />
-            </button>
+            faqSaved ? (
+              <button
+                onClick={() => onSaveFaq((msg.content || "").trim())}
+                title="Bereits als FAQ gespeichert ✓ — klicken zum erneut Speichern/Bearbeiten"
+                className="text-pink-600"
+              >
+                <BookmarkCheck size={14} />
+              </button>
+            ) : (
+              <button
+                onClick={() => onSaveFaq((msg.content || "").trim())}
+                title="Diese Frage als FAQ speichern — damit der Bot sie künftig automatisch beantwortet"
+                className="opacity-30 group-hover:opacity-100 transition text-neutral-400 hover:text-pink-600"
+              >
+                <BookmarkPlus size={14} />
+              </button>
+            )
           )}
           {DeleteBtn}
         </div>
