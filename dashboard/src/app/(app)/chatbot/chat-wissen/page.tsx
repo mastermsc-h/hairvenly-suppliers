@@ -3,6 +3,7 @@ import { requireProfile } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { BookOpen, Sparkles, Tag } from "lucide-react";
 import KnowledgeSearchBox from "./search-box";
+import AiSimilarSearch from "./ai-similar-search";
 import KnowledgeRow from "./knowledge-row";
 
 export const dynamic = "force-dynamic";
@@ -266,7 +267,10 @@ export default async function ChatWissenPage({ searchParams }: PageProps) {
         </p>
       </div>
 
-      {/* Test-Suche */}
+      {/* 🤖 KI-Ähnlichkeitssuche: Kundenfrage → sinngemäß ähnliche frühere Q&As */}
+      <AiSimilarSearch />
+
+      {/* Test-Suche (Stichwort/Volltext) */}
       <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm space-y-2">
         <div className="flex items-center gap-2">
           <Sparkles size={14} className="text-purple-600" />
