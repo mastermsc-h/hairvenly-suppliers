@@ -1,0 +1,25 @@
+#!/bin/sh
+# 🛡️ REGRESSION-GATE (User-Anweisung 09.06.2026)
+#
+# Blockiert jeden Push, wenn eine Chatbot-Smoke-Suite rot ist. Jede historische
+# Kundenbeschwerde ist als Testfall in dashboard/scripts/smoke/*.spec.mjs
+# einzementiert — gefixte Bugs dürfen NIE wieder still kaputtgehen.
+#
+# Aktivierung (einmalig pro Maschine):  git config core.hooksPath .githooks
+# Notfall-Bypass (bewusst + sichtbar):  git push --no-verify
+#
+# Bewusst NUR die Smoke-Suite (schnell, deterministisch). tsc/build bleiben
+# manuelle Pflicht vor dem Commit — der Hook prüft den Working Tree, und
+# parallele Sessions mit fremdem WIP sollen saubere Pushes nicht blockieren.
+
+repo_root="$(git rev-parse --show-toplevel)"
+echo ""
+echo "🛡️  Regression-Gate: Chatbot-Smoke-Suite läuft vor dem Push …"
+if ! node "$repo_root/dashboard/scripts/smoke/run-all.mjs"; then
+  echo "❌ PUSH BLOCKIERT — mindestens eine Smoke-Suite ist rot."
+  echo "   Ein bereits gefixter Bug wäre sonst wieder live gegangen."
+  echo "   Fix den Test (oder den Code) und pushe erneut."
+  echo "   Notfall-Bypass (nur bewusst!): git push --no-verify"
+  exit 1
+fi
+exit 0

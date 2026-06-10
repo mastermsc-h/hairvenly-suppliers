@@ -375,3 +375,18 @@ Mit der zentralen Pipeline jetzt strukturell behoben.
 
 …und es ist eine wiederkehrende Diskussion / ein wiederkehrender Bug:
 **das ist ein Bug in dieser Datei selbst**. Ergänzen, sofort.
+
+---
+
+## 7. Regression-Gate (seit 09.06.2026)
+
+**Regel: Kein Push ohne grüne Smoke-Suite.** Jede historische Kundenbeschwerde
+ist als Testfall in `scripts/smoke/*.spec.mjs` einzementiert (Stand 09.06:
+4 Suiten, 99 Fälle — Triage, Preis-, Verfügbarkeits-Halluzination, Tool-Zwang).
+
+- Runner: `npm run smoke` (findet neue `*.spec.mjs` automatisch)
+- Erzwungen via `.githooks/pre-push` (Repo-Root; aktiviert per
+  `git config core.hooksPath .githooks` — einmalig pro Maschine)
+- Notfall-Bypass: `git push --no-verify` (nur bewusst!)
+- **Pflicht bei jedem Bug-Fix:** der Fall + Sibling-Fälle kommen als Testfälle
+  in die passende Spec (oder eine neue) — im selben Commit wie der Fix.
