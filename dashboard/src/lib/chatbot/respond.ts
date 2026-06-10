@@ -141,6 +141,7 @@ import { BUSINESS_CONFIG } from "./business-config";
 import { stripColorUrlMismatch, limitUrls, stripFalseMediaLimitation, detectStrandedContactInfo, detectFalseOpeningClaim } from "./output-sanitizers";
 import { isLeanPromptEnabled, isFaqCompressionEnabled, isForceToolsEnabled } from "./settings";
 import { buildLeanHardRules } from "./lean-rules";
+import { stableCutoffIso, splitByCacheCutoff } from "./cache-stability";
 
 /**
  * Entfernt / ersetzt interne Lagerzahlen aus dem Bot-Output.
@@ -441,7 +442,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-05-31.cache-split-trainings.v1";
+const RESPOND_CODE_VERSION = "2026-06-09.learning-cache-decoupled.v1";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
@@ -843,14 +844,14 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   for (const t of wantedTopics) {
     if (!CORE_TOPICS.has(t)) extraWantedTopics.add(t);
   }
-  const [{ data: pinnedFaqs }, { data: coreTopicFaqs }, { data: extraTopicFaqs }] = await Promise.all([
+  const [{ data: pinnedFaqsRaw }, { data: coreTopicFaqsRaw }, { data: extraTopicFaqs }] = await Promise.all([
     svc.from("chatbot_faq")
-      .select("slug, topic, question, answer, answer_short")
+      .select("slug, topic, question, answer, answer_short, created_at, updated_at")
       .eq("active", true)
       .eq("pinned", true)
       .order("topic").order("order_idx"),
     svc.from("chatbot_faq")
-      .select("slug, topic, question, answer, answer_short")
+      .select("slug, topic, question, answer, answer_short, created_at, updated_at")
       .eq("active", true)
       .in("topic", Array.from(CORE_TOPICS))
       .order("topic").order("order_idx"),
@@ -862,21 +863,46 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
           .order("topic").order("order_idx")
       : Promise.resolve({ data: [] as { slug: string; topic: string; question: string; answer: string; answer_short: string | null }[] }),
   ]);
+  // 💰 LERNEN↔CACHE-ENTKOPPLUNG (Schritt B, 09.06): FAQs von HEUTE (neu oder
+  // editiert) gehen NICHT in den stabilen Cache-Block (würde ihn invalidieren
+  // → 66% der Kosten waren Cache-Writes), sondern in den variablen Block.
+  // Inhaltlich identisch wirksam — ab morgen wandern sie automatisch in den
+  // stabilen Block (1 Cache-Rebuild/Tag statt ~13). Siehe cache-stability.ts.
+  const faqCutoff = stableCutoffIso();
+  const pinnedSplit = splitByCacheCutoff(pinnedFaqsRaw || [], faqCutoff);
+  const coreSplit = splitByCacheCutoff(coreTopicFaqsRaw || [], faqCutoff);
+  const pinnedFaqs = pinnedSplit.consolidated;
+  const coreTopicFaqs = coreSplit.consolidated;
   // 💰 FAQ-KOMPRESSION (Flag): answer_short (fakttreue Kurzfassung) nutzen,
   // sofern vorhanden — sonst volle answer. Original bleibt unberührt.
   const faqCompression = await isFaqCompressionEnabled();
   const pickAnswer = (f: { answer: string; answer_short?: string | null }): string =>
     faqCompression && f.answer_short ? f.answer_short : f.answer;
-  // Stable: pinned + core
+  // Stable: pinned + core (nur konsolidierte, d.h. vor heute zuletzt geändert)
   const faqMap = new Map<string, { topic: string; question: string; answer: string }>();
   for (const f of pinnedFaqs || []) faqMap.set(f.slug, { topic: f.topic, question: f.question, answer: pickAnswer(f) });
   for (const f of coreTopicFaqs || []) if (!faqMap.has(f.slug)) faqMap.set(f.slug, { topic: f.topic, question: f.question, answer: pickAnswer(f) });
   const faqs = Array.from(faqMap.values());
-  // Variable: nur topic-extras, die NICHT bereits in stable sind
+  // Variable Teil 1: FRISCHE FAQs von heute (gleiche Autorität wie die
+  // Wissensdatenbank, nur im uncached Block — Cache bleibt heil).
   const stableSlugs = new Set<string>();
   for (const f of pinnedFaqs || []) stableSlugs.add(f.slug);
   for (const f of coreTopicFaqs || []) stableSlugs.add(f.slug);
-  const extraFaqs = (extraTopicFaqs || []).filter(f => !stableSlugs.has(f.slug));
+  const freshFaqMap = new Map<string, { topic: string; question: string; answer: string }>();
+  for (const f of [...pinnedSplit.fresh, ...coreSplit.fresh]) {
+    if (!stableSlugs.has(f.slug) && !freshFaqMap.has(f.slug)) {
+      freshFaqMap.set(f.slug, { topic: f.topic, question: f.question, answer: pickAnswer(f) });
+    }
+  }
+  if (freshFaqMap.size > 0) {
+    let freshBlock = "\n\n## 📚 WISSENSDATENBANK — NEUESTE EINTRÄGE (gleiche Verbindlichkeit wie die Wissensdatenbank oben: IMMER wahr)\n";
+    for (const f of freshFaqMap.values()) {
+      freshBlock += `### ${f.topic || "allgemein"}\n**F:** ${f.question}\n**A:** ${f.answer}\n\n`;
+    }
+    dynamicExtras += freshBlock;
+  }
+  // Variable Teil 2: topic-extras, die NICHT bereits in stable/fresh sind
+  const extraFaqs = (extraTopicFaqs || []).filter(f => !stableSlugs.has(f.slug) && !freshFaqMap.has(f.slug));
   if (extraFaqs.length > 0) {
     const byTopic = new Map<string, { question: string; answer: string }[]>();
     for (const f of extraFaqs) {
@@ -947,21 +973,39 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   // Jetzt: max 10 Trainings, davon 5 pinned + 3 themen-relevant + 2 recency.
   // Pinned werden NACH created_at DESC limitiert (neueste Pinned zuerst) —
   // ältere Pinned die nicht mehr gebraucht werden sollten manuell archiviert.
-  const [{ data: pinnedTraining }, { data: pinnedAvatarTraining }, { data: relevantTraining }, { data: recentTraining }] = await Promise.all([
-    // 1a) GLOBALE Pinned Trainings (avatar_name IS NULL) — max 5. Bewusst OHNE
+  // 💰 LERNEN↔CACHE-ENTKOPPLUNG (Schritt B, 09.06): Das stable Top-5-Fenster
+  // der globalen Pinned-Trainings wird per created_at < Tages-Cutoff fixiert.
+  // Vorher: limit(5) auf created_at DESC → JEDES neue Pinned-Training verdrängte
+  // sofort ein altes aus dem Fenster → stable Block änderte sich → Cache-Break.
+  // Jetzt: HEUTE gepinnte Trainings laufen über eine eigene Query in den
+  // variablen Block (sofort wirksam) und rücken erst morgen ins stable Fenster.
+  const trainingCutoff = stableCutoffIso();
+  const [{ data: pinnedTrainingRaw }, { data: freshPinnedTraining }, { data: pinnedAvatarTraining }, { data: relevantTraining }, { data: recentTraining }] = await Promise.all([
+    // 1a) GLOBALE Pinned Trainings (avatar_name IS NULL) — max 5, NUR vor heute
+    //     erstellte (Fenster bleibt über den Tag konstant). Bewusst OHNE
     //     Avatar-OR, damit das Ergebnis AVATAR-UNABHÄNGIG ist → identischer
     //     stable-Cache für alle Sessions (sonst Cache-Fragmentierung pro Avatar).
     svc.from("chatbot_training")
-      .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
+      .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned, created_at, updated_at")
       .eq("active", true)
       .eq("pinned", true)
       .is("avatar_name", null)
+      .lt("created_at", trainingCutoff)
       .order("created_at", { ascending: false })
       .limit(5),
+    // 1a-frisch) HEUTE gepinnte globale Trainings — max 3 → variabler Block.
+    svc.from("chatbot_training")
+      .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned, created_at, updated_at")
+      .eq("active", true)
+      .eq("pinned", true)
+      .is("avatar_name", null)
+      .gte("created_at", trainingCutoff)
+      .order("created_at", { ascending: false })
+      .limit(3),
     // 1b) AVATAR-SPEZIFISCHE Pinned Trainings — max 3, gehen in den variable
     //     Block (nicht in den geteilten Cache).
     svc.from("chatbot_training")
-      .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
+      .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned, created_at, updated_at")
       .eq("active", true)
       .eq("pinned", true)
       .eq("avatar_name", avatarName)
@@ -970,7 +1014,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
     // 2) Themen-Match — max 3 (vorher 15)
     keywords.length > 0
       ? svc.from("chatbot_training")
-          .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
+          .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned, created_at, updated_at")
           .eq("active", true)
           .or(`avatar_name.is.null,avatar_name.eq.${avatarName}`)
           .or(keywords.map(k => `user_message.ilike.%${k}%,feedback.ilike.%${k}%`).join(","))
@@ -979,7 +1023,7 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
       : Promise.resolve({ data: [] }),
     // 3) Recency-Backstop — max 2 (vorher 10)
     svc.from("chatbot_training")
-      .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned")
+      .select("id, user_message, good_answer, bad_answer, feedback, avatar_name, context_messages, pinned, created_at, updated_at")
       .eq("active", true)
       .or(`avatar_name.is.null,avatar_name.eq.${avatarName}`)
       .order("created_at", { ascending: false })
@@ -1002,6 +1046,11 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   //     werden vom LLM sogar leicht stärker gewichtet).
   //
   // Ziel: Cache-Hit-Rate 33% → ~80%, Token-Kosten ~$170/Monat → ~$45.
+  // Heute EDITIERTE alte Pinned-Trainings ebenfalls in den variablen Block
+  // verschieben (sonst würde der Edit den stable Block mehrfach am Tag ändern).
+  const pinnedTrainingSplit = splitByCacheCutoff(pinnedTrainingRaw || [], trainingCutoff);
+  const pinnedTraining = pinnedTrainingSplit.consolidated;
+  const editedTodayPinned = pinnedTrainingSplit.fresh;
   type TrainingRow = NonNullable<typeof pinnedTraining>[number];
   // 💰 CACHE-OPTIMIERUNG #2 (2026-05-31, Kostenanalyse): Der stable Block MUSS
   // AVATAR-UNABHÄNGIG sein, sonst entsteht pro Avatar ein eigener Cache (5
@@ -1024,7 +1073,9 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   // recency, ohne Duplikate mit den stable (globalen Pinned) Trainings.
   const variableTrainings: TrainingRow[] = [];
   const variableTrainingIds = new Set<string>();
-  for (const t of [...avatarSpecificPinned, ...(relevantTraining || []), ...(recentTraining || [])]) {
+  // Frische globale Pinned (heute erstellt/editiert) zuerst — höchste Prio im
+  // variablen Block, inhaltlich gleichwertig zum stable Block.
+  for (const t of [...(freshPinnedTraining || []), ...editedTodayPinned, ...avatarSpecificPinned, ...(relevantTraining || []), ...(recentTraining || [])]) {
     if (stableTrainingIds.has(t.id)) continue;
     if (variableTrainingIds.has(t.id)) continue;
     variableTrainingIds.add(t.id);

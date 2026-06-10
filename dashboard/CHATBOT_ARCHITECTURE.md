@@ -390,3 +390,22 @@ ist als Testfall in `scripts/smoke/*.spec.mjs` einzementiert (Stand 09.06:
 - Notfall-Bypass: `git push --no-verify` (nur bewusst!)
 - **Pflicht bei jedem Bug-Fix:** der Fall + Sibling-Fälle kommen als Testfälle
   in die passende Spec (oder eine neue) — im selben Commit wie der Fix.
+
+---
+
+## 8. Lernen↔Cache-Entkopplung (seit 09.06.2026)
+
+**Regel: Neues Wissen darf den Prompt-Cache nicht brechen.** Gemessen waren
+66% der respond-Kosten Cache-SCHREIBVORGÄNGE, weil jede neue FAQ/jedes neue
+Training den stabilen Block sofort invalidierte (~13×/Tag).
+
+Mechanik (`src/lib/chatbot/cache-stability.ts`, genutzt in respond.ts):
+- Tages-Cutoff (UTC-Mitternacht, deterministisch): Inhalte von HEUTE (neu
+  oder editiert) → variabler Block (sofort wirksam, uncached). Ab morgen →
+  automatisch im stabilen Block. 1 Cache-Rebuild/Tag statt ~13.
+- Trainings-Top-5-Fenster ist per `created_at < cutoff` fixiert (vorher
+  verdrängte jedes neue Pinned-Training sofort ein altes → Cache-Break).
+- INVARIANTE (Smoke-Suite cache-stability.spec.mjs): stable + fresh = alles.
+  Wissen geht NIE verloren — nur die Cache-Platzierung ändert sich.
+
+**Konsequenz: Unbegrenzt FAQs/Trainings hinzufügen ist jetzt kosten-sicher.**
