@@ -46,7 +46,7 @@ interface ShopifyVariant {
 }
 
 interface ShopifyProduct {
-  id: string;
+  id: string;        // gid://shopify/Product/...
   title: string;
   variants: { edges: { node: ShopifyVariant }[] };
 }
@@ -133,9 +133,10 @@ async function main() {
   const byTitle = new Map<string, ShopifyProduct>();
   for (const p of products) byTitle.set(normalize(p.title), p);
 
-  // 4) Match each color to a product and figure out target SKUs per variant
+  // 4) Match each color to a product and figure out target SKUs per variant.
+  //    Gruppiert nach productId, weil Shopify Bulk-Update pro produkt arbeitet.
   type Plan = { variantId: string; currentSku: string | null; newSku: string; productTitle: string; reason: string };
-  const plans: Plan[] = [];
+  const plansByProductId = new Map<string, Plan[]>();
   let noMatch = 0;
   let alreadyOk = 0;
 
@@ -147,16 +148,15 @@ async function main() {
     }
     const isClipIn = /clip[\s-]*in/i.test(c.method_name);
     const variants = product.variants.edges.map((e) => e.node);
+    const productPlans = plansByProductId.get(product.id) ?? [];
 
     if (!isClipIn) {
-      // Erwartung: 1 variante. Wenn mehr, alle bekommen den base sku
-      // (sollte selten vorkommen — non-clip-ins haben i.d.r. nur "Default")
       for (const v of variants) {
         if (v.sku === c.sku) {
           alreadyOk++;
           continue;
         }
-        plans.push({
+        productPlans.push({
           variantId: v.id,
           currentSku: v.sku,
           newSku: c.sku,
@@ -165,24 +165,34 @@ async function main() {
         });
       }
     } else {
-      // Clip-Ins: pro variante je 100g/150g/225g unterschiedliche SKU
-      for (const v of variants) {
-        const suffix = variantSuffix(v.title);
-        const target = suffix ? `${c.sku}-${suffix}` : c.sku;
-        if (v.sku === target) {
-          alreadyOk++;
-          continue;
-        }
-        plans.push({
-          variantId: v.id,
-          currentSku: v.sku,
-          newSku: target,
+      // Clip-Ins: DB hat eine row PRO Gewichts-Variante (100g/150g/225g),
+      // also pro DB-row NUR die passende Shopify-Variant updaten — nicht
+      // alle Variants des produkts (sonst gibt's 'duplicated input' wenn
+      // 3 DB-rows alle 3 Shopify-Variants treffen wollen).
+      const dbWeight = (c.length_value.match(/\d+/) ?? [""])[0];
+      const matchingVariant = variants.find((v) => {
+        const w = variantSuffix(v.title);
+        return w === `${dbWeight}G`;
+      }) ?? variants[0];
+      if (!matchingVariant) continue;
+      if (matchingVariant.sku === c.sku) {
+        alreadyOk++;
+      } else {
+        productPlans.push({
+          variantId: matchingVariant.id,
+          currentSku: matchingVariant.sku,
+          newSku: c.sku,
           productTitle: product.title,
-          reason: suffix ? `clipin-${suffix}` : "clipin-default",
+          reason: `clipin-${dbWeight}g`,
         });
       }
     }
+
+    if (productPlans.length > 0) plansByProductId.set(product.id, productPlans);
   }
+
+  // Flache liste der plans NUR fuer Berichts-Zwecke (Anzahl, Beispiele)
+  const plans = Array.from(plansByProductId.values()).flat();
 
   console.log(`\n--- Summary ---`);
   console.log(`  Plans to apply: ${plans.length}`);
@@ -204,40 +214,47 @@ async function main() {
     return;
   }
 
-  // 5) Apply via productVariantUpdate
+  // 5) Apply via productVariantsBulkUpdate (gruppiert pro produkt)
   console.log("\n--- Applying changes ---");
   let ok = 0;
   let fail = 0;
-  for (let i = 0; i < plans.length; i++) {
-    const p = plans[i];
+  const productEntries = Array.from(plansByProductId.entries());
+  for (let i = 0; i < productEntries.length; i++) {
+    const [productId, productPlans] = productEntries[i];
     try {
       const data = await graphql<{
-        productVariantUpdate: { productVariant: { id: string; sku: string } | null; userErrors: { field: string[]; message: string }[] };
+        productVariantsBulkUpdate: {
+          productVariants: { id: string; sku: string }[] | null;
+          userErrors: { field: string[]; message: string }[];
+        };
       }>(
-        `mutation($input: ProductVariantInput!) {
-          productVariantUpdate(input: $input) {
-            productVariant { id sku }
+        `mutation($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+          productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+            productVariants { id sku }
             userErrors { field message }
           }
         }`,
-        { input: { id: p.variantId, sku: p.newSku } },
+        {
+          productId,
+          variants: productPlans.map((p) => ({ id: p.variantId, inventoryItem: { sku: p.newSku } })),
+        },
       );
-      const errs = data.productVariantUpdate?.userErrors ?? [];
+      const errs = data.productVariantsBulkUpdate?.userErrors ?? [];
       if (errs.length > 0) {
-        fail++;
-        console.error(`  ✗ ${p.newSku}: ${errs.map((e) => e.message).join("; ")}`);
+        fail += productPlans.length;
+        console.error(`  ✗ ${productPlans[0].productTitle.slice(0, 50)}: ${errs.map((e) => e.message).join("; ")}`);
       } else {
-        ok++;
-        if (i % 25 === 0) process.stdout.write(`  ${i + 1}/${plans.length}\r`);
+        ok += productPlans.length;
+        if (i % 10 === 0) process.stdout.write(`  ${i + 1}/${productEntries.length} products (${ok} variants)\r`);
       }
     } catch (e) {
-      fail++;
-      console.error(`  ✗ ${p.newSku}:`, (e as Error).message);
+      fail += productPlans.length;
+      console.error(`  ✗ ${productPlans[0]?.productTitle?.slice(0, 50) ?? productId}:`, (e as Error).message);
     }
-    // Mini-throttle: Shopify allows 2 calls/sec on standard, 10/sec on plus
-    await new Promise((r) => setTimeout(r, 120));
+    // Mini-throttle: Shopify allows 2 calls/sec on standard
+    await new Promise((r) => setTimeout(r, 250));
   }
-  console.log(`\n--- Result: ${ok} updated, ${fail} failed.`);
+  console.log(`\n--- Result: ${ok} variants updated, ${fail} failed.`);
 }
 
 main().catch((e) => {
