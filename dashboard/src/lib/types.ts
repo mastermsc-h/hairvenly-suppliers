@@ -104,6 +104,10 @@ export interface Supplier {
   iban: string | null;
   swift_bic: string | null;
   profile_notes: string | null;
+  order_cycle_enabled?: boolean;
+  order_cycle_start_date?: string | null;
+  order_cycle_interval_days?: number;
+  order_cycle_last_reminded?: string | null;
   created_at: string;
 }
 

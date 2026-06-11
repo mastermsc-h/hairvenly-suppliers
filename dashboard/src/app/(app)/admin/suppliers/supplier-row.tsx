@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Pencil, Trash2, Check, X } from "lucide-react";
 import { updateSupplierBasic, deleteSupplier } from "@/lib/actions/suppliers";
 import type { Supplier } from "@/lib/types";
+import ReminderConfigButton from "./reminder-config-button";
 
 export default function SupplierRow({ supplier }: { supplier: Supplier }) {
   const [editing, setEditing] = useState(false);
@@ -153,6 +154,14 @@ export default function SupplierRow({ supplier }: { supplier: Supplier }) {
       <td className="px-5 py-3 text-neutral-500">{created}</td>
       <td className="px-5 py-3">
         <div className="flex items-center justify-end gap-2">
+          <ReminderConfigButton
+            supplierId={supplier.id}
+            supplierName={supplier.name}
+            enabled={!!supplier.order_cycle_enabled}
+            startDate={supplier.order_cycle_start_date ?? null}
+            intervalDays={supplier.order_cycle_interval_days ?? 14}
+            lastReminded={supplier.order_cycle_last_reminded ?? null}
+          />
           <button
             onClick={() => setEditing(true)}
             title="Bearbeiten"

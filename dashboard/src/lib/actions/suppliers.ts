@@ -128,6 +128,19 @@ export async function updateSupplierBasic(supplierId: string, formData: FormData
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { error: "Name ist erforderlich." };
 
+  // Bestell-Reminder-Felder (optional vorhanden)
+  const reminderUpdate: Record<string, unknown> = {};
+  if (formData.has("order_cycle_enabled")) {
+    reminderUpdate.order_cycle_enabled = formData.get("order_cycle_enabled") === "on";
+  }
+  if (formData.has("order_cycle_start_date")) {
+    reminderUpdate.order_cycle_start_date = s(formData.get("order_cycle_start_date"));
+  }
+  if (formData.has("order_cycle_interval_days")) {
+    const n = Number(formData.get("order_cycle_interval_days"));
+    if (Number.isFinite(n) && n > 0) reminderUpdate.order_cycle_interval_days = n;
+  }
+
   const { error } = await supabase
     .from("suppliers")
     .update({
@@ -136,6 +149,7 @@ export async function updateSupplierBasic(supplierId: string, formData: FormData
       phone: s(formData.get("phone")),
       address: s(formData.get("address")),
       sort_order: Number(formData.get("sort_order")) || 0,
+      ...reminderUpdate,
     })
     .eq("id", supplierId);
   if (error) return { error: error.message };
