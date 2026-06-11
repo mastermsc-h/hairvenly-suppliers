@@ -225,6 +225,7 @@ function LengthBlock({ length, locale }: { length: CatalogLength; locale: Locale
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-[11px] text-neutral-500 uppercase tracking-wider">
+                  <th className="text-left pb-2 font-medium w-32">SKU</th>
                   <th className="text-left pb-2 font-medium">{t(locale, "catalog.name_hairvenly")}</th>
                   <th className="text-left pb-2 font-medium">{t(locale, "catalog.name_supplier")}</th>
                   <th className="text-left pb-2 font-medium">{t(locale, "catalog.name_shopify")}</th>
@@ -335,6 +336,11 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
     return (
       <tr>
         <td className="py-1 pr-2">
+          <span className="font-mono text-[10px] text-neutral-400" title="SKU wird automatisch generiert — nicht editierbar">
+            {color.sku || "—"}
+          </span>
+        </td>
+        <td className="py-1 pr-2">
           <input value={nameH} onChange={(e) => setNameH(e.target.value)} onKeyDown={onKeyDown} autoFocus
             className="w-full rounded border border-neutral-300 px-2 py-1 text-sm" />
         </td>
@@ -378,6 +384,15 @@ function ColorRow({ color, locale }: { color: ProductColor; locale: Locale }) {
   return (
     <>
     <tr className="group hover:bg-neutral-50/50">
+      <td className="py-1.5">
+        {color.sku ? (
+          <span className="font-mono text-[10px] inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-700 border border-neutral-200">
+            {color.sku}
+          </span>
+        ) : (
+          <span className="text-neutral-300 text-xs">—</span>
+        )}
+      </td>
       <td className="py-1.5 text-neutral-900 font-medium">#{color.name_hairvenly}</td>
       <td className="py-1.5 text-neutral-500">{color.name_supplier || "—"}</td>
       <td className="py-1.5 text-neutral-500 truncate max-w-[260px]" title={color.name_shopify || undefined}>{color.name_shopify || "—"}</td>

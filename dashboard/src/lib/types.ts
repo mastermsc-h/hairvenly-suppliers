@@ -286,6 +286,8 @@ export interface ProductColor {
   equivalent_in_other_line: string | null;
   bot_active: boolean;
   sort_order: number;
+  /** Sprechender Stock-Keeping-Unit-Code (z.B. RU-TAPE-45-1A). Auto-generiert. */
+  sku: string | null;
   updated_at: string | null;
   // Kuratierungs-/KI-Spalten (Dashboard = Master, Hybrid-Modell)
   similar_in_same_line?: string | null;
