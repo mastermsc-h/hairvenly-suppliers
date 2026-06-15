@@ -269,15 +269,21 @@ export function filterArchivedFromStock(
       return !isProductArrivedInOrder(meta, item.product);
     });
     // 3) Override ankunft using per-position / shipment / order ETAs (in that priority)
+    //    und Quelle markieren: DB-Treffer → etaConfirmed=true (gepflegtes Datum),
+    //    kein DB-Datum → Sheet-Wert bleibt, etaConfirmed=false (Schätzung).
+    //    So kann der Bot ein unbestätigtes Sheet-Datum nie als fixen Termin ausgeben.
     const withEta = kept.map((o) => {
       const meta = orderIdByName[o.name];
-      if (!meta) return o;
-      const newAnkunft = buildAnkunftFromMeta(meta, item.product);
-      if (!newAnkunft || newAnkunft === o.ankunft) return o;
-      return { ...o, ankunft: newAnkunft };
+      const dbAnkunft = meta ? buildAnkunftFromMeta(meta, item.product) : null;
+      if (dbAnkunft) {
+        if (o.ankunft === dbAnkunft && o.etaConfirmed === true) return o;
+        return { ...o, ankunft: dbAnkunft, etaConfirmed: true };
+      }
+      if (o.etaConfirmed === false) return o;
+      return { ...o, etaConfirmed: false };
     });
     const dropped = kept.length !== item.perOrder.length;
-    const etaChanged = withEta.some((o, i) => o.ankunft !== kept[i].ankunft);
+    const etaChanged = withEta.some((o, i) => o !== kept[i]);
     if (!dropped && !etaChanged) return item;
     const unterwegsG = withEta.reduce((s, o) => s + (o.menge || 0), 0);
     return { ...item, perOrder: withEta, unterwegsG };

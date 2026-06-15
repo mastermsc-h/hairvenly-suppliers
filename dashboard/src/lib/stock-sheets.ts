@@ -76,7 +76,10 @@ export interface AlertProduct {
   stufe?: "kritisch" | "niedrig";
   sheetKey: "wellig" | "glatt";
   unterwegsG: number;
-  perOrder: { name: string; ankunft: string; menge: number }[];
+  // etaConfirmed: true  → ankunft stammt aus der DB (orders/order_items/shipment, gepflegt)
+  //               false → ankunft ist die Sheet-Schätzung (Bestelldatum + Fixfrist), UNBESTÄTIGT
+  //               undefined → nicht ausgewertet (Alt-Verhalten, neutral)
+  perOrder: { name: string; ankunft: string; menge: number; etaConfirmed?: boolean }[];
   tier?: "TOP7" | "MID" | "REST" | "KAUM";
   verkauft30d?: number;
   verkauft90d?: number;

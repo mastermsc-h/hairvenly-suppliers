@@ -507,24 +507,27 @@ const getStockEta: ToolDef = {
           // Frühestes ETA-Datum statt erstes perOrder-Item (User-Bug
           // 2026-05-28: vorher kam "Anfang Juni" statt "25.06.2026" weil
           // die perOrder-Reihenfolge zufällig war).
-          const earliestDe = (m: { perOrder?: { ankunft?: string }[] }): string => {
-            if (!m.perOrder || m.perOrder.length === 0) return "bald";
+          const earliestDe = (m: { perOrder?: { ankunft?: string; etaConfirmed?: boolean }[] }): { text: string; confirmed: boolean } => {
+            if (!m.perOrder || m.perOrder.length === 0) return { text: "bald", confirmed: false };
             const dated = m.perOrder.map(o => {
+              const confirmed = o.etaConfirmed === true;
               const dm = (o.ankunft || "").match(/(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/);
-              if (!dm) return { iso: null as string | null, text: o.ankunft || "" };
+              if (!dm) return { iso: null as string | null, text: o.ankunft || "", confirmed };
               const [, d, mo, y] = dm;
               const yy = y.length === 2 ? `20${y}` : y;
               return {
                 iso: `${yy}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`,
                 text: `${d.padStart(2, "0")}.${mo.padStart(2, "0")}.${yy}`,
+                confirmed,
               };
             });
             dated.sort((a, b) => (a.iso || "9999").localeCompare(b.iso || "9999"));
-            return dated[0]?.text || dated[0]?.iso || "bald";
+            const first = dated[0];
+            return { text: first?.text || first?.iso || "bald", confirmed: !!first?.confirmed };
           };
           type PerLengthBucket = {
             in_stock: { product: string; shopify_url: string | null }[];
-            unterwegs: { product: string; eta: string; shopify_url: string | null }[];
+            unterwegs: { product: string; eta: string; eta_confirmed: boolean; shopify_url: string | null }[];
             oos: { product: string; shopify_url: string | null }[];
           };
           const perLength: Record<string, PerLengthBucket> = {};
@@ -540,9 +543,11 @@ const getStockEta: ToolDef = {
           }
           for (const m of inUnterwegs) {
             const len = extractLength(`${m.collection} ${m.product}`) || "unknown";
+            const e = earliestDe(m);
             ensure(len).unterwegs.push({
               product: m.product,
-              eta: earliestDe(m),
+              eta: e.text,
+              eta_confirmed: e.confirmed,
               shopify_url: urlFor(m.product),
             });
           }
@@ -563,6 +568,8 @@ const getStockEta: ToolDef = {
                 "   Beispiel: per_length['55cm'] hat .in_stock / .unterwegs[].eta / .oos. " +
                 "   Wenn .unterwegs nicht leer ist, nenne das konkrete ETA-Datum (z.B. 'kommt ca. 25.06.2026 wieder'). " +
                 "   NIEMALS schwammig '2-8 Wochen' sagen wenn ein konkretes ETA in den Daten steht.\n" +
+                "   ⚠️ Wenn unterwegs[].eta_confirmed=false ist, ist das Datum nur eine grobe Schätzung (noch kein bestätigter " +
+                "   Liefertermin) — sag dann 'voraussichtlich um den [Datum] herum, aber noch nicht fix bestätigt' statt eines harten Termins.\n" +
                 "2. Wenn KEINE Länge erkennbar ist: frag die Kundin kurz 'in welcher Länge?'. " +
                 "   Zähle die anderen Längen NICHT proaktiv auf — die Kundin sucht eine bestimmte.\n" +
                 "3. URL: nimm AUSSCHLIESSLICH die shopify_url aus diesem Output für die konkrete Länge. " +
@@ -606,12 +613,13 @@ const getStockEta: ToolDef = {
           return { iso, text: `${d.padStart(2, "0")}.${mo.padStart(2, "0")}.${yy.slice(-2)}` };
         };
         const comingSoon = inUnterwegs.slice(0, 3).map(m => {
-          const dated = m.perOrder.map(o => ({ ...extractDate(o.ankunft || ""), raw: o.ankunft }));
+          const dated = m.perOrder.map(o => ({ ...extractDate(o.ankunft || ""), raw: o.ankunft, confirmed: o.etaConfirmed === true }));
           dated.sort((a, b) => (a.iso || "9999").localeCompare(b.iso || "9999"));
           return {
             product: m.product,
             collection: m.collection,
             earliest_eta: dated[0]?.text || dated[0]?.raw || "bald",
+            eta_confirmed: !!dated[0]?.confirmed,
             shopify_url: urlFor(m.product),
           };
         });
@@ -633,6 +641,8 @@ const getStockEta: ToolDef = {
               "Beispiel: 'Soft Blond Balayage hätten wir in 65cm sofort verfügbar 💕 " +
               "In 55cm/85cm ist die Farbe gerade unterwegs (ca. Anfang Juni). " +
               "Magst du die 65cm nehmen oder lieber auf die andere Länge warten?' " +
+              "⚠️ Wenn coming_soon[].eta_confirmed=false ist, ist das Datum nur eine grobe Schätzung — " +
+              "formuliere dann 'voraussichtlich um den [Datum] herum, aber noch nicht fix bestätigt'. " +
               "URL-REGEL: Wenn du einen Produkt-Link postest, nimm AUSSCHLIESSLICH die " +
               "shopify_url aus diesem Tool-Output. NIEMALS selbst URLs bauen oder raten.",
             available_now: withStockEarly.slice(0, 5).map(r => ({
@@ -659,7 +669,7 @@ const getStockEta: ToolDef = {
         };
         // Pro Produkt das früheste Datum finden
         const products = inUnterwegs.slice(0, 3).map(m => {
-          const dated = m.perOrder.map(o => ({ ...extractDate(o.ankunft || ""), raw: o.ankunft }));
+          const dated = m.perOrder.map(o => ({ ...extractDate(o.ankunft || ""), raw: o.ankunft, confirmed: o.etaConfirmed === true }));
           dated.sort((a, b) => (a.iso || "9999").localeCompare(b.iso || "9999"));
           const earliest = dated[0];
           return {
@@ -668,6 +678,7 @@ const getStockEta: ToolDef = {
             // KEINE konkreten Mengen!
             earliest_eta: earliest?.text || earliest?.raw || "bald",
             earliest_eta_iso: earliest?.iso || null,
+            eta_confirmed: !!earliest?.confirmed,
             shopify_url: urlFor(m.product),
           };
         });
@@ -678,6 +689,9 @@ const getStockEta: ToolDef = {
               "Produkt ist unterwegs. Verwende NUR 'earliest_eta' für die Antwort und formuliere weich: " +
               "z.B. 'ca. Ende Mai, also etwa 30.05.' — NIEMALS sagen 'erste Lieferung' oder 'zweite Lieferung'! " +
               "EIN Datum reicht. " +
+              "⚠️ Wenn products[].eta_confirmed=false ist, ist das Datum nur eine grobe Schätzung (KEIN bestätigter " +
+              "Liefertermin) — sag dann z.B. 'voraussichtlich um den [Datum] herum, aber noch nicht fix bestätigt' " +
+              "statt eines harten Termins. Bei eta_confirmed=true darfst du das Datum als verlässlich nennen. " +
               "URL-REGEL: Wenn du einen Produkt-Link postest, nimm AUSSCHLIESSLICH die " +
               "shopify_url aus diesem Tool-Output. NIEMALS selbst URLs bauen oder raten.",
             sheet_last_updated: lastUpdated,
@@ -1119,17 +1133,30 @@ const getAvailableColors: ToolDef = {
     for (const sr of stockRows) {
       stockByName.set(normN(sr.product), { quantity: sr.quantity, totalWeight: sr.totalWeight });
     }
-    const unterwegsByName = new Map<string, { etaText: string }>();
+    // FRÜHESTES datiertes ETA (nicht perOrder[0] — Reihenfolge ist zufällig) +
+    // dessen Quelle: etaConfirmed=true → DB-gepflegt, false → Sheet-Schätzung.
+    const unterwegsByName = new Map<string, { etaText: string; etaConfirmed: boolean }>();
     for (const u of unterwegs) {
-      const eta = u.perOrder[0]?.ankunft || "bald";
-      unterwegsByName.set(normN(u.product), { etaText: eta });
+      let best: { iso: string; text: string; confirmed: boolean } | null = null;
+      let fallback: { text: string; confirmed: boolean } | null = null;
+      for (const o of u.perOrder) {
+        const confirmed = o.etaConfirmed === true;
+        const dm = (o.ankunft || "").match(/(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/);
+        if (!dm) { if (!fallback) fallback = { text: o.ankunft || "bald", confirmed }; continue; }
+        const [, d, mo, y] = dm;
+        const yy = y.length === 2 ? `20${y}` : y;
+        const iso = `${yy}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+        if (!best || iso < best.iso) best = { iso, text: `${d.padStart(2, "0")}.${mo.padStart(2, "0")}.${yy}`, confirmed };
+      }
+      const picked = best || fallback || { text: "bald", confirmed: false };
+      unterwegsByName.set(normN(u.product), { etaText: picked.text, etaConfirmed: picked.confirmed });
     }
     const nullbestandSet = new Set(nullbestand.map(p => normN(p.product)));
 
     // Eindeutige Farbnamen — sammle Methoden, Längen, URLs UND Stock-Status.
     // WICHTIG: variants[] enthält URL PRO Methode+Länge — der Bot soll daraus
     // den richtigen Link wählen, nicht "shopify_url" der nur die erste Variante ist.
-    type ColorVariant = { method: string; length: string; shopify_url: string | null; in_stock: boolean; eta: string | null };
+    type ColorVariant = { method: string; length: string; shopify_url: string | null; in_stock: boolean; eta: string | null; eta_confirmed: boolean | null };
     type ColorEntry = {
       lengths: Set<string>;
       methods: Set<string>;
@@ -1189,6 +1216,7 @@ const getAvailableColors: ToolDef = {
             shopify_url: r.shopify_url,
             in_stock: !!(vStock && vStock.totalWeight > 0),
             eta: vUw?.etaText || null,
+            eta_confirmed: vUw ? vUw.etaConfirmed : null,
           });
         }
       }
