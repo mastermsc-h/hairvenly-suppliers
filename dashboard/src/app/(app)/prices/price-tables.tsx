@@ -50,7 +50,7 @@ interface MethodGroup {
 
 /* ── Build grouped data ──────────────────────────────────────────── */
 
-function buildMethodGroups(list: PriceListFull): MethodGroup[] {
+function buildMethodGroups(list: PriceListFull, canSeeCostPrices: boolean): MethodGroup[] {
   const groupMap = new Map<string, ProductRow[]>();
 
   // Preserve method order from price list
@@ -66,7 +66,17 @@ function buildMethodGroups(list: PriceListFull): MethodGroup[] {
           entry,
           ek: (entry.prices[m.name] as number | undefined) ?? null,
         }))
-        .filter((c) => c.ek != null);
+        // Admins: nur Zeilen mit EK. Mitarbeiter (kein EK sichtbar): zeige
+        // alle Kategorien dieser Methode, die ein Mapping/VK haben, damit die
+        // Tabelle nicht leer ist (EK wurde serverseitig geleert).
+        .filter((c) => (canSeeCostPrices ? c.ek != null : true));
+
+      // Für MA: Methode nur zeigen wenn es einen VK gibt ODER gemappte Produkte.
+      if (!canSeeCostPrices) {
+        const hasVk = (sp[m.name] as SellingPriceTier | undefined) != null;
+        const hasMappings = cats.some((c) => (c.entry.mapped_products?.length ?? 0) > 0);
+        if (!hasVk && !hasMappings) continue;
+      }
 
       if (cats.length === 0) continue;
 
@@ -226,7 +236,7 @@ function OverviewTable({
   usdEurRate: number;
   locale: Locale;
 }) {
-  const groups = useMemo(() => buildMethodGroups(list), [list]);
+  const groups = useMemo(() => buildMethodGroups(list, canSeeCostPrices), [list, canSeeCostPrices]);
   const zollFactor = 1 + zollPct / 100;
 
   // Calculate totals across all methods/lengths
