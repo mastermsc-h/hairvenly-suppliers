@@ -24,7 +24,13 @@ export default async function PricesPage() {
         ...pl,
         length_groups: pl.length_groups.map((lg) => ({
           ...lg,
-          entries: lg.entries.map((e) => ({ ...e, prices: {} })),
+          entries: lg.entries.map((e) => ({
+            ...e,
+            // Keys behalten (damit MA dieselben Zeilen wie der Admin sieht),
+            // aber die echten Einkaufswerte auf 0 redigieren — der echte
+            // Preis kommt nie im Client-JS an.
+            prices: Object.fromEntries(Object.keys(e.prices ?? {}).map((k) => [k, 0])),
+          })),
         })),
       }));
 

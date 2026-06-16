@@ -342,6 +342,7 @@ export interface SupplierPriceList {
   supplier_id: string;
   name: string;
   methods: PriceMethod[];
+  display_unit_grams?: number;
   created_at: string;
   updated_at: string;
 }

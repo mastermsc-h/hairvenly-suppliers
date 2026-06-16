@@ -50,7 +50,7 @@ interface MethodGroup {
 
 /* ── Build grouped data ──────────────────────────────────────────── */
 
-function buildMethodGroups(list: PriceListFull, canSeeCostPrices: boolean): MethodGroup[] {
+function buildMethodGroups(list: PriceListFull): MethodGroup[] {
   const groupMap = new Map<string, ProductRow[]>();
 
   // Preserve method order from price list
@@ -58,29 +58,30 @@ function buildMethodGroups(list: PriceListFull, canSeeCostPrices: boolean): Meth
     groupMap.set(m.name, []);
   }
 
+  // Alle Preise auf 100g normalisieren. Ebru speichert pro 1000g
+  // (display_unit_grams=1000) → scale=10, Amanda pro 100g → scale=1.
+  const scale = (list.display_unit_grams ?? 100) / 100;
+  const sc = (v: number | null | undefined) => (v == null ? null : v / scale);
+
   for (const lg of list.length_groups) {
     const sp = lg.selling_prices ?? {};
     for (const m of list.methods) {
+      // EK-Keys bleiben für MA serverseitig erhalten (Wert 0), daher matcht
+      // 'ek != null' bei MA und Admin dieselben Zeilen → identische Ansicht.
       const cats = lg.entries
         .map((entry) => ({
           entry,
-          ek: (entry.prices[m.name] as number | undefined) ?? null,
+          ek: sc((entry.prices[m.name] as number | undefined) ?? null),
         }))
-        // Admins: nur Zeilen mit EK. Mitarbeiter (kein EK sichtbar): zeige
-        // alle Kategorien dieser Methode, die ein Mapping/VK haben, damit die
-        // Tabelle nicht leer ist (EK wurde serverseitig geleert).
-        .filter((c) => (canSeeCostPrices ? c.ek != null : true));
-
-      // Für MA: Methode nur zeigen wenn es einen VK gibt ODER gemappte Produkte.
-      if (!canSeeCostPrices) {
-        const hasVk = (sp[m.name] as SellingPriceTier | undefined) != null;
-        const hasMappings = cats.some((c) => (c.entry.mapped_products?.length ?? 0) > 0);
-        if (!hasVk && !hasMappings) continue;
-      }
+        .filter((c) => c.ek != null);
 
       if (cats.length === 0) continue;
 
       const totalEk = cats.reduce((s, c) => s + (c.ek ?? 0), 0);
+      const rawVk = sp[m.name] as SellingPriceTier | undefined;
+      const scaledVk: SellingPriceTier | null = rawVk
+        ? { brutto: rawVk.brutto / scale, netto: rawVk.netto / scale, gewerbe: rawVk.gewerbe / scale }
+        : null;
 
       groupMap.get(m.name)!.push({
         method: m.name,
@@ -88,8 +89,8 @@ function buildMethodGroups(list: PriceListFull, canSeeCostPrices: boolean): Meth
         lgLabel: lg.label,
         lengthValues: lg.length_values,
         lgSellingPrices: sp as Record<string, SellingPriceTier>,
-        vk: (sp[m.name] as SellingPriceTier | undefined) ?? null,
-        avgEk: totalEk / cats.length,
+        vk: scaledVk,
+        avgEk: cats.length > 0 ? totalEk / cats.length : null,
         categories: cats,
       });
     }
@@ -116,7 +117,7 @@ const ZOLL_DEFAULT = 2.5;
 
 export default function PriceTables({ priceLists, supplierColors, locale, canSeeCostPrices = false }: Props) {
   const [activeTab, setActiveTab] = useState(0);
-  const [vkMode, setVkMode] = useState<VkMode>("netto");
+  const [vkMode, setVkMode] = useState<VkMode>("brutto");
   const [zollPct, setZollPct] = useState(ZOLL_DEFAULT);
   const [ekInEur, setEkInEur] = useState(false);
   const [usdEurRate, setUsdEurRate] = useState(0.92);
@@ -236,7 +237,7 @@ function OverviewTable({
   usdEurRate: number;
   locale: Locale;
 }) {
-  const groups = useMemo(() => buildMethodGroups(list, canSeeCostPrices), [list, canSeeCostPrices]);
+  const groups = useMemo(() => buildMethodGroups(list), [list]);
   const zollFactor = 1 + zollPct / 100;
 
   // Calculate totals across all methods/lengths
@@ -334,6 +335,7 @@ function OverviewTable({
                   locale={locale}
                   isLast={row === group.rows[group.rows.length - 1]}
                   canSeeCostPrices={canSeeCostPrices}
+                  priceScale={(list.display_unit_grams ?? 100) / 100}
                 />
               ))}
             </tbody>
@@ -405,6 +407,7 @@ function ProductRowView({
   locale,
   isLast,
   canSeeCostPrices,
+  priceScale,
 }: {
   row: ProductRow;
   vkMode: VkMode;
@@ -415,6 +418,7 @@ function ProductRowView({
   locale: Locale;
   isLast: boolean;
   canSeeCostPrices: boolean;
+  priceScale: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [editingVk, setEditingVk] = useState(false);
@@ -440,10 +444,14 @@ function ProductRowView({
 
   function saveVk() {
     startTransition(async () => {
-      const netto = Math.round((vkBrutto / 1.19) * 100) / 100;
+      // vkBrutto/vkGewerbe sind in der angezeigten 100g-Einheit. Vor dem
+      // Speichern auf die gespeicherte Einheit zurückskalieren (×priceScale).
+      const storedBrutto = Math.round(vkBrutto * priceScale * 100) / 100;
+      const storedGewerbe = Math.round(vkGewerbe * priceScale * 100) / 100;
+      const storedNetto = Math.round((storedBrutto / 1.19) * 100) / 100;
       await updateSellingPrices(row.lgId, {
         ...(row.lgSellingPrices ?? {}),
-        [row.method]: { brutto: vkBrutto, netto, gewerbe: vkGewerbe },
+        [row.method]: { brutto: storedBrutto, netto: storedNetto, gewerbe: storedGewerbe },
       });
       setEditingVk(false);
     });
@@ -565,6 +573,7 @@ function ProductRowView({
           locale={locale}
           isLastParent={isLast}
           canSeeCostPrices={canSeeCostPrices}
+          priceScale={priceScale}
         />
       )}
     </>
@@ -583,6 +592,7 @@ function CategoryBreakdown({
   locale,
   isLastParent,
   canSeeCostPrices,
+  priceScale,
 }: {
   row: ProductRow;
   vkMode: VkMode;
@@ -593,6 +603,7 @@ function CategoryBreakdown({
   locale: Locale;
   isLastParent: boolean;
   canSeeCostPrices: boolean;
+  priceScale: number;
 }) {
   const vkVal = row.vk ? row.vk[vkMode] : null;
 
@@ -623,6 +634,7 @@ function CategoryBreakdown({
             locale={locale}
             showBorder={!isLastCat || !isLastParent}
             canSeeCostPrices={canSeeCostPrices}
+            priceScale={priceScale}
           />
         );
       })}
@@ -646,6 +658,7 @@ function CategoryRow({
   locale,
   showBorder,
   canSeeCostPrices,
+  priceScale,
 }: {
   entry: EntryType;
   ek: number | null;
@@ -660,6 +673,7 @@ function CategoryRow({
   locale: Locale;
   showBorder: boolean;
   canSeeCostPrices: boolean;
+  priceScale: number;
 }) {
   const [showProducts, setShowProducts] = useState(false);
   const [editingEk, setEditingEk] = useState(false);
@@ -679,9 +693,11 @@ function CategoryRow({
 
   function saveEk() {
     startTransition(async () => {
+      // editEk ist in 100g-Anzeige; auf gespeicherte Einheit zurückskalieren.
+      const storedEk = Math.round(editEk * priceScale * 100) / 100;
       await updatePriceEntry(entry.id, {
         ...entry.prices,
-        [method]: editEk,
+        [method]: storedEk,
       });
       setEditingEk(false);
     });
