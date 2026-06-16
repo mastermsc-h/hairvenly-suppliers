@@ -96,11 +96,15 @@ interface Props {
   priceLists: PriceListFull[];
   supplierColors: Record<string, SupplierColor[]>;
   locale: Locale;
+  /** Nur echte Admins sehen die Einkaufspreise (EK-Spalten, Aufschlag-Marge, ø EK).
+   *  Mitarbeiter sehen die Tabelle mit Verkaufspreisen, Aufschlag-Spalte usw.
+   *  Default false → restrictive. Wird über page.tsx auf profile.role==='admin' gesetzt. */
+  canSeeCostPrices?: boolean;
 }
 
 const ZOLL_DEFAULT = 2.5;
 
-export default function PriceTables({ priceLists, supplierColors, locale }: Props) {
+export default function PriceTables({ priceLists, supplierColors, locale, canSeeCostPrices = false }: Props) {
   const [activeTab, setActiveTab] = useState(0);
   const [vkMode, setVkMode] = useState<VkMode>("netto");
   const [zollPct, setZollPct] = useState(ZOLL_DEFAULT);
@@ -154,45 +158,49 @@ export default function PriceTables({ priceLists, supplierColors, locale }: Prop
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-1">
-            <span className="text-[10px] text-neutral-400">Zoll:</span>
-            <input
-              type="number"
-              step="0.1"
-              value={zollPct}
-              onChange={(e) => setZollPct(Number(e.target.value) || 0)}
-              className="w-12 text-[10px] text-right rounded border border-neutral-300 px-1 py-0.5 tabular-nums"
-            />
-            <span className="text-[10px] text-neutral-400">%</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setEkInEur(!ekInEur)}
-              className={`px-2 py-0.5 text-[10px] rounded-md transition ${
-                ekInEur
-                  ? "bg-blue-600 text-white"
-                  : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
-              }`}
-            >
-              EK → €
-            </button>
-            {ekInEur && (
-              <>
+          {canSeeCostPrices && (
+            <>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-neutral-400">Zoll:</span>
                 <input
                   type="number"
-                  step="0.01"
-                  value={usdEurRate}
-                  onChange={(e) => setUsdEurRate(Number(e.target.value) || 0)}
-                  className="w-14 text-[10px] text-right rounded border border-blue-300 px-1 py-0.5 tabular-nums"
+                  step="0.1"
+                  value={zollPct}
+                  onChange={(e) => setZollPct(Number(e.target.value) || 0)}
+                  className="w-12 text-[10px] text-right rounded border border-neutral-300 px-1 py-0.5 tabular-nums"
                 />
-                <span className="text-[10px] text-neutral-400">$/€</span>
-              </>
-            )}
-          </div>
+                <span className="text-[10px] text-neutral-400">%</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setEkInEur(!ekInEur)}
+                  className={`px-2 py-0.5 text-[10px] rounded-md transition ${
+                    ekInEur
+                      ? "bg-blue-600 text-white"
+                      : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
+                  }`}
+                >
+                  EK → €
+                </button>
+                {ekInEur && (
+                  <>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={usdEurRate}
+                      onChange={(e) => setUsdEurRate(Number(e.target.value) || 0)}
+                      className="w-14 text-[10px] text-right rounded border border-blue-300 px-1 py-0.5 tabular-nums"
+                    />
+                    <span className="text-[10px] text-neutral-400">$/€</span>
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
-      <OverviewTable list={list} supplierColors={colors} vkMode={vkMode} zollPct={zollPct} ekInEur={ekInEur} usdEurRate={usdEurRate} locale={locale} />
+      <OverviewTable list={list} supplierColors={colors} vkMode={vkMode} zollPct={zollPct} ekInEur={ekInEur} usdEurRate={usdEurRate} locale={locale} canSeeCostPrices={canSeeCostPrices} />
     </div>
   );
 }
@@ -207,10 +215,12 @@ function OverviewTable({
   ekInEur,
   usdEurRate,
   locale,
+  canSeeCostPrices,
 }: {
   list: PriceListFull;
   supplierColors: SupplierColor[];
   vkMode: VkMode;
+  canSeeCostPrices: boolean;
   zollPct: number;
   ekInEur: boolean;
   usdEurRate: number;
@@ -276,21 +286,29 @@ function OverviewTable({
                 <th className="text-left px-4 py-2 text-[10px] font-medium text-neutral-400 uppercase tracking-wide w-[30%]">
                   Länge
                 </th>
-                <th className="text-right px-3 py-2 text-[10px] font-medium text-neutral-400 uppercase tracking-wide">
-                  {"\u00D8"} EK
-                </th>
-                <th className="text-right px-3 py-2 text-[10px] font-medium text-neutral-400 uppercase tracking-wide">
-                  Zoll {zollPct}%
-                </th>
+                {canSeeCostPrices && (
+                  <>
+                    <th className="text-right px-3 py-2 text-[10px] font-medium text-neutral-400 uppercase tracking-wide">
+                      {"\u00D8"} EK
+                    </th>
+                    <th className="text-right px-3 py-2 text-[10px] font-medium text-neutral-400 uppercase tracking-wide">
+                      Zoll {zollPct}%
+                    </th>
+                  </>
+                )}
                 <th className="text-right px-3 py-2 text-[10px] font-medium text-neutral-400 uppercase tracking-wide">
                   VK {vkMode === "brutto" ? "Brutto" : vkMode === "gewerbe" ? "Gew." : "Netto"}
                 </th>
-                <th className="text-right px-3 py-2 text-[10px] font-medium text-neutral-400 uppercase tracking-wide">
-                  Aufschlag
-                </th>
-                <th className="text-right px-4 py-2 text-[10px] font-medium text-neutral-400 uppercase tracking-wide">
-                  Marge
-                </th>
+                {canSeeCostPrices && (
+                  <>
+                    <th className="text-right px-3 py-2 text-[10px] font-medium text-neutral-400 uppercase tracking-wide">
+                      Aufschlag
+                    </th>
+                    <th className="text-right px-4 py-2 text-[10px] font-medium text-neutral-400 uppercase tracking-wide">
+                      Marge
+                    </th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -305,6 +323,7 @@ function OverviewTable({
                   supplierColors={supplierColors}
                   locale={locale}
                   isLast={row === group.rows[group.rows.length - 1]}
+                  canSeeCostPrices={canSeeCostPrices}
                 />
               ))}
             </tbody>
@@ -319,36 +338,44 @@ function OverviewTable({
             Gesamt ({totals.count} Kategorien)
           </div>
           <div className="flex items-center gap-6 text-sm tabular-nums">
-            <div className="text-center">
-              <div className="text-[10px] text-neutral-400 uppercase">Ø EK {vkMode === "brutto" ? "Brutto" : ""}</div>
-              <div>
-                {ekInEur || vkMode === "brutto" ? "€" : "$"}
-                {Math.round(totals.avgEk * (ekInEur ? usdEurRate : 1) * (vkMode === "brutto" ? 1.19 : 1)).toLocaleString("de-DE")}
-              </div>
-            </div>
-            <div className="text-center">
-              <div className="text-[10px] text-neutral-400 uppercase">+ Zoll</div>
-              <div>
-                {ekInEur || vkMode === "brutto" ? "€" : "$"}
-                {Math.round(totals.avgEkZoll * (ekInEur ? usdEurRate : 1) * (vkMode === "brutto" ? 1.19 : 1)).toLocaleString("de-DE")}
-              </div>
-            </div>
+            {canSeeCostPrices && (
+              <>
+                <div className="text-center">
+                  <div className="text-[10px] text-neutral-400 uppercase">Ø EK {vkMode === "brutto" ? "Brutto" : ""}</div>
+                  <div>
+                    {ekInEur || vkMode === "brutto" ? "€" : "$"}
+                    {Math.round(totals.avgEk * (ekInEur ? usdEurRate : 1) * (vkMode === "brutto" ? 1.19 : 1)).toLocaleString("de-DE")}
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[10px] text-neutral-400 uppercase">+ Zoll</div>
+                  <div>
+                    {ekInEur || vkMode === "brutto" ? "€" : "$"}
+                    {Math.round(totals.avgEkZoll * (ekInEur ? usdEurRate : 1) * (vkMode === "brutto" ? 1.19 : 1)).toLocaleString("de-DE")}
+                  </div>
+                </div>
+              </>
+            )}
             <div className="text-center">
               <div className="text-[10px] text-neutral-400 uppercase">Ø VK {vkMode === "brutto" ? "Brutto" : vkMode === "gewerbe" ? "Gew." : "Netto"}</div>
               <div className="text-blue-400">€{totals.avgVk.toLocaleString("de-DE", { maximumFractionDigits: 0 })}</div>
             </div>
-            <div className="text-center">
-              <div className="text-[10px] text-neutral-400 uppercase">Aufschlag</div>
-              <div className={totals.aufschlag >= 80 ? "text-green-400" : totals.aufschlag >= 50 ? "text-yellow-400" : "text-red-400"}>
-                {totals.aufschlag.toFixed(1)}%
-              </div>
-            </div>
-            <div className="text-center">
-              <div className="text-[10px] text-neutral-400 uppercase">Marge</div>
-              <div className={totals.marge >= 40 ? "text-green-400" : totals.marge >= 30 ? "text-yellow-400" : "text-red-400"}>
-                {totals.marge.toFixed(1)}%
-              </div>
-            </div>
+            {canSeeCostPrices && (
+              <>
+                <div className="text-center">
+                  <div className="text-[10px] text-neutral-400 uppercase">Aufschlag</div>
+                  <div className={totals.aufschlag >= 80 ? "text-green-400" : totals.aufschlag >= 50 ? "text-yellow-400" : "text-red-400"}>
+                    {totals.aufschlag.toFixed(1)}%
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[10px] text-neutral-400 uppercase">Marge</div>
+                  <div className={totals.marge >= 40 ? "text-green-400" : totals.marge >= 30 ? "text-yellow-400" : "text-red-400"}>
+                    {totals.marge.toFixed(1)}%
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -367,6 +394,7 @@ function ProductRowView({
   supplierColors,
   locale,
   isLast,
+  canSeeCostPrices,
 }: {
   row: ProductRow;
   vkMode: VkMode;
@@ -376,6 +404,7 @@ function ProductRowView({
   supplierColors: SupplierColor[];
   locale: Locale;
   isLast: boolean;
+  canSeeCostPrices: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [editingVk, setEditingVk] = useState(false);
@@ -427,26 +456,30 @@ function ProductRowView({
             </span>
           </div>
         </td>
-        <td className="text-right px-3 py-2.5 tabular-nums text-neutral-700">
-          {(() => {
-            if (row.avgEk == null) return "—";
-            let val = row.avgEk;
-            const useEur = ekInEur || vkMode === "brutto";
-            if (ekInEur) val = val * usdEurRate;
-            if (vkMode === "brutto") val = val * 1.19;
-            return `${useEur ? "€" : "$"}${Math.round(val).toLocaleString("de-DE")}`;
-          })()}
-        </td>
-        <td className="text-right px-3 py-2.5 tabular-nums text-neutral-500 text-xs">
-          {(() => {
-            if (ekWithZoll == null) return "—";
-            let val = ekWithZoll;
-            const useEur = ekInEur || vkMode === "brutto";
-            if (ekInEur) val = val * usdEurRate;
-            if (vkMode === "brutto") val = val * 1.19;
-            return `${useEur ? "€" : "$"}${Math.round(val).toLocaleString("de-DE")}`;
-          })()}
-        </td>
+        {canSeeCostPrices && (
+          <>
+            <td className="text-right px-3 py-2.5 tabular-nums text-neutral-700">
+              {(() => {
+                if (row.avgEk == null) return "—";
+                let val = row.avgEk;
+                const useEur = ekInEur || vkMode === "brutto";
+                if (ekInEur) val = val * usdEurRate;
+                if (vkMode === "brutto") val = val * 1.19;
+                return `${useEur ? "€" : "$"}${Math.round(val).toLocaleString("de-DE")}`;
+              })()}
+            </td>
+            <td className="text-right px-3 py-2.5 tabular-nums text-neutral-500 text-xs">
+              {(() => {
+                if (ekWithZoll == null) return "—";
+                let val = ekWithZoll;
+                const useEur = ekInEur || vkMode === "brutto";
+                if (ekInEur) val = val * usdEurRate;
+                if (vkMode === "brutto") val = val * 1.19;
+                return `${useEur ? "€" : "$"}${Math.round(val).toLocaleString("de-DE")}`;
+              })()}
+            </td>
+          </>
+        )}
         <td className="text-right px-3 py-2.5 tabular-nums text-blue-600 font-medium" onClick={(e) => e.stopPropagation()}>
           {editingVk ? (
             <div className="flex items-center gap-1 justify-end">
@@ -495,16 +528,20 @@ function ProductRowView({
             </div>
           )}
         </td>
-        <td className="text-right px-3 py-2.5">
-          {aufschlagPct != null ? (
-            <span className={`tabular-nums font-semibold ${aufschlagColor}`}>{aufschlagPct.toFixed(1)}%</span>
-          ) : <span className="text-neutral-300">—</span>}
-        </td>
-        <td className="text-right px-4 py-2.5">
-          {margePct != null ? (
-            <span className={`tabular-nums font-semibold ${margeColor}`}>{margePct.toFixed(1)}%</span>
-          ) : <span className="text-neutral-300">—</span>}
-        </td>
+        {canSeeCostPrices && (
+          <>
+            <td className="text-right px-3 py-2.5">
+              {aufschlagPct != null ? (
+                <span className={`tabular-nums font-semibold ${aufschlagColor}`}>{aufschlagPct.toFixed(1)}%</span>
+              ) : <span className="text-neutral-300">—</span>}
+            </td>
+            <td className="text-right px-4 py-2.5">
+              {margePct != null ? (
+                <span className={`tabular-nums font-semibold ${margeColor}`}>{margePct.toFixed(1)}%</span>
+              ) : <span className="text-neutral-300">—</span>}
+            </td>
+          </>
+        )}
       </tr>
 
       {expanded && (
@@ -517,6 +554,7 @@ function ProductRowView({
           supplierColors={supplierColors}
           locale={locale}
           isLastParent={isLast}
+          canSeeCostPrices={canSeeCostPrices}
         />
       )}
     </>
@@ -534,6 +572,7 @@ function CategoryBreakdown({
   supplierColors,
   locale,
   isLastParent,
+  canSeeCostPrices,
 }: {
   row: ProductRow;
   vkMode: VkMode;
@@ -543,6 +582,7 @@ function CategoryBreakdown({
   supplierColors: SupplierColor[];
   locale: Locale;
   isLastParent: boolean;
+  canSeeCostPrices: boolean;
 }) {
   const vkVal = row.vk ? row.vk[vkMode] : null;
 
@@ -572,6 +612,7 @@ function CategoryBreakdown({
             lengthValues={row.lengthValues}
             locale={locale}
             showBorder={!isLastCat || !isLastParent}
+            canSeeCostPrices={canSeeCostPrices}
           />
         );
       })}
@@ -594,6 +635,7 @@ function CategoryRow({
   lengthValues,
   locale,
   showBorder,
+  canSeeCostPrices,
 }: {
   entry: EntryType;
   ek: number | null;
@@ -607,6 +649,7 @@ function CategoryRow({
   lengthValues: string[];
   locale: Locale;
   showBorder: boolean;
+  canSeeCostPrices: boolean;
 }) {
   const [showProducts, setShowProducts] = useState(false);
   const [editingEk, setEditingEk] = useState(false);
@@ -659,80 +702,88 @@ function CategoryRow({
             )}
           </div>
         </td>
-        {/* EK */}
-        <td className="text-right px-3 py-1.5 tabular-nums text-xs text-neutral-600" onClick={(e) => e.stopPropagation()}>
-          {editingEk ? (
-            <div className="flex items-center gap-1 justify-end">
-              <span className="text-neutral-400">$</span>
-              <input
-                type="number"
-                step="0.01"
-                value={editEk}
-                onChange={(e) => setEditEk(Number(e.target.value) || 0)}
-                className="w-20 text-right text-xs rounded border border-neutral-300 px-1 py-0.5 tabular-nums"
-                autoFocus
-              />
-              <button onClick={saveEk} disabled={isPending} className="p-0.5 text-green-600 hover:text-green-800">
-                <Check size={11} />
-              </button>
-              <button onClick={() => setEditingEk(false)} className="p-0.5 text-neutral-400 hover:text-neutral-700">
-                <X size={11} />
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center justify-end gap-1 group/ek">
-              <span>
-                {(() => {
-                  if (ek == null) return "—";
-                  let val = ek;
-                  const useEur = ekInEur || vkMode === "brutto";
-                  if (ekInEur) val = val * usdEurRate;
-                  if (vkMode === "brutto") val = val * 1.19;
-                  return `${useEur ? "€" : "$"}${val.toLocaleString("de-DE", { maximumFractionDigits: 2 })}`;
-                })()}
-              </span>
-              <button
-                onClick={() => {
-                  setEditEk(ek ?? 0);
-                  setEditingEk(true);
-                }}
-                className="opacity-0 group-hover/ek:opacity-100 p-0.5 text-neutral-400 hover:text-neutral-700 transition"
-              >
-                <Pencil size={10} />
-              </button>
-            </div>
-          )}
-        </td>
-        {/* Zoll */}
-        <td className="text-right px-3 py-1.5 tabular-nums text-xs text-neutral-400">
-          {(() => {
-            if (ekWithZoll == null) return "";
-            let val = ekWithZoll;
-            const useEur = ekInEur || vkMode === "brutto";
-            if (ekInEur) val = val * usdEurRate;
-            if (vkMode === "brutto") val = val * 1.19;
-            return `${useEur ? "€" : "$"}${Math.round(val).toLocaleString("de-DE")}`;
-          })()}
-        </td>
+        {canSeeCostPrices && (
+          <>
+            {/* EK */}
+            <td className="text-right px-3 py-1.5 tabular-nums text-xs text-neutral-600" onClick={(e) => e.stopPropagation()}>
+              {editingEk ? (
+                <div className="flex items-center gap-1 justify-end">
+                  <span className="text-neutral-400">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editEk}
+                    onChange={(e) => setEditEk(Number(e.target.value) || 0)}
+                    className="w-20 text-right text-xs rounded border border-neutral-300 px-1 py-0.5 tabular-nums"
+                    autoFocus
+                  />
+                  <button onClick={saveEk} disabled={isPending} className="p-0.5 text-green-600 hover:text-green-800">
+                    <Check size={11} />
+                  </button>
+                  <button onClick={() => setEditingEk(false)} className="p-0.5 text-neutral-400 hover:text-neutral-700">
+                    <X size={11} />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-end gap-1 group/ek">
+                  <span>
+                    {(() => {
+                      if (ek == null) return "—";
+                      let val = ek;
+                      const useEur = ekInEur || vkMode === "brutto";
+                      if (ekInEur) val = val * usdEurRate;
+                      if (vkMode === "brutto") val = val * 1.19;
+                      return `${useEur ? "€" : "$"}${val.toLocaleString("de-DE", { maximumFractionDigits: 2 })}`;
+                    })()}
+                  </span>
+                  <button
+                    onClick={() => {
+                      setEditEk(ek ?? 0);
+                      setEditingEk(true);
+                    }}
+                    className="opacity-0 group-hover/ek:opacity-100 p-0.5 text-neutral-400 hover:text-neutral-700 transition"
+                  >
+                    <Pencil size={10} />
+                  </button>
+                </div>
+              )}
+            </td>
+            {/* Zoll */}
+            <td className="text-right px-3 py-1.5 tabular-nums text-xs text-neutral-400">
+              {(() => {
+                if (ekWithZoll == null) return "";
+                let val = ekWithZoll;
+                const useEur = ekInEur || vkMode === "brutto";
+                if (ekInEur) val = val * usdEurRate;
+                if (vkMode === "brutto") val = val * 1.19;
+                return `${useEur ? "€" : "$"}${Math.round(val).toLocaleString("de-DE")}`;
+              })()}
+            </td>
+          </>
+        )}
         {/* VK — empty in detail */}
         <td className="px-3 py-1.5" />
-        {/* Aufschlag */}
-        <td className="text-right px-3 py-1.5">
-          {aufschlagPct != null && (
-            <span className={`text-xs tabular-nums ${aufschlagColor}`}>{aufschlagPct.toFixed(0)}%</span>
-          )}
-        </td>
-        {/* Marge */}
-        <td className="text-right px-4 py-1.5">
-          {margePctLocal != null && (
-            <span className={`text-xs tabular-nums ${margeColor}`}>{margePctLocal.toFixed(0)}%</span>
-          )}
-        </td>
+        {canSeeCostPrices && (
+          <>
+            {/* Aufschlag */}
+            <td className="text-right px-3 py-1.5">
+              {aufschlagPct != null && (
+                <span className={`text-xs tabular-nums ${aufschlagColor}`}>{aufschlagPct.toFixed(0)}%</span>
+              )}
+            </td>
+            {/* Marge */}
+            <td className="text-right px-4 py-1.5">
+              {margePctLocal != null && (
+                <span className={`text-xs tabular-nums ${margeColor}`}>{margePctLocal.toFixed(0)}%</span>
+              )}
+            </td>
+          </>
+        )}
       </tr>
 
       {showProducts && (
         <tr>
-          <td colSpan={6} className="pl-14 pr-4 pb-2 pt-0.5">
+          <td colSpan={canSeeCostPrices ? 6 : 2} className="pl-14 pr-4 pb-2 pt-0.5">
             <MappedProducts
               entry={entry}
               filteredMapped={filteredMapped}
