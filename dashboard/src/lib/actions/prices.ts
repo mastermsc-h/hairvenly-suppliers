@@ -92,6 +92,7 @@ export async function loadPriceLists(): Promise<PriceListFull[]> {
       supplier_id: list.supplier_id,
       name: list.name,
       methods: list.methods as SupplierPriceList["methods"],
+      display_unit_grams: (list.display_unit_grams as number | undefined) ?? 100,
       created_at: list.created_at,
       updated_at: list.updated_at,
       supplier_name: supplierName,
