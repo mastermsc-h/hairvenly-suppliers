@@ -134,15 +134,33 @@ function isExtensionItem(handles: string[] | undefined): boolean {
 }
 
 function toExpected(items: PackOrderLineItem[]): ExpectedItem[] {
-  return items.map((li) => ({
-    variantId: li.variantId,
-    barcode: li.barcode,
-    title: li.title,
-    variantTitle: li.variantTitle,
-    quantity: li.quantity,
-    imageUrl: li.imageUrl,
-    isExtension: isExtensionItem(li.collectionHandles),
-  }));
+  // Gleiche Variante kann als MEHRERE line items auftauchen (order-edit,
+  // rabatt-splits). Ohne merge matcht recordPackScan immer nur den ersten
+  // eintrag → falscher 'overflow' + order nie komplettierbar.
+  // Daher: items mit identischem barcode zu einem eintrag zusammenfassen.
+  const out: ExpectedItem[] = [];
+  const byBarcode = new Map<string, ExpectedItem>();
+  for (const li of items) {
+    const entry: ExpectedItem = {
+      variantId: li.variantId,
+      barcode: li.barcode,
+      title: li.title,
+      variantTitle: li.variantTitle,
+      quantity: li.quantity,
+      imageUrl: li.imageUrl,
+      isExtension: isExtensionItem(li.collectionHandles),
+    };
+    if (li.barcode) {
+      const existing = byBarcode.get(li.barcode);
+      if (existing) {
+        existing.quantity += li.quantity;
+        continue;
+      }
+      byBarcode.set(li.barcode, entry);
+    }
+    out.push(entry);
+  }
+  return out;
 }
 
 /**
@@ -355,7 +373,9 @@ export async function recordPackScan(
     scanned_by: profile.id,
   });
 
-  // Status der Session ggf. updaten (in_progress beim ersten Scan)
+  // Session bei JEDEM Scan anfassen: updated_at muss frisch bleiben, sonst
+  // fällt eine lange laufende Session aus dem 30-Min-Stale-Fenster des
+  // Displays und der iMac springt mitten im Packen auf den Wartebildschirm.
   if (session.status === "open") {
     await supabase
       .from("pack_sessions")
@@ -364,6 +384,11 @@ export async function recordPackScan(
         started_at: new Date().toISOString(),
         packed_by: profile.id,
       })
+      .eq("id", sessionId);
+  } else {
+    await supabase
+      .from("pack_sessions")
+      .update({ updated_at: new Date().toISOString() })
       .eq("id", sessionId);
   }
 
@@ -460,6 +485,7 @@ export async function recordManualConfirm(
     scannedCounts[counterKey] = item.quantity;
   }
 
+  // Session immer anfassen — hält updated_at frisch fürs Display-Stale-Fenster
   if (session.status === "open") {
     await supabase
       .from("pack_sessions")
@@ -468,6 +494,11 @@ export async function recordManualConfirm(
         started_at: new Date().toISOString(),
         packed_by: profile.id,
       })
+      .eq("id", sessionId);
+  } else {
+    await supabase
+      .from("pack_sessions")
+      .update({ updated_at: new Date().toISOString() })
       .eq("id", sessionId);
   }
 
@@ -1105,6 +1136,12 @@ export async function uploadPackPhoto(
   });
 
   if (insErr) return { success: false, error: insErr.message };
+
+  // Session anfassen — hält updated_at frisch fürs Display-Stale-Fenster
+  await supabase
+    .from("pack_sessions")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", sessionId);
 
   return { success: true, storagePath: path };
 }
