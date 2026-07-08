@@ -19,14 +19,25 @@ function isExtensionItem(handles: string[] | undefined): boolean {
   return !handles.some((h) => SKIP_HANDLES.has(h));
 }
 
-export default async function PrintAllPage() {
+export default async function PrintAllPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ order?: string }>;
+}) {
   const profile = await requireProfile();
   if (!hasFeature(profile, "shipping")) redirect("/");
 
+  const { order: singleOrder } = await searchParams;
+
   const orders = await fetchOrdersForPrintAll(50);
 
+  // Einzeldruck: nur die angeforderte Bestellung (per ?order=<nummer>)
+  const filtered = singleOrder
+    ? orders.filter((o) => o.numberClean === singleOrder.replace(/^#/, ""))
+    : orders;
+
   // Daten für den Client vorbereiten — pro Item ein isExtension-Flag
-  const slips = orders.map((o) => ({
+  const slips = filtered.map((o) => ({
     name: o.name,
     numberClean: o.numberClean,
     createdAt: o.createdAt,

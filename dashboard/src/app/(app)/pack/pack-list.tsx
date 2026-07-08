@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Search, Package2, ArrowRight, RefreshCw, ArrowDown, ArrowUp } from "lucide-react";
+import { Search, Package2, ArrowRight, RefreshCw, ArrowDown, ArrowUp, Printer } from "lucide-react";
 import { t, type Locale } from "@/lib/i18n";
 import type { PackOrderWithStatus } from "./page";
 import { useRouter } from "next/navigation";
@@ -175,15 +175,26 @@ export default function PackList({
                       )}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Link
-                        href={`/pack/${o.numberClean}`}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-neutral-900 text-white text-xs font-medium hover:bg-neutral-700 transition"
-                      >
-                        {o.packStatus === "in_progress"
-                          ? t(locale, "shipping.continue_pack")
-                          : t(locale, "shipping.start_pack")}
-                        <ArrowRight size={14} />
-                      </Link>
+                      <div className="inline-flex items-center gap-2">
+                        <a
+                          href={`/pack/print-all?order=${o.numberClean}`}
+                          target="_blank"
+                          rel="noopener"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-neutral-300 text-neutral-700 text-xs font-medium hover:bg-neutral-50 transition"
+                          title="Lieferschein einzeln drucken"
+                        >
+                          <Printer size={14} />
+                        </a>
+                        <Link
+                          href={`/pack/${o.numberClean}`}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-neutral-900 text-white text-xs font-medium hover:bg-neutral-700 transition"
+                        >
+                          {o.packStatus === "in_progress"
+                            ? t(locale, "shipping.continue_pack")
+                            : t(locale, "shipping.start_pack")}
+                          <ArrowRight size={14} />
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                   );
