@@ -192,16 +192,15 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
     .maybeSingle();
 
   if (existing) {
-    // Bei status=open → sofort auf in_progress setzen (Display switcht beim Page-Open)
-    const updates: Record<string, unknown> = {};
+    // WICHTIG: Das bloße ÖFFNEN der Pack-Seite setzt den Status NICHT mehr auf
+    // 'in_progress'. Sonst wäre eine nur-angeschaute Bestellung sofort "in
+    // Bearbeitung" — und nach einem Abbruch (→ open) würde erneutes Öffnen sie
+    // sofort wieder in_progress machen. Der Status wird erst beim ersten echten
+    // Scan / manuellen Bestätigen auf in_progress gesetzt (recordPackScan /
+    // recordManualConfirm). Nur updated_at anfassen, damit das Display eine
+    // gerade geöffnete Session als "zuletzt aktiv" behandelt.
+    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (!existing.packed_by) updates.packed_by = profile.id;
-    if (existing.status === "open") {
-      updates.status = "in_progress";
-      updates.started_at = new Date().toISOString();
-    } else {
-      // Status update um updated_at zu triggern → Display switcht zu dieser Session
-      updates.updated_at = new Date().toISOString();
-    }
     await supabase.from("pack_sessions").update(updates).eq("id", existing.id);
 
     // Auto-Skip nachträglich anwenden für Sessions die VOR Auto-Skip-Feature
@@ -238,7 +237,7 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
 
     return {
       sessionId: existing.id,
-      status: existing.status === "open" ? "in_progress" : existing.status,
+      status: existing.status,
       expectedItems: (existing.expected_items as ExpectedItem[]) ?? [],
       photosSkipped,
       photosSkipReason,
@@ -262,8 +261,9 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
     .insert({
       order_name: cleanName,
       shopify_order_id: Number.isFinite(numericId) ? numericId : null,
-      status: "in_progress", // sofort aktiv damit Display switcht
-      started_at: new Date().toISOString(),
+      // 'open' — wird erst beim ersten Scan/Confirm auf in_progress gesetzt.
+      status: "open",
+      started_at: null,
       expected_items: expected,
       packed_by: profile.id,
       photos_skipped: autoSkip !== null,
