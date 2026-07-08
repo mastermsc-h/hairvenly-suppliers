@@ -288,6 +288,41 @@ export async function getOrCreatePackSession(orderName: string): Promise<{
 }
 
 /**
+ * Erneuert den expected_items-Snapshot einer Session aus dem Live-Shopify-Stand.
+ * Wird gebraucht wenn die Bestellung NACH Session-Anlage in Shopify geändert
+ * wurde (Artikel dazu/entfernt) — sonst packt der Mitarbeiter nach altem Stand.
+ * Bestehende Scans bleiben im Log; die Zähler rechnen gegen den neuen Snapshot.
+ */
+export async function refreshSessionSnapshot(
+  sessionId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) return { success: false, error: "Forbidden" };
+  const supabase = await createClient();
+
+  const { data: session } = await supabase
+    .from("pack_sessions")
+    .select("order_name, shopify_order_id")
+    .eq("id", sessionId)
+    .single();
+  if (!session) return { success: false, error: "Session nicht gefunden" };
+  if (!session.shopify_order_id) return { success: true }; // Demo — nichts zu tun
+
+  const order = await fetchOrderForPack(session.order_name);
+  if (!order) return { success: false, error: "Bestellung nicht in Shopify gefunden" };
+
+  const expected = toExpected(order.lineItems);
+  const { error } = await supabase
+    .from("pack_sessions")
+    .update({ expected_items: expected, updated_at: new Date().toISOString() })
+    .eq("id", sessionId);
+  if (error) return { success: false, error: error.message };
+
+  revalidatePath(`/pack/${session.order_name.replace(/^#/, "")}`);
+  return { success: true };
+}
+
+/**
  * Verarbeitet einen Barcode-Scan. Vergleicht mit erwarteten Items.
  * Returns scan status: 'match' | 'mismatch' | 'overflow'.
  */
@@ -364,14 +399,43 @@ export async function recordPackScan(
   const variantNumeric = matchedVariantId
     ? parseInt(matchedVariantId.split("/").pop() ?? "", 10)
     : null;
-  await supabase.from("pack_scans").insert({
-    session_id: sessionId,
-    scanned_barcode: trimmed,
-    matched_variant_id: variantNumeric && Number.isFinite(variantNumeric) ? variantNumeric : null,
-    matched_title: matchedTitle ?? null,
-    status,
-    scanned_by: profile.id,
-  });
+  const { data: insertedScan } = await supabase
+    .from("pack_scans")
+    .insert({
+      session_id: sessionId,
+      scanned_barcode: trimmed,
+      matched_variant_id: variantNumeric && Number.isFinite(variantNumeric) ? variantNumeric : null,
+      matched_title: matchedTitle ?? null,
+      status,
+      scanned_by: profile.id,
+    })
+    .select("id")
+    .single();
+
+  // Race-Repair: zählen-dann-inserten ist nicht atomar. Wenn zwei Geräte
+  // gleichzeitig denselben Artikel scannen, akzeptieren beide als 'match'
+  // und die Menge wird überschritten. Nach dem Insert deshalb rezählen —
+  // überschüssige match-Rows (die jüngsten) deterministisch auf 'overflow'
+  // downgraden. Beide beteiligten Requests führen dieselbe Reparatur aus
+  // und kommen zum selben Ergebnis (idempotent).
+  if (status === "match" && expectedItem) {
+    const { data: allMatches } = await supabase
+      .from("pack_scans")
+      .select("id, scanned_at")
+      .eq("session_id", sessionId)
+      .eq("scanned_barcode", trimmed)
+      .eq("status", "match")
+      .order("scanned_at", { ascending: true })
+      .order("id", { ascending: true });
+    if (allMatches && allMatches.length > expectedItem.quantity) {
+      const surplusIds = allMatches.slice(expectedItem.quantity).map((r) => r.id);
+      await supabase.from("pack_scans").update({ status: "overflow" }).in("id", surplusIds);
+      scannedCounts[trimmed] = expectedItem.quantity;
+      if (insertedScan && surplusIds.includes(insertedScan.id)) {
+        status = "overflow";
+      }
+    }
+  }
 
   // Session bei JEDEM Scan anfassen: updated_at muss frisch bleiben, sonst
   // fällt eine lange laufende Session aus dem 30-Min-Stale-Fenster des
@@ -1135,7 +1199,16 @@ export async function uploadPackPhoto(
     taken_by: profile.id,
   });
 
-  if (insErr) return { success: false, error: insErr.message };
+  if (insErr) {
+    // Orphan vermeiden: hochgeladene Datei wieder entfernen wenn der
+    // DB-Eintrag nicht angelegt werden konnte.
+    try {
+      await supabase.storage.from("pack-photos").remove([path]);
+    } catch {
+      // best effort — der 180d-cleanup-cron räumt notfalls nach
+    }
+    return { success: false, error: insErr.message };
+  }
 
   // Session anfassen — hält updated_at frisch fürs Display-Stale-Fenster
   await supabase

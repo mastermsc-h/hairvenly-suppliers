@@ -23,6 +23,30 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = createServiceClient();
+
+  // ── Demo-Sessions (#DEMO-*) älter als 7 Tage komplett löschen ──
+  // Scans/Photos-Rows cascaden via FK; Storage-Files vorher entfernen.
+  let demosDeleted = 0;
+  const demoCutoff = new Date();
+  demoCutoff.setDate(demoCutoff.getDate() - 7);
+  const { data: demoSessions } = await supabase
+    .from("pack_sessions")
+    .select("id")
+    .like("order_name", "#DEMO-%")
+    .lt("created_at", demoCutoff.toISOString());
+  if (demoSessions && demoSessions.length > 0) {
+    const demoIds = demoSessions.map((s) => s.id);
+    const { data: demoPhotos } = await supabase
+      .from("pack_photos")
+      .select("storage_path")
+      .in("session_id", demoIds);
+    if (demoPhotos && demoPhotos.length > 0) {
+      await supabase.storage.from("pack-photos").remove(demoPhotos.map((p) => p.storage_path));
+    }
+    const { error: demoErr } = await supabase.from("pack_sessions").delete().in("id", demoIds);
+    if (!demoErr) demosDeleted = demoIds.length;
+  }
+
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 180);
   const cutoffIso = cutoff.toISOString();
@@ -36,7 +60,7 @@ export async function GET(req: NextRequest) {
     .limit(1000);
 
   if (!oldPhotos || oldPhotos.length === 0) {
-    return NextResponse.json({ deleted: 0, cutoff: cutoffIso });
+    return NextResponse.json({ deleted: 0, demosDeleted, cutoff: cutoffIso });
   }
 
   const paths = oldPhotos.map((p) => p.storage_path);
@@ -56,6 +80,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     deleted: paths.length,
+    demosDeleted,
     cutoff: cutoffIso,
     sample: paths.slice(0, 3),
   });

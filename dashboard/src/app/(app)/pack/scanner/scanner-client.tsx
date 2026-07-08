@@ -57,6 +57,12 @@ export default function ScannerClient({ locale: _locale }: { locale: Locale }) {
   const performLookup = useCallback((barcode: string) => {
     const trimmed = barcode.trim();
     if (!trimmed) return;
+    // Order-QR erkannt (Lieferschein-QR) → direkt in den Pack-Mode springen
+    const packUrl = trimmed.match(/\/pack\/(\d+)/);
+    if (packUrl) {
+      window.location.href = `/pack/${packUrl[1]}`;
+      return;
+    }
     setScanned(trimmed);
     setNotFound(false);
     setResults(null);

@@ -15,6 +15,7 @@ import {
   skipPackPhotos,
   unskipPackPhotos,
   updateShippingAddress,
+  refreshSessionSnapshot,
   type PhotoSkipReason,
 } from "@/lib/actions/pack";
 import CelebrationOverlay from "../celebration-overlay";
@@ -175,6 +176,7 @@ export default function PackMode({
   initialPhotos,
   initialPhotosSkipped,
   initialPhotosSkipReason,
+  snapshotStale = false,
   shippingAddress,
   shopifyOrderUrl,
   shopifyLabelUrl,
@@ -189,6 +191,7 @@ export default function PackMode({
   initialPhotos: Record<string, { id: string; url: string }[]>;
   initialPhotosSkipped: boolean;
   initialPhotosSkipReason: PhotoSkipReason | null;
+  snapshotStale?: boolean;
   shippingAddress: { name: string | null; address1: string | null; address2: string | null; zip: string | null; city: string | null; country: string | null } | null;
   shopifyOrderUrl: string | null;
   shopifyLabelUrl: string | null;
@@ -409,6 +412,17 @@ export default function PackMode({
       if (inFlightRef.current) return;
       const trimmed = barcode.trim();
       if (!trimmed) return;
+      // Order-QR erkannt (Lieferschein-QR enthält /pack/<nr>-URL):
+      // gleicher Auftrag → ignorieren, anderer → dorthin navigieren.
+      const packUrl = trimmed.match(/\/pack\/(\d+)/);
+      if (packUrl) {
+        const scannedOrder = packUrl[1];
+        const currentOrder = orderName.replace(/^#/, "");
+        if (scannedOrder !== currentOrder) {
+          window.location.href = `/pack/${scannedOrder}`;
+        }
+        return;
+      }
       inFlightRef.current = true;
       startTransition(async () => {
         try {
@@ -447,13 +461,19 @@ export default function PackMode({
           await refreshHistory();
         } catch (err) {
           playBeep(false);
-          setFlash({ kind: "mismatch", message: err instanceof Error ? err.message : "Fehler" });
+          const raw = err instanceof Error ? err.message : "Fehler";
+          // Netzwerkfehler klar benennen — der Scan ist NICHT gezählt worden
+          const isNetwork = /fetch|network|load failed|connection/i.test(raw);
+          setFlash({
+            kind: "mismatch",
+            message: isNetwork ? "Keine Verbindung — bitte erneut scannen" : raw,
+          });
         } finally {
           inFlightRef.current = false;
         }
       });
     },
-    [sessionId, status, locale, refreshHistory, bigSuccess, expectedItems],
+    [sessionId, status, locale, refreshHistory, bigSuccess, expectedItems, orderName],
   );
 
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
@@ -671,6 +691,39 @@ export default function PackMode({
           );
         })}
       </div>
+
+      {/* Warnung: Bestellung wurde nach Session-Anlage in Shopify geändert */}
+      {snapshotStale && status !== "shipped" && (
+        <div className="mb-4 p-4 bg-amber-50 border-2 border-amber-400 rounded-2xl flex flex-col md:flex-row md:items-center gap-3">
+          <div className="flex items-start gap-2 flex-1">
+            <AlertTriangle size={20} className="text-amber-700 shrink-0 mt-0.5" />
+            <div className="text-sm text-amber-900">
+              <strong>Bestellung wurde in Shopify geändert!</strong>
+              <div className="text-xs mt-0.5">
+                Die Positionen unten entsprechen nicht mehr dem aktuellen Stand.
+                Bitte aktualisieren, bevor weitergepackt wird.
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() =>
+              startTransition(async () => {
+                const res = await refreshSessionSnapshot(sessionId);
+                if (res.success) {
+                  window.location.reload();
+                } else {
+                  alert(`Fehler: ${res.error ?? "unbekannt"}`);
+                }
+              })
+            }
+            className="shrink-0 px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 transition disabled:opacity-50"
+          >
+            {isPending ? "Aktualisiere…" : "Positionen aktualisieren"}
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Left: Scanner + Status */}

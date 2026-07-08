@@ -19,6 +19,22 @@ interface ExpectedItem {
   imageUrl: string | null;
 }
 
+// Signatur über (barcode|titel)→menge, merge-tolerant — erkennt ob der
+// Session-Snapshot vom Live-Shopify-Stand abweicht (Order wurde editiert).
+function itemsSignature(
+  items: { barcode: string | null; title: string; quantity: number }[],
+): string {
+  const m = new Map<string, number>();
+  for (const it of items) {
+    const key = it.barcode || `t:${it.title}`;
+    m.set(key, (m.get(key) ?? 0) + it.quantity);
+  }
+  return Array.from(m.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, q]) => `${k}=${q}`)
+    .join("|");
+}
+
 export default async function PackOrderPage({
   params,
 }: {
@@ -47,6 +63,7 @@ export default async function PackOrderPage({
   let expectedItems: ExpectedItem[];
   let photosSkipped: boolean;
   let photosSkipReason: PhotoSkipReason | null;
+  let snapshotStale = false;
 
   if (isDemo) {
     // Demo-session bereits angelegt → direkt aus DB lesen
@@ -96,6 +113,12 @@ export default async function PackOrderPage({
     expectedItems = sessionData.expectedItems;
     photosSkipped = sessionData.photosSkipped;
     photosSkipReason = sessionData.photosSkipReason;
+
+    // Snapshot-Abgleich: weicht die Live-Order vom eingefrorenen Snapshot ab
+    // (Order wurde nach Session-Anlage in Shopify editiert)?
+    snapshotStale =
+      status !== "shipped" &&
+      itemsSignature(order.lineItems) !== itemsSignature(expectedItems);
 
     orderDisplay = {
       name: order.name,
@@ -168,6 +191,7 @@ export default async function PackOrderPage({
         initialPhotos={photoMap}
         initialPhotosSkipped={photosSkipped}
         initialPhotosSkipReason={photosSkipReason}
+        snapshotStale={snapshotStale}
         shippingAddress={orderDisplay.shippingAddress}
         shopifyOrderUrl={shopifyOrderUrl}
         shopifyLabelUrl={shopifyLabelUrl}
