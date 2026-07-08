@@ -29,6 +29,13 @@ export default function PackList({
   // Standard: neueste oben (descending). Klick auf Datum-Header toggelt.
   const [sortDesc, setSortDesc] = useState(true);
   const [isPending, startTransition] = useTransition();
+  const [isRefreshing, startRefresh] = useTransition();
+
+  function handleRefresh() {
+    startRefresh(() => {
+      router.refresh();
+    });
+  }
 
   function handleResetPrint(orderNumberClean: string) {
     startTransition(async () => {
@@ -86,11 +93,12 @@ export default function PackList({
           />
         </div>
         <button
-          onClick={() => router.refresh()}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-neutral-300 text-sm hover:bg-neutral-50"
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-neutral-300 text-sm hover:bg-neutral-50 disabled:opacity-60"
         >
-          <RefreshCw size={14} />
-          {t(locale, "shipping.refresh")}
+          <RefreshCw size={14} className={isRefreshing ? "animate-spin" : ""} />
+          {isRefreshing ? "Lädt…" : t(locale, "shipping.refresh")}
         </button>
         <div className="text-sm text-neutral-500 whitespace-nowrap">
           {filtered.length} {t(locale, "shipping.col_order").toLowerCase()}
