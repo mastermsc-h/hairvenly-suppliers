@@ -1620,7 +1620,10 @@ export interface PrintAllOrder {
   name: string;
   numberClean: string;
   createdAt: string;
-  totalPrice: string;             // Bestellsumme inkl. Versand, z.B. "201.99"
+  subtotalPrice: string;          // Summe Positionen (nach Positions-Rabatten)
+  totalDiscounts: string;         // Order-Rabatt (z.B. Rabattcode)
+  shippingPrice: string;          // Versandkosten
+  totalPrice: string;             // Endbetrag inkl. Versand, z.B. "201.99"
   currency: string;               // z.B. "EUR"
   shippingAddress: {
     name: string | null;
@@ -1651,6 +1654,9 @@ export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[
           node {
             name
             createdAt
+            subtotalPriceSet { shopMoney { amount currencyCode } }
+            totalDiscountsSet { shopMoney { amount currencyCode } }
+            totalShippingPriceSet { shopMoney { amount currencyCode } }
             totalPriceSet { shopMoney { amount currencyCode } }
             shippingAddress { name address1 zip city country }
             lineItems(first: 30) {
@@ -1679,6 +1685,9 @@ export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[
         node: {
           name: string;
           createdAt: string;
+          subtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+          totalDiscountsSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+          totalShippingPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
           totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
           shippingAddress: PrintAllOrder["shippingAddress"];
           lineItems: {
@@ -1705,6 +1714,9 @@ export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[
       name: o.name,
       numberClean: o.name.replace(/^#/, ""),
       createdAt: o.createdAt,
+      subtotalPrice: o.subtotalPriceSet?.shopMoney.amount ?? "0",
+      totalDiscounts: o.totalDiscountsSet?.shopMoney.amount ?? "0",
+      shippingPrice: o.totalShippingPriceSet?.shopMoney.amount ?? "0",
       totalPrice: o.totalPriceSet?.shopMoney.amount ?? "0",
       currency: o.totalPriceSet?.shopMoney.currencyCode ?? "EUR",
       shippingAddress: o.shippingAddress,

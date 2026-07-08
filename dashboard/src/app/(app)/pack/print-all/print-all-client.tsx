@@ -19,6 +19,9 @@ interface Slip {
   name: string;
   numberClean: string;
   createdAt: string;
+  subtotalPrice: string;
+  totalDiscounts: string;
+  shippingPrice: string;
   totalPrice: string;
   currency: string;
   shippingAddress: {
@@ -318,11 +321,43 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
                     </tr>
                   );
                 })}
+                {/* Zwischensumme */}
                 <tr>
-                  <td colSpan={2} className="py-3 text-right text-sm font-semibold">
-                    Gesamt (inkl. Versand)
+                  <td colSpan={2} className="pt-3 pb-1 text-right text-sm text-neutral-600 border-t-2 border-black">
+                    Zwischensumme
                   </td>
-                  <td className="py-3 text-right text-base font-bold border-t-2 border-black">
+                  <td className="pt-3 pb-1 text-right text-sm text-neutral-700 border-t-2 border-black">
+                    {formatMoney(slip.subtotalPrice, slip.currency)}
+                  </td>
+                </tr>
+                {/* Rabatt — nur wenn vorhanden */}
+                {parseFloat(slip.totalDiscounts) > 0 && (
+                  <tr>
+                    <td colSpan={2} className="py-1 text-right text-sm text-emerald-700">
+                      Rabatt
+                    </td>
+                    <td className="py-1 text-right text-sm text-emerald-700">
+                      − {formatMoney(slip.totalDiscounts, slip.currency)}
+                    </td>
+                  </tr>
+                )}
+                {/* Versand */}
+                <tr>
+                  <td colSpan={2} className="py-1 text-right text-sm text-neutral-600">
+                    Versand
+                  </td>
+                  <td className="py-1 text-right text-sm text-neutral-700">
+                    {parseFloat(slip.shippingPrice) > 0
+                      ? formatMoney(slip.shippingPrice, slip.currency)
+                      : "Kostenlos"}
+                  </td>
+                </tr>
+                {/* Gesamt */}
+                <tr>
+                  <td colSpan={2} className="pt-2 text-right text-sm font-semibold border-t border-neutral-300">
+                    Gesamt
+                  </td>
+                  <td className="pt-2 text-right text-base font-bold border-t border-neutral-300">
                     {formatMoney(slip.totalPrice, slip.currency)}
                   </td>
                 </tr>
