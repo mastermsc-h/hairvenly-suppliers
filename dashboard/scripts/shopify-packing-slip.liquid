@@ -87,6 +87,7 @@
   table.items .item-title { font-size: 13px; line-height: 1.4; }
   table.items .item-variant { font-size: 11px; color: #666; margin-top: 2px; }
   table.items .item-qty { font-weight: 700; font-size: 16px; }
+  table.items .item-unit-price { font-size: 10px; color: #888; margin-top: 2px; }
   table.items .item-price { font-size: 13px; }
   table.items .total-label { text-align: right; font-size: 13px; font-weight: 600; border-bottom: none; }
   table.items .total-value { text-align: right; font-size: 15px; font-weight: 700; border-top: 2px solid #000; border-bottom: none; }
@@ -235,6 +236,9 @@
         </td>
         <td class="col-qty">
           <span class="item-qty">{{ line_item.quantity }}×</span>
+          {% if line_item.quantity > 1 %}
+            <div class="item-unit-price">à {{ line_item.final_price | money }}</div>
+          {% endif %}
         </td>
         <td class="col-price">
           <span class="item-price">{{ line_item.final_line_price | money }}</span>

@@ -1634,6 +1634,7 @@ export interface PrintAllOrder {
     variantTitle: string | null;
     quantity: number;
     collectionHandles: string[];
+    unitPrice: string;            // rabattierter Stückpreis
     lineTotal: string;            // rabattierter Zeilenpreis (unit × qty)
   }[];
 }
@@ -1710,11 +1711,13 @@ export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[
       lineItems: o.lineItems.edges.map((le) => {
         const li = le.node;
         const unit = parseFloat(li.discountedUnitPriceSet?.shopMoney.amount ?? "0");
+        const unitStr = li.discountedUnitPriceSet?.shopMoney.amount ?? "0";
         return {
           title: li.title,
           variantTitle: li.variant?.title && li.variant.title !== "Default Title" ? li.variant.title : null,
           quantity: li.quantity,
           collectionHandles: li.variant?.product?.collections.edges.map((c) => c.node.handle) ?? [],
+          unitPrice: unitStr,
           lineTotal: (unit * li.quantity).toFixed(2),
         };
       }),

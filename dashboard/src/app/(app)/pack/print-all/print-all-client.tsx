@@ -11,6 +11,7 @@ interface SlipItem {
   variantTitle: string | null;
   quantity: number;
   isExtension: boolean;
+  unitPrice: string;
   lineTotal: string;
 }
 
@@ -305,6 +306,11 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
                       </td>
                       <td className="py-3 align-top text-right">
                         <span className="font-bold text-base">{it.quantity}×</span>
+                        {it.quantity > 1 && (
+                          <div className="text-[11px] text-neutral-500 mt-0.5">
+                            à {formatMoney(it.unitPrice, slip.currency)}
+                          </div>
+                        )}
                       </td>
                       <td className="py-3 align-top text-right">
                         <span className="text-sm">{formatMoney(it.lineTotal, slip.currency)}</span>

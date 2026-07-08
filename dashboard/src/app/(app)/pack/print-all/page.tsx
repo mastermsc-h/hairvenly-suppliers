@@ -49,6 +49,7 @@ export default async function PrintAllPage({
       variantTitle: li.variantTitle,
       quantity: li.quantity,
       isExtension: isExtensionItem(li.collectionHandles),
+      unitPrice: li.unitPrice,
       lineTotal: li.lineTotal,
     })),
   }));
