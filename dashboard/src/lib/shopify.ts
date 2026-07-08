@@ -1364,11 +1364,13 @@ export async function fetchUnfulfilledPaidOrders(limit = 100): Promise<PackOrder
  * Financial-Status pending/authorized/partially_paid — also alles was noch
  * nicht vollständig bezahlt ist, aber auch noch nicht storniert/erstattet.
  */
-export async function fetchUnfulfilledUnpaidOrders(limit = 100): Promise<PackOrder[]> {
-  // Älteste zuerst — die am längsten offenen (überfällig, canceln) stehen oben.
+export async function fetchUnfulfilledUnpaidOrders(limit = 250): Promise<PackOrder[]> {
+  // Neueste zuerst — sonst füllen uralte Karteileichen (financial_status
+  // pending seit Jahren) das Limit und die aktuellen unbezahlten fehlen.
+  // Client teilt danach in "aktuell (≤14d)" und aufklappbare "ältere".
   const query = `
     query unpaidQueue($q: String!, $first: Int!) {
-      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: false) {
+      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: true) {
         edges { node { ${PACK_ORDER_FIELDS_SLIM} } }
       }
     }

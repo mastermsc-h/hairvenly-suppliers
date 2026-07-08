@@ -33,7 +33,7 @@ export default async function PackPage() {
   try {
     [orders, unpaidOrders] = await Promise.all([
       fetchUnfulfilledPaidOrders(100),
-      fetchUnfulfilledUnpaidOrders(100),
+      fetchUnfulfilledUnpaidOrders(250),
     ]);
     fetchedCount = orders.length;
   } catch (e) {
@@ -90,6 +90,12 @@ export default async function PackPage() {
 
   // Anzahl orders ohne QR (von der aktuellen Liste) — Hinweis für Backfill-Button
   const ordersWithoutQrInList = orders.filter((o) => !o.hasPackQr).length;
+
+  // Anzahl aktueller unbezahlter (≤14 Tage) — für den Sektions-Chip
+  const nowMs = Date.now();
+  const unpaidRecentCount = unpaidOrders.filter(
+    (o) => Math.floor((nowMs - new Date(o.createdAt).getTime()) / 86_400_000) <= 14,
+  ).length;
 
   return (
     <div className="p-4 md:p-8 space-y-6 max-w-7xl">
@@ -154,11 +160,11 @@ export default async function PackPage() {
                 Noch nicht bezahlt
               </h2>
               <span className="text-xs font-medium text-neutral-500 bg-neutral-100 rounded-full px-2 py-0.5">
-                {unpaidOrders.length}
+                {unpaidRecentCount} aktuell
               </span>
             </div>
             <p className="text-sm text-neutral-500 -mt-1">
-              Offene Bestellungen die noch <strong>auf Zahlung warten</strong> (z.B. Vorkasse) — noch nicht versandbereit. Überfällige (&gt; 7 Tage) sind farblich markiert.
+              Offene Bestellungen die noch <strong>auf Zahlung warten</strong> (z.B. Vorkasse) — noch nicht versandbereit. Ältere als 14 Tage sind eingeklappt; überfällige farblich markiert.
             </p>
             <UnpaidList orders={unpaidOrders} locale={locale} />
           </section>
