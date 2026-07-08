@@ -972,6 +972,32 @@ export async function resetSlipPrint(
 }
 
 /**
+ * Setzt den Druck-Status mehrerer Bestellungen auf einmal zurück.
+ * Wird für den "alle zurücksetzen"-Link in der Versand-Liste genutzt.
+ */
+export async function resetSlipPrintBulk(
+  orderNames: string[],
+): Promise<{ success: boolean; error?: string; resetCount?: number }> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) return { success: false, error: "Forbidden" };
+  const clean = Array.from(
+    new Set(orderNames.map((n) => (n.startsWith("#") ? n : `#${n}`))),
+  ).filter(Boolean);
+  if (clean.length === 0) return { success: true, resetCount: 0 };
+
+  const supabase = await createClient();
+  const { error, count } = await supabase
+    .from("printed_slips")
+    .delete({ count: "exact" })
+    .in("order_name", clean);
+  if (error) return { success: false, error: error.message };
+
+  revalidatePath("/pack");
+  revalidatePath("/pack/archive");
+  return { success: true, resetCount: count ?? 0 };
+}
+
+/**
  * Erstellt eine Demo-Bestellung zum Testen des Pack-Flows ohne echte
  * Shopify-Bestellung. Wird mit prefix '#DEMO-' kenntlich gemacht.
  *

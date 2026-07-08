@@ -6,7 +6,7 @@ import { Search, Package2, ArrowRight, RefreshCw, ArrowDown, ArrowUp, Printer, X
 import { t, type Locale } from "@/lib/i18n";
 import type { PackOrderWithStatus } from "./page";
 import { useRouter } from "next/navigation";
-import { resetSlipPrint } from "@/lib/actions/pack";
+import { resetSlipPrint, resetSlipPrintBulk } from "@/lib/actions/pack";
 
 const SHOPIFY_STORE_HANDLE = "339520-3";
 
@@ -33,6 +33,19 @@ export default function PackList({
   function handleResetPrint(orderNumberClean: string) {
     startTransition(async () => {
       const res = await resetSlipPrint(orderNumberClean);
+      if (res.success) router.refresh();
+      else alert(`Fehler: ${res.error ?? "unbekannt"}`);
+    });
+  }
+
+  // Wie viele der aktuellen Bestellungen haben einen Druck-Status?
+  const printedNames = orders.filter((o) => o.slipPrintedAt).map((o) => o.name);
+
+  function handleResetAllPrints() {
+    if (printedNames.length === 0) return;
+    if (!confirm(`Druck-Status von ${printedNames.length} Bestellung(en) zurücksetzen?`)) return;
+    startTransition(async () => {
+      const res = await resetSlipPrintBulk(printedNames);
       if (res.success) router.refresh();
       else alert(`Fehler: ${res.error ?? "unbekannt"}`);
     });
@@ -107,7 +120,22 @@ export default function PackList({
                   </th>
                   <th className="text-left px-4 py-3 font-medium">{t(locale, "shipping.col_customer")}</th>
                   <th className="text-left px-4 py-3 font-medium">{t(locale, "shipping.col_items")}</th>
-                  <th className="text-left px-4 py-3 font-medium">{t(locale, "shipping.col_status")}</th>
+                  <th className="text-left px-4 py-3 font-medium">
+                    <div className="flex items-center gap-2">
+                      <span>{t(locale, "shipping.col_status")}</span>
+                      {printedNames.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleResetAllPrints}
+                          disabled={isPending}
+                          title="Druck-Status aller Bestellungen zurücksetzen"
+                          className="normal-case tracking-normal font-normal text-[11px] text-neutral-400 hover:text-red-600 disabled:opacity-40"
+                        >
+                          Druck reset
+                        </button>
+                      )}
+                    </div>
+                  </th>
                   <th className="text-right px-4 py-3 font-medium">{t(locale, "shipping.col_action")}</th>
                 </tr>
               </thead>
