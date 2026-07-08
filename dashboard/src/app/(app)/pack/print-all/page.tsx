@@ -30,12 +30,15 @@ export default async function PrintAllPage() {
     name: o.name,
     numberClean: o.numberClean,
     createdAt: o.createdAt,
+    totalPrice: o.totalPrice,
+    currency: o.currency,
     shippingAddress: o.shippingAddress,
     items: o.lineItems.map((li) => ({
       title: li.title,
       variantTitle: li.variantTitle,
       quantity: li.quantity,
       isExtension: isExtensionItem(li.collectionHandles),
+      lineTotal: li.lineTotal,
     })),
   }));
 

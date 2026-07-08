@@ -82,10 +82,14 @@
   table.items td { vertical-align: top; padding: 14px 6px; border-bottom: 1px solid #e5e5e5; }
   table.items .col-image { width: 70px; }
   table.items .col-qty { width: 80px; text-align: right; }
+  table.items .col-price { width: 100px; text-align: right; }
   table.items .item-image { width: 60px; height: 60px; object-fit: cover; border-radius: 4px; }
   table.items .item-title { font-size: 13px; line-height: 1.4; }
   table.items .item-variant { font-size: 11px; color: #666; margin-top: 2px; }
   table.items .item-qty { font-weight: 700; font-size: 16px; }
+  table.items .item-price { font-size: 13px; }
+  table.items .total-label { text-align: right; font-size: 13px; font-weight: 600; border-bottom: none; }
+  table.items .total-value { text-align: right; font-size: 15px; font-weight: 700; border-top: 2px solid #000; border-bottom: none; }
 
   .footer { text-align: center; margin-top: 40px; font-size: 12px; color: #555; line-height: 1.6; }
 </style>
@@ -143,6 +147,7 @@
       <th class="col-image"></th>
       <th>ARTIKEL</th>
       <th class="col-qty">ANZAHL</th>
+      <th class="col-price">PREIS</th>
     </tr>
   </thead>
   <tbody>
@@ -231,8 +236,15 @@
         <td class="col-qty">
           <span class="item-qty">{{ line_item.quantity }}×</span>
         </td>
+        <td class="col-price">
+          <span class="item-price">{{ line_item.final_line_price | money }}</span>
+        </td>
       </tr>
     {% endfor %}
+    <tr>
+      <td colspan="3" class="total-label">Gesamt (inkl. Versand)</td>
+      <td class="total-value">{{ order.total_price | money }}</td>
+    </tr>
   </tbody>
 </table>
 

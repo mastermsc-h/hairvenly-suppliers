@@ -1590,6 +1590,8 @@ export interface PrintAllOrder {
   name: string;
   numberClean: string;
   createdAt: string;
+  totalPrice: string;             // Bestellsumme inkl. Versand, z.B. "201.99"
+  currency: string;               // z.B. "EUR"
   shippingAddress: {
     name: string | null;
     address1: string | null;
@@ -1602,6 +1604,7 @@ export interface PrintAllOrder {
     variantTitle: string | null;
     quantity: number;
     collectionHandles: string[];
+    lineTotal: string;            // rabattierter Zeilenpreis (unit × qty)
   }[];
 }
 
@@ -1617,12 +1620,14 @@ export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[
           node {
             name
             createdAt
+            totalPriceSet { shopMoney { amount currencyCode } }
             shippingAddress { name address1 zip city country }
             lineItems(first: 30) {
               edges {
                 node {
                   title
                   quantity
+                  discountedUnitPriceSet { shopMoney { amount currencyCode } }
                   variant {
                     title
                     product {
@@ -1643,12 +1648,14 @@ export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[
         node: {
           name: string;
           createdAt: string;
+          totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
           shippingAddress: PrintAllOrder["shippingAddress"];
           lineItems: {
             edges: {
               node: {
                 title: string;
                 quantity: number;
+                discountedUnitPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
                 variant: {
                   title: string | null;
                   product: { collections: { edges: { node: { handle: string } }[] } } | null;
@@ -1667,14 +1674,18 @@ export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[
       name: o.name,
       numberClean: o.name.replace(/^#/, ""),
       createdAt: o.createdAt,
+      totalPrice: o.totalPriceSet?.shopMoney.amount ?? "0",
+      currency: o.totalPriceSet?.shopMoney.currencyCode ?? "EUR",
       shippingAddress: o.shippingAddress,
       lineItems: o.lineItems.edges.map((le) => {
         const li = le.node;
+        const unit = parseFloat(li.discountedUnitPriceSet?.shopMoney.amount ?? "0");
         return {
           title: li.title,
           variantTitle: li.variant?.title && li.variant.title !== "Default Title" ? li.variant.title : null,
           quantity: li.quantity,
           collectionHandles: li.variant?.product?.collections.edges.map((c) => c.node.handle) ?? [],
+          lineTotal: (unit * li.quantity).toFixed(2),
         };
       }),
     };

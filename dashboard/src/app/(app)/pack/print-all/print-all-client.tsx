@@ -10,12 +10,15 @@ interface SlipItem {
   variantTitle: string | null;
   quantity: number;
   isExtension: boolean;
+  lineTotal: string;
 }
 
 interface Slip {
   name: string;
   numberClean: string;
   createdAt: string;
+  totalPrice: string;
+  currency: string;
   shippingAddress: {
     name: string | null;
     address1: string | null;
@@ -24,6 +27,12 @@ interface Slip {
     country: string | null;
   } | null;
   items: SlipItem[];
+}
+
+function formatMoney(amount: string, currency: string): string {
+  const n = parseFloat(amount);
+  if (!Number.isFinite(n)) return `${amount} ${currency}`;
+  return n.toLocaleString("de-DE", { style: "currency", currency });
 }
 
 function detectAttributes(title: string, variantTitle: string | null) {
@@ -260,6 +269,7 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
                 <tr>
                   <th className="text-left text-[11px] tracking-widest text-neutral-600 border-b-2 border-black py-2">ARTIKEL</th>
                   <th className="text-right text-[11px] tracking-widest text-neutral-600 border-b-2 border-black py-2 w-[80px]">ANZAHL</th>
+                  <th className="text-right text-[11px] tracking-widest text-neutral-600 border-b-2 border-black py-2 w-[100px]">PREIS</th>
                 </tr>
               </thead>
               <tbody>
@@ -285,9 +295,20 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
                       <td className="py-3 align-top text-right">
                         <span className="font-bold text-base">{it.quantity}×</span>
                       </td>
+                      <td className="py-3 align-top text-right">
+                        <span className="text-sm">{formatMoney(it.lineTotal, slip.currency)}</span>
+                      </td>
                     </tr>
                   );
                 })}
+                <tr>
+                  <td colSpan={2} className="py-3 text-right text-sm font-semibold">
+                    Gesamt (inkl. Versand)
+                  </td>
+                  <td className="py-3 text-right text-base font-bold border-t-2 border-black">
+                    {formatMoney(slip.totalPrice, slip.currency)}
+                  </td>
+                </tr>
               </tbody>
             </table>
 
