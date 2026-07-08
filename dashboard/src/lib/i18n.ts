@@ -602,7 +602,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "customs_ch.hint": "Das PDF enthält alle Pflichtangaben. Stempel/Unterschrift wird vor Versand manuell ergänzt.",
 
     // Versand / Pack-Modus
-    "nav.shipping": "Versand",
+    "nav.shipping": "Shopify Bestellungen",
     "nav.shipping.list": "Bestellungen",
     "nav.shipping.scanner": "Scanner",
     "nav.shipping.display": "Pack-Anzeige (iMac)",
@@ -1284,7 +1284,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "customs_ch.hint": "The PDF contains all required information. Stamp/signature is added manually before dispatch.",
 
     // Shipping / Pack mode
-    "nav.shipping": "Shipping",
+    "nav.shipping": "Shopify Orders",
     "nav.shipping.list": "Orders",
     "nav.shipping.scanner": "Scanner",
     "nav.shipping.display": "Pack Display (iMac)",
@@ -1966,7 +1966,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "customs_ch.hint": "PDF tüm zorunlu bilgileri içerir. Kaşe/imza sevkiyattan önce manuel olarak eklenir.",
 
     // Kargo / Paketleme modu
-    "nav.shipping": "Kargo",
+    "nav.shipping": "Shopify Siparişleri",
     "nav.shipping.list": "Siparişler",
     "nav.shipping.scanner": "Tarayıcı",
     "nav.shipping.display": "Paketleme Ekranı (iMac)",
