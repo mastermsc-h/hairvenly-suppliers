@@ -15,6 +15,8 @@ export interface PackOrderWithStatus extends PackOrder {
   packedBy: string | null;
   startedAt: string | null;
   finishedAt: string | null;
+  slipPrintedAt: string | null;
+  slipPrintedBy: string | null;
 }
 
 export default async function PackPage() {
@@ -56,14 +58,27 @@ export default async function PackPage() {
     });
   }
 
+  // Lieferschein-Druck-Status (letzter Druck pro Order)
+  const { data: printedSlips } = await supabase
+    .from("v_printed_slips_latest")
+    .select("order_name, printed_at, printed_by_name")
+    .in("order_name", orderNames.length > 0 ? orderNames : [""]);
+  const slipMap = new Map<string, { printedAt: string; printedBy: string | null }>();
+  for (const p of printedSlips ?? []) {
+    slipMap.set(p.order_name, { printedAt: p.printed_at, printedBy: p.printed_by_name });
+  }
+
   const ordersWithStatus: PackOrderWithStatus[] = orders.map((o) => {
     const session = sessionMap.get(o.name);
+    const slip = slipMap.get(o.name);
     return {
       ...o,
       packStatus: (session?.status as PackOrderWithStatus["packStatus"]) ?? "open",
       packedBy: session?.packedBy ?? null,
       startedAt: session?.startedAt ?? null,
       finishedAt: session?.finishedAt ?? null,
+      slipPrintedAt: slip?.printedAt ?? null,
+      slipPrintedBy: slip?.printedBy ?? null,
     };
   });
 

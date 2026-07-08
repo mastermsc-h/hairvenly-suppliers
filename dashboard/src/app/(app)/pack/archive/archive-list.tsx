@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Search, Archive, ExternalLink, Camera, FileText, ArrowRight, Calendar } from "lucide-react";
+import { Search, Archive, ExternalLink, Camera, FileText, ArrowRight, Calendar, Printer } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { t, type Locale } from "@/lib/i18n";
 import type { ArchivedSession } from "./page";
@@ -203,9 +203,22 @@ export default function ArchiveList({
                       <div className="flex items-center gap-2 mt-1 text-xs text-neutral-500">
                         <span className="flex items-center gap-1">
                           <Camera size={11} />
-                          {s.photoCount}/3
+                          {s.photoCount}
                         </span>
                       </div>
+                      {s.slipPrintedAt && (
+                        <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-emerald-700">
+                          <Printer size={11} />
+                          <span>
+                            {new Date(s.slipPrintedAt).toLocaleDateString(localeStr, {
+                              day: "2-digit",
+                              month: "2-digit",
+                              timeZone: "Europe/Berlin",
+                            })}
+                            {s.slipPrintedBy ? ` · ${s.slipPrintedBy}` : ""}
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <Link

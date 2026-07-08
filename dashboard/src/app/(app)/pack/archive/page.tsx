@@ -19,6 +19,8 @@ export interface ArchivedSession {
   notes: string | null;
   itemCount: number;
   photoCount: number;
+  slipPrintedAt: string | null;
+  slipPrintedBy: string | null;
 }
 
 function defaultRange(): { from: string; to: string } {
@@ -69,9 +71,21 @@ export default async function ArchivePage({
     photoCounts.set(p.session_id, (photoCounts.get(p.session_id) ?? 0) + 1);
   }
 
+  // Lieferschein-Druck-Status pro Order laden
+  const archiveOrderNames = (rows ?? []).map((r) => r.order_name);
+  const { data: printedSlips } = await supabase
+    .from("v_printed_slips_latest")
+    .select("order_name, printed_at, printed_by_name")
+    .in("order_name", archiveOrderNames.length > 0 ? archiveOrderNames : [""]);
+  const slipMap = new Map<string, { printedAt: string; printedBy: string | null }>();
+  for (const p of printedSlips ?? []) {
+    slipMap.set(p.order_name, { printedAt: p.printed_at, printedBy: p.printed_by_name });
+  }
+
   const sessions: ArchivedSession[] = (rows ?? []).map((r) => {
     const profileRel = (r as { profiles?: { display_name?: string | null; username?: string | null } | null }).profiles;
     const items = Array.isArray(r.expected_items) ? r.expected_items.length : 0;
+    const slip = slipMap.get(r.order_name);
     return {
       id: r.id,
       orderName: r.order_name,
@@ -85,6 +99,8 @@ export default async function ArchivePage({
       notes: r.notes,
       itemCount: items,
       photoCount: photoCounts.get(r.id) ?? 0,
+      slipPrintedAt: slip?.printedAt ?? null,
+      slipPrintedBy: slip?.printedBy ?? null,
     };
   });
 

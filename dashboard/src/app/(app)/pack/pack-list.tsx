@@ -173,6 +173,19 @@ export default function PackList({
                       {o.packedBy && (
                         <div className="text-xs text-neutral-500 mt-1">{o.packedBy}</div>
                       )}
+                      {o.slipPrintedAt && (
+                        <div className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-emerald-700">
+                          <Printer size={11} />
+                          <span>
+                            {new Date(o.slipPrintedAt).toLocaleDateString(localeStr, {
+                              day: "2-digit",
+                              month: "2-digit",
+                              timeZone: "Europe/Berlin",
+                            })}
+                            {o.slipPrintedBy ? ` · ${o.slipPrintedBy}` : ""}
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="inline-flex items-center gap-2">

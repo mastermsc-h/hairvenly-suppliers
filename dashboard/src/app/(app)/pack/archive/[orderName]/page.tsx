@@ -37,6 +37,13 @@ export default async function ArchiveDetailPage({
   const profileRel = (session as { profiles?: { display_name?: string | null; username?: string | null } | null }).profiles;
   const packedByName = profileRel?.display_name || profileRel?.username || null;
 
+  // Lieferschein-Druck-Status
+  const { data: slip } = await supabase
+    .from("v_printed_slips_latest")
+    .select("printed_at, printed_by_name")
+    .eq("order_name", cleanName)
+    .maybeSingle();
+
   // Foto-URLs holen
   const { data: photos } = await supabase
     .from("pack_photos")
@@ -158,6 +165,28 @@ export default async function ArchiveDetailPage({
                   timeZone: "Europe/Berlin",
                 })
               : "—"}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs font-medium text-neutral-500 uppercase">{t(locale, "shipping.slip_printed")}</div>
+          <div className="text-sm text-neutral-900 mt-1">
+            {slip?.printed_at ? (
+              <>
+                {new Date(slip.printed_at).toLocaleString(localeStr, {
+                  day: "2-digit",
+                  month: "2-digit",
+                  year: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  timeZone: "Europe/Berlin",
+                })}
+                {slip.printed_by_name ? (
+                  <span className="text-neutral-500"> · {slip.printed_by_name}</span>
+                ) : null}
+              </>
+            ) : (
+              "—"
+            )}
           </div>
         </div>
       </div>

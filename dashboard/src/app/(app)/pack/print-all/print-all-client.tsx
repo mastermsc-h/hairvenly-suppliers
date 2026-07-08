@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import Link from "next/link";
 import { Printer, ArrowLeft } from "lucide-react";
+import { recordSlipPrint } from "@/lib/actions/pack";
 
 interface SlipItem {
   title: string;
@@ -79,6 +80,7 @@ function formatDate(iso: string): string {
 export default function PrintAllClient({ slips }: { slips: Slip[] }) {
   const [qrMap, setQrMap] = useState<Record<string, string>>({});
   const [ready, setReady] = useState(false);
+  const printedRef = useRef(false);
 
   // QR-Codes für alle Bestellungen generieren
   useEffect(() => {
@@ -114,12 +116,15 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
   }, [slips]);
 
   // Sobald alle QRs da sind: einmal automatisch das Druckfenster öffnen
+  // + den Druck protokollieren (wer/wann), damit die Versand-Liste + das
+  // Archiv anzeigen können dass der Lieferschein raus ist.
   useEffect(() => {
-    if (!ready) return;
-    // Kurz warten, damit Bilder + Layout fertig sind
+    if (!ready || printedRef.current || slips.length === 0) return;
+    printedRef.current = true;
+    void recordSlipPrint(slips.map((s) => s.name)).catch(() => {});
     const tm = setTimeout(() => window.print(), 500);
     return () => clearTimeout(tm);
-  }, [ready]);
+  }, [ready, slips]);
 
   if (slips.length === 0) {
     return (

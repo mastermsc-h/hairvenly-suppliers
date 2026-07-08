@@ -927,6 +927,31 @@ export async function cancelPackSession(
 }
 
 /**
+ * Protokolliert, dass für die genannten Bestellungen ein Lieferschein
+ * gedruckt wurde (wer + wann). Wird vom Druck-Client aufgerufen sobald das
+ * Druckfenster geöffnet wird.
+ */
+export async function recordSlipPrint(
+  orderNames: string[],
+): Promise<{ success: boolean; error?: string }> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) return { success: false, error: "Forbidden" };
+  const clean = Array.from(new Set(orderNames.map((n) => (n.startsWith("#") ? n : `#${n}`)))).filter(
+    Boolean,
+  );
+  if (clean.length === 0) return { success: true };
+
+  const supabase = await createClient();
+  const rows = clean.map((order_name) => ({ order_name, printed_by: profile.id }));
+  const { error } = await supabase.from("printed_slips").insert(rows);
+  if (error) return { success: false, error: error.message };
+
+  revalidatePath("/pack");
+  revalidatePath("/pack/archive");
+  return { success: true };
+}
+
+/**
  * Erstellt eine Demo-Bestellung zum Testen des Pack-Flows ohne echte
  * Shopify-Bestellung. Wird mit prefix '#DEMO-' kenntlich gemacht.
  *
