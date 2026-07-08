@@ -158,7 +158,7 @@ export default async function PackPage() {
               </span>
             </div>
             <p className="text-sm text-neutral-500 -mt-1">
-              Offene Bestellungen die noch <strong>auf Zahlung warten</strong> (z.B. Vorkasse) — noch nicht versandbereit. Letzte 90 Tage.
+              Offene Bestellungen die noch <strong>auf Zahlung warten</strong> (z.B. Vorkasse) — noch nicht versandbereit. Überfällige (&gt; 7 Tage) sind farblich markiert.
             </p>
             <UnpaidList orders={unpaidOrders} locale={locale} />
           </section>

@@ -1364,23 +1364,21 @@ export async function fetchUnfulfilledPaidOrders(limit = 100): Promise<PackOrder
  * Financial-Status pending/authorized/partially_paid — also alles was noch
  * nicht vollständig bezahlt ist, aber auch noch nicht storniert/erstattet.
  */
-export async function fetchUnfulfilledUnpaidOrders(limit = 100, daysBack = 90): Promise<PackOrder[]> {
+export async function fetchUnfulfilledUnpaidOrders(limit = 100): Promise<PackOrder[]> {
+  // Älteste zuerst — die am längsten offenen (überfällig, canceln) stehen oben.
   const query = `
     query unpaidQueue($q: String!, $first: Int!) {
-      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: true) {
+      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: false) {
         edges { node { ${PACK_ORDER_FIELDS_SLIM} } }
       }
     }
   `;
   const skipTags = PACK_SKIP_TAGS.map((t) => `-tag:"${t}"`).join(" AND ");
-  // Nur die letzten N Tage — sonst tauchen uralte nie-bezahlte Karteileichen
-  // (abgebrochene Checkouts) aus der Shop-Historie auf.
-  const since = new Date();
-  since.setDate(since.getDate() - daysBack);
-  const sinceStr = since.toISOString().slice(0, 10);
   // Nicht bezahlt = pending/authorized/partially_paid (nicht storniert/erstattet).
+  // Keine Zeitgrenze — auch uralte offene Bestellungen sollen sichtbar sein
+  // (werden farblich als überfällig markiert, damit man sie canceln kann).
   const q =
-    `fulfillment_status:unfulfilled AND created_at:>=${sinceStr} AND (financial_status:pending OR financial_status:authorized OR financial_status:partially_paid)` +
+    `fulfillment_status:unfulfilled AND (financial_status:pending OR financial_status:authorized OR financial_status:partially_paid)` +
     (skipTags ? ` AND ${skipTags}` : "");
   const res = await shopifyGraphQL<{ orders: { edges: { node: PackOrderNode }[] } }>(
     query,
