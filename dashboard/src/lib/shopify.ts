@@ -1360,6 +1360,36 @@ export async function fetchUnfulfilledPaidOrders(limit = 100): Promise<PackOrder
 }
 
 /**
+ * Fetch unfulfilled, NOT-yet-paid orders (offen, wartet auf Zahlung).
+ * Financial-Status pending/authorized/partially_paid — also alles was noch
+ * nicht vollständig bezahlt ist, aber auch noch nicht storniert/erstattet.
+ */
+export async function fetchUnfulfilledUnpaidOrders(limit = 100, daysBack = 90): Promise<PackOrder[]> {
+  const query = `
+    query unpaidQueue($q: String!, $first: Int!) {
+      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: true) {
+        edges { node { ${PACK_ORDER_FIELDS_SLIM} } }
+      }
+    }
+  `;
+  const skipTags = PACK_SKIP_TAGS.map((t) => `-tag:"${t}"`).join(" AND ");
+  // Nur die letzten N Tage — sonst tauchen uralte nie-bezahlte Karteileichen
+  // (abgebrochene Checkouts) aus der Shop-Historie auf.
+  const since = new Date();
+  since.setDate(since.getDate() - daysBack);
+  const sinceStr = since.toISOString().slice(0, 10);
+  // Nicht bezahlt = pending/authorized/partially_paid (nicht storniert/erstattet).
+  const q =
+    `fulfillment_status:unfulfilled AND created_at:>=${sinceStr} AND (financial_status:pending OR financial_status:authorized OR financial_status:partially_paid)` +
+    (skipTags ? ` AND ${skipTags}` : "");
+  const res = await shopifyGraphQL<{ orders: { edges: { node: PackOrderNode }[] } }>(
+    query,
+    { q, first: limit },
+  );
+  return res.data?.orders.edges.map((e) => mapPackOrder(e.node)) ?? [];
+}
+
+/**
  * Fetch alle bezahlten Orders der letzten N Tage — egal ob fulfilled oder nicht.
  * Wird genutzt für QR-Backfill (auch alte/fulfilled orders sollen QR im Lieferschein haben).
  */

@@ -1,12 +1,14 @@
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { t, type Locale } from "@/lib/i18n";
-import { fetchUnfulfilledPaidOrders, type PackOrder } from "@/lib/shopify";
+import { fetchUnfulfilledPaidOrders, fetchUnfulfilledUnpaidOrders, type PackOrder } from "@/lib/shopify";
 import { createClient } from "@/lib/supabase/server";
 import PackList from "./pack-list";
+import UnpaidList from "./unpaid-list";
 import BackfillButton from "./backfill-button";
 import DemoButton from "./demo-button";
 import OrderQrScanner from "./order-qr-scanner";
+import { CheckCircle2, Clock } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -25,10 +27,14 @@ export default async function PackPage() {
   const locale = (profile.language ?? "de") as Locale;
 
   let orders: PackOrder[] = [];
+  let unpaidOrders: PackOrder[] = [];
   let errorMessage: string | null = null;
   let fetchedCount = 0;
   try {
-    orders = await fetchUnfulfilledPaidOrders(100);
+    [orders, unpaidOrders] = await Promise.all([
+      fetchUnfulfilledPaidOrders(100),
+      fetchUnfulfilledUnpaidOrders(100),
+    ]);
     fetchedCount = orders.length;
   } catch (e) {
     errorMessage = e instanceof Error ? e.message : String(e);
@@ -122,7 +128,41 @@ export default async function PackPage() {
           <pre className="whitespace-pre-wrap">{errorMessage}</pre>
         </div>
       ) : (
-        <PackList orders={ordersWithStatus} locale={locale} />
+        <>
+          {/* Sektion 1: bezahlt & versandbereit */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={18} className="text-emerald-600" />
+              <h2 className="text-lg font-semibold text-neutral-900">
+                Bezahlt &amp; versandbereit
+              </h2>
+              <span className="text-xs font-medium text-neutral-500 bg-neutral-100 rounded-full px-2 py-0.5">
+                {ordersWithStatus.length}
+              </span>
+            </div>
+            <p className="text-sm text-neutral-500 -mt-1">
+              Diese Bestellungen sind <strong>bezahlt</strong>, aber noch <strong>nicht versendet</strong> — sie können jetzt gepackt werden.
+            </p>
+            <PackList orders={ordersWithStatus} locale={locale} />
+          </section>
+
+          {/* Sektion 2: noch nicht bezahlt */}
+          <section className="space-y-3 pt-4">
+            <div className="flex items-center gap-2">
+              <Clock size={18} className="text-amber-500" />
+              <h2 className="text-lg font-semibold text-neutral-900">
+                Noch nicht bezahlt
+              </h2>
+              <span className="text-xs font-medium text-neutral-500 bg-neutral-100 rounded-full px-2 py-0.5">
+                {unpaidOrders.length}
+              </span>
+            </div>
+            <p className="text-sm text-neutral-500 -mt-1">
+              Offene Bestellungen die noch <strong>auf Zahlung warten</strong> (z.B. Vorkasse) — noch nicht versandbereit. Letzte 90 Tage.
+            </p>
+            <UnpaidList orders={unpaidOrders} locale={locale} />
+          </section>
+        </>
       )}
     </div>
   );
