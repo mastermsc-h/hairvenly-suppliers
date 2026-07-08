@@ -952,6 +952,26 @@ export async function recordSlipPrint(
 }
 
 /**
+ * Setzt den Druck-Status einer Bestellung zurück (löscht alle printed_slips-
+ * Einträge). Admin + Mitarbeiter (jeder mit shipping-Feature) dürfen das.
+ */
+export async function resetSlipPrint(
+  orderName: string,
+): Promise<{ success: boolean; error?: string }> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) return { success: false, error: "Forbidden" };
+  const clean = orderName.startsWith("#") ? orderName : `#${orderName}`;
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("printed_slips").delete().eq("order_name", clean);
+  if (error) return { success: false, error: error.message };
+
+  revalidatePath("/pack");
+  revalidatePath("/pack/archive");
+  return { success: true };
+}
+
+/**
  * Erstellt eine Demo-Bestellung zum Testen des Pack-Flows ohne echte
  * Shopify-Bestellung. Wird mit prefix '#DEMO-' kenntlich gemacht.
  *

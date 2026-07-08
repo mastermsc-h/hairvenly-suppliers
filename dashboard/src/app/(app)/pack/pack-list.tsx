@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { Search, Package2, ArrowRight, RefreshCw, ArrowDown, ArrowUp, Printer } from "lucide-react";
+import { useMemo, useState, useTransition } from "react";
+import { Search, Package2, ArrowRight, RefreshCw, ArrowDown, ArrowUp, Printer, X } from "lucide-react";
 import { t, type Locale } from "@/lib/i18n";
 import type { PackOrderWithStatus } from "./page";
 import { useRouter } from "next/navigation";
+import { resetSlipPrint } from "@/lib/actions/pack";
 
 const SHOPIFY_STORE_HANDLE = "339520-3";
 
@@ -27,6 +28,15 @@ export default function PackList({
   const [query, setQuery] = useState("");
   // Standard: neueste oben (descending). Klick auf Datum-Header toggelt.
   const [sortDesc, setSortDesc] = useState(true);
+  const [isPending, startTransition] = useTransition();
+
+  function handleResetPrint(orderNumberClean: string) {
+    startTransition(async () => {
+      const res = await resetSlipPrint(orderNumberClean);
+      if (res.success) router.refresh();
+      else alert(`Fehler: ${res.error ?? "unbekannt"}`);
+    });
+  }
 
   const filtered = useMemo(() => {
     const sorted = [...orders].sort((a, b) => {
@@ -184,6 +194,15 @@ export default function PackList({
                             })}
                             {o.slipPrintedBy ? ` · ${o.slipPrintedBy}` : ""}
                           </span>
+                          <button
+                            type="button"
+                            onClick={() => handleResetPrint(o.numberClean)}
+                            disabled={isPending}
+                            title="Druck-Status zurücksetzen"
+                            className="ml-0.5 text-neutral-400 hover:text-red-600 disabled:opacity-40"
+                          >
+                            <X size={12} />
+                          </button>
                         </div>
                       )}
                     </td>

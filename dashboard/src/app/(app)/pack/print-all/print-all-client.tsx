@@ -115,16 +115,19 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
     };
   }, [slips]);
 
-  // Sobald alle QRs da sind: einmal automatisch das Druckfenster öffnen
-  // + den Druck protokollieren (wer/wann), damit die Versand-Liste + das
-  // Archiv anzeigen können dass der Lieferschein raus ist.
-  useEffect(() => {
-    if (!ready || printedRef.current || slips.length === 0) return;
-    printedRef.current = true;
-    void recordSlipPrint(slips.map((s) => s.name)).catch(() => {});
-    const tm = setTimeout(() => window.print(), 500);
-    return () => clearTimeout(tm);
-  }, [ready, slips]);
+  // KEIN automatisches Druckfenster mehr. Der Druck (+ das Protokollieren
+  // von wer/wann) passiert erst wenn der User den Drucken-Button klickt.
+  const [justPrinted, setJustPrinted] = useState(false);
+  function handlePrint() {
+    // Erst protokollieren, dann drucken — nur beim ERSTEN Klick tracken,
+    // damit 'erneut drucken' nicht mehrfach einträgt.
+    if (!printedRef.current) {
+      printedRef.current = true;
+      void recordSlipPrint(slips.map((s) => s.name)).catch(() => {});
+      setJustPrinted(true);
+    }
+    window.print();
+  }
 
   if (slips.length === 0) {
     return (
@@ -220,15 +223,18 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
             <ArrowLeft size={16} /> Zurück
           </Link>
           <div className="text-sm text-neutral-700">
-            <strong>{slips.length}</strong> Lieferschein{slips.length === 1 ? "" : "e"} · automatisches Druckfenster {ready ? "wurde geöffnet" : "wird vorbereitet…"}
+            <strong>{slips.length}</strong> Lieferschein{slips.length === 1 ? "" : "e"}
+            {justPrinted && <span className="text-emerald-700 ml-1">· gedruckt ✓</span>}
+            {!ready && <span className="text-neutral-400 ml-1">· wird vorbereitet…</span>}
           </div>
         </div>
         <button
           type="button"
-          onClick={() => window.print()}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700 transition"
+          onClick={handlePrint}
+          disabled={!ready}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700 transition disabled:opacity-50"
         >
-          <Printer size={16} /> Erneut drucken
+          <Printer size={16} /> {justPrinted ? "Erneut drucken" : "Drucken"}
         </button>
       </div>
 
