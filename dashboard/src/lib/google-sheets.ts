@@ -544,18 +544,27 @@ export async function triggerAppsScript(supplier: "amanda" | "china", budgetGram
       signal: AbortSignal.timeout(360000), // 6 min timeout
     });
 
-    // Apps Script Web Apps redirect (302) to the actual response
     const text = await response.text();
     try {
-      const data = JSON.parse(text);
-      if (data.error) return { ok: false, error: data.error };
+      const data = JSON.parse(text) as { ok?: boolean; error?: string; title?: string; budgetG?: number };
+      if (data.error) {
+        console.error("[triggerAppsScript] Apps Script Fehler:", data.error);
+        return { ok: false, error: data.error };
+      }
+      // Sanity-Check: wenn Apps Script zwar 'ok' aber weder title noch budgetG
+      // zurückgibt, ist wahrscheinlich etwas schiefgelaufen — sag es dem User.
+      if (!data.title && !data.budgetG) {
+        console.warn("[triggerAppsScript] Response ohne Title/Budget — evtl. leerer Sheet-Output:", text.slice(0, 500));
+      }
       return { ok: true, title: data.title };
     } catch {
-      // Sometimes the response is HTML (auth page) — means deployment config is wrong
       if (text.includes("authorization") || text.includes("Sign in")) {
         return { ok: false, error: "Apps Script Autorisierung fehlgeschlagen. Bitte Web App Deployment prüfen." };
       }
-      return { ok: true };
+      // Nicht-JSON und keine Auth-Seite → wahrscheinlich HTML-Fehlerseite oder Timeout.
+      // Antwort zurückgeben statt still ok:true — damit der User weiß dass was schief lief.
+      console.warn("[triggerAppsScript] Nicht-JSON Response, ersten 200 Zeichen:", text.slice(0, 200));
+      return { ok: false, error: `Apps Script antwortete unerwartet (kein JSON). Erste 200 Zeichen: ${text.slice(0, 200)}` };
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
