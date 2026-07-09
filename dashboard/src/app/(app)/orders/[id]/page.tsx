@@ -29,6 +29,7 @@ import ShipmentsSection from "./shipments-section";
 import SyncEtaButton from "./sync-eta-button";
 import PropagateEtaButton from "./propagate-eta-button";
 import PushToShopifyButton from "./push-to-shopify-button";
+import RegeneratePdfButton from "./regenerate-pdf-button";
 
 export default async function OrderDetailPage({
   params,
@@ -326,9 +327,15 @@ export default async function OrderDetailPage({
             const visibleDocs = canSeeAllDocs
               ? (canSeeFinance ? docs : docs.filter((d) => !financialKinds.includes(d.kind)))
               : docs.filter((d) => d.kind === "packing_details");
+            const hasOrderOverview = docs.some((d) => d.kind === "order_overview");
             return (
               <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6">
-                <h2 className="text-sm font-medium text-neutral-700 mb-4">{t(locale, "order.documents_title")}</h2>
+                <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                  <h2 className="text-sm font-medium text-neutral-700">{t(locale, "order.documents_title")}</h2>
+                  {profile.is_admin && items.length > 0 && (
+                    <RegeneratePdfButton orderId={o.id} hasExistingPdf={hasOrderOverview} />
+                  )}
+                </div>
                 {canSeeFinance && <DocumentUpload orderId={o.id} locale={locale} shipments={shipments} />}
                 <ul className="mt-4 divide-y divide-neutral-100">
                   {visibleDocs.length === 0 && (
