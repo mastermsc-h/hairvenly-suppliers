@@ -1,7 +1,7 @@
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { t, type Locale } from "@/lib/i18n";
-import { fetchUnfulfilledPaidOrders, fetchUnfulfilledUnpaidOrders, type PackOrder } from "@/lib/shopify";
+import { fetchUnfulfilledPaidOrders, fetchUnfulfilledUnpaidOrders, fetchOrderForPack, type PackOrder } from "@/lib/shopify";
 import { createClient } from "@/lib/supabase/server";
 import PackList from "./pack-list";
 import UnpaidList from "./unpaid-list";
@@ -42,6 +42,32 @@ export default async function PackPage() {
 
   // Pack-Status aus Supabase laden und mit Shopify-Orders mergen
   const supabase = await createClient();
+
+  // Reopened-Ausnahmefälle: Sessions die lokal wieder aktiv sind (in_progress/
+  // verified), aber in Shopify schon 'fulfilled' → fallen aus der unfulfilled-
+  // Query raus. Diese explizit nachladen, damit "erneut bearbeitete"
+  // Bestellungen in der Liste sichtbar bleiben.
+  try {
+    const shopifyNameSet = new Set(orders.map((o) => o.name));
+    const reopenCutoff = new Date(Date.now() - 7 * 86_400_000).toISOString();
+    const { data: activeSessions } = await supabase
+      .from("pack_sessions")
+      .select("order_name")
+      .in("status", ["in_progress", "verified"])
+      .gt("updated_at", reopenCutoff);
+    const reopenedNames = (activeSessions ?? [])
+      .map((s) => s.order_name)
+      .filter((n) => !shopifyNameSet.has(n) && !n.startsWith("#DEMO-"));
+    if (reopenedNames.length > 0) {
+      const fetched = await Promise.all(
+        reopenedNames.map((n) => fetchOrderForPack(n).catch(() => null)),
+      );
+      for (const o of fetched) if (o) orders.push(o);
+    }
+  } catch {
+    // Reopened-Nachladung ist optional — bei Fehler bleibt die Hauptliste intakt
+  }
+
   const orderNames = orders.map((o) => o.name);
   const { data: sessions } = await supabase
     .from("pack_sessions")
