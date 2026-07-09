@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
 import { Camera, X, ScanLine } from "lucide-react";
-import { useRouter } from "next/navigation";
 
 const READER_ID = "order-qr-reader";
 
@@ -21,14 +20,51 @@ export default function OrderQrScanner({
   buttonLabel?: string;
   buttonClass?: string;
 }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  // Verhindert doppeltes stop() (success-handler + effect-cleanup) — das war
+  // die Ursache für iOS-PWA-Crashes ("This page couldn't load").
+  const teardownRef = useRef(false);
+
+  // Kamera 100% freigeben: html5-qrcode stop/clear PLUS alle noch offenen
+  // MediaStream-Tracks killen. Ohne das bleibt auf iOS die Kamera belegt und
+  // WebKit crasht bei der Navigation zur nächsten (kamera-nutzenden) Seite.
+  const teardownCamera = async () => {
+    if (teardownRef.current) return;
+    teardownRef.current = true;
+    const sc = scannerRef.current;
+    if (sc) {
+      try {
+        await sc.stop();
+      } catch {
+        /* schon gestoppt */
+      }
+      try {
+        await sc.clear();
+      } catch {
+        /* ignore */
+      }
+      scannerRef.current = null;
+    }
+    // Fallback: übrig gebliebene Video-Streams im Reader-Container hart stoppen
+    try {
+      const el = document.getElementById(READER_ID);
+      el?.querySelectorAll("video").forEach((v) => {
+        const s = (v as HTMLVideoElement).srcObject as MediaStream | null;
+        s?.getTracks().forEach((t) => t.stop());
+        (v as HTMLVideoElement).srcObject = null;
+      });
+    } catch {
+      /* ignore */
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
+    teardownRef.current = false;
     let cancelled = false;
+
     const start = async () => {
       try {
         const scanner = new Html5Qrcode(READER_ID, { verbose: false });
@@ -37,7 +73,7 @@ export default function OrderQrScanner({
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 280, height: 280 } },
           async (decodedText) => {
-            if (cancelled) return;
+            if (cancelled || teardownRef.current) return;
             // URL parsen → /pack/<order>
             let orderName: string | null = null;
             try {
@@ -51,14 +87,15 @@ export default function OrderQrScanner({
             }
             if (orderName) {
               cancelled = true;
-              try {
-                await scanner.stop();
-                await scanner.clear();
-              } catch {
-                // ignore
-              }
+              const target = `/pack/${orderName.replace(/^#/, "")}`;
+              await teardownCamera();
               setOpen(false);
-              router.push(`/pack/${orderName.replace(/^#/, "")}`);
+              // Kurz warten, bis iOS die Kamera-Ressource wirklich freigegeben
+              // hat, dann HART navigieren (voller Load statt RSC-Stream —
+              // robuster in der standalone-PWA, kein WebKit-Crash).
+              setTimeout(() => {
+                window.location.assign(target);
+              }, 250);
             }
           },
           () => {
@@ -74,15 +111,10 @@ export default function OrderQrScanner({
 
     return () => {
       cancelled = true;
-      const sc = scannerRef.current;
-      if (sc) {
-        sc.stop()
-          .then(() => sc.clear())
-          .catch(() => {});
-        scannerRef.current = null;
-      }
+      void teardownCamera();
     };
-  }, [open, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   return (
     <>
