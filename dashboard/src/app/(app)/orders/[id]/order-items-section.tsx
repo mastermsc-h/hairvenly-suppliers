@@ -13,6 +13,7 @@ import {
 import { setItemsEta, createShipmentForItems } from "@/lib/actions/shipments";
 import { date as fmtDate } from "@/lib/format";
 import type { OrderItem, OrderStatus, CatalogMethod, ProductColor } from "@/lib/types";
+import RefreshStockButton from "./refresh-stock-button";
 
 interface ItemGroup {
   label: string;
@@ -145,16 +146,21 @@ export default function OrderItemsSection({
           </a>
         )}
         {isAdmin && items.length > 0 && (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); handlePdf(!!hasOrderOverviewPdf); }}
-            disabled={generatingPdf}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition shrink-0 disabled:opacity-50"
-            title={hasOrderOverviewPdf ? "PDF neu erstellen (alte bleibt erhalten)" : "Bestellübersicht als PDF erzeugen"}
-          >
-            {generatingPdf ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />}
-            {generatingPdf ? "Erstellt…" : hasOrderOverviewPdf ? "PDF neu erstellen" : "PDF erstellen"}
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handlePdf(!!hasOrderOverviewPdf); }}
+              disabled={generatingPdf}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition shrink-0 disabled:opacity-50"
+              title={hasOrderOverviewPdf ? "PDF neu erstellen (alte bleibt erhalten)" : "Bestellübersicht als PDF erzeugen"}
+            >
+              {generatingPdf ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />}
+              {generatingPdf ? "Erstellt…" : hasOrderOverviewPdf ? "PDF neu erstellen" : "PDF erstellen"}
+            </button>
+            <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+              <RefreshStockButton orderId={orderId} />
+            </div>
+          </>
         )}
         {open ? <ChevronDown size={16} className="text-neutral-400" /> : <ChevronRight size={16} className="text-neutral-400" />}
       </button>

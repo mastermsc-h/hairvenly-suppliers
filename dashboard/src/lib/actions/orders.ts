@@ -817,6 +817,41 @@ export async function getSuggestionMeta(supplierName: string): Promise<{
   return { title: meta.title, budgetKg: meta.budgetKg, usedKg: meta.usedKg };
 }
 
+/**
+ * Triggert einen Apps-Script-Refresh für den Lieferant dieser Bestellung.
+ * Nutzt das letzte bekannte Budget aus dem Stock-Sheet-Vorschlag-Tab
+ * (Zelle J2 für Amanda, I2 für China) — falls das fehlt: Default 20kg.
+ *
+ * Dauer: 2-5 Minuten (Apps Script createBestellungAmanda/China).
+ * Effekt: Stock-Sheet (Russisch-GLATT / Usbekisch-WELLIG) wird komplett
+ * neu berechnet inkl. der 'unterwegs'-Spalten pro Bestellung.
+ */
+export async function refreshStockForOrder(orderId: string): Promise<{ error?: string; title?: string }> {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: order } = await supabase
+    .from("orders")
+    .select("supplier_id")
+    .eq("id", orderId)
+    .single();
+  if (!order) return { error: "Bestellung nicht gefunden" };
+
+  const { data: supplier } = await supabase
+    .from("suppliers")
+    .select("name")
+    .eq("id", order.supplier_id)
+    .single();
+  if (!supplier) return { error: "Lieferant nicht gefunden" };
+
+  // Letztes bekanntes Budget aus dem Vorschlag-Tab holen (getSuggestionMeta
+  // ist in dieser Datei weiter unten definiert)
+  const meta = await getSuggestionMeta(supplier.name);
+  const budgetKg = meta?.budgetKg && meta.budgetKg > 0 ? meta.budgetKg : 20;
+
+  return triggerSuggestionGeneration(supplier.name, budgetKg);
+}
+
 export async function triggerSuggestionGeneration(supplierName: string, budgetKg: number): Promise<{ error?: string; title?: string }> {
   await requireAdmin();
 
@@ -868,6 +903,38 @@ async function requireOrderEditor(orderId: string) {
   return { profile, supabase };
 }
 
+/**
+ * Auto-Sync: nach einer Positions-Änderung das Order-Sheet aktualisieren.
+ * Wenn die Bestellung noch kein Sheet hat, wird nichts gemacht (User muss
+ * initial via 'Sheet Export' anlegen). Bei Erfolg pending_resync = false,
+ * bei Fehler bleibt pending_resync = true → User sieht Banner und kann
+ * manuell nachziehen.
+ *
+ * Aufruf best-effort — Sheet-Fehler dürfen die DB-Änderung nicht rückgängig
+ * machen (die Position bleibt gültig, nur die Sync ist temp offline).
+ */
+async function autoSyncOrderSheet(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orderId: string,
+): Promise<void> {
+  try {
+    const { data: order } = await supabase
+      .from("orders")
+      .select("sheet_url")
+      .eq("id", orderId)
+      .single();
+    if (!order?.sheet_url) return; // Kein Sheet → nichts zu syncen
+
+    const res = await exportOrderToGoogleSheet(orderId);
+    if (res.error) {
+      console.warn(`[autoSyncOrderSheet] ${orderId}: ${res.error}`);
+    }
+    // exportOrderToGoogleSheet setzt bei Erfolg selbst pending_resync=false.
+  } catch (e) {
+    console.warn("[autoSyncOrderSheet] Exception:", e);
+  }
+}
+
 export async function updateOrderItemQuantity(input: {
   orderId: string;
   itemId: string;
@@ -904,6 +971,7 @@ export async function updateOrderItemQuantity(input: {
       `Menge geändert: #${oldItem.color_name} ${oldItem.quantity}${oldItem.unit} → ${input.quantity}${oldItem.unit}`,
     );
 
+    await autoSyncOrderSheet(supabase, input.orderId);
     revalidatePath(`/orders/${input.orderId}`);
     return {};
   } catch (e) {
@@ -937,6 +1005,7 @@ export async function deleteOrderItem(input: {
       `Position entfernt: #${oldItem.color_name} ${oldItem.quantity}${oldItem.unit} (${oldItem.method_name} ${oldItem.length_value})`,
     );
 
+    await autoSyncOrderSheet(supabase, input.orderId);
     revalidatePath(`/orders/${input.orderId}`);
     return {};
   } catch (e) {
@@ -984,6 +1053,7 @@ export async function addOrderItem(input: {
       `Position hinzugefügt: #${input.colorName} ${input.quantity}${input.unit ?? "g"} (${input.methodName} ${input.lengthValue})`,
     );
 
+    await autoSyncOrderSheet(supabase, input.orderId);
     revalidatePath(`/orders/${input.orderId}`);
     return {};
   } catch (e) {
