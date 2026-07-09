@@ -28,7 +28,7 @@ function addressLooksIncomplete(address1: string | null | undefined): boolean {
 }
 import { t, type Locale } from "@/lib/i18n";
 import QRCode from "qrcode";
-import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X, RotateCcw, History, Package2, ImagePlus, ChevronDown, ChevronUp, Smartphone } from "lucide-react";
+import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X, RotateCcw, History, Package2, ImagePlus, Smartphone } from "lucide-react";
 import CameraScanner from "./camera-scanner";
 import OrderQrScanner from "../order-qr-scanner";
 
@@ -302,6 +302,33 @@ export default function PackMode({
     return null;
   }, [expectedItems, counts]);
 
+  // Gesamt-Fortschritt: wie viele Positionen erledigt, ob überhaupt schon
+  // etwas gescannt wurde. Steuert die klare "Als Erstes / Als Nächstes"-
+  // Ansage + den Fortschrittsbalken oben in der Scan-Phase.
+  const packProgress = useMemo(() => {
+    const total = expectedItems.length;
+    let donePositions = 0;
+    let scannedUnits = 0;
+    let totalUnits = 0;
+    for (let idx = 0; idx < expectedItems.length; idx++) {
+      const it = expectedItems[idx];
+      const counterKey = it.barcode || `manual:${idx}`;
+      const got = counts[counterKey] ?? 0;
+      totalUnits += it.quantity;
+      scannedUnits += Math.min(got, it.quantity);
+      if (got >= it.quantity) donePositions++;
+    }
+    return {
+      total,
+      donePositions,
+      scannedUnits,
+      totalUnits,
+      anyScanned: scannedUnits > 0,
+      // 1-basierte Position der aktuell zu scannenden Position
+      currentPos: nextItem ? nextItem.idx + 1 : total,
+    };
+  }, [expectedItems, counts, nextItem]);
+
   const handleManualConfirm = useCallback(
     (idx: number) => {
       startTransition(async () => {
@@ -371,12 +398,6 @@ export default function PackMode({
   // (wichtig wenn iPhone via QR direkt in der Foto-Phase aufmacht)
   const lastPhaseRef = useRef<typeof phase | null>(null);
 
-  // "Scanne als Nächstes" standardmäßig zugeklappt — nur kompakte Header-Zeile
-  const [cameraActive, setCameraActive] = useState(false);
-  const [hintExpanded, setHintExpanded] = useState(false);
-  useEffect(() => {
-    if (cameraActive) setHintExpanded(false);
-  }, [cameraActive]);
 
   useEffect(() => {
     if (lastPhaseRef.current === phase) return;
@@ -728,91 +749,98 @@ export default function PackMode({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Left: Scanner + Status */}
         <div className="md:col-span-1 space-y-4">
-          {phase === "scan" && <CameraScanner onScan={submitBarcode} paused={isPending} onActiveChange={setCameraActive} />}
-
+          {/* PROMINENTE ZIEL-KARTE — steht ÜBER der Kamera, immer sichtbar & */}
+          {/* aufgeklappt. Beantwortet klar "Was scanne ich JETZT?" — auch am */}
+          {/* iPhone ohne Scrollen. Wechselt "Als Erstes" ⇄ "Als Nächstes". */}
           {phase === "scan" && nextItem && (
-            <div className="md:hidden bg-blue-50 border-2 border-blue-300 rounded-2xl shadow-sm overflow-hidden">
-              {/* Kompakte Header-Zeile — immer sichtbar */}
-              <button
-                onClick={() => setHintExpanded((e) => !e)}
-                className="w-full flex items-center gap-2 p-2.5 hover:bg-blue-100 transition"
-              >
-                <span className="text-[10px] font-bold text-blue-900 uppercase tracking-widest shrink-0">
-                  Nächste:
-                </span>
-                <div className="flex flex-wrap gap-1 flex-1 min-w-0 justify-start">
+            <div className="bg-blue-600 rounded-2xl shadow-md overflow-hidden">
+              {/* Fortschritts-Header */}
+              <div className="px-3.5 pt-3 pb-2">
+                <div className="flex items-center justify-between text-white">
+                  <span className="text-[11px] font-bold uppercase tracking-widest">
+                    {packProgress.anyScanned ? "Jetzt scannen" : "Als Erstes scannen"}
+                  </span>
+                  <span className="text-[11px] font-semibold text-blue-100">
+                    Position {packProgress.currentPos} / {packProgress.total}
+                  </span>
+                </div>
+                {/* Fortschrittsbalken über alle Positionen */}
+                <div className="mt-2 h-1.5 rounded-full bg-blue-800/60 overflow-hidden">
+                  <div
+                    className="h-full bg-white rounded-full transition-all duration-300"
+                    style={{
+                      width: `${packProgress.total > 0 ? (packProgress.donePositions / packProgress.total) * 100 : 0}%`,
+                    }}
+                  />
+                </div>
+                <div className="text-[10px] text-blue-100 mt-1">
+                  {packProgress.donePositions} von {packProgress.total} Positionen erledigt
+                </div>
+              </div>
+
+              {/* Ziel-Produkt: Bild + Tags + Menge — groß & klar */}
+              <div className="bg-white m-1.5 mt-0 rounded-xl p-3 flex gap-3 items-center">
+                {nextItem.item.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={nextItem.item.imageUrl}
+                    alt=""
+                    className="w-16 h-16 rounded-lg object-cover bg-neutral-100 shrink-0"
+                  />
+                ) : (
+                  <div className="w-16 h-16 rounded-lg bg-neutral-200 shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
                   {nextItem.item.isExtension !== false ? (
-                    <>
+                    <div className="flex flex-wrap gap-1 mb-1">
                       {nextItem.attrs.method.label && (
-                        <span
-                          className={`inline-block ${nextItem.attrs.method.cls} text-white text-[11px] font-bold px-1.5 py-0.5 rounded tracking-wider`}
-                        >
+                        <span className={`inline-block ${nextItem.attrs.method.cls} text-white text-xs font-bold px-2 py-0.5 rounded tracking-wider`}>
                           {nextItem.attrs.method.label}
                         </span>
                       )}
                       {nextItem.attrs.length && (
-                        <span className="inline-block bg-slate-700 text-white text-[11px] font-bold px-1.5 py-0.5 rounded">
+                        <span className="inline-block bg-slate-700 text-white text-xs font-bold px-2 py-0.5 rounded">
                           {nextItem.attrs.length}
                         </span>
                       )}
                       {nextItem.attrs.origin && (
-                        <span className="inline-block bg-slate-900 text-white text-[11px] font-bold px-1.5 py-0.5 rounded">
+                        <span className="inline-block bg-slate-900 text-white text-xs font-bold px-2 py-0.5 rounded">
                           {nextItem.attrs.origin}
                         </span>
                       )}
                       {nextItem.attrs.color && (
-                        <span className="inline-block bg-amber-600 text-white text-[11px] font-bold px-1.5 py-0.5 rounded font-mono">
+                        <span className="inline-block bg-amber-600 text-white text-xs font-bold px-2 py-0.5 rounded font-mono">
                           {nextItem.attrs.color}
                         </span>
                       )}
-                    </>
-                  ) : (
-                    <span className="text-[11px] text-blue-900 font-medium truncate">
-                      {nextItem.item.title}
-                    </span>
-                  )}
-                </div>
-                <span className="text-base font-black text-blue-900 shrink-0">
-                  {nextItem.got}/{nextItem.item.quantity}
-                </span>
-                {hintExpanded ? (
-                  <ChevronUp size={14} className="text-blue-700 shrink-0" />
-                ) : (
-                  <ChevronDown size={14} className="text-blue-700 shrink-0" />
-                )}
-              </button>
-
-              {/* Erweiterte Details — collapsable */}
-              {hintExpanded && (
-                <div className="px-3 pb-3 pt-1 border-t border-blue-200">
-                  <div className="flex gap-3">
-                    {nextItem.item.imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={nextItem.item.imageUrl}
-                        alt=""
-                        className="w-14 h-14 rounded-lg object-cover bg-white shrink-0"
-                      />
-                    ) : (
-                      <div className="w-14 h-14 rounded-lg bg-neutral-200 shrink-0" />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs text-neutral-700 line-clamp-2">{nextItem.item.title}</div>
-                      {nextItem.item.variantTitle &&
-                        nextItem.item.variantTitle !== "Default Title" && (
-                          <div className="text-xs font-semibold text-emerald-700 mt-0.5">
-                            Variante: {nextItem.item.variantTitle}
-                          </div>
-                        )}
                     </div>
+                  ) : null}
+                  <div className="text-xs text-neutral-700 line-clamp-2 leading-snug">
+                    {nextItem.item.title}
                   </div>
-                  <div className="text-[10px] text-neutral-500 mt-2 italic">
-                    Andere Reihenfolge ist auch ok — nur ein Vorschlag.
+                  {nextItem.item.variantTitle &&
+                    nextItem.item.variantTitle !== "Default Title" && (
+                      <div className="text-xs font-semibold text-emerald-700 mt-0.5">
+                        {nextItem.item.variantTitle}
+                      </div>
+                    )}
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="text-2xl font-black text-blue-700 leading-none">
+                    {nextItem.got}<span className="text-neutral-400 text-lg">/{nextItem.item.quantity}</span>
                   </div>
+                  <div className="text-[10px] text-neutral-400 mt-0.5">Stück</div>
+                </div>
+              </div>
+              {packProgress.total > 1 && (
+                <div className="text-[10px] text-blue-100 px-3.5 pb-2 -mt-0.5">
+                  Reihenfolge egal — du kannst jeden Artikel zuerst scannen.
                 </div>
               )}
             </div>
           )}
+
+          {phase === "scan" && <CameraScanner onScan={submitBarcode} paused={isPending} />}
 
           {phase === "photos" && (
             <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 shadow-sm text-center">
@@ -940,16 +968,24 @@ export default function PackMode({
                 const counterKey = it.barcode || `manual:${idx}`;
                 const got = counts[counterKey] ?? 0;
                 const done = got >= it.quantity;
+                const isNext = phase === "scan" && nextItem?.idx === idx;
                 const attrs = detectAttributes(it.title);
                 return (
                   <div
                     key={idx}
-                    className={`flex flex-col md:flex-row gap-4 p-4 rounded-xl border-2 transition ${
+                    className={`relative flex flex-col md:flex-row gap-4 p-4 rounded-xl border-2 transition ${
                       done
                         ? "border-emerald-400 bg-emerald-50"
-                        : "border-neutral-200 bg-white"
+                        : isNext
+                          ? "border-blue-500 bg-blue-50 ring-2 ring-blue-300"
+                          : "border-neutral-200 bg-white"
                     }`}
                   >
+                    {isNext && (
+                      <span className="absolute -top-2.5 left-4 bg-blue-600 text-white text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full shadow-sm">
+                        Jetzt scannen
+                      </span>
+                    )}
                     {it.imageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
