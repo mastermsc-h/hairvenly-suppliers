@@ -2,10 +2,22 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { Html5Qrcode } from "html5-qrcode";
-import { Camera, CameraOff, AlertTriangle, Search, ArrowLeft, ScanLine, RefreshCw } from "lucide-react";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { Camera, CameraOff, AlertTriangle, Search, ArrowLeft, ScanLine, RefreshCw, Flashlight } from "lucide-react";
 import { type Locale } from "@/lib/i18n";
 import { scanProductByBarcode } from "@/lib/actions/pack";
+
+// Nur die Formate erlauben, die wir tatsächlich brauchen — das beschleunigt
+// die Dekodierung deutlich (die Lib probiert sonst alle ~15 Symbologien durch).
+const SCAN_FORMATS = [
+  Html5QrcodeSupportedFormats.QR_CODE,
+  Html5QrcodeSupportedFormats.CODE_128,
+  Html5QrcodeSupportedFormats.CODE_39,
+  Html5QrcodeSupportedFormats.EAN_13,
+  Html5QrcodeSupportedFormats.EAN_8,
+  Html5QrcodeSupportedFormats.UPC_A,
+  Html5QrcodeSupportedFormats.UPC_E,
+];
 
 interface Result {
   productTitle: string;
@@ -29,6 +41,8 @@ export default function ScannerClient({ locale: _locale }: { locale: Locale }) {
   const [notFound, setNotFound] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [history, setHistory] = useState<{ barcode: string; result: Result | null; ts: number }[]>([]);
+  const [torchOn, setTorchOn] = useState(false);
+  const [torchAvailable, setTorchAvailable] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const lastScanRef = useRef<{ code: string; ts: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -86,6 +100,19 @@ export default function ScannerClient({ locale: _locale }: { locale: Locale }) {
 
   const restart = useCallback(() => setRestartTick((t) => t + 1), []);
 
+  const toggleTorch = useCallback(async () => {
+    const sc = scannerRef.current;
+    if (!sc) return;
+    const next = !torchOn;
+    try {
+      // @ts-expect-error torch ist eine nicht-standard-constraint, device-abhängig
+      await sc.applyVideoConstraints({ advanced: [{ torch: next }] });
+      setTorchOn(next);
+    } catch {
+      setTorchAvailable(false);
+    }
+  }, [torchOn]);
+
   // Camera-Scanner setup
   useEffect(() => {
     if (!active) return;
@@ -101,11 +128,19 @@ export default function ScannerClient({ locale: _locale }: { locale: Locale }) {
           }
           scannerRef.current = null;
         }
-        const scanner = new Html5Qrcode(READER_ID, { verbose: false });
+        const scanner = new Html5Qrcode(READER_ID, {
+          verbose: false,
+          formatsToSupport: SCAN_FORMATS,
+          // Nutzt die native BarcodeDetector-API des Browsers wo verfügbar
+          // (iOS Safari/WebKit) — deutlich schnellere & robustere Erkennung.
+          experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+        });
         scannerRef.current = scanner;
         await scanner.start(
           { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 280, height: 200 }, aspectRatio: 1.5 },
+          // Breite, flache Scan-Box: 1D-Barcodes (EAN/Code128) sind quer —
+          // eine flache Box trifft sie viel zuverlässiger als ein Quadrat.
+          { fps: 15, qrbox: { width: 320, height: 150 }, aspectRatio: 1.777 },
           (text) => {
             const now = Date.now();
             const last = lastScanRef.current;
@@ -120,6 +155,16 @@ export default function ScannerClient({ locale: _locale }: { locale: Locale }) {
         if (cancelled) {
           await scanner.stop();
           await scanner.clear();
+        } else {
+          try {
+            const caps = scanner.getRunningTrackCapabilities?.() as
+              | { torch?: boolean }
+              | undefined;
+            setTorchAvailable(!!caps?.torch);
+          } catch {
+            setTorchAvailable(false);
+          }
+          setTorchOn(false);
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -180,6 +225,17 @@ export default function ScannerClient({ locale: _locale }: { locale: Locale }) {
               <span>Kamera-Scanner</span>
             </div>
             <div className="flex items-center gap-2">
+              {active && torchAvailable && (
+                <button
+                  onClick={toggleTorch}
+                  className={`px-2 py-1.5 rounded-lg text-xs font-medium ${
+                    torchOn ? "bg-amber-400 text-neutral-900" : "bg-neutral-700 text-white hover:bg-neutral-600"
+                  }`}
+                  title="Taschenlampe an/aus"
+                >
+                  <Flashlight size={12} />
+                </button>
+              )}
               {active && (
                 <button
                   onClick={restart}
