@@ -972,6 +972,34 @@ export async function resetSlipPrint(
 }
 
 /**
+ * Öffnet eine bereits abgeschlossene (verified/shipped) Session erneut zur
+ * Bearbeitung — z.B. um ein Beweisfoto neu zu machen. Setzt den Status zurück
+ * auf 'in_progress'; Scans + Fotos bleiben erhalten. Admin + Mitarbeiter.
+ *
+ * Kein Shopify-Eingriff: wurde die Order schon fulfilled, bleibt sie das —
+ * completePackSession erkennt das später und setzt nur den lokalen Status.
+ */
+export async function reopenPackSession(
+  orderName: string,
+): Promise<{ success: boolean; error?: string }> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) return { success: false, error: "Forbidden" };
+  const clean = orderName.startsWith("#") ? orderName : `#${orderName}`;
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("pack_sessions")
+    .update({ status: "in_progress", finished_at: null, updated_at: new Date().toISOString() })
+    .eq("order_name", clean);
+  if (error) return { success: false, error: error.message };
+
+  revalidatePath("/pack");
+  revalidatePath("/pack/archive");
+  revalidatePath(`/pack/${clean.replace(/^#/, "")}`);
+  return { success: true };
+}
+
+/**
  * Setzt den Druck-Status mehrerer Bestellungen auf einmal zurück.
  * Wird für den "alle zurücksetzen"-Link in der Versand-Liste genutzt.
  */

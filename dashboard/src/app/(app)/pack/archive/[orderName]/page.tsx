@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink, Camera, CheckCircle2, AlertTriangle } from "lucide-react";
 import NotesEditor from "./notes-editor";
+import ReopenButton from "./reopen-button";
 
 const SHOPIFY_STORE_HANDLE = "339520-3";
 
@@ -105,15 +106,18 @@ export default async function ArchiveDetailPage({
             </h1>
           </div>
         </div>
-        <span
-          className={`inline-block px-3 py-1 text-xs font-medium rounded border ${
-            session.status === "shipped"
-              ? "bg-blue-50 text-blue-800 border-blue-300"
-              : "bg-emerald-50 text-emerald-800 border-emerald-300"
-          }`}
-        >
-          {t(locale, `shipping.status_${session.status}`)}
-        </span>
+        <div className="flex items-center gap-3">
+          <span
+            className={`inline-block px-3 py-1 text-xs font-medium rounded border ${
+              session.status === "shipped"
+                ? "bg-blue-50 text-blue-800 border-blue-300"
+                : "bg-emerald-50 text-emerald-800 border-emerald-300"
+            }`}
+          >
+            {t(locale, `shipping.status_${session.status}`)}
+          </span>
+          <ReopenButton orderName={session.order_name} numberClean={session.order_name.replace(/^#/, "")} />
+        </div>
       </header>
 
       {/* Meta-Daten */}
