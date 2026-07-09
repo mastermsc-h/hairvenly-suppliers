@@ -31,6 +31,7 @@ interface Props {
   orderStatus: OrderStatus;
   pendingResync: boolean;
   catalog: CatalogMethod[];
+  hasOrderOverviewPdf?: boolean;
 }
 
 const fmt = (n: number) => new Intl.NumberFormat("de-DE").format(n);
@@ -63,7 +64,7 @@ function getMethodColor(method: string) {
 
 export default function OrderItemsSection({
   items, itemGroups, totalQty, locale, sheetUrl, orderId, isAdmin,
-  canEdit, orderStatus, pendingResync, catalog,
+  canEdit, orderStatus, pendingResync, catalog, hasOrderOverviewPdf,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [exporting, startExport] = useTransition();
@@ -96,11 +97,15 @@ export default function OrderItemsSection({
     });
   };
 
-  const handlePdf = () => {
+  const handlePdf = (hasExisting = false) => {
     setExportError("");
+    if (hasExisting) {
+      if (!confirm("Es existiert bereits eine Bestellübersicht-PDF. Neue Version anlegen? Die alte bleibt in den Dokumenten sichtbar.")) return;
+    }
     startPdf(async () => {
       const result = await generateAndUploadPDF(orderId);
       if (result.error) setExportError(result.error);
+      else if (result.signedUrl) window.open(result.signedUrl, "_blank");
     });
   };
 
@@ -139,6 +144,18 @@ export default function OrderItemsSection({
             <ExternalLink size={12} /> Google Sheet
           </a>
         )}
+        {isAdmin && items.length > 0 && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); handlePdf(!!hasOrderOverviewPdf); }}
+            disabled={generatingPdf}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition shrink-0 disabled:opacity-50"
+            title={hasOrderOverviewPdf ? "PDF neu erstellen (alte bleibt erhalten)" : "Bestellübersicht als PDF erzeugen"}
+          >
+            {generatingPdf ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />}
+            {generatingPdf ? "Erstellt…" : hasOrderOverviewPdf ? "PDF neu erstellen" : "PDF erstellen"}
+          </button>
+        )}
         {open ? <ChevronDown size={16} className="text-neutral-400" /> : <ChevronRight size={16} className="text-neutral-400" />}
       </button>
 
@@ -168,7 +185,7 @@ export default function OrderItemsSection({
                     Sheet
                   </button>
                   <button
-                    onClick={handlePdf}
+                    onClick={() => handlePdf(!!hasOrderOverviewPdf)}
                     disabled={generatingPdf}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition"
                   >
@@ -294,12 +311,12 @@ export default function OrderItemsSection({
                   </button>
                 )}
                 <button
-                  onClick={handlePdf}
+                  onClick={() => handlePdf(!!hasOrderOverviewPdf)}
                   disabled={generatingPdf}
                   className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition"
                 >
                   {generatingPdf ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />}
-                  {generatingPdf ? "Erstellt..." : "PDF erstellen"}
+                  {generatingPdf ? "Erstellt..." : hasOrderOverviewPdf ? "PDF neu erstellen" : "PDF erstellen"}
                 </button>
               </div>
             )}
