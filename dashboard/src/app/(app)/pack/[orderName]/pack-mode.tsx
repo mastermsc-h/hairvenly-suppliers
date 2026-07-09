@@ -398,6 +398,9 @@ export default function PackMode({
   // (wichtig wenn iPhone via QR direkt in der Foto-Phase aufmacht)
   const lastPhaseRef = useRef<typeof phase | null>(null);
 
+  // Kamera aktiv? → Ziel-Karte kollabiert dann zur schmalen Leiste, damit
+  // das Kamerabild am iPhone die volle Höhe bekommt (sonst unten abgeschnitten).
+  const [cameraActive, setCameraActive] = useState(false);
 
   useEffect(() => {
     if (lastPhaseRef.current === phase) return;
@@ -749,10 +752,11 @@ export default function PackMode({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Left: Scanner + Status */}
         <div className="md:col-span-1 space-y-4">
-          {/* PROMINENTE ZIEL-KARTE — steht ÜBER der Kamera, immer sichtbar & */}
-          {/* aufgeklappt. Beantwortet klar "Was scanne ich JETZT?" — auch am */}
-          {/* iPhone ohne Scrollen. Wechselt "Als Erstes" ⇄ "Als Nächstes". */}
-          {phase === "scan" && nextItem && (
+          {/* PROMINENTE ZIEL-KARTE — steht ÜBER der Kamera. Solange die Kamera */}
+          {/* AUS ist: große Karte mit Bild. Sobald die Kamera läuft, kollabiert */}
+          {/* sie zu einer schmalen Leiste, damit das Kamerabild am iPhone die */}
+          {/* volle Höhe bekommt (vorher unten vom Safari-Balken abgeschnitten). */}
+          {phase === "scan" && nextItem && !cameraActive && (
             <div className="bg-blue-600 rounded-2xl shadow-md overflow-hidden">
               {/* Fortschritts-Header */}
               <div className="px-3.5 pt-3 pb-2">
@@ -840,7 +844,61 @@ export default function PackMode({
             </div>
           )}
 
-          {phase === "scan" && <CameraScanner onScan={submitBarcode} paused={isPending} />}
+          {/* SCHMALE LEISTE bei aktiver Kamera — kompakte "was jetzt"-Info, */}
+          {/* klebt oben fest, damit man beim Scannen nie den Überblick verliert. */}
+          {phase === "scan" && nextItem && cameraActive && (
+            <div className="sticky top-2 z-10 bg-blue-600 rounded-xl shadow-md overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2">
+                <span className="text-[10px] font-bold text-blue-100 uppercase tracking-widest shrink-0">
+                  Jetzt · {packProgress.currentPos}/{packProgress.total}
+                </span>
+                <div className="flex flex-wrap gap-1 flex-1 min-w-0">
+                  {nextItem.item.isExtension !== false ? (
+                    <>
+                      {nextItem.attrs.method.label && (
+                        <span className={`inline-block ${nextItem.attrs.method.cls} text-white text-[11px] font-bold px-1.5 py-0.5 rounded tracking-wider`}>
+                          {nextItem.attrs.method.label}
+                        </span>
+                      )}
+                      {nextItem.attrs.length && (
+                        <span className="inline-block bg-slate-700 text-white text-[11px] font-bold px-1.5 py-0.5 rounded">
+                          {nextItem.attrs.length}
+                        </span>
+                      )}
+                      {nextItem.attrs.origin && (
+                        <span className="inline-block bg-slate-900 text-white text-[11px] font-bold px-1.5 py-0.5 rounded">
+                          {nextItem.attrs.origin}
+                        </span>
+                      )}
+                      {nextItem.attrs.color && (
+                        <span className="inline-block bg-amber-600 text-white text-[11px] font-bold px-1.5 py-0.5 rounded font-mono">
+                          {nextItem.attrs.color}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-[11px] text-white font-medium truncate">
+                      {nextItem.item.title}
+                    </span>
+                  )}
+                </div>
+                <span className="text-base font-black text-white shrink-0">
+                  {nextItem.got}/{nextItem.item.quantity}
+                </span>
+              </div>
+              {/* hauchdünner Fortschrittsbalken — Höhe fast 0, kein Platzverlust */}
+              <div className="h-1 bg-blue-800/60">
+                <div
+                  className="h-full bg-white transition-all duration-300"
+                  style={{
+                    width: `${packProgress.total > 0 ? (packProgress.donePositions / packProgress.total) * 100 : 0}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {phase === "scan" && <CameraScanner onScan={submitBarcode} paused={isPending} onActiveChange={setCameraActive} />}
 
           {phase === "photos" && (
             <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 shadow-sm text-center">
