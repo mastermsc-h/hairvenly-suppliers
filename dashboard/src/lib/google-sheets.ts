@@ -549,7 +549,11 @@ export async function triggerAppsScript(supplier: "amanda" | "china", budgetGram
       const data = JSON.parse(text) as { ok?: boolean; error?: string; title?: string; budgetG?: number };
       if (data.error) {
         console.error("[triggerAppsScript] Apps Script Fehler:", data.error);
-        return { ok: false, error: data.error };
+        // Google-Spreadsheet-Timeout in verständliche Handlungsanweisung übersetzen
+        const friendly = /timed out|Zeit überschritten/i.test(data.error)
+          ? "Google Sheets ist gerade ausgelastet (vermutlich läuft der Auto-Refresh im Hintergrund). Bitte in 2–3 Minuten erneut versuchen."
+          : data.error;
+        return { ok: false, error: friendly };
       }
       // Sanity-Check: wenn Apps Script zwar 'ok' aber weder title noch budgetG
       // zurückgibt, ist wahrscheinlich etwas schiefgelaufen — sag es dem User.
