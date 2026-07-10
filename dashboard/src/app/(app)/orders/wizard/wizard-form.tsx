@@ -8,7 +8,7 @@ import {
   Download, ChevronDown, ChevronRight, ExternalLink,
 } from "lucide-react";
 import { t, type Locale } from "@/lib/i18n";
-import { createWizardOrder, exportOrderToGoogleSheet, generateAndUploadPDF, importOrderSuggestions, getSuggestionMeta, triggerSuggestionGeneration } from "@/lib/actions/orders";
+import { createWizardOrder, exportOrderToGoogleSheet, generateAndUploadPDF, importOrderSuggestions, getSuggestionMeta, startGeneration, getGenerationStatus } from "@/lib/actions/orders";
 import type { Supplier, CatalogMethod, ProductColor } from "@/lib/types";
 
 interface Props {
@@ -588,35 +588,81 @@ export default function WizardForm({ suppliers, catalogs, locale }: Props) {
                   className="w-16 px-2 py-1.5 text-sm text-right border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300" />
                 <span className="text-xs text-neutral-400">kg</span>
               </div>
-              {/* Generate button — calls Apps Script Web App synchronously */}
+              {/* Generate button — startet async Job im Apps Script, pollt dann
+                  den Status. Kein langes HTTP-Warten → kein Vercel-Timeout,
+                  kein hängender Spinner. */}
               <button
                 onClick={async () => {
                   const kg = parseFloat(budgetKg);
                   if (isNaN(kg) || kg <= 0) return;
                   setGenerating(true);
                   setError("");
-                  setGenStatus("Bestellvorschlag wird generiert... (kann 2-5 Min. dauern)");
+                  setGenStatus("Generierung wird gestartet...");
                   setImportStats(null);
                   setSuggestionMeta(null);
 
-                  const result = await triggerSuggestionGeneration(selectedSupplier?.name ?? "", kg);
+                  try {
+                    const start = await startGeneration(selectedSupplier?.name ?? "", kg);
+                    if (!start.ok) {
+                      setError(start.error ?? "Start fehlgeschlagen");
+                      return;
+                    }
 
-                  if (result.error) {
-                    setError(result.error);
+                    // Polling: alle 8s Status abfragen, max 15 Min.
+                    const startedAt = Date.now();
+                    const MAX_MS = 15 * 60 * 1000;
+                    let pollFails = 0;
+                    while (Date.now() - startedAt < MAX_MS) {
+                      await new Promise((r) => setTimeout(r, 8000));
+                      const st = await getGenerationStatus();
+
+                      if (st.pollError) {
+                        // Einzelne Poll-Fehler tolerieren (transienter Netzwerk-Blip)
+                        pollFails++;
+                        if (pollFails >= 4) {
+                          setError(`Status-Abfrage wiederholt fehlgeschlagen: ${st.pollError}`);
+                          return;
+                        }
+                        continue;
+                      }
+                      pollFails = 0;
+
+                      const mins = Math.floor((Date.now() - startedAt) / 60000);
+                      const secs = Math.floor(((Date.now() - startedAt) % 60000) / 1000);
+                      const elapsed = `${mins}:${String(secs).padStart(2, "0")}`;
+
+                      if (st.status === "done") {
+                        setGenStatus("Fertig! Wird importiert...");
+                        const meta = await getSuggestionMeta(selectedSupplier?.name ?? "");
+                        if (meta.title) {
+                          setSuggestionMeta({ title: meta.title, budgetKg: meta.budgetKg ?? 0, usedKg: meta.usedKg ?? 0 });
+                        }
+                        handleImport();
+                        return;
+                      }
+                      if (st.status === "error") {
+                        setError(st.error ?? "Generierung fehlgeschlagen");
+                        return;
+                      }
+                      if (st.status === "waiting") {
+                        setGenStatus(
+                          st.activeStep
+                            ? `Wartet auf freien Slot — "${st.activeStep}" läuft gerade... (${elapsed})`
+                            : `Wartet auf freien Slot... (${elapsed})`,
+                        );
+                      } else if (st.status === "running") {
+                        setGenStatus(`Bestellvorschlag wird generiert... (${elapsed}, dauert i.d.R. 2-5 Min.)`);
+                      } else {
+                        setGenStatus(`In Warteschlange... (${elapsed})`);
+                      }
+                    }
+                    setError("Generierung hat nach 15 Minuten nicht abgeschlossen. Bitte im Sheet prüfen (Vorschlag-Tab) und ggf. 'Importieren' klicken.");
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : "Unerwarteter Fehler bei der Generierung");
+                  } finally {
                     setGenerating(false);
                     setGenStatus("");
-                    return;
                   }
-
-                  // Script is done — read meta and auto-import
-                  setGenStatus("Fertig! Wird importiert...");
-                  const meta = await getSuggestionMeta(selectedSupplier?.name ?? "");
-                  if (meta.title) {
-                    setSuggestionMeta({ title: meta.title, budgetKg: meta.budgetKg ?? 0, usedKg: meta.usedKg ?? 0 });
-                  }
-                  handleImport();
-                  setGenerating(false);
-                  setGenStatus("");
                 }}
                 disabled={generating || importing}
                 className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition"

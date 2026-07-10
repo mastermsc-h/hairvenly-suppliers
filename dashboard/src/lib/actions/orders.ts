@@ -868,6 +868,39 @@ export async function triggerSuggestionGeneration(supplierName: string, budgetKg
   return { title: result.title };
 }
 
+/**
+ * Startet die Bestellvorschlag-Generierung asynchron (Apps Script Job +
+ * Trigger, Antwort in <5s). Fortschritt via getGenerationStatus() pollen.
+ */
+export async function startGeneration(supplierName: string, budgetKg: number): Promise<{ ok: boolean; error?: string }> {
+  await requireAdmin();
+
+  const lower = supplierName.toLowerCase();
+  const supplier = lower.includes("amanda") ? "amanda" as const
+    : (lower.includes("eyfel") || lower.includes("china") || lower.includes("ebru")) ? "china" as const
+    : null;
+  if (!supplier) return { ok: false, error: "Kein Vorschlag für diesen Lieferanten" };
+
+  const budgetGrams = Math.round(budgetKg * 1000);
+  const { startSuggestionGeneration } = await import("@/lib/google-sheets");
+  return startSuggestionGeneration(supplier, budgetGrams);
+}
+
+/** Pollt den Status des laufenden Generierungs-Jobs. */
+export async function getGenerationStatus(): Promise<{
+  status: string;
+  title?: string;
+  error?: string;
+  activeStep?: string | null;
+  pollError?: string;
+}> {
+  await requireAdmin();
+  const { pollSuggestionGeneration } = await import("@/lib/google-sheets");
+  const result = await pollSuggestionGeneration();
+  if ("pollError" in result) return { status: "poll_error", pollError: result.pollError };
+  return result;
+}
+
 // ── Order Item Editing ──────────────────────────────────────────
 // Erlaubt admins + mitarbeitern, bestellpositionen nachträglich zu
 // ändern (Menge, hinzufügen, entfernen) — solange die Bestellung im

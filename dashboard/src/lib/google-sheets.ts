@@ -531,6 +531,72 @@ export async function readSuggestionMeta(tabName: string): Promise<SuggestionMet
  * The script runs createBestellungAmanda/China with the given budget.
  * This can take 2-5 minutes to complete.
  */
+/**
+ * Startet die Generierung ASYNCHRON: Apps Script merkt sich den Job,
+ * plant einen Trigger und antwortet sofort (<5s). Fortschritt wird
+ * über pollSuggestionGeneration() abgefragt. Kein 6-Min-HTTP-Warten
+ * mehr → kein Vercel-Timeout, kein hängender Spinner.
+ */
+export async function startSuggestionGeneration(
+  supplier: "amanda" | "china",
+  budgetGrams: number,
+): Promise<{ ok: boolean; error?: string }> {
+  const url = process.env.GOOGLE_APPS_SCRIPT_URL;
+  if (!url) return { ok: false, error: "GOOGLE_APPS_SCRIPT_URL nicht konfiguriert" };
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "start", supplier, budgetG: budgetGrams }),
+      signal: AbortSignal.timeout(30000),
+    });
+    const text = await response.text();
+    try {
+      const data = JSON.parse(text) as { ok?: boolean; started?: boolean; error?: string };
+      if (data.error) return { ok: false, error: data.error };
+      if (data.started) return { ok: true };
+      return { ok: false, error: "Unerwartete Antwort beim Start: " + text.slice(0, 200) };
+    } catch {
+      return { ok: false, error: "Apps Script antwortete unerwartet (kein JSON): " + text.slice(0, 200) };
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `Start fehlgeschlagen: ${message}` };
+  }
+}
+
+export interface GenerationStatus {
+  status: "none" | "queued" | "waiting" | "running" | "done" | "error";
+  supplier?: string;
+  title?: string;
+  error?: string;
+  activeStep?: string | null;
+  createdAt?: number;
+}
+
+/** Fragt den Status des laufenden Generierungs-Jobs ab (Polling). */
+export async function pollSuggestionGeneration(): Promise<GenerationStatus | { pollError: string }> {
+  const url = process.env.GOOGLE_APPS_SCRIPT_URL;
+  if (!url) return { pollError: "GOOGLE_APPS_SCRIPT_URL nicht konfiguriert" };
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "status" }),
+      signal: AbortSignal.timeout(20000),
+    });
+    const text = await response.text();
+    try {
+      return JSON.parse(text) as GenerationStatus;
+    } catch {
+      return { pollError: "Status-Antwort kein JSON: " + text.slice(0, 200) };
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { pollError: message };
+  }
+}
+
 export async function triggerAppsScript(supplier: "amanda" | "china", budgetGrams: number): Promise<{ ok: boolean; title?: string; error?: string }> {
   const url = process.env.GOOGLE_APPS_SCRIPT_URL;
   if (!url) return { ok: false, error: "GOOGLE_APPS_SCRIPT_URL nicht konfiguriert" };
