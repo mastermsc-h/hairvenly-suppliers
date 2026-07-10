@@ -111,7 +111,11 @@ export default function CameraScanner({
         scannerRef.current = scanner;
 
         await scanner.start(
-          VIDEO_CONSTRAINTS,
+          // 1. Param MUSS genau 1 Key haben (html5-qrcode-Validierung). Die
+          // vollen Constraints (Auflösung/Fokus) gehören in config.videoConstraints
+          // — die werden dann für getUserMedia genutzt und der 1-Key-Check
+          // greift gar nicht erst.
+          { facingMode: "environment" },
           {
             fps: 12,
             // Breite, große Scan-Fläche (siehe scanBox) → Barcode muss nicht
@@ -119,6 +123,7 @@ export default function CameraScanner({
             // Schräglage. Etwas weniger fps, weil der größere Crop mehr rechnet.
             qrbox: scanBox,
             aspectRatio: 1.777,
+            videoConstraints: VIDEO_CONSTRAINTS,
           },
           (decodedText) => {
             const now = Date.now();

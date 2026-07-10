@@ -156,10 +156,12 @@ export default function ScannerClient({ locale: _locale }: { locale: Locale }) {
         });
         scannerRef.current = scanner;
         await scanner.start(
-          VIDEO_CONSTRAINTS,
+          // 1. Param MUSS genau 1 Key haben — volle Constraints (Auflösung/
+          // Fokus) gehören in config.videoConstraints (siehe camera-scanner.tsx).
+          { facingMode: "environment" },
           // Große Scan-Fläche (siehe scanBox) + kontinuierlicher Fokus →
           // toleranter bei Abstand/Winkel, weniger "hin- und herfahren".
-          { fps: 12, qrbox: scanBox, aspectRatio: 1.777 },
+          { fps: 12, qrbox: scanBox, aspectRatio: 1.777, videoConstraints: VIDEO_CONSTRAINTS },
           (text) => {
             const now = Date.now();
             const last = lastScanRef.current;
