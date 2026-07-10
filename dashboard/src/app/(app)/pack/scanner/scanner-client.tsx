@@ -19,6 +19,25 @@ const SCAN_FORMATS = [
   Html5QrcodeSupportedFormats.UPC_E,
 ];
 
+// Höhere Auflösung + kontinuierlicher Autofokus → scharfes Bild, damit die
+// dünnen Code-128-Striche getrennt werden (größter Software-Hebel gegen
+// "muss hin- und herfahren"). focusMode in advanced[] = best-effort.
+const VIDEO_CONSTRAINTS = {
+  facingMode: "environment",
+  width: { ideal: 1920 },
+  height: { ideal: 1080 },
+  // @ts-expect-error focusMode/advanced sind non-standard MediaTrackConstraints
+  advanced: [{ focusMode: "continuous" }],
+} as MediaTrackConstraints;
+
+// Große, breite Scan-Fläche relativ zum Sucher (Barcode muss nicht exakt
+// zentriert/nah sein). 1D-Codes sind quer → ~92% Breite.
+function scanBox(vfW: number, vfH: number): { width: number; height: number } {
+  const width = Math.max(200, Math.floor(Math.min(vfW * 0.92, 460)));
+  const height = Math.max(140, Math.floor(Math.min(vfH * 0.55, 280)));
+  return { width, height };
+}
+
 interface Result {
   productTitle: string;
   variantTitle: string | null;
@@ -137,10 +156,10 @@ export default function ScannerClient({ locale: _locale }: { locale: Locale }) {
         });
         scannerRef.current = scanner;
         await scanner.start(
-          { facingMode: "environment" },
-          // Breite, flache Scan-Box: 1D-Barcodes (EAN/Code128) sind quer —
-          // eine flache Box trifft sie viel zuverlässiger als ein Quadrat.
-          { fps: 15, qrbox: { width: 320, height: 150 }, aspectRatio: 1.777 },
+          VIDEO_CONSTRAINTS,
+          // Große Scan-Fläche (siehe scanBox) + kontinuierlicher Fokus →
+          // toleranter bei Abstand/Winkel, weniger "hin- und herfahren".
+          { fps: 12, qrbox: scanBox, aspectRatio: 1.777 },
           (text) => {
             const now = Date.now();
             const last = lastScanRef.current;

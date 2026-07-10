@@ -18,6 +18,27 @@ const SCAN_FORMATS = [
   Html5QrcodeSupportedFormats.UPC_E,
 ];
 
+// Höhere Kamera-Auflösung + kontinuierlicher Autofokus erzwingen. Das ist der
+// größte Software-Hebel gegen "muss hin- und herfahren bis er scharf stellt":
+// scharfes, hochaufgelöstes Bild = die dünnen Code-128-Striche werden getrennt.
+// focusMode steht in advanced[] (best-effort, wird ignoriert wo nicht unterstützt,
+// statt einen OverconstrainedError zu werfen).
+const VIDEO_CONSTRAINTS = {
+  facingMode: "environment",
+  width: { ideal: 1920 },
+  height: { ideal: 1080 },
+  // @ts-expect-error focusMode/advanced sind non-standard MediaTrackConstraints
+  advanced: [{ focusMode: "continuous" }],
+} as MediaTrackConstraints;
+
+// Große, breite Scan-Fläche relativ zum Sucher: der Barcode muss nicht mehr
+// exakt zentriert/nah sein. Deckt ~92% Breite ab (1D-Codes sind quer).
+function scanBox(vfW: number, vfH: number): { width: number; height: number } {
+  const width = Math.max(200, Math.floor(Math.min(vfW * 0.92, 460)));
+  const height = Math.max(140, Math.floor(Math.min(vfH * 0.55, 280)));
+  return { width, height };
+}
+
 export default function CameraScanner({
   onScan,
   paused = false,
@@ -90,12 +111,13 @@ export default function CameraScanner({
         scannerRef.current = scanner;
 
         await scanner.start(
-          { facingMode: "environment" },
+          VIDEO_CONSTRAINTS,
           {
-            fps: 15,
-            // Breit + flach: 1D-Barcodes (EAN) brauchen horizontale Fläche,
-            // eine quadratische Box zwingt zum unnötig nahen Heranfahren.
-            qrbox: { width: 320, height: 150 },
+            fps: 12,
+            // Breite, große Scan-Fläche (siehe scanBox) → Barcode muss nicht
+            // exakt zentriert/nah sein; mehr Sample-Zeilen = toleranter bei
+            // Schräglage. Etwas weniger fps, weil der größere Crop mehr rechnet.
+            qrbox: scanBox,
             aspectRatio: 1.777,
           },
           (decodedText) => {
