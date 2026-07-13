@@ -31,6 +31,7 @@ import QRCode from "qrcode";
 import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X, RotateCcw, History, Package2, ImagePlus, Smartphone } from "lucide-react";
 import CameraScanner from "./camera-scanner";
 import OrderQrScanner from "../order-qr-scanner";
+import { isAccessoryCode } from "../accessory-code";
 
 interface ExpectedItem {
   variantId: string | null;
@@ -447,6 +448,56 @@ export default function PackMode({
         }
         return;
       }
+      // Universeller Zubehör-Code → nächste offene NICHT-Extension-Position
+      // komplett bestätigen (Extensions ausgeschlossen, die brauchen ihren
+      // echten Barcode). So geht Zubehör/Pflege/Schulungen ohne Tippen weiter.
+      if (isAccessoryCode(trimmed)) {
+        const accIdx = expectedItems.findIndex((it, i) => {
+          if (it.isExtension !== false) return false; // nur echtes Zubehör
+          const key = it.barcode || `manual:${i}`;
+          return (counts[key] ?? 0) < it.quantity;
+        });
+        if (accIdx < 0) {
+          playBeep(false);
+          setFlash({ kind: "mismatch", message: "Kein offenes Zubehör zum Bestätigen" });
+          return;
+        }
+        inFlightRef.current = true;
+        startTransition(async () => {
+          try {
+            const res = await recordManualConfirm(sessionId, accIdx);
+            setCounts(res.scannedCounts);
+            const item = expectedItems[accIdx];
+            const counterKey = item.barcode || `manual:${accIdx}`;
+            const count = res.scannedCounts[counterKey] ?? item.quantity;
+            if (res.status === "match") {
+              playBeep(true);
+              setFlash({ kind: "match", message: item.title });
+              setBigSuccess({
+                title: res.matchedTitle ?? item.title ?? "Zubehör",
+                count,
+                total: item.quantity,
+              });
+              if (status === "open") setStatus("in_progress");
+            } else {
+              playBeep(false);
+              setFlash({ kind: "overflow", message: t(locale, "shipping.scan_overflow") });
+            }
+            await refreshHistory();
+          } catch (err) {
+            playBeep(false);
+            const raw = err instanceof Error ? err.message : "Fehler";
+            const isNetwork = /fetch|network|load failed|connection/i.test(raw);
+            setFlash({
+              kind: "mismatch",
+              message: isNetwork ? "Keine Verbindung — bitte erneut scannen" : raw,
+            });
+          } finally {
+            inFlightRef.current = false;
+          }
+        });
+        return;
+      }
       inFlightRef.current = true;
       startTransition(async () => {
         try {
@@ -497,7 +548,7 @@ export default function PackMode({
         }
       });
     },
-    [sessionId, status, locale, refreshHistory, bigSuccess, expectedItems, orderName],
+    [sessionId, status, locale, refreshHistory, bigSuccess, expectedItems, orderName, counts],
   );
 
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
@@ -818,7 +869,14 @@ export default function PackMode({
                         </span>
                       )}
                     </div>
-                  ) : null}
+                  ) : (
+                    // Zubehör/Pflege/Schulung → Hinweis auf den Zubehör-Code
+                    <div className="mb-1">
+                      <span className="inline-flex items-center gap-1 bg-violet-100 text-violet-800 text-xs font-bold px-2 py-0.5 rounded">
+                        🏷️ Zubehör · mit Zubehör-Code scannbar
+                      </span>
+                    </div>
+                  )}
                   <div className="text-xs text-neutral-700 line-clamp-2 leading-snug">
                     {nextItem.item.title}
                   </div>

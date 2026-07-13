@@ -148,6 +148,15 @@ export default async function PackPage() {
               🧾 Alle Lieferscheine drucken
             </a>
           )}
+          <a
+            href="/pack/zubehoer-code"
+            target="_blank"
+            rel="noopener"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-neutral-300 text-neutral-900 text-sm font-medium hover:bg-neutral-50 transition"
+            title="Universellen Zubehör-Scan-Code drucken (für Zubehör/Pflege/Schulungen)"
+          >
+            🏷️ Zubehör-Code
+          </a>
           <OrderQrScanner />
           <BackfillButton />
           <DemoButton />
