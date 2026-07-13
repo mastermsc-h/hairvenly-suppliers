@@ -259,9 +259,10 @@ export async function syncReturnsFromShopify(fromDate?: string, toDate?: string)
     totalRefundAmount: 0,
   };
 
-  // Default: last 3 months
+  // Default: last 30 days. Any deeper backfill (e.g. after longer downtime)
+  // is done via the /api/cron/refresh nightly job which handles 90 days.
   const defaultFrom = new Date();
-  defaultFrom.setMonth(defaultFrom.getMonth() - 3);
+  defaultFrom.setDate(defaultFrom.getDate() - 30);
   const sinceDate = fromDate || defaultFrom.toISOString().split("T")[0];
 
   try {
