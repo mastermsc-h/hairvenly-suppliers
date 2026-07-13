@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Plus, Save, X, GraduationCap, Users2, Euro, ShieldAlert, Trash2,
   ChevronDown, TrendingUp, Lock, CalendarDays, Check, XCircle, Ban,
+  Target, BookOpen, MessageSquare, ClipboardList, Circle, CheckCircle2,
 } from "lucide-react";
 import { TEAMS, teamMeta } from "@/lib/staff/teams";
 import { maxOnVacation, teamOnDay, blackoutsForDay, UNLIMITED, probation } from "@/lib/staff/capacity";
@@ -21,9 +22,18 @@ import {
   createVacationRequest,
   decideVacation,
   deleteVacation,
+  addReview,
+  deleteReview,
+  addGoal,
+  setGoalStatus,
+  deleteGoal,
+  addTraining,
+  deleteTraining,
+  saveMemberMeta,
 } from "@/lib/actions/staff";
 import type {
   StaffMember, TeamSetting, SalaryChange, StaffWarning, VacationRequest, VacationBlackout,
+  StaffReview, StaffGoal, StaffTraining, StaffMemberMeta,
 } from "@/lib/types";
 import { Card, CardHead } from "../staff-ui";
 
@@ -50,6 +60,10 @@ export default function MembersClient({
   today,
   salaryByMember,
   warningsByMember,
+  reviewsByMember,
+  goalsByMember,
+  trainingsByMember,
+  metaByMember,
 }: {
   members: StaffMember[];
   settings: TeamSetting[];
@@ -59,6 +73,10 @@ export default function MembersClient({
   today: string;
   salaryByMember: Record<string, SalaryChange[]>;
   warningsByMember: Record<string, StaffWarning[]>;
+  reviewsByMember: Record<string, StaffReview[]>;
+  goalsByMember: Record<string, StaffGoal[]>;
+  trainingsByMember: Record<string, StaffTraining[]>;
+  metaByMember: Record<string, StaffMemberMeta>;
 }) {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -196,6 +214,10 @@ export default function MembersClient({
                             member={m}
                             salary={salaryByMember[m.id] ?? []}
                             warnings={warningsByMember[m.id] ?? []}
+                            reviews={reviewsByMember[m.id] ?? []}
+                            goals={goalsByMember[m.id] ?? []}
+                            trainings={trainingsByMember[m.id] ?? []}
+                            meta={metaByMember[m.id] ?? null}
                             today={today}
                             onChange={() => router.refresh()}
                           />
@@ -523,15 +545,21 @@ function AdminSummary({
 }
 
 function AdminPanel({
-  member, salary, warnings, today, onChange,
+  member, salary, warnings, reviews, goals, trainings, meta, today, onChange,
 }: {
   member: StaffMember;
   salary: SalaryChange[];
   warnings: StaffWarning[];
+  reviews: StaffReview[];
+  goals: StaffGoal[];
+  trainings: StaffTraining[];
+  meta: StaffMemberMeta | null;
   today: string;
   onChange: () => void;
 }) {
   const p = probation(member.employment_start, today);
+  // Letzte Gehaltserhöhung = neuester Eintrag, wenn es mehr als einen gibt.
+  const lastRaise = salary.length > 1 ? salary[0] : null;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
       {/* Eintritt / Probezeit */}
@@ -554,7 +582,7 @@ function AdminPanel({
 
       {/* Gehalt */}
       <Card>
-        <CardHead icon={<TrendingUp size={14} />} title="Gehalt" sub="monatl. brutto" tint="emerald" />
+        <CardHead icon={<TrendingUp size={14} />} title="Gehalt" sub={lastRaise ? `letzte Erhöhung: ${lastRaise.effective_date}` : "monatl. brutto"} tint="emerald" />
         <div className="p-4">
           {salary.length === 0 ? (
             <div className="text-sm text-neutral-400">Noch kein Gehalt erfasst.</div>
@@ -604,6 +632,89 @@ function AdminPanel({
             </ul>
           )}
           <WarningForm staffId={member.id} onChange={onChange} />
+        </div>
+      </Card>
+
+      {/* Ziele */}
+      <Card>
+        <CardHead icon={<Target size={14} />} title="Ziele" sub={goals.length ? `${goals.filter((g) => g.status === "open").length} offen` : undefined} tint="sky" />
+        <div className="p-4">
+          {goals.length === 0 ? (
+            <div className="text-sm text-neutral-400">Noch keine Ziele.</div>
+          ) : (
+            <ul className="space-y-1.5 mb-2">
+              {goals.map((g) => (
+                <li key={g.id} className="flex items-start justify-between gap-2 text-sm">
+                  <button onClick={() => { void (async () => { await setGoalStatus(g.id, g.status === "done" ? "open" : "done"); onChange(); })(); }} className="mt-0.5 shrink-0" title={g.status === "done" ? "Als offen markieren" : "Als erreicht markieren"}>
+                    {g.status === "done" ? <CheckCircle2 size={15} className="text-emerald-600" /> : <Circle size={15} className="text-neutral-300" />}
+                  </button>
+                  <span className={`flex-1 min-w-0 ${g.status === "done" ? "line-through text-neutral-400" : ""}`}>
+                    {g.title}
+                    {g.due_date && <span className="text-[10px] text-neutral-400"> · bis {g.due_date}</span>}
+                    {g.detail && <span className="block text-[11px] text-neutral-500">{g.detail}</span>}
+                  </span>
+                  <button onClick={() => { if (confirm("Ziel löschen?")) { void (async () => { await deleteGoal(g.id); onChange(); })(); } }} className="text-neutral-300 hover:text-rose-600 shrink-0"><Trash2 size={13} /></button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <GoalForm staffId={member.id} onChange={onChange} />
+        </div>
+      </Card>
+
+      {/* Schulungen */}
+      <Card>
+        <CardHead icon={<BookOpen size={14} />} title="Schulungen" sub={trainings.length ? `${trainings.length} erfasst` : undefined} tint="amber" />
+        <div className="p-4">
+          {trainings.length === 0 ? (
+            <div className="text-sm text-neutral-400">Noch keine Schulungen.</div>
+          ) : (
+            <ul className="space-y-1 mb-2">
+              {trainings.map((tr) => (
+                <li key={tr.id} className="flex items-start justify-between gap-2 text-sm">
+                  <span className="flex-1 min-w-0">
+                    <b>{tr.title}</b>
+                    {tr.training_date && <span className="text-[10px] text-neutral-400"> · {tr.training_date}</span>}
+                    {tr.note && <span className="block text-[11px] text-neutral-500">{tr.note}</span>}
+                  </span>
+                  <button onClick={() => { if (confirm("Schulung löschen?")) { void (async () => { await deleteTraining(tr.id); onChange(); })(); } }} className="text-neutral-300 hover:text-rose-600 shrink-0"><Trash2 size={13} /></button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <TrainingForm staffId={member.id} onChange={onChange} />
+        </div>
+      </Card>
+
+      {/* Verantwortlichkeiten / Aufgaben / Notizen */}
+      <Card className="lg:col-span-2">
+        <CardHead icon={<ClipboardList size={14} />} title="Verantwortlichkeiten · Aufgaben · Notizen" tint="indigo" />
+        <div className="p-4">
+          <MetaForm staffId={member.id} meta={meta} onChange={onChange} />
+        </div>
+      </Card>
+
+      {/* Mitarbeitergespräche */}
+      <Card>
+        <CardHead icon={<MessageSquare size={14} />} title="Mitarbeitergespräche" sub={reviews.length ? `${reviews.length} dokumentiert` : undefined} tint="fuchsia" />
+        <div className="p-4">
+          {reviews.length === 0 ? (
+            <div className="text-sm text-neutral-400">Noch keine Gespräche.</div>
+          ) : (
+            <ul className="space-y-2 mb-2">
+              {reviews.map((rv) => (
+                <li key={rv.id} className="rounded-lg border border-neutral-100 bg-neutral-50/50 p-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-neutral-700">{rv.review_date}</span>
+                    <button onClick={() => { if (confirm("Gespräch löschen?")) { void (async () => { await deleteReview(rv.id); onChange(); })(); } }} className="text-neutral-300 hover:text-rose-600"><Trash2 size={13} /></button>
+                  </div>
+                  {rv.content && <div className="text-[13px] text-neutral-600 whitespace-pre-wrap mt-0.5">{rv.content}</div>}
+                  {rv.next_date && <div className="text-[10px] text-sky-700 mt-1">nächstes Gespräch: {rv.next_date}</div>}
+                </li>
+              ))}
+            </ul>
+          )}
+          <ReviewForm staffId={member.id} onChange={onChange} />
         </div>
       </Card>
     </div>
@@ -919,6 +1030,140 @@ function WarningForm({ staffId, onChange }: { staffId: string; onChange: () => v
         {pending ? "..." : "+ erfassen"}
       </button>
       {error && <span className="text-rose-600 text-[10px] w-full">{error}</span>}
+    </form>
+  );
+}
+
+// ─── Personalakte-Formulare ─────────────────────────────────────
+
+function useAddForm(action: (staffId: string, fd: FormData) => Promise<{ error?: string } | { ok: true }>, staffId: string, onChange: () => void) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    start(async () => {
+      const res = await action(staffId, fd);
+      if (res && "error" in res && res.error) { setError(res.error); return; }
+      form.reset();
+      onChange();
+    });
+  }
+  return { error, pending, submit };
+}
+
+function GoalForm({ staffId, onChange }: { staffId: string; onChange: () => void }) {
+  const { error, pending, submit } = useAddForm(addGoal, staffId, onChange);
+  return (
+    <form onSubmit={submit} className="flex flex-wrap items-end gap-2 border-t border-neutral-100 pt-2">
+      <label className="block flex-1 min-w-[120px]">
+        <span className="text-[10px] uppercase text-neutral-500">Ziel</span>
+        <input name="title" required placeholder="z.B. Farbberatung sicher" className="block w-full rounded border border-neutral-300 px-2 py-1 text-sm" />
+      </label>
+      <label className="block">
+        <span className="text-[10px] uppercase text-neutral-500">bis</span>
+        <input name="due_date" type="date" className="block w-32 rounded border border-neutral-300 px-2 py-1 text-sm" />
+      </label>
+      <label className="block flex-1 min-w-[120px]">
+        <span className="text-[10px] uppercase text-neutral-500">Detail</span>
+        <input name="detail" className="block w-full rounded border border-neutral-300 px-2 py-1 text-sm" />
+      </label>
+      <button type="submit" disabled={pending} className="rounded-lg bg-neutral-900 text-white px-3 py-1.5 text-xs font-medium">{pending ? "..." : "+ Ziel"}</button>
+      {error && <span className="text-rose-600 text-[10px] w-full">{error}</span>}
+    </form>
+  );
+}
+
+function TrainingForm({ staffId, onChange }: { staffId: string; onChange: () => void }) {
+  const { error, pending, submit } = useAddForm(addTraining, staffId, onChange);
+  return (
+    <form onSubmit={submit} className="flex flex-wrap items-end gap-2 border-t border-neutral-100 pt-2">
+      <label className="block">
+        <span className="text-[10px] uppercase text-neutral-500">Datum</span>
+        <input name="training_date" type="date" className="block w-32 rounded border border-neutral-300 px-2 py-1 text-sm" />
+      </label>
+      <label className="block flex-1 min-w-[120px]">
+        <span className="text-[10px] uppercase text-neutral-500">Schulung</span>
+        <input name="title" required placeholder="z.B. Hygiene-Schulung" className="block w-full rounded border border-neutral-300 px-2 py-1 text-sm" />
+      </label>
+      <label className="block flex-1 min-w-[100px]">
+        <span className="text-[10px] uppercase text-neutral-500">Notiz</span>
+        <input name="note" className="block w-full rounded border border-neutral-300 px-2 py-1 text-sm" />
+      </label>
+      <button type="submit" disabled={pending} className="rounded-lg bg-neutral-900 text-white px-3 py-1.5 text-xs font-medium">{pending ? "..." : "+ Schulung"}</button>
+      {error && <span className="text-rose-600 text-[10px] w-full">{error}</span>}
+    </form>
+  );
+}
+
+function ReviewForm({ staffId, onChange }: { staffId: string; onChange: () => void }) {
+  const { error, pending, submit } = useAddForm(addReview, staffId, onChange);
+  return (
+    <form onSubmit={submit} className="space-y-2 border-t border-neutral-100 pt-2">
+      <div className="flex flex-wrap gap-2">
+        <label className="block">
+          <span className="text-[10px] uppercase text-neutral-500">Datum</span>
+          <input name="review_date" type="date" required className="block w-36 rounded border border-neutral-300 px-2 py-1 text-sm" />
+        </label>
+        <label className="block">
+          <span className="text-[10px] uppercase text-neutral-500">Nächstes Gespräch</span>
+          <input name="next_date" type="date" className="block w-36 rounded border border-neutral-300 px-2 py-1 text-sm" />
+        </label>
+      </div>
+      <label className="block">
+        <span className="text-[10px] uppercase text-neutral-500">Inhalt / Absprachen</span>
+        <textarea name="content" rows={2} placeholder="Themen, Absprachen, Feedback …" className="block w-full rounded border border-neutral-300 px-2 py-1 text-sm" />
+      </label>
+      <div className="flex justify-end">
+        <button type="submit" disabled={pending} className="rounded-lg bg-neutral-900 text-white px-3 py-1.5 text-xs font-medium">{pending ? "..." : "+ Gespräch dokumentieren"}</button>
+      </div>
+      {error && <span className="text-rose-600 text-[10px]">{error}</span>}
+    </form>
+  );
+}
+
+function MetaForm({ staffId, meta, onChange }: { staffId: string; meta: StaffMemberMeta | null; onChange: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [pending, start] = useTransition();
+  function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    setSaved(false);
+    const fd = new FormData(e.currentTarget);
+    start(async () => {
+      const res = await saveMemberMeta(staffId, fd);
+      if (res?.error) { setError(res.error); return; }
+      setSaved(true);
+      onChange();
+    });
+  }
+  const ta = "block w-full rounded border border-neutral-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-neutral-900 outline-none";
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <label className="block">
+          <span className="text-[10px] uppercase text-neutral-500">Verantwortlichkeiten</span>
+          <textarea name="responsibilities" rows={4} defaultValue={meta?.responsibilities ?? ""} placeholder="z.B. Kassenverantwortung, Social Media …" className={ta} />
+        </label>
+        <label className="block">
+          <span className="text-[10px] uppercase text-neutral-500">Aufgaben</span>
+          <textarea name="tasks" rows={4} defaultValue={meta?.tasks ?? ""} placeholder="laufende Aufgaben …" className={ta} />
+        </label>
+        <label className="block">
+          <span className="text-[10px] uppercase text-neutral-500">Notizen</span>
+          <textarea name="notes" rows={4} defaultValue={meta?.notes ?? ""} placeholder="allgemeine Notizen …" className={ta} />
+        </label>
+      </div>
+      <div className="flex items-center justify-end gap-3">
+        {error && <span className="text-rose-600 text-xs">{error}</span>}
+        {saved && !pending && <span className="text-emerald-700 text-xs">gespeichert ✓</span>}
+        <button type="submit" disabled={pending} className="rounded-lg bg-neutral-900 text-white px-4 py-1.5 text-sm font-medium flex items-center gap-2">
+          <Save size={14} /> {pending ? "..." : "Speichern"}
+        </button>
+      </div>
     </form>
   );
 }

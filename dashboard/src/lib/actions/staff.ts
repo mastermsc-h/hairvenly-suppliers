@@ -391,3 +391,111 @@ export async function deleteWarning(id: string) {
   revalidatePath("/staff/members");
   return { ok: true };
 }
+
+// ─── Personalakte: Gespräche / Ziele / Schulungen / Meta (NUR ADMIN) ──
+
+export async function addReview(staffId: string, formData: FormData) {
+  await requireStaffAdmin();
+  const svc = createServiceClient();
+  const date = str(formData.get("review_date"));
+  if (!date) return { error: "Datum fehlt." };
+  const { error } = await svc.from("staff_reviews").insert({
+    staff_id: staffId,
+    review_date: date,
+    content: str(formData.get("content")),
+    next_date: str(formData.get("next_date")),
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/staff/members");
+  return { ok: true };
+}
+
+export async function deleteReview(id: string) {
+  await requireStaffAdmin();
+  const svc = createServiceClient();
+  const { error } = await svc.from("staff_reviews").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/staff/members");
+  return { ok: true };
+}
+
+export async function addGoal(staffId: string, formData: FormData) {
+  await requireStaffAdmin();
+  const svc = createServiceClient();
+  const title = str(formData.get("title"));
+  if (!title) return { error: "Titel fehlt." };
+  const { error } = await svc.from("staff_goals").insert({
+    staff_id: staffId,
+    title,
+    detail: str(formData.get("detail")),
+    due_date: str(formData.get("due_date")),
+    status: "open",
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/staff/members");
+  return { ok: true };
+}
+
+export async function setGoalStatus(id: string, status: "open" | "done") {
+  await requireStaffAdmin();
+  const svc = createServiceClient();
+  const { error } = await svc
+    .from("staff_goals")
+    .update({ status, done_at: status === "done" ? new Date().toISOString() : null })
+    .eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/staff/members");
+  return { ok: true };
+}
+
+export async function deleteGoal(id: string) {
+  await requireStaffAdmin();
+  const svc = createServiceClient();
+  const { error } = await svc.from("staff_goals").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/staff/members");
+  return { ok: true };
+}
+
+export async function addTraining(staffId: string, formData: FormData) {
+  await requireStaffAdmin();
+  const svc = createServiceClient();
+  const title = str(formData.get("title"));
+  if (!title) return { error: "Titel fehlt." };
+  const { error } = await svc.from("staff_trainings").insert({
+    staff_id: staffId,
+    title,
+    training_date: str(formData.get("training_date")),
+    note: str(formData.get("note")),
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/staff/members");
+  return { ok: true };
+}
+
+export async function deleteTraining(id: string) {
+  await requireStaffAdmin();
+  const svc = createServiceClient();
+  const { error } = await svc.from("staff_trainings").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/staff/members");
+  return { ok: true };
+}
+
+export async function saveMemberMeta(staffId: string, formData: FormData) {
+  await requireStaffAdmin();
+  const svc = createServiceClient();
+  const { error } = await svc.from("staff_member_meta").upsert(
+    {
+      staff_id: staffId,
+      responsibilities: str(formData.get("responsibilities")),
+      tasks: str(formData.get("tasks")),
+      notes: str(formData.get("notes")),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "staff_id" },
+  );
+  if (error) return { error: error.message };
+  revalidatePath("/staff/members");
+  return { ok: true };
+}

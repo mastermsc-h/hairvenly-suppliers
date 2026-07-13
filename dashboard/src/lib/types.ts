@@ -572,6 +572,46 @@ export interface StaffWarning {
   created_at: string;
 }
 
+// ─── Personalakte / Mitarbeitergespräche (sensibel, nur Admin) ──
+export interface StaffReview {
+  id: string;
+  staff_id: string;
+  review_date: string;
+  content: string | null;
+  next_date: string | null;
+  created_at: string;
+}
+
+export type GoalStatus = "open" | "done";
+
+export interface StaffGoal {
+  id: string;
+  staff_id: string;
+  title: string;
+  detail: string | null;
+  status: GoalStatus;
+  due_date: string | null;
+  done_at: string | null;
+  created_at: string;
+}
+
+export interface StaffTraining {
+  id: string;
+  staff_id: string;
+  training_date: string | null;
+  title: string;
+  note: string | null;
+  created_at: string;
+}
+
+export interface StaffMemberMeta {
+  staff_id: string;
+  responsibilities: string | null;
+  tasks: string | null;
+  notes: string | null;
+  updated_at: string;
+}
+
 export interface VacationRequest {
   id: string;
   staff_id: string;
