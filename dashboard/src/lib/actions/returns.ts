@@ -265,8 +265,16 @@ export async function syncReturnsFromShopify(fromDate?: string, toDate?: string)
   const sinceDate = fromDate || defaultFrom.toISOString().split("T")[0];
 
   try {
-    // 1. Sync Shopify Returns API
-    const shopifyReturns = await fetchReturns(100);
+    // 1. Sync Shopify Returns API — top-level `returns` query is not
+    //    available on this Shopify plan/API version. Skip gracefully so the
+    //    refund-based path (step 2) can still run and populate the DB.
+    let shopifyReturns: Awaited<ReturnType<typeof fetchReturns>> = [];
+    try {
+      shopifyReturns = await fetchReturns(100);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/returns.*doesn't exist|QueryRoot/i.test(msg)) throw e;
+    }
     report.shopifyReturnsFound = shopifyReturns.length;
 
     for (const sr of shopifyReturns) {
