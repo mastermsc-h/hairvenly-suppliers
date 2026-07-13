@@ -635,6 +635,30 @@ function AdminPanel({
         </div>
       </Card>
 
+      {/* Mitarbeitergespräche — oben, volle Breite */}
+      <Card className="lg:col-span-3">
+        <CardHead icon={<MessageSquare size={14} />} title="Mitarbeitergespräche" sub={reviews.length ? `${reviews.length} dokumentiert` : undefined} tint="fuchsia" />
+        <div className="p-4">
+          {reviews.length === 0 ? (
+            <div className="text-sm text-neutral-400">Noch keine Gespräche.</div>
+          ) : (
+            <ul className="space-y-2 mb-2">
+              {reviews.map((rv) => (
+                <li key={rv.id} className="rounded-lg border border-neutral-100 bg-neutral-50/50 p-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-neutral-700">{rv.review_date}</span>
+                    <button onClick={() => { if (confirm("Gespräch löschen?")) { void (async () => { await deleteReview(rv.id); onChange(); })(); } }} className="text-neutral-300 hover:text-rose-600"><Trash2 size={13} /></button>
+                  </div>
+                  {rv.content && <div className="text-[13px] text-neutral-600 whitespace-pre-wrap mt-0.5">{rv.content}</div>}
+                  {rv.next_date && <div className="text-[10px] text-sky-700 mt-1">nächstes Gespräch: {rv.next_date}</div>}
+                </li>
+              ))}
+            </ul>
+          )}
+          <ReviewForm staffId={member.id} onChange={onChange} />
+        </div>
+      </Card>
+
       {/* Ziele */}
       <Card>
         <CardHead icon={<Target size={14} />} title="Ziele" sub={goals.length ? `${goals.filter((g) => g.status === "open").length} offen` : undefined} tint="sky" />
@@ -687,36 +711,13 @@ function AdminPanel({
       </Card>
 
       {/* Verantwortlichkeiten / Aufgaben / Notizen */}
-      <Card className="lg:col-span-2">
+      <Card className="lg:col-span-3">
         <CardHead icon={<ClipboardList size={14} />} title="Verantwortlichkeiten · Aufgaben · Notizen" tint="indigo" />
         <div className="p-4">
           <MetaForm staffId={member.id} meta={meta} onChange={onChange} />
         </div>
       </Card>
 
-      {/* Mitarbeitergespräche */}
-      <Card>
-        <CardHead icon={<MessageSquare size={14} />} title="Mitarbeitergespräche" sub={reviews.length ? `${reviews.length} dokumentiert` : undefined} tint="fuchsia" />
-        <div className="p-4">
-          {reviews.length === 0 ? (
-            <div className="text-sm text-neutral-400">Noch keine Gespräche.</div>
-          ) : (
-            <ul className="space-y-2 mb-2">
-              {reviews.map((rv) => (
-                <li key={rv.id} className="rounded-lg border border-neutral-100 bg-neutral-50/50 p-2 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-neutral-700">{rv.review_date}</span>
-                    <button onClick={() => { if (confirm("Gespräch löschen?")) { void (async () => { await deleteReview(rv.id); onChange(); })(); } }} className="text-neutral-300 hover:text-rose-600"><Trash2 size={13} /></button>
-                  </div>
-                  {rv.content && <div className="text-[13px] text-neutral-600 whitespace-pre-wrap mt-0.5">{rv.content}</div>}
-                  {rv.next_date && <div className="text-[10px] text-sky-700 mt-1">nächstes Gespräch: {rv.next_date}</div>}
-                </li>
-              ))}
-            </ul>
-          )}
-          <ReviewForm staffId={member.id} onChange={onChange} />
-        </div>
-      </Card>
     </div>
   );
 }
