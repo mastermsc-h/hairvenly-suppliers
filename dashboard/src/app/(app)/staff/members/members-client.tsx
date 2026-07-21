@@ -51,6 +51,13 @@ function fmtEur(n: number): string {
   return n.toLocaleString("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 }
 
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  const a = parts[0]?.[0] ?? "";
+  const b = parts.length > 1 ? parts[parts.length - 1][0] : "";
+  return (a + b).toUpperCase();
+}
+
 export default function MembersClient({
   members,
   settings,
@@ -140,35 +147,32 @@ export default function MembersClient({
                 />
               ) : (
                 <FragmentRow key={m.id}>
-                  <tr className={`border-t border-neutral-100 transition-colors ${expanded === m.id ? "bg-neutral-50" : "hover:bg-neutral-50/50"}`}>
-                    <td className="px-4 py-3 font-medium align-top">
-                      <span className="inline-flex items-center gap-2">
-                        {m.name}
-                        {m.is_trainee && (
-                          <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
-                            <GraduationCap size={11} /> Azubi
-                          </span>
-                        )}
-                      </span>
-                      <div className="mt-1">
-                        {isAdmin ? (
-                          <AdminSummary
-                            member={m}
-                            salary={salaryByMember[m.id] ?? []}
-                            warnings={warningsByMember[m.id] ?? []}
-                            today={today}
-                            open={expanded === m.id}
-                            onToggle={() => setExpanded(expanded === m.id ? null : m.id)}
-                          />
-                        ) : (
-                          <button
-                            onClick={() => setExpanded(expanded === m.id ? null : m.id)}
-                            className="inline-flex items-center gap-1 text-xs text-neutral-600 hover:text-neutral-900"
-                          >
-                            <CalendarDays size={12} /> Urlaub & Anträge
-                            <ChevronDown size={13} className={`transition-transform ${expanded === m.id ? "rotate-180" : ""}`} />
-                          </button>
-                        )}
+                  <tr className={`border-t border-neutral-100 transition-colors ${expanded === m.id ? "bg-neutral-50" : "hover:bg-sky-50/40"}`}>
+                    <td className="pl-4 pr-4 py-3.5 align-top">
+                      <div className="flex items-start gap-3">
+                        <span className={`mt-0.5 h-9 w-9 shrink-0 rounded-full grid place-items-center text-white text-[11px] font-semibold ${teamMeta(m.team).bar} ${m.active ? "" : "opacity-40"}`}>
+                          {initials(m.name)}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 font-medium text-neutral-800">
+                            {m.name}
+                            {m.is_trainee && (
+                              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                                <GraduationCap size={11} /> Azubi
+                              </span>
+                            )}
+                          </div>
+                          {isAdmin && (
+                            <div className="mt-0.5">
+                              <AdminSummary
+                                member={m}
+                                salary={salaryByMember[m.id] ?? []}
+                                warnings={warningsByMember[m.id] ?? []}
+                                today={today}
+                              />
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -211,6 +215,17 @@ export default function MembersClient({
                   {expanded === m.id && (
                     <tr className="border-t border-neutral-200 bg-gradient-to-b from-neutral-100/70 to-neutral-50/30">
                       <td colSpan={9} className="px-4 py-4 space-y-4">
+                        {/* Panel-Kopf mit Schließen (sticky, damit immer erreichbar) */}
+                        <div className="sticky top-0 z-10 -mx-4 -mt-4 mb-1 px-4 py-2.5 flex items-center justify-between bg-white/85 backdrop-blur border-b border-neutral-200">
+                          <div className="flex items-center gap-2">
+                            <span className={`h-6 w-6 rounded-full grid place-items-center text-white text-[10px] font-semibold ${teamMeta(m.team).bar}`}>{initials(m.name)}</span>
+                            <span className="text-sm font-semibold text-neutral-800">{m.name}</span>
+                            <span className="text-xs text-neutral-400">· Personalakte</span>
+                          </div>
+                          <button onClick={() => setExpanded(null)} className="inline-flex items-center gap-1 rounded-lg bg-neutral-900 text-white px-3 py-1.5 text-xs font-medium hover:bg-neutral-800">
+                            <X size={14} /> Schließen
+                          </button>
+                        </div>
                         <MemberVacation
                           member={m}
                           requests={requestsByMember[m.id] ?? []}
@@ -235,6 +250,11 @@ export default function MembersClient({
                             onChange={() => router.refresh()}
                           />
                         )}
+                        <div className="flex justify-center pt-1">
+                          <button onClick={() => setExpanded(null)} className="inline-flex items-center gap-1 rounded-lg border border-neutral-300 bg-white px-4 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50">
+                            <ChevronDown size={14} className="rotate-180" /> {m.name} zuklappen
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )}
@@ -525,25 +545,23 @@ function probationBadge(member: StaffMember, today: string) {
 }
 
 function AdminSummary({
-  member, salary, warnings, today, open, onToggle,
+  member, salary, warnings, today,
 }: {
   member: StaffMember;
   salary: SalaryChange[];
   warnings: StaffWarning[];
   today: string;
-  open: boolean;
-  onToggle: () => void;
 }) {
   const current = salary[0]; // bereits nach effective_date desc sortiert
   const pb = probationBadge(member, today);
   return (
-    <button onClick={onToggle} className="inline-flex items-center gap-2 text-left hover:opacity-80">
-      <div className="space-y-1">
-        <span className="inline-flex items-center gap-1 text-sm font-medium text-neutral-800">
-          <Euro size={13} /> {current ? fmtEur(current.amount) : "—"}
-          {salary.length > 1 && <span className="text-[10px] text-emerald-700">+{salary.length - 1} Erhöh.</span>}
-        </span>
-        <div className="flex items-center gap-1.5">
+    <div className="space-y-1">
+      <span className="inline-flex items-center gap-1 text-sm text-neutral-600">
+        <Euro size={12} /> {current ? fmtEur(current.amount) : "—"}
+        {salary.length > 1 && <span className="text-[10px] text-emerald-700">+{salary.length - 1} Erhöh.</span>}
+      </span>
+      {(warnings.length > 0 || pb) && (
+        <div className="flex flex-wrap items-center gap-1.5">
           {warnings.length > 0 && (
             <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700">
               <ShieldAlert size={10} /> {warnings.length} Verw.
@@ -551,9 +569,8 @@ function AdminSummary({
           )}
           {pb && <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${pb.cls}`}>{pb.text}</span>}
         </div>
-      </div>
-      <ChevronDown size={14} className={`text-neutral-400 transition-transform ${open ? "rotate-180" : ""}`} />
-    </button>
+      )}
+    </div>
   );
 }
 
