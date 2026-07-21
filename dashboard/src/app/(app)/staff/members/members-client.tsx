@@ -35,7 +35,7 @@ import type {
   StaffMember, TeamSetting, SalaryChange, StaffWarning, VacationRequest, VacationBlackout,
   StaffReview, StaffGoal, StaffTraining, StaffMemberMeta,
 } from "@/lib/types";
-import { Card, CardHead } from "../staff-ui";
+import { Card, CardHead, CollapsibleCard } from "../staff-ui";
 
 const inputCls =
   "mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 outline-none";
@@ -188,11 +188,24 @@ export default function MembersClient({
                         <span className="text-neutral-500 text-xs">Inaktiv</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right space-x-3 whitespace-nowrap">
-                      <button onClick={() => setEditing(m.id)} className="text-sm text-neutral-700 hover:text-neutral-900">
-                        Bearbeiten
-                      </button>
-                      <DeleteBtn id={m.id} name={m.name} onDone={() => router.refresh()} />
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => setExpanded(expanded === m.id ? null : m.id)}
+                          className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
+                            expanded === m.id
+                              ? "bg-neutral-900 text-white border-neutral-900"
+                              : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+                          }`}
+                        >
+                          {expanded === m.id ? "Schließen" : "Details"}
+                          <ChevronDown size={13} className={`transition-transform ${expanded === m.id ? "rotate-180" : ""}`} />
+                        </button>
+                        <button onClick={() => setEditing(m.id)} className="text-sm text-neutral-700 hover:text-neutral-900">
+                          Bearbeiten
+                        </button>
+                        <DeleteBtn id={m.id} name={m.name} onDone={() => router.refresh()} />
+                      </div>
                     </td>
                   </tr>
                   {expanded === m.id && (
@@ -563,8 +576,7 @@ function AdminPanel({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
       {/* Eintritt / Probezeit */}
-      <Card>
-        <CardHead icon={<Lock size={14} />} title="Eintritt & Probezeit" tint="violet" />
+      <CollapsibleCard icon={<Lock size={14} />} title="Eintritt & Probezeit" tint="violet" defaultOpen>
         <div className="p-4">
           <div className="text-sm text-neutral-700">Eintritt: <b>{member.employment_start ?? "—"}</b></div>
           {p ? (
@@ -578,11 +590,10 @@ function AdminPanel({
             <div className="text-sm text-neutral-400 mt-1">Kein Eintrittsdatum hinterlegt.</div>
           )}
         </div>
-      </Card>
+      </CollapsibleCard>
 
       {/* Gehalt */}
-      <Card>
-        <CardHead icon={<TrendingUp size={14} />} title="Gehalt" sub={lastRaise ? `letzte Erhöhung: ${lastRaise.effective_date}` : "monatl. brutto"} tint="emerald" />
+      <CollapsibleCard icon={<TrendingUp size={14} />} title="Gehalt" sub={lastRaise ? `letzte Erhöhung: ${lastRaise.effective_date}` : "monatl. brutto"} tint="emerald" defaultOpen>
         <div className="p-4">
           {salary.length === 0 ? (
             <div className="text-sm text-neutral-400">Noch kein Gehalt erfasst.</div>
@@ -605,11 +616,10 @@ function AdminPanel({
           )}
           <SalaryForm staffId={member.id} onChange={onChange} />
         </div>
-      </Card>
+      </CollapsibleCard>
 
       {/* Verwarnungen */}
-      <Card>
-        <CardHead icon={<ShieldAlert size={14} />} title="Verwarnungen" tint="rose" />
+      <CollapsibleCard icon={<ShieldAlert size={14} />} title="Verwarnungen" tint="rose" defaultOpen>
         <div className="p-4">
           {warnings.length === 0 ? (
             <div className="text-sm text-neutral-400">Keine Verwarnungen.</div>
@@ -633,11 +643,10 @@ function AdminPanel({
           )}
           <WarningForm staffId={member.id} onChange={onChange} />
         </div>
-      </Card>
+      </CollapsibleCard>
 
       {/* Mitarbeitergespräche — oben, volle Breite */}
-      <Card className="lg:col-span-3">
-        <CardHead icon={<MessageSquare size={14} />} title="Mitarbeitergespräche" sub={reviews.length ? `${reviews.length} dokumentiert` : undefined} tint="fuchsia" />
+      <CollapsibleCard className="lg:col-span-3" icon={<MessageSquare size={14} />} title="Mitarbeitergespräche" sub={reviews.length ? `${reviews.length} dokumentiert` : undefined} tint="fuchsia" defaultOpen>
         <div className="p-4">
           {reviews.length === 0 ? (
             <div className="text-sm text-neutral-400">Noch keine Gespräche.</div>
@@ -657,11 +666,10 @@ function AdminPanel({
           )}
           <ReviewForm staffId={member.id} onChange={onChange} />
         </div>
-      </Card>
+      </CollapsibleCard>
 
       {/* Ziele */}
-      <Card>
-        <CardHead icon={<Target size={14} />} title="Ziele" sub={goals.length ? `${goals.filter((g) => g.status === "open").length} offen` : undefined} tint="sky" />
+      <CollapsibleCard icon={<Target size={14} />} title="Ziele" sub={goals.length ? `${goals.filter((g) => g.status === "open").length} offen` : undefined} tint="sky" defaultOpen={false}>
         <div className="p-4">
           {goals.length === 0 ? (
             <div className="text-sm text-neutral-400">Noch keine Ziele.</div>
@@ -684,11 +692,10 @@ function AdminPanel({
           )}
           <GoalForm staffId={member.id} onChange={onChange} />
         </div>
-      </Card>
+      </CollapsibleCard>
 
       {/* Schulungen */}
-      <Card>
-        <CardHead icon={<BookOpen size={14} />} title="Schulungen" sub={trainings.length ? `${trainings.length} erfasst` : undefined} tint="amber" />
+      <CollapsibleCard icon={<BookOpen size={14} />} title="Schulungen" sub={trainings.length ? `${trainings.length} erfasst` : undefined} tint="amber" defaultOpen={false}>
         <div className="p-4">
           {trainings.length === 0 ? (
             <div className="text-sm text-neutral-400">Noch keine Schulungen.</div>
@@ -708,15 +715,14 @@ function AdminPanel({
           )}
           <TrainingForm staffId={member.id} onChange={onChange} />
         </div>
-      </Card>
+      </CollapsibleCard>
 
       {/* Verantwortlichkeiten / Aufgaben / Notizen */}
-      <Card className="lg:col-span-3">
-        <CardHead icon={<ClipboardList size={14} />} title="Verantwortlichkeiten · Aufgaben · Notizen" tint="indigo" />
+      <CollapsibleCard className="lg:col-span-3" icon={<ClipboardList size={14} />} title="Verantwortlichkeiten · Aufgaben · Notizen" tint="indigo" defaultOpen={false}>
         <div className="p-4">
           <MetaForm staffId={member.id} meta={meta} onChange={onChange} />
         </div>
-      </Card>
+      </CollapsibleCard>
 
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 // Gemeinsame, moderne Bausteine für den Mitarbeiter-Bereich:
 // Karten mit farbigem Header-Streifen (Icon-Chip) → klare Abtrennungen.
@@ -71,6 +71,27 @@ export function CardHead({
     <button type="button" onClick={onClick} className={cls}>{inner}</button>
   ) : (
     <div className={cls}>{inner}</div>
+  );
+}
+
+/** Karte mit klickbarem Header (Chevron) + ein-/ausklappbarem Inhalt. */
+export function CollapsibleCard({
+  icon, title, sub, tint = "neutral", defaultOpen = true, className, children,
+}: {
+  icon: ReactNode;
+  title: ReactNode;
+  sub?: ReactNode;
+  tint?: Tint;
+  defaultOpen?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Card className={className}>
+      <CardHead icon={icon} title={title} sub={sub} tint={tint} onClick={() => setOpen((o) => !o)} chevron={open} />
+      {open && children}
+    </Card>
   );
 }
 
