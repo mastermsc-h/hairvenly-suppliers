@@ -642,3 +642,31 @@ export interface SickDay {
   note: string | null;
   created_at: string;
 }
+
+// ---- Steuer-Ledger (Finanzen / Vorauszahlungen) ----
+export type SteuerArt =
+  | "ust_va"
+  | "ust_nachzahlung"
+  | "est_vz"
+  | "est_nachzahlung"
+  | "gewst_vz"
+  | "gewst_nachzahlung"
+  | "sonstige";
+
+export type SteuerRichtung = "zahlung" | "erstattung";
+
+export interface SteuerPosten {
+  id: string;
+  art: SteuerArt;
+  zeitraum: string;
+  jahr: number;
+  richtung: SteuerRichtung;
+  soll_betrag: number;
+  faellig_am: string | null;
+  ist_betrag: number;
+  bezahlt_am: string | null;
+  bescheid_ref: string | null;
+  notiz: string | null;
+  created_at: string;
+  updated_at: string;
+}
