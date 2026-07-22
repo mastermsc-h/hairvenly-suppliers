@@ -665,6 +665,7 @@ export default function ReturnsList({
   const [deleting, startDelete] = useTransition();
   const [syncReport, setSyncReport] = useState<SyncReport | null>(null);
   const [showSyncDialog, setShowSyncDialog] = useState(false);
+  const [showAdvancedMenu, setShowAdvancedMenu] = useState(false);
   const [importingSheet, startSheetImport] = useTransition();
   const [sheetReport, setSheetReport] = useState<SheetImportReport | null>(null);
   const [syncingCollections, startCollectionSync] = useTransition();
@@ -720,6 +721,17 @@ export default function ReturnsList({
     startSync(async () => {
       setSyncReport(null);
       const result = await syncReturnsFromShopify(from, to);
+      setSyncReport(result);
+    });
+  };
+
+  // One-click refresh: bounded 30-day window (server default) so it finishes
+  // in seconds instead of running into the 60s function timeout. Deeper
+  // backfills happen automatically via the nightly cron (90 days).
+  const handleQuickSync = () => {
+    startSync(async () => {
+      setSyncReport(null);
+      const result = await syncReturnsFromShopify();
       setSyncReport(result);
     });
   };
@@ -854,59 +866,73 @@ export default function ReturnsList({
         <div className="flex-1" />
 
         {syncReport && !showSyncDialog && (
-          <span className="text-xs text-neutral-500">
-            {syncReport.synced} importiert, {syncReport.skipped} übersprungen
-            {syncReport.updated ? `, ${syncReport.updated} aktualisiert` : ""}
-          </span>
+          syncReport.error ? (
+            <span className="text-xs text-red-600 max-w-[320px]">{syncReport.error}</span>
+          ) : (
+            <span className="text-xs text-emerald-600">
+              ✓ {syncReport.synced} importiert, {syncReport.skipped} übersprungen
+              {syncReport.updated ? `, ${syncReport.updated} aktualisiert` : ""}
+            </span>
+          )
         )}
 
         {isAdmin && (
           <>
             <div className="flex flex-col items-end">
-              <button onClick={handleSheetImport} disabled={importingSheet}
-                className="inline-flex items-center gap-2 text-sm font-medium text-neutral-700 px-3 py-2 rounded-lg border border-neutral-300 hover:bg-neutral-50 transition disabled:opacity-50"
-                title="Daten aus dem Google Sheet 'Retouren 2026' importieren (Gründe, Bearbeiter, Lösungen)">
-                <FileSpreadsheet size={14} className={importingSheet ? "animate-pulse" : ""} />
-                {importingSheet ? "Importiere..." : "Sheet Import"}
-              </button>
-              {sheetReport && !sheetReport.error && (
-                <div className="text-[10px] text-neutral-400 mt-1 text-right leading-tight">
-                  {sheetReport.inserted} neu · {sheetReport.updated} aktualisiert · {sheetReport.skipped} übersprungen
-                </div>
-              )}
-              {sheetReport?.error && (
-                <div className="text-[10px] text-red-500 mt-1 text-right leading-tight">{sheetReport.error}</div>
-              )}
-            </div>
-            <div className="flex flex-col items-end">
-              <button onClick={handleCollectionSync} disabled={syncingCollections}
-                className="inline-flex items-center gap-2 text-sm font-medium text-neutral-700 px-3 py-2 rounded-lg border border-neutral-300 hover:bg-neutral-50 transition disabled:opacity-50"
-                title="Shopify Collections + Sales für Rückgabequote pro Collection synchronisieren (dauert 1-3 Min)">
-                <RefreshCw size={14} className={syncingCollections ? "animate-spin" : ""} />
-                {syncingCollections ? "Collections..." : "Collections Sync"}
-              </button>
-              {collectionResult && (
-                <div className="text-[10px] text-neutral-400 mt-1 text-right leading-tight max-w-[240px]">
-                  {collectionResult}
-                </div>
-              )}
-            </div>
-            <div className="flex flex-col items-end">
-              <button onClick={() => { setSyncReport(null); setShowSyncDialog(true); }} disabled={syncing}
-                className="inline-flex items-center gap-2 text-sm font-medium text-neutral-700 px-3 py-2 rounded-lg border border-neutral-300 hover:bg-neutral-50 transition disabled:opacity-50">
-                <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
-                Shopify Sync
-              </button>
-              {syncInfo && (syncInfo.lastSyncAt || syncInfo.coverageFrom) && (
-                <div className="text-[10px] text-neutral-400 mt-1 text-right leading-tight">
-                  {syncInfo.lastSyncAt && (
-                    <div>{t(locale, "returns.last_sync")}: {formatDate(syncInfo.lastSyncAt)}</div>
-                  )}
-                  {syncInfo.coverageFrom && syncInfo.coverageTo && (
-                    <div>{t(locale, "returns.sync_coverage")}: {formatDate(syncInfo.coverageFrom)} – {formatDate(syncInfo.coverageTo)}</div>
+              <div className="flex items-center gap-1">
+                <button onClick={handleQuickSync} disabled={syncing || importingSheet || syncingCollections}
+                  className="inline-flex items-center gap-2 text-sm font-medium text-neutral-700 px-3 py-2 rounded-lg border border-neutral-300 hover:bg-neutral-50 transition disabled:opacity-50"
+                  title="Refunds + Umsätze der letzten 30 Tage aus Shopify aktualisieren (dauert wenige Sekunden). Ältere Zeiträume aktualisiert der nächtliche Auto-Sync.">
+                  <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
+                  {syncing ? "Aktualisiere…" : "Aktualisieren"}
+                </button>
+                <div className="relative">
+                  <button onClick={() => setShowAdvancedMenu((v) => !v)}
+                    className="p-2 rounded-lg border border-neutral-300 text-neutral-500 hover:bg-neutral-50 transition"
+                    title="Erweiterte Sync-Optionen">
+                    <ChevronDown size={14} />
+                  </button>
+                  {showAdvancedMenu && (
+                    <div className="absolute right-0 top-full mt-1 z-50 w-64 bg-white border border-neutral-200 rounded-xl shadow-lg py-1">
+                      <button onClick={() => { setShowAdvancedMenu(false); setSyncReport(null); setShowSyncDialog(true); }}
+                        disabled={syncing}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-neutral-50 disabled:opacity-50">
+                        <div className="font-medium text-neutral-800">Shopify Sync mit Zeitraum…</div>
+                        <div className="text-neutral-400">Bestimmten Zeitraum nachladen</div>
+                      </button>
+                      <button onClick={() => { setShowAdvancedMenu(false); handleSheetImport(); }}
+                        disabled={importingSheet}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-neutral-50 disabled:opacity-50">
+                        <div className="font-medium text-neutral-800 flex items-center gap-1.5">
+                          <FileSpreadsheet size={12} /> {importingSheet ? "Importiere…" : "Sheet Import"}
+                        </div>
+                        <div className="text-neutral-400">Gründe/Bearbeiter aus Google Sheet</div>
+                      </button>
+                      <button onClick={() => { setShowAdvancedMenu(false); handleCollectionSync(); }}
+                        disabled={syncingCollections}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-neutral-50 disabled:opacity-50">
+                        <div className="font-medium text-neutral-800">{syncingCollections ? "Collections…" : "Collections Sync (1–3 Min)"}</div>
+                        <div className="text-neutral-400">Alle Collection-Umsätze neu laden</div>
+                      </button>
+                    </div>
                   )}
                 </div>
-              )}
+              </div>
+              <div className="text-[10px] text-neutral-400 mt-1 text-right leading-tight">
+                <div>Auto-Sync: täglich nachts</div>
+                {syncInfo?.lastSyncAt && (
+                  <div>{t(locale, "returns.last_sync")}: {formatDate(syncInfo.lastSyncAt)}</div>
+                )}
+                {sheetReport && !sheetReport.error && (
+                  <div>{sheetReport.inserted} neu · {sheetReport.updated} aktualisiert · {sheetReport.skipped} übersprungen</div>
+                )}
+                {sheetReport?.error && (
+                  <div className="text-red-500">{sheetReport.error}</div>
+                )}
+                {collectionResult && (
+                  <div className="max-w-[240px]">{collectionResult}</div>
+                )}
+              </div>
             </div>
             <button onClick={() => { setEditReturn(null); setShowForm(true); }}
               className="inline-flex items-center gap-2 bg-neutral-900 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-neutral-800 transition">

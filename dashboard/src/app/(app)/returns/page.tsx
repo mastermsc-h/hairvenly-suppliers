@@ -12,7 +12,14 @@ export default async function ReturnsPage() {
   const supabase = await createClient();
   const locale = (profile.language ?? "de") as Locale;
 
-  // Helper: paginate to fetch ALL rows (Supabase caps single response at 1000)
+  // Helper: paginate to fetch ALL rows (Supabase caps single response at 1000).
+  // Only the columns the list/chart actually render — a `*` select here ships
+  // multiple MB of unused data to the client on every page load.
+  const RETURN_COLUMNS =
+    "id, shopify_return_id, shopify_refund_id, shopify_order_id, order_number, customer_name, return_type, reason, status, handler, notes, resolution, resolution_result, refund_amount, initiated_at, resolved_at, created_at, updated_at, repurchase_status";
+  const ITEM_COLUMNS =
+    "id, return_id, product_type, color, length, origin, weight, quality, exchange_product, exchange_weight, exchange_tracking, quantity, refund_amount, collection_title";
+
   async function fetchAllReturns() {
     const all: Return[] = [];
     const pageSize = 1000;
@@ -21,12 +28,12 @@ export default async function ReturnsPage() {
     while (true) {
       const { data, error } = await supabase
         .from("returns")
-        .select("*")
+        .select(RETURN_COLUMNS)
         .order("initiated_at", { ascending: false })
         .order("created_at", { ascending: false })
         .range(from, from + pageSize - 1);
       if (error) break;
-      const page = (data ?? []) as Return[];
+      const page = (data ?? []) as unknown as Return[];
       all.push(...page);
       if (page.length < pageSize) break;
       from += pageSize;
@@ -42,10 +49,10 @@ export default async function ReturnsPage() {
     while (true) {
       const { data, error } = await supabase
         .from("return_items")
-        .select("*")
+        .select(ITEM_COLUMNS)
         .range(from, from + pageSize - 1);
       if (error) break;
-      const page = (data ?? []) as ReturnItem[];
+      const page = (data ?? []) as unknown as ReturnItem[];
       all.push(...page);
       if (page.length < pageSize) break;
       from += pageSize;
@@ -61,8 +68,11 @@ export default async function ReturnsPage() {
     { data: shopifyProducts },
     { data: lastSyncEvent },
     { data: syncCoverage },
-    { data: monthlyRefundsRaw },
     { data: employeeProfiles },
+    { data: syncCoverageMax },
+    { count: exactCount },
+    { data: collectionSales },
+    { data: lastCronSync },
   ] = await Promise.all([
     fetchAllReturns(),
     fetchAllItems(),
@@ -81,8 +91,6 @@ export default async function ReturnsPage() {
       .not("shopify_order_id", "is", null)
       .order("initiated_at", { ascending: true })
       .limit(1),
-    // Pre-aggregated monthly refund totals via view (no row limit issues)
-    supabase.from("v_returns_summary").select("month, total_refund"),
     // Employees (admins + Mitarbeiter) — anyone whose role is not "supplier"
     supabase
       .from("profiles")
@@ -90,29 +98,30 @@ export default async function ReturnsPage() {
       .neq("role", "supplier")
       .eq("approved", true)
       .order("display_name", { ascending: true }),
+    supabase
+      .from("returns")
+      .select("initiated_at")
+      .not("shopify_order_id", "is", null)
+      .order("initiated_at", { ascending: false })
+      .limit(1),
+    // Exact count query (head-only, no rows transferred)
+    supabase.from("returns").select("*", { count: "exact", head: true }),
+    // Per-collection monthly sales (tax-exclusive netto basis) for the chart.
+    supabase
+      .from("shopify_collection_sales")
+      .select("month, collection_title, gross_revenue, order_count"),
+    // The nightly cron writes synced_at but no return_event — use it as a
+    // freshness signal so "Letzter Sync" reflects automatic runs too.
+    supabase
+      .from("shopify_collection_sales")
+      .select("synced_at")
+      .order("synced_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   const returns = returnsAll;
   const items = itemsAll;
-
-  const { data: syncCoverageMax } = await supabase
-    .from("returns")
-    .select("initiated_at")
-    .not("shopify_order_id", "is", null)
-    .order("initiated_at", { ascending: false })
-    .limit(1);
-
-  // Exact count query (head-only, no rows transferred)
-  const { count: exactCount } = await supabase
-    .from("returns")
-    .select("*", { count: "exact", head: true });
-
-  // Load per-collection monthly sales (tax-exclusive netto basis).
-  // We aggregate two series: "extensions only" (KPI_EXCLUDED filtered out) and
-  // "all collections" (raw sum). The chart offers a toggle between both.
-  const { data: collectionSales } = await supabase
-    .from("shopify_collection_sales")
-    .select("month, collection_title, gross_revenue, order_count");
 
   // initiated_at / month columns are stored as DATE (no timezone). Extract
   // year-month verbatim — previous "day > 20 → next month" compensation was
@@ -167,10 +176,6 @@ export default async function ReturnsPage() {
       refundExt.set(key, (refundExt.get(key) ?? 0) + val);
     }
   }
-  // monthlyRefundsRaw is still loaded but no longer used — kept alive to
-  // avoid dead-data warning; remove the query if future cleanup is done.
-  void monthlyRefundsRaw;
-
   // Detect incomplete months by order count (uses all-sales order_count)
   const orderCounts = Array.from(orderCountMap.values()).filter((n) => n > 0).sort((a, b) => a - b);
   const median = orderCounts.length > 0 ? orderCounts[Math.floor(orderCounts.length / 2)] : 0;
@@ -194,8 +199,16 @@ export default async function ReturnsPage() {
     });
   }
 
+  // Freshness = the later of: last manual sync event, last nightly cron run.
+  const manualSyncAt = (lastSyncEvent?.created_at as string | undefined) ?? null;
+  const cronSyncAt = (lastCronSync?.synced_at as string | undefined) ?? null;
+  const lastSyncAt =
+    manualSyncAt && cronSyncAt
+      ? (manualSyncAt > cronSyncAt ? manualSyncAt : cronSyncAt)
+      : manualSyncAt ?? cronSyncAt;
+
   const syncInfo = {
-    lastSyncAt: (lastSyncEvent?.created_at as string | undefined) ?? null,
+    lastSyncAt,
     coverageFrom: (syncCoverage?.[0]?.initiated_at as string | undefined) ?? null,
     coverageTo: (syncCoverageMax?.[0]?.initiated_at as string | undefined) ?? null,
   };

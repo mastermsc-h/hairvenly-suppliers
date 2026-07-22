@@ -58,14 +58,49 @@ export default async function ReturnsAnalyticsPage() {
     { data: summaryData },
     { data: byReasonData },
     returnsRaw,
-    { data: monthlyRevenue },
     itemsWithType,
+    { data: collectionSalesRaw },
+    { data: coverageFromRow },
+    { data: coverageToRow },
+    { data: lastSyncRow },
+    { data: lastCronSync },
   ] = await Promise.all([
     supabase.from("v_returns_summary").select("*").order("month", { ascending: true }),
     supabase.from("v_returns_by_reason").select("*"),
     fetchAllReturns(),
-    supabase.from("shopify_monthly_revenue").select("gross_revenue"),
     fetchAllItemsWithType(),
+    // Collection sales for rate calculation — include month for period filtering
+    supabase
+      .from("shopify_collection_sales")
+      .select("month, collection_title, gross_revenue, item_count, order_count"),
+    supabase
+      .from("returns")
+      .select("initiated_at")
+      .not("shopify_order_id", "is", null)
+      .order("initiated_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("returns")
+      .select("initiated_at")
+      .not("shopify_order_id", "is", null)
+      .order("initiated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("return_events")
+      .select("created_at")
+      .eq("event_type", "shopify_sync")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    // Nightly cron writes synced_at without a return_event — freshness fallback
+    supabase
+      .from("shopify_collection_sales")
+      .select("synced_at")
+      .order("synced_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   const summary = (summaryData ?? []) as { month: string; return_type: string; total: number; resolved: number; total_refund: number | string }[];
@@ -85,11 +120,6 @@ export default async function ReturnsAnalyticsPage() {
     reason: i.returns?.reason ?? null,
   }));
 
-  // Load collection sales for rate calculation — include month for period filtering
-  const { data: collectionSalesRaw } = await supabase
-    .from("shopify_collection_sales")
-    .select("month, collection_title, gross_revenue, item_count, order_count");
-
   // Total gross sales = sum of line-item gross_revenue from shopify_collection_sales
   // (this is "Gross Sales" — original price × qty, BEFORE shipping/tax/discounts,
   // same basis as Shopify's gross_sales metric). The monthly_revenue table stores
@@ -104,33 +134,18 @@ export default async function ReturnsAnalyticsPage() {
     .filter((r) => !EXCLUDED_FROM_TOTALS.has(r.collection_title))
     .reduce((sum, r) => sum + Number(r.gross_revenue ?? 0), 0);
 
-  // Load sync coverage window (from/to) based on Shopify-imported returns
-  const { data: coverageFromRow } = await supabase
-    .from("returns")
-    .select("initiated_at")
-    .not("shopify_order_id", "is", null)
-    .order("initiated_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  const { data: coverageToRow } = await supabase
-    .from("returns")
-    .select("initiated_at")
-    .not("shopify_order_id", "is", null)
-    .order("initiated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const { data: lastSyncRow } = await supabase
-    .from("return_events")
-    .select("created_at")
-    .eq("event_type", "shopify_sync")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // Freshness = the later of: last manual sync event, last nightly cron run.
+  const manualSyncAt = (lastSyncRow?.created_at as string | undefined) ?? null;
+  const cronSyncAt = (lastCronSync?.synced_at as string | undefined) ?? null;
+  const lastSyncAt =
+    manualSyncAt && cronSyncAt
+      ? (manualSyncAt > cronSyncAt ? manualSyncAt : cronSyncAt)
+      : manualSyncAt ?? cronSyncAt;
 
   const syncInfo = {
     coverageFrom: (coverageFromRow?.initiated_at as string | undefined) ?? null,
     coverageTo: (coverageToRow?.initiated_at as string | undefined) ?? null,
-    lastSyncAt: (lastSyncRow?.created_at as string | undefined) ?? null,
+    lastSyncAt,
   };
 
   const excludedList = Array.from(EXCLUDED_FROM_TOTALS);
