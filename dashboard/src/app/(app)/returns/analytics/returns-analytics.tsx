@@ -1145,6 +1145,10 @@ export default function ReturnsAnalytics({
                     return uniqueOrders.size;
                   })()} Bestellungen gesamt
                 </p>
+                <p className="text-[11px] text-neutral-400 mt-1">
+                  Typ-Spalten = zurückgesendete Stück · Bestellungen = Retouren-Vorgänge.
+                  Eine Bestellung kann mehrere Stück enthalten (z.&nbsp;B. 3&nbsp;Stück in einer Rücksendung).
+                </p>
               </div>
               <button
                 onClick={() => setSelectedCategory(null)}
@@ -1163,10 +1167,10 @@ export default function ReturnsAnalytics({
                   <thead className="bg-neutral-50 text-left text-xs uppercase text-neutral-500 sticky top-0">
                     <tr>
                       <th className="px-4 py-2 font-medium">Produkt</th>
-                      <th className="px-3 py-2 font-medium text-right">Rücksendung</th>
-                      <th className="px-3 py-2 font-medium text-right">Umtausch</th>
-                      <th className="px-3 py-2 font-medium text-right">Reklamation</th>
-                      <th className="px-4 py-2 font-medium text-right">Bestellungen</th>
+                      <th className="px-3 py-2 font-medium text-right" title="Anzahl zurückgesendeter Stück (Typ: Rücksendung)">Rücksendung<br /><span className="normal-case font-normal text-neutral-400">Stück</span></th>
+                      <th className="px-3 py-2 font-medium text-right" title="Anzahl umgetauschter Stück">Umtausch<br /><span className="normal-case font-normal text-neutral-400">Stück</span></th>
+                      <th className="px-3 py-2 font-medium text-right" title="Anzahl reklamierter Stück">Reklamation<br /><span className="normal-case font-normal text-neutral-400">Stück</span></th>
+                      <th className="px-4 py-2 font-medium text-right" title="Eindeutige Retouren-Vorgänge — eine Bestellung kann mehrere Stück enthalten">Bestellungen</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-100">
