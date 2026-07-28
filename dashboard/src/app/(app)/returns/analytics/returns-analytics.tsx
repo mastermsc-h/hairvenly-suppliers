@@ -637,11 +637,15 @@ export default function ReturnsAnalytics({
   // return_ids so the same case reads as 1 Bestellung.
   const categoryProductBreakdown = useMemo(() => {
     if (!selectedCategory) return [];
+    // Consistent units: every type column counts VORGÄNGE (unique return_ids),
+    // so Rücksendung + Umtausch + Reklamation = Bestellungen. The piece count
+    // (Stück) gets its own dedicated column instead of being mixed in.
     type Entry = {
       name: string;
-      return: number;
-      exchange: number;
-      complaint: number;
+      returnIds: Set<string>;
+      exchangeIds: Set<string>;
+      complaintIds: Set<string>;
+      pieces: number;
       orderIds: Set<string>;
     };
     const productMap = new Map<string, Entry>();
@@ -659,24 +663,27 @@ export default function ReturnsAnalytics({
       const rid = item.return_id ?? `${name}-fallback-${item.initiated_at ?? ""}`;
       const existing = productMap.get(name) ?? {
         name,
-        return: 0,
-        exchange: 0,
-        complaint: 0,
+        returnIds: new Set<string>(),
+        exchangeIds: new Set<string>(),
+        complaintIds: new Set<string>(),
+        pieces: 0,
         orderIds: new Set<string>(),
       };
       const key = item.return_type as "return" | "exchange" | "complaint";
-      if (key === "return" || key === "exchange" || key === "complaint") {
-        existing[key] += qty;
-      }
+      if (key === "return") existing.returnIds.add(rid);
+      else if (key === "exchange") existing.exchangeIds.add(rid);
+      else if (key === "complaint") existing.complaintIds.add(rid);
+      existing.pieces += qty;
       existing.orderIds.add(rid);
       productMap.set(name, existing);
     }
     return Array.from(productMap.values())
       .map((e) => ({
         name: e.name,
-        return: e.return,
-        exchange: e.exchange,
-        complaint: e.complaint,
+        return: e.returnIds.size,
+        exchange: e.exchangeIds.size,
+        complaint: e.complaintIds.size,
+        pieces: e.pieces,
         orders: e.orderIds.size,
       }))
       .sort((a, b) => b.orders - a.orders);
@@ -1146,8 +1153,8 @@ export default function ReturnsAnalytics({
                   })()} Bestellungen gesamt
                 </p>
                 <p className="text-[11px] text-neutral-400 mt-1">
-                  Typ-Spalten = zurückgesendete Stück · Bestellungen = Retouren-Vorgänge.
-                  Eine Bestellung kann mehrere Stück enthalten (z.&nbsp;B. 3&nbsp;Stück in einer Rücksendung).
+                  Alle Typ-Spalten zählen Vorgänge (Rücksendung + Umtausch + Reklamation = Bestellungen).
+                  Stück = zurückgesendete Menge; eine Bestellung kann mehrere Stück enthalten.
                 </p>
               </div>
               <button
@@ -1167,10 +1174,11 @@ export default function ReturnsAnalytics({
                   <thead className="bg-neutral-50 text-left text-xs uppercase text-neutral-500 sticky top-0">
                     <tr>
                       <th className="px-4 py-2 font-medium">Produkt</th>
-                      <th className="px-3 py-2 font-medium text-right" title="Anzahl zurückgesendeter Stück (Typ: Rücksendung)">Rücksendung<br /><span className="normal-case font-normal text-neutral-400">Stück</span></th>
-                      <th className="px-3 py-2 font-medium text-right" title="Anzahl umgetauschter Stück">Umtausch<br /><span className="normal-case font-normal text-neutral-400">Stück</span></th>
-                      <th className="px-3 py-2 font-medium text-right" title="Anzahl reklamierter Stück">Reklamation<br /><span className="normal-case font-normal text-neutral-400">Stück</span></th>
-                      <th className="px-4 py-2 font-medium text-right" title="Eindeutige Retouren-Vorgänge — eine Bestellung kann mehrere Stück enthalten">Bestellungen</th>
+                      <th className="px-3 py-2 font-medium text-right" title="Retouren-Vorgänge vom Typ Rücksendung">Rücksendung</th>
+                      <th className="px-3 py-2 font-medium text-right" title="Retouren-Vorgänge vom Typ Umtausch">Umtausch</th>
+                      <th className="px-3 py-2 font-medium text-right" title="Retouren-Vorgänge vom Typ Reklamation">Reklamation</th>
+                      <th className="px-4 py-2 font-medium text-right" title="Alle Retouren-Vorgänge (= Summe der Typ-Spalten)">Bestellungen</th>
+                      <th className="px-4 py-2 font-medium text-right" title="Zurückgesendete Menge — eine Bestellung kann mehrere Stück enthalten">Stück</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-100">
@@ -1190,6 +1198,9 @@ export default function ReturnsAnalytics({
                         </td>
                         <td className="px-4 py-2 text-right font-semibold text-neutral-900 tabular-nums">
                           {p.orders}
+                        </td>
+                        <td className="px-4 py-2 text-right text-neutral-500 tabular-nums">
+                          {p.pieces}
                         </td>
                       </tr>
                     ))}
