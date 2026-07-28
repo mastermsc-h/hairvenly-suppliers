@@ -26,23 +26,39 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = createServiceClient();
+  const startedMs = Date.now();
   const startedAt = new Date().toISOString();
   const skip = req.nextUrl.searchParams.get("skip")?.split(",") ?? [];
   const results: Record<string, unknown> = { startedAt };
 
-  if (!skip.includes("collections")) {
-    results.collections = await cronCollectionSync(supabase);
-  }
-  if (!skip.includes("revenue")) {
-    results.revenue = await cronRevenueSync(supabase);
-  }
+  // Ordered by importance; each task is bounded so the whole run fits into
+  // the 60s function limit. If we still approach the limit, remaining tasks
+  // are skipped and reported instead of the route dying mid-task (which is
+  // exactly what silently killed the nightly sync before this fix).
+  const TIME_BUDGET_MS = 45_000;
+  const overBudget = () => Date.now() - startedMs > TIME_BUDGET_MS;
+
   if (!skip.includes("refunds")) {
     results.refunds = await cronRefundsSync(supabase);
   }
+  if (!skip.includes("collections")) {
+    results.collections = overBudget()
+      ? { skipped: "time budget exceeded" }
+      : await cronCollectionSync(supabase);
+  }
+  if (!skip.includes("revenue")) {
+    results.revenue = overBudget()
+      ? { skipped: "time budget exceeded" }
+      : await cronRevenueSync(supabase);
+  }
   if (!skip.includes("repurchase")) {
-    results.repurchase = await cronRepurchaseCompute(supabase);
+    results.repurchase = overBudget()
+      ? { skipped: "time budget exceeded" }
+      : await cronRepurchaseCompute(supabase);
   }
 
   results.finishedAt = new Date().toISOString();
+  results.elapsedMs = Date.now() - startedMs;
+  console.log("[cron/refresh]", JSON.stringify(results));
   return NextResponse.json(results);
 }

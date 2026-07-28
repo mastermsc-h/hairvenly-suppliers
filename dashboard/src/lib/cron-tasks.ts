@@ -15,14 +15,19 @@ import {
 } from "@/lib/shopify";
 
 // ── Collection sales ──────────────────────────────────────────
+// Nightly default: current + previous 2 months only. Historical months never
+// change (refunds don't touch collection_sales), and a 12-month window takes
+// 1-3 minutes — which killed the whole cron route at the 60s timeout every
+// night before any other task could run.
 export async function cronCollectionSync(
   supabase: SupabaseClient,
+  monthsBack = 2,
 ): Promise<{ synced: number; error?: string }> {
   try {
     const now = new Date();
-    const twelveAgo = new Date(now);
-    twelveAgo.setMonth(twelveAgo.getMonth() - 12);
-    const fromDate = `${twelveAgo.getFullYear()}-${String(twelveAgo.getMonth() + 1).padStart(2, "0")}-01`;
+    const start = new Date(now);
+    start.setMonth(start.getMonth() - monthsBack);
+    const fromDate = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-01`;
     const toDate = now.toISOString().slice(0, 10);
 
     const rows = await fetchMonthlyCollectionSales(fromDate, toDate);
@@ -58,9 +63,10 @@ export async function cronCollectionSync(
 // ── Monthly revenue ───────────────────────────────────────────
 export async function cronRevenueSync(
   supabase: SupabaseClient,
+  monthsBack = 2,
 ): Promise<{ synced: number; error?: string }> {
   try {
-    const rows = await fetchMonthlyRevenue(12);
+    const rows = await fetchMonthlyRevenue(monthsBack);
     if (rows.length === 0) return { synced: 0 };
     const syncedAt = new Date().toISOString();
     const payload = rows.map((r) => ({
@@ -94,11 +100,12 @@ function toBerlinDate(iso: string | null | undefined): string {
 
 export async function cronRefundsSync(
   supabase: SupabaseClient,
+  sinceDays = 45,
 ): Promise<{ synced: number; skipped: number; error?: string }> {
   try {
-    const ninety = new Date();
-    ninety.setDate(ninety.getDate() - 90);
-    const sinceDate = ninety.toISOString().slice(0, 10);
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - sinceDays);
+    const sinceDate = cutoff.toISOString().slice(0, 10);
     const refundedOrders = await fetchOrdersWithRefunds(sinceDate);
 
     let synced = 0;
@@ -245,6 +252,16 @@ export async function cronRepurchaseCompute(
     let exchange = 0, newOrder = 0, lost = 0, pending = 0, skipped = 0;
 
     for (const [customerId, rows] of byCustomer) {
+      // Skip the (expensive) Shopify orders fetch entirely when every row of
+      // this customer is still within the TTL — otherwise the cron pays one
+      // GraphQL roundtrip per customer per night and blows the 60s budget.
+      const allFresh = rows.every(
+        (r) => r.repurchase_check_at && now.getTime() - new Date(r.repurchase_check_at).getTime() < ttlMs,
+      );
+      if (allFresh) {
+        skipped += rows.length;
+        continue;
+      }
       const minDate = rows.reduce((a, r) => (r.initiated_at && r.initiated_at < a ? r.initiated_at : a), "9999-12-31");
       const customerNumeric = customerId.replace("gid://shopify/Customer/", "");
       const q = `customer_id:${customerNumeric} created_at:>=${minDate}`;
