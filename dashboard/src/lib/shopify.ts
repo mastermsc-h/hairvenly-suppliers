@@ -1765,17 +1765,25 @@ export interface AccessoryGroup {
   variants: AccessoryVariant[];
 }
 
-/** Kollektionen, die im Zubehör-Bereich angezeigt werden. */
-export const ACCESSORY_COLLECTIONS: { slug: string; title: string }[] = [
-  { slug: "extensions-zubehoer", title: "Extensions Zubehör" },
-  { slug: "blessed-haarpflege", title: "Blessed Haarpflege" },
-  { slug: "sonstige-haarpflege", title: "Sonstige Haarpflege" },
-  { slug: "teststraehnen", title: "Teststrähnen" },
-];
+/**
+ * Gruppen im Zubehör-Bereich. Die Quelle ist bewusst pro Gruppe wählbar:
+ * - "collection": Shopify-Kollektion per Handle
+ * - "titleQuery": Produktsuche (für "Extensions Zubehör" — die gleichnamige
+ *   Kollektion wurde in Shopify gelöscht, die Produkte tragen aber alle
+ *   "Zubehör" im Titel)
+ * - "product": ein einzelnes Produkt mit vielen Varianten (Teststrähnen)
+ */
+export type AccessorySource =
+  | { kind: "collection" }
+  | { kind: "titleQuery"; query: string }
+  | { kind: "product"; gid: string };
 
-// Farbmuster Teststrähne (41 farb-varianten) — eigenes produkt, nicht
-// in den zubehör-kollektionen, deshalb per ID als pseudo-kollektion.
-const TESTSTRAEHNEN_PRODUCT_GID = "gid://shopify/Product/12117166850312";
+export const ACCESSORY_COLLECTIONS: { slug: string; title: string; source: AccessorySource }[] = [
+  { slug: "extensions-zubehoer", title: "Extensions Zubehör", source: { kind: "titleQuery", query: "title:*Zubehör*" } },
+  { slug: "blessed-haarpflege", title: "Blessed Haarpflege", source: { kind: "collection" } },
+  { slug: "sonstige-haarpflege", title: "Sonstige Haarpflege", source: { kind: "collection" } },
+  { slug: "teststraehnen", title: "Teststrähnen", source: { kind: "product", gid: "gid://shopify/Product/12117166850312" } },
+];
 
 interface AccessoryProductNode {
   title: string;
@@ -1811,62 +1819,59 @@ function accessoryVariantsFromProduct(p: AccessoryProductNode): AccessoryVariant
  * Teststrähnen-Produkt als eigene Gruppe. Live aus Shopify.
  */
 export async function fetchAccessoryGroups(): Promise<AccessoryGroup[]> {
-  const groups: AccessoryGroup[] = [];
+  // Variant-Felder einmal definiert — identisch für alle drei Quellen
+  const VARIANT_FIELDS = `
+    title
+    featuredImage { url }
+    variants(first: 50) {
+      edges { node { title sku barcode inventoryQuantity price image { url } } }
+    }`;
 
-  for (const col of ACCESSORY_COLLECTIONS) {
-    if (col.slug === "teststraehnen") {
-      const res = await shopifyGraphQL<{ product: AccessoryProductNode | null }>(
-        `query {
-          product(id: "${TESTSTRAEHNEN_PRODUCT_GID}") {
-            title
-            featuredImage { url }
-            variants(first: 50) {
-              edges { node { title sku barcode inventoryQuantity price image { url } } }
-            }
-          }
-        }`,
-        undefined,
-        { allowPartialErrors: true },
-      );
-      const p = res.data?.product;
-      groups.push({
-        slug: col.slug,
-        title: col.title,
-        variants: p ? accessoryVariantsFromProduct(p) : [],
-      });
-      continue;
-    }
+  const groups = await Promise.all(
+    ACCESSORY_COLLECTIONS.map(async (col): Promise<AccessoryGroup> => {
+      let products: AccessoryProductNode[] = [];
 
-    const res = await shopifyGraphQL<{
-      collectionByHandle: { products: { edges: { node: AccessoryProductNode }[] } } | null;
-    }>(
-      `query($handle: String!) {
-        collectionByHandle(handle: $handle) {
-          products(first: 100) {
-            edges {
-              node {
-                title
-                featuredImage { url }
-                variants(first: 50) {
-                  edges { node { title sku barcode inventoryQuantity price image { url } } }
-                }
-              }
+      if (col.source.kind === "product") {
+        const res = await shopifyGraphQL<{ product: AccessoryProductNode | null }>(
+          `query { product(id: "${col.source.gid}") { ${VARIANT_FIELDS} } }`,
+          undefined,
+          { allowPartialErrors: true },
+        );
+        if (res.data?.product) products = [res.data.product];
+      } else if (col.source.kind === "titleQuery") {
+        const res = await shopifyGraphQL<{ products: { edges: { node: AccessoryProductNode }[] } }>(
+          `query($q: String!) { products(first: 100, query: $q) { edges { node { ${VARIANT_FIELDS} } } } }`,
+          { q: col.source.query },
+          { allowPartialErrors: true },
+        );
+        products = res.data?.products.edges.map((e) => e.node) ?? [];
+      } else {
+        const res = await shopifyGraphQL<{
+          collectionByHandle: { products: { edges: { node: AccessoryProductNode }[] } } | null;
+        }>(
+          `query($handle: String!) {
+            collectionByHandle(handle: $handle) {
+              products(first: 100) { edges { node { ${VARIANT_FIELDS} } } }
             }
-          }
+          }`,
+          { handle: col.slug },
+          { allowPartialErrors: true },
+        );
+        if (!res.data?.collectionByHandle) {
+          // Kollektion in Shopify gelöscht/umbenannt — nicht still leer lassen
+          console.warn(`[fetchAccessoryGroups] Kollektion "${col.slug}" nicht gefunden.`);
         }
-      }`,
-      { handle: col.slug },
-      { allowPartialErrors: true },
-    );
-    const products = res.data?.collectionByHandle?.products.edges.map((e) => e.node) ?? [];
-    const variants = products.flatMap(accessoryVariantsFromProduct);
-    // Sortierung: nach Produkt-Titel, dann Variant-Titel
-    variants.sort((a, b) =>
-      a.productTitle.localeCompare(b.productTitle) ||
-      (a.variantTitle ?? "").localeCompare(b.variantTitle ?? ""),
-    );
-    groups.push({ slug: col.slug, title: col.title, variants });
-  }
+        products = res.data?.collectionByHandle?.products.edges.map((e) => e.node) ?? [];
+      }
+
+      const variants = products.flatMap(accessoryVariantsFromProduct);
+      variants.sort((a, b) =>
+        a.productTitle.localeCompare(b.productTitle) ||
+        (a.variantTitle ?? "").localeCompare(b.variantTitle ?? ""),
+      );
+      return { slug: col.slug, title: col.title, variants };
+    }),
+  );
 
   return groups;
 }
