@@ -54,11 +54,37 @@ export default async function ReturnsAnalyticsPage() {
     return all;
   }
 
+  // Per-product sales (sold pieces) — the denominator for a product-level
+  // return rate. Paginated: 12 months produce several thousand rows.
+  async function fetchAllProductSales() {
+    const all: { month: string; product_title: string; collection_title: string | null; item_count: number; gross_revenue: number }[] = [];
+    const pageSize = 1000;
+    for (let from = 0; from < 100000; from += pageSize) {
+      const { data } = await supabase
+        .from("shopify_product_sales")
+        .select("month, product_title, collection_title, item_count, gross_revenue")
+        .range(from, from + pageSize - 1);
+      if (!data || data.length === 0) break;
+      for (const r of data as unknown as Array<{ month: string; product_title: string; collection_title: string | null; item_count: number | string; gross_revenue: number | string }>) {
+        all.push({
+          month: String(r.month).slice(0, 10),
+          product_title: r.product_title,
+          collection_title: r.collection_title,
+          item_count: Number(r.item_count ?? 0),
+          gross_revenue: Number(r.gross_revenue ?? 0),
+        });
+      }
+      if (data.length < pageSize) break;
+    }
+    return all;
+  }
+
   const [
     { data: summaryData },
     { data: byReasonData },
     returnsRaw,
     itemsWithType,
+    productSales,
     { data: collectionSalesRaw },
     { data: coverageFromRow },
     { data: coverageToRow },
@@ -69,6 +95,7 @@ export default async function ReturnsAnalyticsPage() {
     supabase.from("v_returns_by_reason").select("*"),
     fetchAllReturns(),
     fetchAllItemsWithType(),
+    fetchAllProductSales(),
     // Collection sales for rate calculation — include month for period filtering
     supabase
       .from("shopify_collection_sales")
@@ -177,6 +204,7 @@ export default async function ReturnsAnalyticsPage() {
         returns={returnsRaw}
         totalRevenue={totalRevenue}
         collectionSales={collectionSalesArr}
+        productSales={productSales}
         syncInfo={syncInfo}
         excludedCollections={excludedList}
         locale={locale}

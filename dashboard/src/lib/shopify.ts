@@ -1011,6 +1011,155 @@ export async function fetchMonthlyCollectionSales(
   return result;
 }
 
+// ── Fetch monthly sales per PRODUCT ───────────────────────────
+// Same basis as fetchMonthlyCollectionSales (net of tax, cancelled orders
+// excluded) but keyed by product title so we can compute a per-product
+// return rate: refunded pieces / sold pieces.
+
+export async function fetchMonthlyProductSales(
+  monthsOrFromDate: number | string = 12,
+  toDate?: string,
+): Promise<{
+  month: string;
+  productTitle: string;
+  collection: string;
+  revenue: number;
+  orderCount: number;
+  itemCount: number;
+}[]> {
+  let startStr: string;
+  if (typeof monthsOrFromDate === "string") {
+    startStr = monthsOrFromDate;
+  } else {
+    const now = new Date();
+    const startDate = new Date(now.getFullYear(), now.getMonth() - monthsOrFromDate, 1);
+    startStr = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, "0")}-01`;
+  }
+  const endFilter = toDate ? ` created_at:<=${toDate}` : "";
+
+  const query = `
+    query monthlyProductSales($q: String!, $first: Int!, $after: String) {
+      orders(first: $first, after: $after, query: $q, sortKey: CREATED_AT, reverse: true) {
+        pageInfo { hasNextPage endCursor }
+        edges {
+          node {
+            id
+            createdAt
+            cancelledAt
+            lineItems(first: 50) {
+              edges {
+                node {
+                  title
+                  quantity
+                  originalTotalSet { shopMoney { amount } }
+                  taxLines { priceSet { shopMoney { amount } } }
+                  product {
+                    title
+                    collections(first: 10) { edges { node { title handle } } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  type Resp = {
+    orders: {
+      pageInfo: { hasNextPage: boolean; endCursor: string };
+      edges: {
+        node: {
+          id: string;
+          createdAt: string;
+          cancelledAt: string | null;
+          lineItems: {
+            edges: {
+              node: {
+                title: string;
+                quantity: number;
+                originalTotalSet: { shopMoney: { amount: string } };
+                taxLines: { priceSet: { shopMoney: { amount: string } } }[];
+                product: { title?: string; collections: { edges: { node: { title: string; handle: string } }[] } } | null;
+              };
+            }[];
+          };
+        };
+      }[];
+    };
+  };
+
+  // month -> "product<NUL>collection" -> stats
+  const agg = new Map<string, Map<string, { revenue: number; orders: Set<string>; items: number }>>();
+  let cursor: string | null = null;
+  const maxPages = 300;
+
+  for (let page = 0; page < maxPages; page++) {
+    const vars: Record<string, unknown> = {
+      q: `created_at:>=${startStr}${endFilter}`,
+      first: 100,
+      after: cursor,
+    };
+    const res: GraphQLResponse<Resp> = await shopifyGraphQL<Resp>(query, vars);
+    const edges = res.data?.orders.edges ?? [];
+    if (edges.length === 0) break;
+
+    for (const e of edges) {
+      const order = e.node;
+      if (order.cancelledAt) continue;
+      const month = order.createdAt.slice(0, 7) + "-01";
+      const monthMap = agg.get(month) ?? new Map();
+
+      for (const liEdge of order.lineItems.edges) {
+        const li = liEdge.node;
+        const collections = li.product?.collections?.edges?.map((c) => c.node);
+        const primary = pickPrimaryCollection(collections);
+        // Match the return_items side, which stores the LINE ITEM title.
+        const productTitle = li.title || li.product?.title || "";
+        if (!productTitle) continue;
+        const refined = refineCollection(primary?.title ?? null, li.product?.title || productTitle);
+        const collName = refined ?? primary?.title ?? "Unassigned";
+
+        const grossWithTax = parseFloat(li.originalTotalSet?.shopMoney?.amount ?? "0") || 0;
+        const tax = (li.taxLines ?? []).reduce(
+          (sum, tl) => sum + (parseFloat(tl.priceSet?.shopMoney?.amount ?? "0") || 0),
+          0,
+        );
+        const amount = Math.max(0, grossWithTax - tax);
+        const qty = li.quantity ?? 0;
+
+        const key = `${productTitle}\u0000${collName}`;
+        const entry = monthMap.get(key) ?? { revenue: 0, orders: new Set<string>(), items: 0 };
+        entry.revenue += amount;
+        entry.orders.add(order.id);
+        entry.items += qty;
+        monthMap.set(key, entry);
+      }
+      agg.set(month, monthMap);
+    }
+
+    if (!res.data?.orders.pageInfo.hasNextPage) break;
+    cursor = res.data.orders.pageInfo.endCursor;
+  }
+
+  const result: { month: string; productTitle: string; collection: string; revenue: number; orderCount: number; itemCount: number }[] = [];
+  for (const [month, products] of agg) {
+    for (const [key, stats] of products) {
+      const [productTitle, collection] = key.split("\u0000");
+      result.push({
+        month,
+        productTitle,
+        collection,
+        revenue: stats.revenue,
+        orderCount: stats.orders.size,
+        itemCount: stats.items,
+      });
+    }
+  }
+  return result;
+}
+
 // ── Fetch monthly revenue totals ───────────────────────────────
 
 export async function fetchMonthlyRevenue(

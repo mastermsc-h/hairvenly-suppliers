@@ -8,6 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   fetchOrdersWithRefunds,
   fetchMonthlyCollectionSales,
+  fetchMonthlyProductSales,
   fetchMonthlyRevenue,
   pickPrimaryCollection,
   refineCollection,
@@ -55,6 +56,64 @@ export async function cronCollectionSync(
       .in("month", months)
       .lt("synced_at", syncedAt);
     return { synced: rows.length };
+  } catch (e) {
+    return { synced: 0, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// ── Product sales (denominator for per-product return rate) ───
+export async function cronProductSalesSync(
+  supabase: SupabaseClient,
+  months = 12,
+): Promise<{ synced: number; error?: string }> {
+  try {
+    const now = new Date();
+    const from = new Date(now);
+    from.setMonth(from.getMonth() - months);
+    const fromDate = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}-01`;
+    const toDate = now.toISOString().slice(0, 10);
+
+    const rows = await fetchMonthlyProductSales(fromDate, toDate);
+    if (rows.length === 0) return { synced: 0 };
+
+    // Collapse to the table's primary key (month, product_title): a product
+    // can sit in several collections, which would otherwise produce two rows
+    // that collide on upsert.
+    const merged = new Map<string, { month: string; product_title: string; collection_title: string; gross_revenue: number; order_count: number; item_count: number }>();
+    for (const r of rows) {
+      const key = `${r.month}|${r.productTitle}`;
+      const cur = merged.get(key);
+      if (cur) {
+        cur.gross_revenue += r.revenue;
+        cur.order_count += r.orderCount;
+        cur.item_count += r.itemCount;
+      } else {
+        merged.set(key, {
+          month: r.month,
+          product_title: r.productTitle,
+          collection_title: r.collection,
+          gross_revenue: r.revenue,
+          order_count: r.orderCount,
+          item_count: r.itemCount,
+        });
+      }
+    }
+
+    const syncedAt = new Date().toISOString();
+    const payload = Array.from(merged.values()).map((r) => ({ ...r, synced_at: syncedAt }));
+    for (let i = 0; i < payload.length; i += 500) {
+      const { error } = await supabase
+        .from("shopify_product_sales")
+        .upsert(payload.slice(i, i + 500), { onConflict: "month,product_title" });
+      if (error) throw error;
+    }
+    const months_ = Array.from(new Set(payload.map((r) => r.month)));
+    await supabase
+      .from("shopify_product_sales")
+      .delete()
+      .in("month", months_)
+      .lt("synced_at", syncedAt);
+    return { synced: payload.length };
   } catch (e) {
     return { synced: 0, error: e instanceof Error ? e.message : String(e) };
   }

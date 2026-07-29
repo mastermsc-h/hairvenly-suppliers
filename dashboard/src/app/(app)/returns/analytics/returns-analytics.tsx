@@ -61,6 +61,16 @@ interface CollectionSalesRow {
   items: number;
 }
 
+// Sold pieces per product per month — the denominator for a product-level
+// return rate (returned pieces / sold pieces).
+interface ProductSalesRow {
+  month: string;
+  product_title: string;
+  collection_title: string | null;
+  item_count: number;
+  gross_revenue: number;
+}
+
 type PresetPeriod = "all" | "12m" | "3m" | "30d" | "14d";
 type PeriodKey = PresetPeriod | { month: string }; // month = "YYYY-MM"
 
@@ -357,6 +367,7 @@ export default function ReturnsAnalytics({
   returns,
   totalRevenue,
   collectionSales,
+  productSales,
   syncInfo,
   excludedCollections,
   locale,
@@ -367,6 +378,7 @@ export default function ReturnsAnalytics({
   returns: ReturnRow[];
   totalRevenue: number;
   collectionSales: CollectionSalesRow[];
+  productSales?: ProductSalesRow[];
   syncInfo?: { coverageFrom: string | null; coverageTo: string | null; lastSyncAt: string | null };
   excludedCollections?: string[];
   locale: Locale;
@@ -431,6 +443,27 @@ export default function ReturnsAnalytics({
     }
     return total;
   }, [filteredSales, range]);
+
+  // Sold pieces per product within the selected period. Months are whole
+  // units, so a partial-month range counts a month once it overlaps — the
+  // same convention the collection-level revenue uses.
+  const soldByProduct = useMemo(() => {
+    const map = new Map<string, { pieces: number; revenue: number }>();
+    for (const s of productSales ?? []) {
+      if (range) {
+        const monthStart = s.month.slice(0, 7) + "-01";
+        const next = new Date(monthStart + "T00:00:00Z");
+        next.setUTCMonth(next.getUTCMonth() + 1);
+        const monthEnd = next.toISOString().slice(0, 10);
+        if (!(monthStart <= range.to && monthEnd > range.from)) continue;
+      }
+      const cur = map.get(s.product_title) ?? { pieces: 0, revenue: 0 };
+      cur.pieces += s.item_count;
+      cur.revenue += s.gross_revenue;
+      map.set(s.product_title, cur);
+    }
+    return map;
+  }, [productSales, range]);
 
   // Drill-down state: which category is selected
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -678,16 +711,59 @@ export default function ReturnsAnalytics({
       productMap.set(name, existing);
     }
     return Array.from(productMap.values())
-      .map((e) => ({
-        name: e.name,
-        return: e.returnIds.size,
-        exchange: e.exchangeIds.size,
-        complaint: e.complaintIds.size,
-        pieces: e.pieces,
-        orders: e.orderIds.size,
-      }))
-      .sort((a, b) => b.orders - a.orders);
-  }, [selectedCategory, filteredItems]);
+      .map((e) => {
+        const sold = soldByProduct.get(e.name)?.pieces ?? null;
+        return {
+          name: e.name,
+          return: e.returnIds.size,
+          exchange: e.exchangeIds.size,
+          complaint: e.complaintIds.size,
+          pieces: e.pieces,
+          orders: e.orderIds.size,
+          sold,
+          // Rate on a piece basis: returned pieces / sold pieces.
+          rate: sold && sold > 0 ? (e.pieces / sold) * 100 : null,
+        };
+      })
+      .sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1) || b.orders - a.orders);
+  }, [selectedCategory, filteredItems, soldByProduct]);
+
+  // ── Problem products: highest return rate across ALL categories ──
+  // Rate = returned pieces / sold pieces. A minimum sales volume filters out
+  // noise (2 of 3 sold is 67% but says nothing).
+  const MIN_SOLD_FOR_RANKING = 20;
+  const problemProducts = useMemo(() => {
+    const returnedByProduct = new Map<string, { pieces: number; refundEur: number; orders: Set<string> }>();
+    for (const item of filteredItems) {
+      const name = (item.product_type || "").trim();
+      if (!name) continue;
+      if (scopeMode === "ext") {
+        const cat = item.collection_title?.trim();
+        if (cat && KPI_EXCLUDED.has(cat)) continue;
+      }
+      const cur = returnedByProduct.get(name) ?? { pieces: 0, refundEur: 0, orders: new Set<string>() };
+      cur.pieces += Math.max(1, item.quantity ?? 1);
+      cur.refundEur += Math.max(0, Number(item.refund_amount ?? 0));
+      if (item.return_id) cur.orders.add(item.return_id);
+      returnedByProduct.set(name, cur);
+    }
+    const rows: { name: string; sold: number; returned: number; rate: number; refundEur: number; orders: number; collection: string }[] = [];
+    for (const [name, ret] of returnedByProduct) {
+      const sold = soldByProduct.get(name)?.pieces ?? 0;
+      if (sold < MIN_SOLD_FOR_RANKING) continue;
+      const collection = (productSales ?? []).find((p) => p.product_title === name)?.collection_title ?? "";
+      rows.push({
+        name,
+        sold,
+        returned: ret.pieces,
+        rate: (ret.pieces / sold) * 100,
+        refundEur: ret.refundEur,
+        orders: ret.orders.size,
+        collection,
+      });
+    }
+    return rows.sort((a, b) => b.rate - a.rate).slice(0, 15);
+  }, [filteredItems, soldByProduct, productSales, scopeMode]);
 
   const tooltipStyle = {
     borderRadius: 10,
@@ -933,6 +1009,60 @@ export default function ReturnsAnalytics({
           )}
         </div>
 
+        {/* Problem products — highest return rate per SOLD piece */}
+        {problemProducts.length > 0 && (
+          <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-semibold text-neutral-900">Problem-Produkte — Rückgabequote pro Stück</h3>
+                <p className="text-[11px] text-neutral-400 mt-0.5">
+                  Retour-Stück ÷ Verkauft-Stück · nur Produkte mit mind. {MIN_SOLD_FOR_RANKING} verkauften Stück im Zeitraum
+                </p>
+              </div>
+              {problemProducts[0] && (
+                <p className="text-xs text-neutral-400 text-right">
+                  Höchste: <span className="font-medium text-red-600">{problemProducts[0].rate.toFixed(1)}%</span>
+                </p>
+              )}
+            </div>
+            <div className="max-h-[420px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-neutral-50 text-left text-xs uppercase text-neutral-500 sticky top-0">
+                  <tr>
+                    <th className="px-4 py-2 font-medium">Produkt</th>
+                    <th className="px-3 py-2 font-medium text-right">Verkauft<br /><span className="normal-case font-normal text-neutral-400">Stück</span></th>
+                    <th className="px-3 py-2 font-medium text-right">Retour<br /><span className="normal-case font-normal text-neutral-400">Stück</span></th>
+                    <th className="px-3 py-2 font-medium text-right">Erstattet €</th>
+                    <th className="px-4 py-2 font-medium text-right">Quote</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100">
+                  {problemProducts.map((p) => (
+                    <tr key={p.name} className="hover:bg-neutral-50">
+                      <td className="px-4 py-2 text-neutral-800 text-xs" title={p.name}>
+                        {p.name}
+                        {p.collection && (
+                          <div className="text-[10px] text-neutral-400">{p.collection}</div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right text-neutral-500 tabular-nums">{p.sold}</td>
+                      <td className="px-3 py-2 text-right text-neutral-700 tabular-nums">{p.returned}</td>
+                      <td className="px-3 py-2 text-right text-neutral-500 tabular-nums">
+                        {`${Math.round(p.refundEur).toLocaleString("de-DE")} €`}
+                      </td>
+                      <td className={`px-4 py-2 text-right font-semibold tabular-nums ${
+                        p.rate >= 30 ? "text-red-600" : p.rate >= 20 ? "text-amber-600" : "text-neutral-900"
+                      }`}>
+                        {p.rate.toFixed(1)}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* Rate-per-Collection (only when sales data is available) */}
         {hasSalesData && categoriesByRate.length > 0 && (
           <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
@@ -1150,11 +1280,11 @@ export default function ReturnsAnalytics({
                       if (item.return_id) uniqueOrders.add(item.return_id);
                     }
                     return uniqueOrders.size;
-                  })()} Bestellungen gesamt
+                  })()} Retouren-Vorgänge · sortiert nach Quote
                 </p>
                 <p className="text-[11px] text-neutral-400 mt-1">
-                  Alle Typ-Spalten zählen Vorgänge (Rücksendung + Umtausch + Reklamation = Bestellungen).
-                  Stück = zurückgesendete Menge; eine Bestellung kann mehrere Stück enthalten.
+                  Typ-Spalten zählen Vorgänge (Rücksendung + Umtausch + Reklamation = Vorgänge).
+                  Quote = Retour-Stück ÷ Verkauft-Stück im gewählten Zeitraum.
                 </p>
               </div>
               <button
@@ -1177,8 +1307,10 @@ export default function ReturnsAnalytics({
                       <th className="px-3 py-2 font-medium text-right" title="Retouren-Vorgänge vom Typ Rücksendung">Rücksendung</th>
                       <th className="px-3 py-2 font-medium text-right" title="Retouren-Vorgänge vom Typ Umtausch">Umtausch</th>
                       <th className="px-3 py-2 font-medium text-right" title="Retouren-Vorgänge vom Typ Reklamation">Reklamation</th>
-                      <th className="px-4 py-2 font-medium text-right" title="Alle Retouren-Vorgänge (= Summe der Typ-Spalten)">Bestellungen</th>
-                      <th className="px-4 py-2 font-medium text-right" title="Zurückgesendete Menge — eine Bestellung kann mehrere Stück enthalten">Stück</th>
+                      <th className="px-3 py-2 font-medium text-right" title="Alle Retouren-Vorgänge (= Summe der Typ-Spalten)">Vorgänge</th>
+                      <th className="px-3 py-2 font-medium text-right" title="Zurückgesendete Menge in Stück">Retour<br /><span className="normal-case font-normal text-neutral-400">Stück</span></th>
+                      <th className="px-3 py-2 font-medium text-right" title="Verkaufte Menge in Stück im gewählten Zeitraum (aus Shopify)">Verkauft<br /><span className="normal-case font-normal text-neutral-400">Stück</span></th>
+                      <th className="px-4 py-2 font-medium text-right" title="Retour-Stück ÷ Verkauft-Stück">Quote</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-100">
@@ -1196,11 +1328,22 @@ export default function ReturnsAnalytics({
                         <td className="px-3 py-2 text-right text-purple-600 tabular-nums">
                           {p.complaint > 0 ? p.complaint : "—"}
                         </td>
-                        <td className="px-4 py-2 text-right font-semibold text-neutral-900 tabular-nums">
+                        <td className="px-3 py-2 text-right font-medium text-neutral-700 tabular-nums">
                           {p.orders}
                         </td>
-                        <td className="px-4 py-2 text-right text-neutral-500 tabular-nums">
+                        <td className="px-3 py-2 text-right text-neutral-500 tabular-nums">
                           {p.pieces}
+                        </td>
+                        <td className="px-3 py-2 text-right text-neutral-500 tabular-nums">
+                          {p.sold ?? "—"}
+                        </td>
+                        <td className={`px-4 py-2 text-right font-semibold tabular-nums ${
+                          p.rate == null ? "text-neutral-300"
+                            : p.rate >= 30 ? "text-red-600"
+                            : p.rate >= 20 ? "text-amber-600"
+                            : "text-neutral-900"
+                        }`}>
+                          {p.rate == null ? "—" : `${p.rate.toFixed(1)}%`}
                         </td>
                       </tr>
                     ))}

@@ -5,6 +5,7 @@ import {
   cronRevenueSync,
   cronRefundsSync,
   cronRepurchaseCompute,
+  cronProductSalesSync,
 } from "@/lib/cron-tasks";
 
 // Hobby plan timeout = 60s. If you upgrade to Pro you can bump this.
@@ -55,6 +56,14 @@ export async function GET(req: NextRequest) {
     results.repurchase = overBudget()
       ? { skipped: "time budget exceeded" }
       : await cronRepurchaseCompute(supabase);
+  }
+  // Only the last 2 months — a full 12-month product-sales pass takes minutes
+  // and would never finish inside the function limit. Older months stay as
+  // written by scripts/sync-product-sales.mjs and don't change retroactively.
+  if (!skip.includes("productsales")) {
+    results.productSales = overBudget()
+      ? { skipped: "time budget exceeded" }
+      : await cronProductSalesSync(supabase, 2);
   }
 
   results.finishedAt = new Date().toISOString();
