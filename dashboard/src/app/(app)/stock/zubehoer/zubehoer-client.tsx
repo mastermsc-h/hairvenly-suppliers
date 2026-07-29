@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Package, Boxes, AlertTriangle, Printer, Search, X } from "lucide-react";
+import { Package, Boxes, AlertTriangle, Printer, Search, X, RotateCcw } from "lucide-react";
 import PrintLabels from "../print-labels";
 import { recordPrintedLabels } from "@/lib/actions/printed-labels";
 import type { AccessoryGroup, AccessoryVariant } from "@/lib/shopify";
@@ -142,6 +142,16 @@ export default function ZubehoerClient({ groups, printedSummary, singleCollectio
             </span>
             <button
               type="button"
+              onClick={() => setQuantities({})}
+              disabled={totalSelected === 0 || printing}
+              title="Alle Etiketten-Mengen auf 0 zurücksetzen"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-neutral-300 text-neutral-600 text-sm font-medium hover:bg-neutral-50 hover:text-neutral-900 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            >
+              <RotateCcw size={14} />
+              Alle auf 0
+            </button>
+            <button
+              type="button"
               onClick={handlePrint}
               disabled={totalSelected === 0 || totalSelected > MAX_TOTAL_LABELS || printing}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
@@ -174,25 +184,41 @@ export default function ZubehoerClient({ groups, printedSummary, singleCollectio
                 {g.title}
                 <span className="ml-2 font-semibold text-indigo-200">({g.variants.length})</span>
               </span>
-              <button
-                type="button"
-                onClick={() => {
-                  // Schnellaktion: Menge = Lager − bereits gedruckt für alle Zeilen der Gruppe
-                  setQuantities((prev) => {
-                    const next = { ...prev };
-                    g.variants.forEach((v, idx) => {
-                      if (!v.barcode) return;
-                      const printed = printedSummary[v.barcode]?.totalPrinted ?? 0;
-                      next[rowKey(g, v, idx)] = Math.max(0, Math.min(MAX_QTY_PER_ROW, Math.floor(v.inventoryQuantity) - printed));
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Schnellaktion: Menge = Lager − bereits gedruckt für alle Zeilen der Gruppe
+                    setQuantities((prev) => {
+                      const next = { ...prev };
+                      g.variants.forEach((v, idx) => {
+                        if (!v.barcode) return;
+                        const printed = printedSummary[v.barcode]?.totalPrinted ?? 0;
+                        next[rowKey(g, v, idx)] = Math.max(0, Math.min(MAX_QTY_PER_ROW, Math.floor(v.inventoryQuantity) - printed));
+                      });
+                      return next;
                     });
-                    return next;
-                  });
-                }}
-                className="relative z-20 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-white/15 hover:bg-white/25 text-white border border-white/30 cursor-pointer"
-                title="Mengen auf Vorschlag setzen (Lager − bereits gedruckt)"
-              >
-                <Printer size={12} /> Vorschlag übernehmen
-              </button>
+                  }}
+                  className="relative z-20 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-white/15 hover:bg-white/25 text-white border border-white/30 cursor-pointer"
+                  title="Mengen auf Vorschlag setzen (Lager − bereits gedruckt)"
+                >
+                  <Printer size={12} /> Vorschlag übernehmen
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuantities((prev) => {
+                      const next = { ...prev };
+                      g.variants.forEach((v, idx) => { next[rowKey(g, v, idx)] = 0; });
+                      return next;
+                    });
+                  }}
+                  className="relative z-20 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-white/15 hover:bg-white/25 text-white border border-white/30 cursor-pointer"
+                  title={`Alle Mengen in "${g.title}" auf 0 setzen`}
+                >
+                  <RotateCcw size={12} /> Auf 0
+                </button>
+              </div>
             </div>
             <table className="w-full text-sm">
               <thead className="bg-neutral-50 text-[10px] uppercase text-neutral-500">
