@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Package, Boxes, AlertTriangle, Printer, Search, X, RotateCcw } from "lucide-react";
 import PrintLabels from "../print-labels";
-import { recordPrintedLabels } from "@/lib/actions/printed-labels";
+import { recordPrintedLabels, resetPrintedForBarcode, resetPrintedForBarcodes } from "@/lib/actions/printed-labels";
 import type { AccessoryGroup, AccessoryVariant } from "@/lib/shopify";
 
 interface Props {
@@ -29,6 +29,47 @@ export default function ZubehoerClient({ groups, printedSummary, singleCollectio
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [printItems, setPrintItems] = useState<{ title: string; barcode: string }[]>([]);
   const [printing, setPrinting] = useState(false);
+  // Lokale Überschreibung des Server-Summaries nach Reset-Aktionen —
+  // spart einen kompletten Reload nur um "Bisher" auf 0 zu sehen.
+  const [resetBarcodes, setResetBarcodes] = useState<Set<string>>(new Set());
+  const [resetting, setResetting] = useState(false);
+
+  const effectiveSummary = useMemo(() => {
+    if (resetBarcodes.size === 0) return printedSummary;
+    const out = { ...printedSummary };
+    for (const bc of resetBarcodes) out[bc] = { totalPrinted: 0, lastPrintedAt: null };
+    return out;
+  }, [printedSummary, resetBarcodes]);
+
+  const printedOf = (v: AccessoryVariant) =>
+    v.barcode ? (effectiveSummary[v.barcode]?.totalPrinted ?? 0) : 0;
+
+  /** Setzt den 'Bisher gedruckt'-Zähler für die übergebenen Varianten zurück. */
+  async function resetPrintedFor(variants: AccessoryVariant[], label: string) {
+    const targets = variants.filter((v) => !!v.barcode && printedOf(v) > 0);
+    if (targets.length === 0) {
+      alert("Keine Produkte mit gedruckten Etiketten in dieser Auswahl.");
+      return;
+    }
+    if (!confirm(`'Bisher gedruckt'-Zähler für ${targets.length} Variante(n) in\n${label}\nzurücksetzen?`)) return;
+
+    setResetting(true);
+    const codes = targets.map((v) => v.barcode!);
+    const res = codes.length === 1
+      ? await resetPrintedForBarcode(codes[0])
+      : await resetPrintedForBarcodes(codes);
+    setResetting(false);
+
+    if (!res.success) {
+      alert(`Fehler: ${res.error}`);
+      return;
+    }
+    setResetBarcodes((prev) => {
+      const next = new Set(prev);
+      for (const c of codes) next.add(c);
+      return next;
+    });
+  }
 
   // Druck auslösen, sobald die PNG-Labels komponiert sind
   useEffect(() => {
@@ -67,6 +108,13 @@ export default function ZubehoerClient({ groups, printedSummary, singleCollectio
     [quantities],
   );
 
+  // Summe aller bereits gedruckten Etiketten (für die Reset-Zeile)
+  const totalPrintedAll = useMemo(
+    () => groups.flatMap((g) => g.variants).reduce((s, v) => s + printedOf(v), 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [groups, effectiveSummary],
+  );
+
   const setQty = (key: string, n: number) => {
     const safe = Math.max(0, Math.min(n || 0, MAX_QTY_PER_ROW));
     setQuantities((prev) => ({ ...prev, [key]: safe }));
@@ -98,7 +146,7 @@ export default function ZubehoerClient({ groups, printedSummary, singleCollectio
       <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
           <h1 className="text-2xl font-semibold text-neutral-900">
-            {singleCollection && groups.length === 1 ? `Zubehör — ${groups[0].title}` : "Zubehör"}
+            {singleCollection && groups.length === 1 ? groups[0].title : "Extensions Zubehör"}
           </h1>
           <p className="text-sm text-neutral-500 mt-1">
             Nicht-Extensions-Produkte · live aus Shopify
@@ -166,6 +214,24 @@ export default function ZubehoerClient({ groups, printedSummary, singleCollectio
             ⚠ Über {MAX_TOTAL_LABELS} Etiketten ist instabil — bitte in mehreren Druckvorgängen aufteilen.
           </div>
         )}
+
+        {/* Reset des 'Bisher gedruckt'-Zählers */}
+        <div className="flex items-center gap-2 pt-1 border-t border-neutral-100 text-xs">
+          <span className="text-neutral-500">&quot;Bisher gedruckt&quot;-Zähler:</span>
+          <button
+            type="button"
+            onClick={() => resetPrintedFor(groups.flatMap((g) => g.variants), singleCollection && groups.length === 1 ? groups[0].title : "allen Kollektionen")}
+            disabled={resetting}
+            title="Setzt den Zähler für ALLE hier angezeigten Varianten auf 0"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-rose-300 text-rose-700 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition"
+          >
+            <RotateCcw size={12} />
+            {resetting ? "Setze zurück…" : "Komplett zurücksetzen"}
+          </button>
+          {totalPrintedAll > 0 && (
+            <span className="text-neutral-400">insgesamt {totalPrintedAll} Etikett{totalPrintedAll === 1 ? "" : "en"} erfasst</span>
+          )}
+        </div>
       </section>
 
       {/* Druckbereich (nur @media print sichtbar) */}
@@ -193,7 +259,7 @@ export default function ZubehoerClient({ groups, printedSummary, singleCollectio
                       const next = { ...prev };
                       g.variants.forEach((v, idx) => {
                         if (!v.barcode) return;
-                        const printed = printedSummary[v.barcode]?.totalPrinted ?? 0;
+                        const printed = printedOf(v);
                         next[rowKey(g, v, idx)] = Math.max(0, Math.min(MAX_QTY_PER_ROW, Math.floor(v.inventoryQuantity) - printed));
                       });
                       return next;
@@ -217,6 +283,15 @@ export default function ZubehoerClient({ groups, printedSummary, singleCollectio
                   title={`Alle Mengen in "${g.title}" auf 0 setzen`}
                 >
                   <RotateCcw size={12} /> Auf 0
+                </button>
+                <button
+                  type="button"
+                  onClick={() => resetPrintedFor(g.variants, g.title)}
+                  disabled={resetting}
+                  className="relative z-20 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-rose-500/80 hover:bg-rose-500 text-white border border-white/30 cursor-pointer disabled:opacity-50"
+                  title={`"Bisher gedruckt" für alle Varianten in "${g.title}" zurücksetzen`}
+                >
+                  <RotateCcw size={12} /> Bisher
                 </button>
               </div>
             </div>
@@ -242,7 +317,7 @@ export default function ZubehoerClient({ groups, printedSummary, singleCollectio
                 ) : (
                   visible.map(({ v, idx }) => {
                     const key = rowKey(g, v, idx);
-                    const printed = v.barcode ? (printedSummary[v.barcode]?.totalPrinted ?? 0) : 0;
+                    const printed = printedOf(v);
                     return (
                       <tr key={key} className="hover:bg-neutral-50/60">
                         <td className="px-3 py-1.5">
@@ -273,7 +348,22 @@ export default function ZubehoerClient({ groups, printedSummary, singleCollectio
                           {v.inventoryQuantity}
                         </td>
                         <td className="px-3 py-1.5 text-right text-xs text-neutral-500 tabular-nums">
-                          {printed > 0 ? printed : <span className="text-neutral-300">–</span>}
+                          {printed > 0 ? (
+                            <span className="inline-flex items-center gap-1">
+                              {printed}
+                              <button
+                                type="button"
+                                onClick={() => resetPrintedFor([v], labelTitle(v))}
+                                disabled={resetting}
+                                title="'Bisher gedruckt' für diese Variante zurücksetzen"
+                                className="text-neutral-400 hover:text-red-600 disabled:opacity-40 p-0.5 rounded"
+                              >
+                                <X size={12} />
+                              </button>
+                            </span>
+                          ) : (
+                            <span className="text-neutral-300">–</span>
+                          )}
                         </td>
                         <td className="px-3 py-1.5 text-right">
                           <input
