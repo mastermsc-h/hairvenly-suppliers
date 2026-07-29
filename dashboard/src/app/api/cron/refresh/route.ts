@@ -52,10 +52,14 @@ export async function GET(req: NextRequest) {
       ? { skipped: "time budget exceeded" }
       : await cronRevenueSync(supabase);
   }
+  // Incremental by design: it works newest-first and stops at the deadline,
+  // so it always returns cleanly and continues on the next run. Previously it
+  // tried to process every customer in one pass, never finished, and left
+  // recent returns without a repurchase status.
   if (!skip.includes("repurchase")) {
     results.repurchase = overBudget()
       ? { skipped: "time budget exceeded" }
-      : await cronRepurchaseCompute(supabase);
+      : await cronRepurchaseCompute(supabase, 60, 7, startedMs + TIME_BUDGET_MS);
   }
   // Only the last 2 months — a full 12-month product-sales pass takes minutes
   // and would never finish inside the function limit. Older months stay as

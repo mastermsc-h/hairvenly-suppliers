@@ -885,14 +885,24 @@ export default function ReturnsAnalytics({
         <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
           <div>
             <h3 className="text-sm font-semibold text-neutral-900">Wiederkaufsrate nach Retoure</h3>
-            <p className="text-[11px] text-neutral-400 mt-0.5">
-              {repurchase.recovered} von {repurchase.total} Retouren mit Folgekauf binnen 60 Tagen
-              {repurchase.pending > 0 ? ` · ${repurchase.pending} noch im 60-Tage-Fenster (Rate kann steigen)` : ""}
-            </p>
+            {repurchase.total === 0 && repurchase.unknown > 0 ? (
+              // No computed rows in this period — showing 0% here would read
+              // as "nobody bought again" instead of "not calculated yet".
+              <p className="text-[11px] text-amber-600 mt-0.5">
+                Für diesen Zeitraum noch nicht berechnet ({repurchase.unknown} Retouren offen).
+                Der nächtliche Abgleich arbeitet neueste Retouren zuerst ab.
+              </p>
+            ) : (
+              <p className="text-[11px] text-neutral-400 mt-0.5">
+                {repurchase.recovered} von {repurchase.total} Retouren mit Folgekauf binnen 60 Tagen
+                {repurchase.pending > 0 ? ` · ${repurchase.pending} noch im 60-Tage-Fenster (Rate kann steigen)` : ""}
+                {repurchase.unknown > 0 ? ` · ${repurchase.unknown} noch nicht berechnet` : ""}
+              </p>
+            )}
           </div>
           <div className="text-right">
             <div className="text-2xl font-semibold text-neutral-900">
-              {repurchase.rate != null ? `${repurchase.rate.toFixed(1)}%` : "—"}
+              {repurchase.total > 0 && repurchase.rate != null ? `${repurchase.rate.toFixed(1)}%` : "—"}
             </div>
             {repurchase.resolvedRate != null && repurchase.decided > 0 && repurchase.pending > 0 && (
               <div className="text-[11px] text-neutral-400">
@@ -1009,60 +1019,6 @@ export default function ReturnsAnalytics({
           )}
         </div>
 
-        {/* Problem products — highest return rate per SOLD piece */}
-        {problemProducts.length > 0 && (
-          <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-sm font-semibold text-neutral-900">Problem-Produkte — Rückgabequote pro Stück</h3>
-                <p className="text-[11px] text-neutral-400 mt-0.5">
-                  Retour-Stück ÷ Verkauft-Stück · nur Produkte mit mind. {MIN_SOLD_FOR_RANKING} verkauften Stück im Zeitraum
-                </p>
-              </div>
-              {problemProducts[0] && (
-                <p className="text-xs text-neutral-400 text-right">
-                  Höchste: <span className="font-medium text-red-600">{problemProducts[0].rate.toFixed(1)}%</span>
-                </p>
-              )}
-            </div>
-            <div className="max-h-[420px] overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-neutral-50 text-left text-xs uppercase text-neutral-500 sticky top-0">
-                  <tr>
-                    <th className="px-4 py-2 font-medium">Produkt</th>
-                    <th className="px-3 py-2 font-medium text-right">Verkauft<br /><span className="normal-case font-normal text-neutral-400">Stück</span></th>
-                    <th className="px-3 py-2 font-medium text-right">Retour<br /><span className="normal-case font-normal text-neutral-400">Stück</span></th>
-                    <th className="px-3 py-2 font-medium text-right">Erstattet €</th>
-                    <th className="px-4 py-2 font-medium text-right">Quote</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-100">
-                  {problemProducts.map((p) => (
-                    <tr key={p.name} className="hover:bg-neutral-50">
-                      <td className="px-4 py-2 text-neutral-800 text-xs" title={p.name}>
-                        {p.name}
-                        {p.collection && (
-                          <div className="text-[10px] text-neutral-400">{p.collection}</div>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-right text-neutral-500 tabular-nums">{p.sold}</td>
-                      <td className="px-3 py-2 text-right text-neutral-700 tabular-nums">{p.returned}</td>
-                      <td className="px-3 py-2 text-right text-neutral-500 tabular-nums">
-                        {`${Math.round(p.refundEur).toLocaleString("de-DE")} €`}
-                      </td>
-                      <td className={`px-4 py-2 text-right font-semibold tabular-nums ${
-                        p.rate >= 30 ? "text-red-600" : p.rate >= 20 ? "text-amber-600" : "text-neutral-900"
-                      }`}>
-                        {p.rate.toFixed(1)}%
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
         {/* Rate-per-Collection (only when sales data is available) */}
         {hasSalesData && categoriesByRate.length > 0 && (
           <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
@@ -1116,6 +1072,60 @@ export default function ReturnsAnalytics({
                       </tr>
                     );
                   })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Problem products — highest return rate per SOLD piece */}
+        {problemProducts.length > 0 && (
+          <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-semibold text-neutral-900">Problem-Produkte — Rückgabequote pro Stück</h3>
+                <p className="text-[11px] text-neutral-400 mt-0.5">
+                  Retour-Stück ÷ Verkauft-Stück · nur Produkte mit mind. {MIN_SOLD_FOR_RANKING} verkauften Stück im Zeitraum
+                </p>
+              </div>
+              {problemProducts[0] && (
+                <p className="text-xs text-neutral-400 text-right">
+                  Höchste: <span className="font-medium text-red-600">{problemProducts[0].rate.toFixed(1)}%</span>
+                </p>
+              )}
+            </div>
+            <div className="max-h-[420px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-neutral-50 text-left text-xs uppercase text-neutral-500 sticky top-0">
+                  <tr>
+                    <th className="px-4 py-2 font-medium">Produkt</th>
+                    <th className="px-3 py-2 font-medium text-right">Verkauft<br /><span className="normal-case font-normal text-neutral-400">Stück</span></th>
+                    <th className="px-3 py-2 font-medium text-right">Retour<br /><span className="normal-case font-normal text-neutral-400">Stück</span></th>
+                    <th className="px-3 py-2 font-medium text-right">Erstattet €</th>
+                    <th className="px-4 py-2 font-medium text-right">Quote</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100">
+                  {problemProducts.map((p) => (
+                    <tr key={p.name} className="hover:bg-neutral-50">
+                      <td className="px-4 py-2 text-neutral-800 text-xs" title={p.name}>
+                        {p.name}
+                        {p.collection && (
+                          <div className="text-[10px] text-neutral-400">{p.collection}</div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right text-neutral-500 tabular-nums">{p.sold}</td>
+                      <td className="px-3 py-2 text-right text-neutral-700 tabular-nums">{p.returned}</td>
+                      <td className="px-3 py-2 text-right text-neutral-500 tabular-nums">
+                        {`${Math.round(p.refundEur).toLocaleString("de-DE")} €`}
+                      </td>
+                      <td className={`px-4 py-2 text-right font-semibold tabular-nums ${
+                        p.rate >= 30 ? "text-red-600" : p.rate >= 20 ? "text-amber-600" : "text-neutral-900"
+                      }`}>
+                        {p.rate.toFixed(1)}%
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

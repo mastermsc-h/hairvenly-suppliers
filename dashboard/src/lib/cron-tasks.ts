@@ -249,16 +249,28 @@ export async function cronRepurchaseCompute(
   supabase: SupabaseClient,
   windowDays = 60,
   ttlDays = 7,
-): Promise<{ exchange: number; newOrder: number; lost: number; pending: number; skipped: number; error?: string }> {
+  deadlineAt?: number,
+): Promise<{ exchange: number; newOrder: number; lost: number; pending: number; skipped: number; remaining?: number; error?: string }> {
   try {
+    // Each customer costs one Shopify roundtrip, so a full pass over every
+    // customer cannot finish inside a serverless function limit. This task is
+    // therefore INCREMENTAL: newest returns first, stop at the deadline, and
+    // report what is left so the next run continues where this one stopped.
+    const outOfTime = () => deadlineAt != null && Date.now() > deadlineAt;
+
     type Row = { id: string; shopify_order_id: string | null; customer_email: string | null; customer_id: string | null; return_type: string | null; initiated_at: string | null; repurchase_status: string | null; repurchase_check_at: string | null };
-    async function fetchAll(): Promise<Row[]> {
+    const staleBefore = new Date(Date.now() - ttlDays * 86400000).toISOString();
+
+    // Only rows that actually need work: never computed, or past their TTL.
+    async function fetchPending(): Promise<Row[]> {
       const all: Row[] = [];
       let from = 0;
       while (true) {
         const { data } = await supabase
           .from("returns")
           .select("id, shopify_order_id, customer_email, customer_id, return_type, initiated_at, repurchase_status, repurchase_check_at")
+          .or(`repurchase_check_at.is.null,repurchase_check_at.lt.${staleBefore}`)
+          .order("initiated_at", { ascending: false })
           .range(from, from + 999);
         if (!data || data.length === 0) break;
         all.push(...(data as Row[]));
@@ -269,7 +281,7 @@ export async function cronRepurchaseCompute(
     }
 
     // Step 1: backfill missing customer email/id for rows with shopify_order_id
-    const returns = await fetchAll();
+    const returns = await fetchPending();
     const ordersToFetch = new Map<string, string[]>();
     for (const r of returns) {
       if (!r.shopify_order_id) continue;
@@ -280,6 +292,7 @@ export async function cronRepurchaseCompute(
     }
     const orderIds = Array.from(ordersToFetch.keys());
     for (let i = 0; i < orderIds.length; i += 50) {
+      if (outOfTime()) break;
       const batch = orderIds.slice(i, i + 50);
       const aliases = batch.map((id, idx) => `o${idx}: order(id: "${id}") { id customer { id email } }`).join("\n");
       const res = await shopifyGraphQL<Record<string, { id: string; customer: { id: string | null; email: string | null } | null }>>(`query { ${aliases} }`, {});
@@ -296,8 +309,9 @@ export async function cronRepurchaseCompute(
       }
     }
 
-    // Step 2: compute repurchase status
-    const fresh = await fetchAll();
+    // Step 2: compute repurchase status — re-read so the customer ids just
+    // written in step 1 are visible.
+    const fresh = await fetchPending();
     const byCustomer = new Map<string, Row[]>();
     for (const r of fresh) {
       if (!r.customer_id) continue;
@@ -305,40 +319,33 @@ export async function cronRepurchaseCompute(
       arr.push(r);
       byCustomer.set(r.customer_id, arr);
     }
+    // Newest return first: recent months are what the dashboard actually
+    // shows, so they must be computed before an old backlog is worked off.
+    const customerOrder = Array.from(byCustomer.entries()).sort((a, b) => {
+      const newest = (rows: Row[]) => rows.reduce((m, r) => (r.initiated_at && r.initiated_at > m ? r.initiated_at : m), "");
+      return newest(b[1]).localeCompare(newest(a[1]));
+    });
+
     const now = new Date();
     const windowMs = windowDays * 86400000;
-    const ttlMs = ttlDays * 86400000;
-    let exchange = 0, newOrder = 0, lost = 0, pending = 0, skipped = 0;
+    let exchange = 0, newOrder = 0, lost = 0, pending = 0, skipped = 0, processedCustomers = 0;
 
-    for (const [customerId, rows] of byCustomer) {
-      // Skip the (expensive) Shopify orders fetch entirely when every row of
-      // this customer is still within the TTL — otherwise the cron pays one
-      // GraphQL roundtrip per customer per night and blows the 60s budget.
-      const allFresh = rows.every(
-        (r) => r.repurchase_check_at && now.getTime() - new Date(r.repurchase_check_at).getTime() < ttlMs,
-      );
-      if (allFresh) {
+    for (const [customerId, rows] of customerOrder) {
+      if (outOfTime()) {
         skipped += rows.length;
         continue;
       }
+      processedCustomers++;
       const minDate = rows.reduce((a, r) => (r.initiated_at && r.initiated_at < a ? r.initiated_at : a), "9999-12-31");
       const customerNumeric = customerId.replace("gid://shopify/Customer/", "");
       const q = `customer_id:${customerNumeric} created_at:>=${minDate}`;
-      const orders: { id: string; createdAt: string }[] = [];
-      let after: string | null = null;
-      for (let p = 0; p < 5; p++) {
-        const res: { data?: { orders: { pageInfo: { hasNextPage: boolean; endCursor: string }; edges: { node: { id: string; createdAt: string } }[] } } } =
-          await shopifyGraphQL(`query($q:String!,$after:String){orders(first:50,after:$after,query:$q,sortKey:CREATED_AT){pageInfo{hasNextPage endCursor}edges{node{id createdAt}}}}`, { q, after });
-        orders.push(...(res.data?.orders?.edges ?? []).map((e) => e.node));
-        if (!res.data?.orders?.pageInfo?.hasNextPage) break;
-        after = res.data.orders.pageInfo.endCursor;
-      }
+      // One page of 50 orders is plenty: we only look for a purchase inside
+      // the recovery window, and customers rarely place 50+ orders in it.
+      const res: { data?: { orders: { edges: { node: { id: string; createdAt: string } }[] } } } =
+        await shopifyGraphQL(`query($q:String!){orders(first:50,query:$q,sortKey:CREATED_AT){edges{node{id createdAt}}}}`, { q });
+      const orders = (res.data?.orders?.edges ?? []).map((e) => e.node);
 
       for (const r of rows) {
-        if (r.repurchase_check_at && now.getTime() - new Date(r.repurchase_check_at).getTime() < ttlMs) {
-          skipped++;
-          continue;
-        }
         let status: string;
         let repurchaseOrderId: string | null = null;
         let repurchaseAt: string | null = null;
@@ -374,7 +381,12 @@ export async function cronRepurchaseCompute(
       }
     }
 
-    return { exchange, newOrder, lost, pending, skipped };
+    // `remaining` > 0 means the deadline cut the run short; the next run
+    // picks these up because their repurchase_check_at is still null/stale.
+    return {
+      exchange, newOrder, lost, pending, skipped,
+      remaining: Math.max(0, customerOrder.length - processedCustomers),
+    };
   } catch (e) {
     return { exchange: 0, newOrder: 0, lost: 0, pending: 0, skipped: 0, error: e instanceof Error ? e.message : String(e) };
   }
