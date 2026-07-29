@@ -1598,6 +1598,130 @@ export async function fetchAllVariantsForAudit(): Promise<AuditVariant[]> {
   return out;
 }
 
+// ── Zubehör (Nicht-Extensions-Produkte) ─────────────────────────
+
+export interface AccessoryVariant {
+  productTitle: string;
+  variantTitle: string | null;
+  sku: string | null;
+  barcode: string | null;
+  inventoryQuantity: number;
+  imageUrl: string | null;
+  price: string | null;
+}
+
+export interface AccessoryGroup {
+  slug: string;    // url-slug (collection handle bzw. "teststraehnen")
+  title: string;   // anzeige-name
+  variants: AccessoryVariant[];
+}
+
+/** Kollektionen, die im Zubehör-Bereich angezeigt werden. */
+export const ACCESSORY_COLLECTIONS: { slug: string; title: string }[] = [
+  { slug: "extensions-zubehoer", title: "Extensions Zubehör" },
+  { slug: "blessed-haarpflege", title: "Blessed Haarpflege" },
+  { slug: "sonstige-haarpflege", title: "Sonstige Haarpflege" },
+  { slug: "teststraehnen", title: "Teststrähnen" },
+];
+
+// Farbmuster Teststrähne (41 farb-varianten) — eigenes produkt, nicht
+// in den zubehör-kollektionen, deshalb per ID als pseudo-kollektion.
+const TESTSTRAEHNEN_PRODUCT_GID = "gid://shopify/Product/12117166850312";
+
+interface AccessoryProductNode {
+  title: string;
+  featuredImage: { url: string } | null;
+  variants: {
+    edges: {
+      node: {
+        title: string | null;
+        sku: string | null;
+        barcode: string | null;
+        inventoryQuantity: number | null;
+        price: string | null;
+        image: { url: string } | null;
+      };
+    }[];
+  };
+}
+
+function accessoryVariantsFromProduct(p: AccessoryProductNode): AccessoryVariant[] {
+  return p.variants.edges.map((ve) => ({
+    productTitle: p.title,
+    variantTitle: ve.node.title && ve.node.title !== "Default Title" ? ve.node.title : null,
+    sku: ve.node.sku?.trim() || null,
+    barcode: ve.node.barcode?.trim() || null,
+    inventoryQuantity: ve.node.inventoryQuantity ?? 0,
+    imageUrl: ve.node.image?.url ?? p.featuredImage?.url ?? null,
+    price: ve.node.price ?? null,
+  }));
+}
+
+/**
+ * Holt alle Zubehör-Produkte: die drei Kollektionen plus das
+ * Teststrähnen-Produkt als eigene Gruppe. Live aus Shopify.
+ */
+export async function fetchAccessoryGroups(): Promise<AccessoryGroup[]> {
+  const groups: AccessoryGroup[] = [];
+
+  for (const col of ACCESSORY_COLLECTIONS) {
+    if (col.slug === "teststraehnen") {
+      const res = await shopifyGraphQL<{ product: AccessoryProductNode | null }>(
+        `query {
+          product(id: "${TESTSTRAEHNEN_PRODUCT_GID}") {
+            title
+            featuredImage { url }
+            variants(first: 50) {
+              edges { node { title sku barcode inventoryQuantity price image { url } } }
+            }
+          }
+        }`,
+        undefined,
+        { allowPartialErrors: true },
+      );
+      const p = res.data?.product;
+      groups.push({
+        slug: col.slug,
+        title: col.title,
+        variants: p ? accessoryVariantsFromProduct(p) : [],
+      });
+      continue;
+    }
+
+    const res = await shopifyGraphQL<{
+      collectionByHandle: { products: { edges: { node: AccessoryProductNode }[] } } | null;
+    }>(
+      `query($handle: String!) {
+        collectionByHandle(handle: $handle) {
+          products(first: 100) {
+            edges {
+              node {
+                title
+                featuredImage { url }
+                variants(first: 50) {
+                  edges { node { title sku barcode inventoryQuantity price image { url } } }
+                }
+              }
+            }
+          }
+        }
+      }`,
+      { handle: col.slug },
+      { allowPartialErrors: true },
+    );
+    const products = res.data?.collectionByHandle?.products.edges.map((e) => e.node) ?? [];
+    const variants = products.flatMap(accessoryVariantsFromProduct);
+    // Sortierung: nach Produkt-Titel, dann Variant-Titel
+    variants.sort((a, b) =>
+      a.productTitle.localeCompare(b.productTitle) ||
+      (a.variantTitle ?? "").localeCompare(b.variantTitle ?? ""),
+    );
+    groups.push({ slug: col.slug, title: col.title, variants });
+  }
+
+  return groups;
+}
+
 export async function fetchAllCollectionHandles(): Promise<{ handle: string; title: string }[]> {
   const query = `
     {

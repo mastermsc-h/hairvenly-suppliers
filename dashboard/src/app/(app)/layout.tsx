@@ -96,6 +96,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                   },
                   { href: "/stock/sales", label: t(locale, "nav.stock.sales") },
                   { href: "/stock/preorders", label: t(locale, "nav.stock.preorders") },
+                  {
+                    href: "/stock/zubehoer",
+                    label: t(locale, "nav.stock.zubehoer"),
+                    children: [
+                      { href: "/stock/zubehoer/extensions-zubehoer", label: t(locale, "nav.stock.zubehoer.extensions") },
+                      { href: "/stock/zubehoer/blessed-haarpflege", label: t(locale, "nav.stock.zubehoer.blessed") },
+                      { href: "/stock/zubehoer/sonstige-haarpflege", label: t(locale, "nav.stock.zubehoer.sonstige") },
+                      { href: "/stock/zubehoer/teststraehnen", label: t(locale, "nav.stock.zubehoer.teststraehnen") },
+                    ],
+                  },
                 ]}
               />
             )}
