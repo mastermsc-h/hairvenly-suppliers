@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useTransition, useMemo } from "react";
+import { useState, useTransition, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, Save, X, GraduationCap, Users2, Euro, ShieldAlert, Trash2,
   ChevronDown, TrendingUp, Lock, CalendarDays, Check, XCircle, Ban,
   Target, BookOpen, MessageSquare, ClipboardList, Circle, CheckCircle2,
+  Bold, Italic, Underline, Pencil,
 } from "lucide-react";
 import { TEAMS, teamMeta } from "@/lib/staff/teams";
 import { maxOnVacation, teamOnDay, blackoutsForDay, UNLIMITED, probation } from "@/lib/staff/capacity";
@@ -23,6 +24,7 @@ import {
   decideVacation,
   deleteVacation,
   addReview,
+  updateReview,
   deleteReview,
   addGoal,
   setGoalStatus,
@@ -670,14 +672,7 @@ function AdminPanel({
           ) : (
             <ul className="space-y-2 mb-2">
               {reviews.map((rv) => (
-                <li key={rv.id} className="rounded-lg border border-neutral-100 bg-neutral-50/50 p-2 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-neutral-700">{rv.review_date}</span>
-                    <button onClick={() => { if (confirm("Gespräch löschen?")) { void (async () => { await deleteReview(rv.id); onChange(); })(); } }} className="text-neutral-300 hover:text-rose-600"><Trash2 size={13} /></button>
-                  </div>
-                  {rv.content && <div className="text-[13px] text-neutral-600 whitespace-pre-wrap mt-0.5">{rv.content}</div>}
-                  {rv.next_date && <div className="text-[10px] text-sky-700 mt-1">nächstes Gespräch: {rv.next_date}</div>}
-                </li>
+                <ReviewItem key={rv.id} review={rv} onChange={onChange} />
               ))}
             </ul>
           )}
@@ -1122,8 +1117,81 @@ function TrainingForm({ staffId, onChange }: { staffId: string; onChange: () => 
   );
 }
 
+// ── Einfacher Rich-Text-Editor (Fett/Kursiv/Unterstrichen) ──────
+
+function sanitizeHtml(html: string): string {
+  if (typeof document === "undefined") return html;
+  const allowed = new Set(["B", "STRONG", "I", "EM", "U", "BR", "P", "DIV", "SPAN"]);
+  const box = document.createElement("div");
+  box.innerHTML = html;
+  box.querySelectorAll("script,style,iframe,object,embed,link,meta,svg,img,input,button,form,textarea,a,video,audio").forEach((n) => n.remove());
+  box.querySelectorAll("*").forEach((el) => { while (el.attributes.length) el.removeAttribute(el.attributes[0].name); });
+  let changed = true;
+  while (changed) {
+    changed = false;
+    box.querySelectorAll("*").forEach((el) => {
+      if (!allowed.has(el.tagName)) {
+        const p = el.parentNode;
+        if (p) { while (el.firstChild) p.insertBefore(el.firstChild, el); p.removeChild(el); changed = true; }
+      }
+    });
+  }
+  return box.innerHTML;
+}
+
+const richDisplay = "[&_u]:underline [&_b]:font-semibold [&_strong]:font-semibold [&_i]:italic [&_em]:italic";
+
+function FmtBtn({ onClick, children, title }: { onClick: () => void; children: React.ReactNode; title: string }) {
+  return (
+    <button type="button" title={title} onMouseDown={(e) => e.preventDefault()} onClick={onClick}
+      className="h-7 w-7 grid place-items-center rounded border border-neutral-300 text-neutral-700 hover:bg-neutral-100">
+      {children}
+    </button>
+  );
+}
+
+function RichText({ name, initialHtml = "", placeholder }: { name: string; initialHtml?: string; placeholder?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [value, setValue] = useState(initialHtml);
+  function sync() { setValue(sanitizeHtml(ref.current?.innerHTML ?? "")); }
+  function cmd(c: "bold" | "italic" | "underline") { document.execCommand(c); ref.current?.focus(); sync(); }
+  return (
+    <div>
+      <div className="flex items-center gap-1 mb-1">
+        <FmtBtn title="Fett" onClick={() => cmd("bold")}><Bold size={13} /></FmtBtn>
+        <FmtBtn title="Kursiv" onClick={() => cmd("italic")}><Italic size={13} /></FmtBtn>
+        <FmtBtn title="Unterstrichen" onClick={() => cmd("underline")}><Underline size={13} /></FmtBtn>
+      </div>
+      <div
+        ref={(el) => { if (el && !el.dataset.init) { el.innerHTML = initialHtml; el.dataset.init = "1"; } }}
+        contentEditable
+        suppressContentEditableWarning
+        onInput={sync}
+        data-ph={placeholder ?? ""}
+        className={`min-h-[64px] rounded border border-neutral-300 px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-neutral-900 empty:before:content-[attr(data-ph)] empty:before:text-neutral-400 ${richDisplay}`}
+      />
+      <input type="hidden" name={name} value={value} />
+    </div>
+  );
+}
+
 function ReviewForm({ staffId, onChange }: { staffId: string; onChange: () => void }) {
-  const { error, pending, submit } = useAddForm(addReview, staffId, onChange);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const [rk, setRk] = useState(0); // Remount-Key, um den Editor nach dem Speichern zu leeren
+  function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    start(async () => {
+      const res = await addReview(staffId, fd);
+      if (res?.error) { setError(res.error); return; }
+      form.reset();
+      setRk((k) => k + 1);
+      onChange();
+    });
+  }
   return (
     <form onSubmit={submit} className="space-y-2 border-t border-neutral-100 pt-2">
       <div className="flex flex-wrap gap-2">
@@ -1136,15 +1204,72 @@ function ReviewForm({ staffId, onChange }: { staffId: string; onChange: () => vo
           <input name="next_date" type="date" className="block w-36 rounded border border-neutral-300 px-2 py-1 text-sm" />
         </label>
       </div>
-      <label className="block">
+      <div>
         <span className="text-[10px] uppercase text-neutral-500">Inhalt / Absprachen</span>
-        <textarea name="content" rows={2} placeholder="Themen, Absprachen, Feedback …" className="block w-full rounded border border-neutral-300 px-2 py-1 text-sm" />
-      </label>
+        <RichText key={rk} name="content" placeholder="Themen, Absprachen, Feedback … (Fett/Kursiv/Unterstrichen möglich)" />
+      </div>
       <div className="flex justify-end">
         <button type="submit" disabled={pending} className="rounded-lg bg-neutral-900 text-white px-3 py-1.5 text-xs font-medium">{pending ? "..." : "+ Gespräch dokumentieren"}</button>
       </div>
       {error && <span className="text-rose-600 text-[10px]">{error}</span>}
     </form>
+  );
+}
+
+function ReviewItem({ review, onChange }: { review: StaffReview; onChange: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  function save(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    const fd = new FormData(e.currentTarget);
+    start(async () => {
+      const res = await updateReview(review.id, fd);
+      if (res?.error) { setError(res.error); return; }
+      setEditing(false);
+      onChange();
+    });
+  }
+
+  if (editing) {
+    return (
+      <li className="rounded-lg border border-neutral-200 bg-neutral-50 p-2">
+        <form onSubmit={save} className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <label className="block">
+              <span className="text-[10px] uppercase text-neutral-500">Datum</span>
+              <input name="review_date" type="date" required defaultValue={review.review_date} className="block w-36 rounded border border-neutral-300 px-2 py-1 text-sm" />
+            </label>
+            <label className="block">
+              <span className="text-[10px] uppercase text-neutral-500">Nächstes Gespräch</span>
+              <input name="next_date" type="date" defaultValue={review.next_date ?? ""} className="block w-36 rounded border border-neutral-300 px-2 py-1 text-sm" />
+            </label>
+          </div>
+          <RichText name="content" initialHtml={review.content ?? ""} placeholder="Inhalt …" />
+          {error && <div className="text-rose-600 text-[11px]">{error}</div>}
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setEditing(false)} className="text-xs text-neutral-500">Abbrechen</button>
+            <button type="submit" disabled={pending} className="rounded-lg bg-neutral-900 text-white px-3 py-1.5 text-xs font-medium"><Save size={13} className="inline" /> Speichern</button>
+          </div>
+        </form>
+      </li>
+    );
+  }
+
+  return (
+    <li className="rounded-lg border border-neutral-100 bg-neutral-50/50 p-2 text-sm">
+      <div className="flex items-center justify-between">
+        <span className="font-medium text-neutral-700">{review.review_date}</span>
+        <span className="inline-flex items-center gap-1.5">
+          <button onClick={() => setEditing(true)} title="Bearbeiten" className="text-neutral-400 hover:text-neutral-700"><Pencil size={13} /></button>
+          <button onClick={() => { if (confirm("Gespräch löschen?")) { void (async () => { await deleteReview(review.id); onChange(); })(); } }} title="Löschen" className="text-neutral-300 hover:text-rose-600"><Trash2 size={13} /></button>
+        </span>
+      </div>
+      {review.content && <div className={`text-[13px] text-neutral-600 whitespace-pre-wrap mt-0.5 ${richDisplay}`} dangerouslySetInnerHTML={{ __html: review.content }} />}
+      {review.next_date && <div className="text-[10px] text-sky-700 mt-1">nächstes Gespräch: {review.next_date}</div>}
+    </li>
   );
 }
 

@@ -410,6 +410,21 @@ export async function addReview(staffId: string, formData: FormData) {
   return { ok: true };
 }
 
+export async function updateReview(id: string, formData: FormData) {
+  await requireStaffAdmin();
+  const svc = createServiceClient();
+  const update: Record<string, unknown> = {
+    content: str(formData.get("content")),
+    next_date: str(formData.get("next_date")),
+  };
+  const rd = str(formData.get("review_date"));
+  if (rd) update.review_date = rd;
+  const { error } = await svc.from("staff_reviews").update(update).eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/staff/members");
+  return { ok: true };
+}
+
 export async function deleteReview(id: string) {
   await requireStaffAdmin();
   const svc = createServiceClient();
