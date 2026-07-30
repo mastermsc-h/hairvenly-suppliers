@@ -28,7 +28,7 @@ interface Props {
   orderIdByName?: Record<string, OrderMeta>;
 }
 
-type QuickFilter = "all" | "no_order" | "has_order" | "kritisch" | "niedrig" | "akut" | "knapp";
+type QuickFilter = "all" | "no_order" | "has_order" | "kritisch" | "niedrig" | "akut" | "knapp" | "ladenhueter";
 
 const QUICK_FILTERS: Record<AlertMode, { key: QuickFilter; label: string; description: string }[]> = {
   zero: [
@@ -40,6 +40,7 @@ const QUICK_FILTERS: Record<AlertMode, { key: QuickFilter; label: string; descri
     { key: "all", label: "Alle", description: "" },
     { key: "akut", label: "Akut (Reichweite < Lieferzeit)", description: "" },
     { key: "knapp", label: "Knapp (< 1.5× Lieferzeit)", description: "" },
+    { key: "ladenhueter", label: "Ladenhüter (0 Verkauf 90T)", description: "" },
     { key: "kritisch", label: "< 300g", description: "" },
     { key: "niedrig", label: "< 600g", description: "" },
     { key: "no_order", label: "Ohne Bestellung", description: "" },
@@ -48,6 +49,12 @@ const QUICK_FILTERS: Record<AlertMode, { key: QuickFilter; label: string; descri
     { key: "all", label: "Alle", description: "" },
   ],
 };
+
+/** Ladenhüter = kritischer Bestand, aber seit 90 Tagen kein einziger Verkauf.
+ *  Muss NICHT nachbestellt werden — der niedrige Bestand ist hier egal. */
+function isLadenhueter(d: AlertProduct): boolean {
+  return d.verkauft90d !== undefined && (d.verkauft90d ?? 0) === 0 && (d.verkauft30d ?? 0) === 0;
+}
 
 type Tier = "TOP7" | "MID" | "REST" | "KAUM";
 const ALL_TIERS: Tier[] = ["TOP7", "MID", "REST", "KAUM"];
@@ -174,6 +181,7 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
     if (quickFilter === "niedrig" && !(d.lagerG >= 300 && d.lagerG < 600)) return false;
     if (quickFilter === "akut" && rangeStatus(d) !== "akut") return false;
     if (quickFilter === "knapp" && rangeStatus(d) !== "knapp") return false;
+    if (quickFilter === "ladenhueter" && !isLadenhueter(d)) return false;
     // Tier filter (critical mode)
     if (mode === "critical" && hasAnyTier && !allTiersActive) {
       if (!activeTiers.has(tierKey(d))) return false;
@@ -287,6 +295,7 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
                 f.key === "niedrig" ? data.filter((d) => d.lagerG >= 300 && d.lagerG < 600).length :
                 f.key === "akut" ? data.filter((d) => rangeStatus(d) === "akut").length :
                 f.key === "knapp" ? data.filter((d) => rangeStatus(d) === "knapp").length :
+                f.key === "ladenhueter" ? data.filter(isLadenhueter).length :
                 0;
               const isAkut = f.key === "akut";
               const isKnapp = f.key === "knapp";
@@ -512,9 +521,11 @@ function AlertSection({
                     </span>
                   )}
                   {mode === "critical" && <ReichweiteBadge item={item} compact />}
-                  {item.verkauft30d ? (
-                    <span className="text-[9px] text-neutral-400">30T: {item.verkauft30d}g</span>
-                  ) : null}
+                  {item.verkauft30d !== undefined && (
+                    <span className="text-[9px] text-neutral-400">
+                      30T: {item.verkauft30d}g · 90T: {item.verkauft90d ?? 0}g
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="text-right shrink-0 ml-3">
@@ -573,7 +584,8 @@ function AlertSection({
               <th className="px-2 py-1.5 font-medium">Kollektion</th>
               <th className="px-2 py-1.5 font-medium">Produkt</th>
               {mode === "critical" && <th className="px-2 py-1.5 font-medium">Rang</th>}
-              {mode === "critical" && <th className="px-2 py-1.5 font-medium text-right" title="Verbrauch letzte 30 Tage">30T</th>}
+              {mode === "critical" && <th className="px-2 py-1.5 font-medium text-right" title="Verkauf letzte 30 Tage">30T</th>}
+              {mode === "critical" && <th className="px-2 py-1.5 font-medium text-right" title="Verkauf letzte 90 Tage">90T</th>}
               {mode === "critical" && <th className="px-2 py-1.5 font-medium text-right" title="Reichweite in Tagen inkl. Bestellung — verglichen mit Lieferzeit">Reichw.</th>}
               <th className="px-2 py-1.5 font-medium text-right">Lager</th>
               <th className="px-2 py-1.5 font-medium text-right">Unterwegs</th>
@@ -615,7 +627,12 @@ function AlertSection({
                 )}
                 {mode === "critical" && (
                   <td className="px-2 py-1 text-right text-neutral-500">
-                    {item.verkauft30d ? `${item.verkauft30d}g` : <span className="text-neutral-300">–</span>}
+                    <VerkaufCell value={item.verkauft30d} />
+                  </td>
+                )}
+                {mode === "critical" && (
+                  <td className="px-2 py-1 text-right text-neutral-500">
+                    <VerkaufCell value={item.verkauft90d} />
                   </td>
                 )}
                 {mode === "critical" && (
@@ -705,9 +722,30 @@ function LagerBadge({ lagerG, stufe }: { lagerG: number; stufe?: "kritisch" | "n
   return <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${bg}`}>{lagerG}g</span>;
 }
 
+/** Verkaufs-Zelle: 0 wird sichtbar als "0g" (rot, Ladenhüter-Signal) statt "–".
+ *  "–" nur wenn gar kein Topseller-Match existiert (Wert undefined). */
+function VerkaufCell({ value }: { value: number | undefined }) {
+  if (value === undefined) return <span className="text-neutral-300">–</span>;
+  if (value === 0) return <span className="text-red-400 font-medium">0g</span>;
+  return <>{value}g</>;
+}
+
 function ReichweiteBadge({ item, compact = false }: { item: AlertProduct; compact?: boolean }) {
   const { daily, range, rangeWithOrder, leadTime } = calcReichweite(item);
   if (daily === null || range === null || rangeWithOrder === null) {
+    // Kein Verbrauch messbar. Wenn Topseller-Daten da sind und 90T = 0:
+    // klar als Ladenhüter labeln — kritischer Bestand ohne Verkauf muss
+    // NICHT nachbestellt werden.
+    if (isLadenhueter(item)) {
+      return (
+        <span
+          className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-neutral-100 text-neutral-500"
+          title="Seit 90 Tagen kein Verkauf — Nachbestellung nicht nötig"
+        >
+          Ladenhüter
+        </span>
+      );
+    }
     return <span className="text-neutral-300 text-[10px]">–</span>;
   }
   const status = rangeStatus(item);

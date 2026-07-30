@@ -441,55 +441,99 @@ export async function readDashboardAlerts(): Promise<{
 }
 
 // ── Enrich Alerts with Topseller Tier ──────────────────────────
-// Matched via sheetKey + normalized color token + Länge (variant).
-// Topseller-`farbe` looks like "#4 Caramel #4 Standard Tape" — we extract
-// the first "#X" token and use it as the color key.
+// Match-Key: sheetKey|methode|farbToken|länge.
+//
+// Warum alle vier Teile:
+// - farbToken allein kollidiert über Methoden ("#LILA" gibt es als Tape UND
+//   Bonding) und über Längen (45/55/65/85cm).
+// - Das Farb-Token steckt im PRODUKT-Namen ("#3T Pearl White 45CM TAPE…"),
+//   NICHT in der Collection ("Tapes Wellig 45cm") — deshalb wird der
+//   Produktname zuerst geprüft.
+// - Die Länge steht bei Alerts oft nur im Collection-/Produktnamen
+//   ("…45CM…"), variant ist meist null → mehrere Quellen abklappern.
 
 function extractColorToken_(s: string): string {
-  // Match "#" followed by alphanumerics, optional "/" suffix groups, possibly trailing single word like "PEARL"
-  const m = s.match(/#[A-Z0-9]+(?:\/[A-Z0-9]+)*/i);
+  // "#" gefolgt von Alphanumerik, optional "/"-Gruppen ("#4/27T24")
+  const m = s.match(/#[A-ZÄÖÜ0-9]+(?:\/[A-ZÄÖÜ0-9]+)*/i);
   if (m) return m[0].toUpperCase().replace(/\s+/g, "");
-  // Fallback: first 12 chars uppercased, no spaces
+  // Fallback: erste 16 Zeichen uppercased, ohne Spaces
   return s.trim().toUpperCase().replace(/\s+/g, "").slice(0, 16);
 }
 
-function normalizeLaenge_(s: string | null | undefined): string {
+/** Methoden-Klasse aus beliebigem Text (Produkt, Collection, Gruppen-Label). */
+function extractMethodClass_(s: string): string {
+  const u = s.toUpperCase();
+  if (/MINI\s*TAPE/.test(u)) return "MTAP";
+  if (/TAPE/.test(u)) return "TAPE";
+  if (/BONDING/.test(u)) return "BOND";
+  if (/CLASSIC/.test(u)) return "CWFT";
+  if (/INVISIBLE/.test(u)) return "IWFT";
+  if (/GENIUS/.test(u)) return "GWFT";
+  if (/CLIP/.test(u)) return "CLIP";
+  if (/PONYTAIL/.test(u)) return "PNTL";
+  return "";
+}
+
+/** Länge (cm) aus beliebigem Text: "45cm", "…45CM TAPE…". Clip-Gewichte (100g) ignorieren. */
+function extractLengthCm_(s: string | null | undefined): string {
   if (!s) return "";
-  // strip "cm", "g", whitespace; keep digits and slashes
-  return String(s).replace(/[^\d/]/g, "");
+  const m = String(s).match(/(\d{2,3})\s*CM/i);
+  return m ? m[1] : "";
 }
 
 export function enrichAlertsWithTier(
   alerts: AlertProduct[],
   topseller: TopsSellerSection[],
 ): AlertProduct[] {
-  // Build lookup: sheetKey|colorToken|laenge → { tier, verkauft30d, verkauft90d, ziel }
   type Meta = { tier: AlertProduct["tier"]; verkauft30d: number; verkauft90d: number; ziel: number };
   const map = new Map<string, Meta>();
+  // Zweitindex ohne Länge — nur nutzen wenn eindeutig (genau 1 Kandidat).
+  // Fängt Fälle, wo eine Seite keine Länge trägt (z.B. Russisch Standard
+  // Tapes: eine Länge pro Methode, Topseller-Spalte leer).
+  const noLenCandidates = new Map<string, Meta[]>();
 
   for (const sec of topseller) {
     const sheetKey: "wellig" | "glatt" = sec.quality === "Usbekisch Wellig" ? "wellig" : "glatt";
     for (const group of sec.sections) {
+      // Methode/Länge aus Gruppen-Label ("Bondings 65cm (Usbekisch Wellig)")
+      // als Fallback, falls das Item selbst nichts hergibt
+      const groupMethod = extractMethodClass_(group.label);
+      const groupLen = extractLengthCm_(group.label);
       for (const it of group.items) {
         const colorTok = extractColorToken_(it.farbe);
-        const lng = normalizeLaenge_(it.laenge);
-        const key = `${sheetKey}|${colorTok}|${lng}`;
+        const method = extractMethodClass_(it.farbe) || groupMethod;
+        const len = extractLengthCm_(it.laenge) || extractLengthCm_(it.farbe) || groupLen;
         const tier = (["TOP7", "MID", "REST", "KAUM"] as const).find((t) => t === it.tier);
-        map.set(key, {
+        const meta: Meta = {
           tier,
           verkauft30d: it.verkauft30d || 0,
           verkauft90d: it.verkauftG || 0,
           ziel: it.ziel || 0,
-        });
+        };
+        map.set(`${sheetKey}|${method}|${colorTok}|${len}`, meta);
+        const nlKey = `${sheetKey}|${method}|${colorTok}`;
+        const arr = noLenCandidates.get(nlKey) ?? [];
+        arr.push(meta);
+        noLenCandidates.set(nlKey, arr);
       }
     }
   }
 
   return alerts.map((a) => {
-    const colorTok = extractColorToken_(a.collection || a.product);
-    const lng = normalizeLaenge_(a.variant);
-    const key = `${a.sheetKey}|${colorTok}|${lng}`;
-    const meta = map.get(key);
+    // Farb-Token aus dem PRODUKT (dort steht "#…"), Collection nur als Fallback
+    const colorTok = extractColorToken_(a.product || a.collection);
+    const method = extractMethodClass_(`${a.product} ${a.collection}`);
+    const len =
+      extractLengthCm_(a.variant) ||
+      extractLengthCm_(a.product) ||
+      extractLengthCm_(a.collection);
+
+    let meta = map.get(`${a.sheetKey}|${method}|${colorTok}|${len}`);
+    if (!meta) {
+      // Ohne Länge — aber nur bei EINEM Kandidaten (sonst Verwechslungsgefahr)
+      const cands = noLenCandidates.get(`${a.sheetKey}|${method}|${colorTok}`);
+      if (cands && cands.length === 1) meta = cands[0];
+    }
     if (!meta) return a;
     return {
       ...a,
