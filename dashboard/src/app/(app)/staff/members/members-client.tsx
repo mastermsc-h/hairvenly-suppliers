@@ -1150,11 +1150,15 @@ function FmtBtn({ onClick, children, title }: { onClick: () => void; children: R
   );
 }
 
-function RichText({ name, initialHtml = "", placeholder }: { name: string; initialHtml?: string; placeholder?: string }) {
+/** Liest den formatierten Inhalt (sanitisiert) aus dem RichText-Feld eines Formulars. */
+function readRichContent(form: HTMLFormElement): string {
+  const ed = form.querySelector<HTMLElement>("[data-rich]");
+  return ed ? sanitizeHtml(ed.innerHTML) : "";
+}
+
+function RichText({ initialHtml = "", placeholder }: { initialHtml?: string; placeholder?: string }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [value, setValue] = useState(initialHtml);
-  function sync() { setValue(sanitizeHtml(ref.current?.innerHTML ?? "")); }
-  function cmd(c: "bold" | "italic" | "underline") { document.execCommand(c); ref.current?.focus(); sync(); }
+  function cmd(c: "bold" | "italic" | "underline") { document.execCommand(c); ref.current?.focus(); }
   return (
     <div>
       <div className="flex items-center gap-1 mb-1">
@@ -1163,14 +1167,13 @@ function RichText({ name, initialHtml = "", placeholder }: { name: string; initi
         <FmtBtn title="Unterstrichen" onClick={() => cmd("underline")}><Underline size={13} /></FmtBtn>
       </div>
       <div
+        data-rich
         ref={(el) => { if (el && !el.dataset.init) { el.innerHTML = initialHtml; el.dataset.init = "1"; } }}
         contentEditable
         suppressContentEditableWarning
-        onInput={sync}
         data-ph={placeholder ?? ""}
-        className={`min-h-[64px] rounded border border-neutral-300 px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-neutral-900 empty:before:content-[attr(data-ph)] empty:before:text-neutral-400 ${richDisplay}`}
+        className={`min-h-[64px] whitespace-pre-wrap rounded border border-neutral-300 px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-neutral-900 empty:before:content-[attr(data-ph)] empty:before:text-neutral-400 ${richDisplay}`}
       />
-      <input type="hidden" name={name} value={value} />
     </div>
   );
 }
@@ -1184,6 +1187,7 @@ function ReviewForm({ staffId, onChange }: { staffId: string; onChange: () => vo
     setError(null);
     const form = e.currentTarget;
     const fd = new FormData(form);
+    fd.set("content", readRichContent(form));
     start(async () => {
       const res = await addReview(staffId, fd);
       if (res?.error) { setError(res.error); return; }
@@ -1206,7 +1210,7 @@ function ReviewForm({ staffId, onChange }: { staffId: string; onChange: () => vo
       </div>
       <div>
         <span className="text-[10px] uppercase text-neutral-500">Inhalt / Absprachen</span>
-        <RichText key={rk} name="content" placeholder="Themen, Absprachen, Feedback … (Fett/Kursiv/Unterstrichen möglich)" />
+        <RichText key={rk} placeholder="Themen, Absprachen, Feedback … (Fett/Kursiv/Unterstrichen möglich)" />
       </div>
       <div className="flex justify-end">
         <button type="submit" disabled={pending} className="rounded-lg bg-neutral-900 text-white px-3 py-1.5 text-xs font-medium">{pending ? "..." : "+ Gespräch dokumentieren"}</button>
@@ -1224,7 +1228,9 @@ function ReviewItem({ review, onChange }: { review: StaffReview; onChange: () =>
   function save(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    fd.set("content", readRichContent(form));
     start(async () => {
       const res = await updateReview(review.id, fd);
       if (res?.error) { setError(res.error); return; }
@@ -1247,7 +1253,7 @@ function ReviewItem({ review, onChange }: { review: StaffReview; onChange: () =>
               <input name="next_date" type="date" defaultValue={review.next_date ?? ""} className="block w-36 rounded border border-neutral-300 px-2 py-1 text-sm" />
             </label>
           </div>
-          <RichText name="content" initialHtml={review.content ?? ""} placeholder="Inhalt …" />
+          <RichText initialHtml={review.content ?? ""} placeholder="Inhalt …" />
           {error && <div className="text-rose-600 text-[11px]">{error}</div>}
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setEditing(false)} className="text-xs text-neutral-500">Abbrechen</button>
