@@ -1215,16 +1215,20 @@ function readRichContent(form: HTMLFormElement): string {
 }
 
 function RichText({ initialHtml = "", placeholder, template }: { initialHtml?: string; placeholder?: string; template?: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  function cmd(c: "bold" | "italic" | "underline") { document.execCommand(c); ref.current?.focus(); }
+  const rootRef = useRef<HTMLDivElement>(null);
+  function editor(): HTMLElement | null {
+    return rootRef.current?.querySelector<HTMLElement>("[data-rich]") ?? null;
+  }
+  function cmd(c: "bold" | "italic" | "underline") { editor()?.focus(); document.execCommand(c); }
   function insertTemplate() {
-    if (!ref.current || !template) return;
-    const hasContent = (ref.current.textContent ?? "").trim().length > 0;
-    ref.current.innerHTML = hasContent ? ref.current.innerHTML + "<div><br></div>" + template : template;
-    ref.current.focus();
+    const ed = editor();
+    if (!ed || !template) return;
+    const hasContent = (ed.textContent ?? "").trim().length > 0;
+    ed.innerHTML = hasContent ? ed.innerHTML + "<div><br></div>" + template : template;
+    ed.focus();
   }
   return (
-    <div>
+    <div ref={rootRef}>
       <div className="flex items-center gap-1 mb-1">
         <FmtBtn title="Fett" onClick={() => cmd("bold")}><Bold size={13} /></FmtBtn>
         <FmtBtn title="Kursiv" onClick={() => cmd("italic")}><Italic size={13} /></FmtBtn>
@@ -1238,7 +1242,7 @@ function RichText({ initialHtml = "", placeholder, template }: { initialHtml?: s
       </div>
       <div
         data-rich
-        ref={(el) => { ref.current = el; if (el && !el.dataset.init) { el.innerHTML = initialHtml; el.dataset.init = "1"; } }}
+        ref={(el) => { if (el && !el.dataset.init) { el.innerHTML = initialHtml; el.dataset.init = "1"; } }}
         contentEditable
         suppressContentEditableWarning
         data-ph={placeholder ?? ""}
