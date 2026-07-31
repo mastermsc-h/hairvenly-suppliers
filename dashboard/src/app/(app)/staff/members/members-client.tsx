@@ -676,7 +676,7 @@ function AdminPanel({
               ))}
             </ul>
           )}
-          <ReviewForm staffId={member.id} onChange={onChange} />
+          <ReviewForm staffId={member.id} team={member.team} isTrainee={member.is_trainee} onChange={onChange} />
         </div>
       </CollapsibleCard>
 
@@ -1150,21 +1150,91 @@ function FmtBtn({ onClick, children, title }: { onClick: () => void; children: R
   );
 }
 
+// ── Vorlagen für Mitarbeitergespräche (team-spezifisch) ─────────
+
+const REVIEW_GENERAL = [
+  "Rückblick: Was lief seit dem letzten Gespräch gut? Worauf bist du stolz?",
+  "Herausforderungen: Wo gab es Schwierigkeiten / was hat dich ausgebremst?",
+  "Zufriedenheit mit deiner Rolle (1–10) — und warum?",
+  "Zusammenarbeit im Team und mit anderen Bereichen?",
+  "Entwicklung: Welche Fähigkeiten möchtest du ausbauen? Welche Schulung wäre hilfreich?",
+  "Ziele bis zum nächsten Gespräch (1–3)?",
+  "Feedback an die Führung: Was brauchst du von mir?",
+  "Sonstiges: Wünsche, Belastung, Perspektive im Unternehmen?",
+];
+
+const REVIEW_TEAM: Record<string, string[]> = {
+  salon: [
+    "Wie zufrieden bist du mit Ablauf am Behandlungsplatz / Zeitplanung?",
+    "Kundenfeedback: Was hörst du oft, wo hakt es bei Beratung/Ergebnis?",
+    "Fehlt dir Material/Ausstattung/Weiterbildung (Techniken, Farben)?",
+    "Wie ist deine Auslastung — zu viel / zu wenig / gut?",
+  ],
+  kundenservice: [
+    "Welche Kundenanliegen häufen sich (Rückgaben, Fragen, Beschwerden)?",
+    "Wo fehlen dir Infos/Tools, um schneller/besser zu antworten?",
+    "Wie erlebst du schwierige Kundengespräche — brauchst du Unterstützung?",
+    "Ideen, wie wir Anfragen reduzieren oder Zufriedenheit steigern könnten?",
+  ],
+  marketing: [
+    "Welche Kampagnen/Inhalte liefen zuletzt gut, welche nicht — warum?",
+    "Wo brauchst du mehr Ressourcen (Budget, Tools, Content, Abstimmung)?",
+    "Zusammenarbeit mit Salon/Produkt (Content-Nachschub, Freigaben)?",
+    "Welche Kennzahlen willst du als Nächstes verbessern?",
+  ],
+  lager: [
+    "Wie sind Abläufe bei Wareneingang/Kommissionierung/Versand — wo stockt es?",
+    "Stimmen Bestände/Ordnung? Was verursacht Fehler oder Zeitverlust?",
+    "Fehlt Ausstattung/Platz/Prozess, der die Arbeit erleichtern würde?",
+    "Wie ist die Belastung in Stoßzeiten?",
+  ],
+};
+
+const REVIEW_AZUBI = [
+  "Wie kommst du mit den Ausbildungsinhalten / der Berufsschule zurecht?",
+  "Fühlst du dich gut angeleitet — wer ist deine Ansprechperson?",
+  "Welche Aufgaben möchtest du als Nächstes lernen/übernehmen?",
+  "Stand für die nächste Prüfung — brauchst du Unterstützung?",
+  "Feedback zur Betreuung: zu viel / zu wenig gefordert?",
+];
+
+function reviewTemplateHtml(team: string, isTrainee: boolean): string {
+  const section = (heading: string, qs: string[]) =>
+    `<div><b>— ${heading} —</b></div>` +
+    qs.map((q) => `<div>${q}</div><div><br></div>`).join("");
+  let html = section("Allgemein", REVIEW_GENERAL);
+  if (REVIEW_TEAM[team]) html += section(teamMeta(team).label, REVIEW_TEAM[team]);
+  if (isTrainee) html += section("Ausbildung", REVIEW_AZUBI);
+  return html;
+}
+
 /** Liest den formatierten Inhalt (sanitisiert) aus dem RichText-Feld eines Formulars. */
 function readRichContent(form: HTMLFormElement): string {
   const ed = form.querySelector<HTMLElement>("[data-rich]");
   return ed ? sanitizeHtml(ed.innerHTML) : "";
 }
 
-function RichText({ initialHtml = "", placeholder }: { initialHtml?: string; placeholder?: string }) {
+function RichText({ initialHtml = "", placeholder, template }: { initialHtml?: string; placeholder?: string; template?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   function cmd(c: "bold" | "italic" | "underline") { document.execCommand(c); ref.current?.focus(); }
+  function insertTemplate() {
+    if (!ref.current || !template) return;
+    const hasContent = (ref.current.textContent ?? "").trim().length > 0;
+    ref.current.innerHTML = hasContent ? ref.current.innerHTML + "<div><br></div>" + template : template;
+    ref.current.focus();
+  }
   return (
     <div>
       <div className="flex items-center gap-1 mb-1">
         <FmtBtn title="Fett" onClick={() => cmd("bold")}><Bold size={13} /></FmtBtn>
         <FmtBtn title="Kursiv" onClick={() => cmd("italic")}><Italic size={13} /></FmtBtn>
         <FmtBtn title="Unterstrichen" onClick={() => cmd("underline")}><Underline size={13} /></FmtBtn>
+        {template && (
+          <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={insertTemplate}
+            className="ml-1 inline-flex items-center gap-1 rounded border border-neutral-300 px-2 h-7 text-xs text-neutral-700 hover:bg-neutral-100">
+            <ClipboardList size={12} /> Vorlage einfügen
+          </button>
+        )}
       </div>
       <div
         data-rich
@@ -1178,10 +1248,11 @@ function RichText({ initialHtml = "", placeholder }: { initialHtml?: string; pla
   );
 }
 
-function ReviewForm({ staffId, onChange }: { staffId: string; onChange: () => void }) {
+function ReviewForm({ staffId, team, isTrainee, onChange }: { staffId: string; team: string; isTrainee: boolean; onChange: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [rk, setRk] = useState(0); // Remount-Key, um den Editor nach dem Speichern zu leeren
+  const template = useMemo(() => reviewTemplateHtml(team, isTrainee), [team, isTrainee]);
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
@@ -1210,7 +1281,7 @@ function ReviewForm({ staffId, onChange }: { staffId: string; onChange: () => vo
       </div>
       <div>
         <span className="text-[10px] uppercase text-neutral-500">Inhalt / Absprachen</span>
-        <RichText key={rk} placeholder="Themen, Absprachen, Feedback … (Fett/Kursiv/Unterstrichen möglich)" />
+        <RichText key={rk} template={template} placeholder="Themen, Absprachen, Feedback … — oder „Vorlage einfügen“ nutzen" />
       </div>
       <div className="flex justify-end">
         <button type="submit" disabled={pending} className="rounded-lg bg-neutral-900 text-white px-3 py-1.5 text-xs font-medium">{pending ? "..." : "+ Gespräch dokumentieren"}</button>
