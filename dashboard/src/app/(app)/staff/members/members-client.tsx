@@ -1238,7 +1238,7 @@ function RichText({ initialHtml = "", placeholder, template }: { initialHtml?: s
       </div>
       <div
         data-rich
-        ref={(el) => { if (el && !el.dataset.init) { el.innerHTML = initialHtml; el.dataset.init = "1"; } }}
+        ref={(el) => { ref.current = el; if (el && !el.dataset.init) { el.innerHTML = initialHtml; el.dataset.init = "1"; } }}
         contentEditable
         suppressContentEditableWarning
         data-ph={placeholder ?? ""}
