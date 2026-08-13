@@ -16,6 +16,7 @@ import {
   unskipPackPhotos,
   updateShippingAddress,
   refreshSessionSnapshot,
+  fetchSessionPhotos,
   type PhotoSkipReason,
 } from "@/lib/actions/pack";
 import CelebrationOverlay from "../celebration-overlay";
@@ -467,6 +468,51 @@ export default function PackMode({
     document.addEventListener("click", onDocClick);
     return () => document.removeEventListener("click", onDocClick);
   }, [phase]);
+
+  // Handy-Handoff: Während Schritt 2 (Fotos) pollt der iMac den Foto-Stand.
+  // Wird das Beweisfoto parallel am Handy aufgenommen (QR öffnet dieselbe
+  // Bestellung), erscheint es hier automatisch → weiter zu Schritt 3. Merge
+  // statt Überschreiben, damit ein gerade lokal (Desktop) hochgeladenes Foto
+  // nicht von einer veralteten Antwort weggeräumt wird.
+  useEffect(() => {
+    if (phase !== "photos") return;
+    let cancelled = false;
+    const poll = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const res = await fetchSessionPhotos(sessionId);
+        if (cancelled) return;
+        setPhotos((local) => {
+          const merged: typeof local = { ...res.photos };
+          for (const k of Object.keys(local)) {
+            if ((local[k]?.length ?? 0) > 0) merged[k] = local[k];
+          }
+          return merged;
+        });
+        setPhotosSkipped((cur) => cur || res.photosSkipped);
+        if (res.photosSkipReason) setPhotosSkipReason(res.photosSkipReason);
+      } catch {
+        // ignore — nächster Tick versucht es erneut
+      }
+    };
+    const iv = setInterval(poll, 3500);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [phase, sessionId]);
+
+  // QR für den Handy-Handoff (öffnet dieselbe Bestellung am Handy zum Fotografieren)
+  const [handoffQr, setHandoffQr] = useState<string>("");
+  useEffect(() => {
+    if (phase !== "photos") return;
+    if (typeof window === "undefined") return;
+    const clean = orderName.replace(/^#/, "");
+    const url = `${window.location.origin}/pack/${clean}`;
+    QRCode.toDataURL(url, { width: 320, margin: 1, errorCorrectionLevel: "M" })
+      .then(setHandoffQr)
+      .catch(() => setHandoffQr(""));
+  }, [phase, orderName]);
 
   const submitBarcode = useCallback(
     // source: "camera" → blockierendes Erfolgs-Overlay (verhindert Doppel-Lesung
@@ -1472,6 +1518,27 @@ export default function PackMode({
                   {t(locale, "shipping.photos_skip_button")}
                 </button>
               </div>
+              {/* Handy-Handoff: Foto am iPhone aufnehmen — erscheint hier automatisch.
+                  Ideal am iMac, wo die Webcam zum Abfotografieren ungeeignet ist. */}
+              {handoffQr && (
+                <div className="mb-3 flex flex-col sm:flex-row items-center gap-4 bg-blue-50 border border-blue-200 rounded-xl p-4">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={handoffQr} alt="Handy-QR" className="w-28 h-28 rounded-lg bg-white p-1 shrink-0" />
+                  <div className="text-sm text-blue-900 min-w-0">
+                    <div className="font-bold flex items-center gap-1.5">
+                      <Smartphone size={16} /> Foto am Handy aufnehmen
+                    </div>
+                    <div className="text-xs text-blue-800/90 mt-1 leading-relaxed">
+                      QR mit dem iPhone scannen → dieselbe Bestellung öffnet sich → dort das
+                      Beweisfoto machen. Es <strong>erscheint hier automatisch</strong> und der
+                      Vorgang springt weiter zu Schritt 3. Kein Datei-Upload am iMac nötig.
+                    </div>
+                    <div className="text-[11px] text-blue-700/80 mt-1.5 flex items-center gap-1">
+                      <Loader2 size={11} className="animate-spin" /> Warte auf Foto vom Handy…
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-1 gap-3">
                 {PHOTO_TYPES.map((type, idx) => {
                   const nextIdx = PHOTO_TYPES.findIndex((t) => (photos[t]?.length ?? 0) === 0);

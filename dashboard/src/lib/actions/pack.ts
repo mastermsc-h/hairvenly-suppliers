@@ -1244,6 +1244,50 @@ export async function unskipPackPhotos(
 }
 
 /**
+ * Liest den aktuellen Foto-Stand einer Session (für Live-Polling am Desktop):
+ * Wird das Beweisfoto parallel am Handy aufgenommen (QR-Handoff), erkennt der
+ * iMac so automatisch, dass ein Foto da ist, und geht weiter zu Schritt 3.
+ */
+export async function fetchSessionPhotos(sessionId: string): Promise<{
+  photos: Record<string, { id: string; url: string }[]>;
+  photosSkipped: boolean;
+  photosSkipReason: PhotoSkipReason | null;
+}> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) throw new Error("Forbidden");
+  const supabase = await createClient();
+
+  const { data: session } = await supabase
+    .from("pack_sessions")
+    .select("photos_skipped, photos_skip_reason")
+    .eq("id", sessionId)
+    .single();
+
+  const { data: photos } = await supabase
+    .from("pack_photos")
+    .select("id, photo_type, storage_path, taken_at")
+    .eq("session_id", sessionId)
+    .order("taken_at", { ascending: true });
+
+  const photoMap: Record<string, { id: string; url: string }[]> = {};
+  for (const p of photos ?? []) {
+    const { data: signed } = await supabase.storage
+      .from("pack-photos")
+      .createSignedUrl(p.storage_path, 60 * 60);
+    if (signed?.signedUrl) {
+      if (!photoMap[p.photo_type]) photoMap[p.photo_type] = [];
+      photoMap[p.photo_type].push({ id: p.id, url: signed.signedUrl });
+    }
+  }
+
+  return {
+    photos: photoMap,
+    photosSkipped: session?.photos_skipped ?? false,
+    photosSkipReason: (session?.photos_skip_reason as PhotoSkipReason | null) ?? null,
+  };
+}
+
+/**
  * Notizen einer Pack-Session speichern (z.B. "Karton beschädigt", Reklamations-Hinweis).
  */
 export async function savePackSessionNotes(
