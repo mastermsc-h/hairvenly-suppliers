@@ -219,11 +219,22 @@ export default function PackMode({
   const [manualForms, setManualForms] = useState<Record<number, { open: boolean; checks: boolean[] }>>({});
   // Live-Scan-Historie
   const [scanHistory, setScanHistory] = useState<Awaited<ReturnType<typeof fetchSessionScans>>>([]);
-  // Großer Vollbild-Erfolgsflash (bleibt offen bis User „Weiter" klickt)
+  // Großer Vollbild-Erfolgsflash (bleibt offen bis User „Weiter" klickt).
+  // NUR für Kamera-Scans — verhindert dass derselbe Code (noch im Bild) doppelt
+  // gewertet wird. Handscanner/Tastatur nutzt stattdessen quickOk (nicht-blockierend).
   const [bigSuccess, setBigSuccess] = useState<{
     title: string;
     count: number;
     total: number;
+  } | null>(null);
+  // Nicht-blockierende Erfolgs-Quittung für Handscanner/Tastatur-Eingabe: kurze
+  // grüne Bestätigung, KEIN "Weiter"-Klick, nächster Scan sofort möglich.
+  // `n` wird bei jedem Treffer erhöht → Auto-Clear-Timer startet neu.
+  const [quickOk, setQuickOk] = useState<{
+    title: string;
+    count: number;
+    total: number;
+    n: number;
   } | null>(null);
 
   function setManualOpen(idx: number, open: boolean) {
@@ -282,6 +293,14 @@ export default function PackMode({
     const tm = setTimeout(() => setFlash({ kind: null }), ms);
     return () => clearTimeout(tm);
   }, [flash]);
+
+  // quickOk auto-clear (nicht-blockierende Handscanner-Quittung). `n` im
+  // Dependency-Array → jeder neue Treffer setzt den Timer zurück.
+  useEffect(() => {
+    if (!quickOk) return;
+    const tm = setTimeout(() => setQuickOk(null), 1100);
+    return () => clearTimeout(tm);
+  }, [quickOk]);
 
   const isComplete = useMemo(() => {
     return expectedItems.every((e, idx) => {
@@ -429,8 +448,31 @@ export default function PackMode({
     setTimeout(tryScroll, 250);
   }, [phase]);
 
+  // Fokus zurück aufs Scan-Feld, sobald das (Kamera-)Erfolgs-Overlay schließt.
+  useEffect(() => {
+    if (!bigSuccess && phase === "scan") inputRef.current?.focus();
+  }, [bigSuccess, phase]);
+
+  // Handscanner tippt NUR ins fokussierte Feld. Klickt man am iMac irgendwo
+  // hin (leere Kartenfläche), ginge der nächste Scan sonst verloren. Darum:
+  // Klick ins Nichts während der Scan-Phase → Fokus zurück aufs Scan-Feld.
+  // Klicks auf echte Bedien-/Eingabe-Elemente bleiben unberührt.
+  useEffect(() => {
+    if (phase !== "scan") return;
+    function onDocClick(e: MouseEvent) {
+      const el = e.target as HTMLElement | null;
+      if (!el || el.closest("input, textarea, select, button, a, label, [contenteditable]")) return;
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, [phase]);
+
   const submitBarcode = useCallback(
-    (barcode: string) => {
+    // source: "camera" → blockierendes Erfolgs-Overlay (verhindert Doppel-Lesung
+    // desselben Codes im Kamerabild). "input" (Handscanner/Tastatur) → nicht-
+    // blockierende Quittung, damit schnelles Durchscannen nicht ausgebremst wird.
+    (barcode: string, source: "camera" | "input" = "input") => {
       // Solange Erfolgs-Overlay offen ist → keine neuen Scans annehmen
       if (bigSuccess) return;
       // Solange ein Server-Call läuft → keine parallelen Scans
@@ -473,11 +515,13 @@ export default function PackMode({
             if (res.status === "match") {
               playBeep(true);
               setFlash({ kind: "match", message: item.title });
-              setBigSuccess({
+              const okInfo = {
                 title: res.matchedTitle ?? item.title ?? "Zubehör",
                 count,
                 total: item.quantity,
-              });
+              };
+              if (source === "camera") setBigSuccess(okInfo);
+              else setQuickOk((q) => ({ ...okInfo, n: (q?.n ?? 0) + 1 }));
               if (status === "open") setStatus("in_progress");
             } else {
               playBeep(false);
@@ -514,11 +558,9 @@ export default function PackMode({
             const counterKey = it ? it.barcode || `manual:${matchedIdx}` : trimmed;
             const count = res.scannedCounts[counterKey] ?? 0;
             const total = it?.quantity ?? 0;
-            setBigSuccess({
-              title: res.matchedTitle ?? "OK",
-              count,
-              total,
-            });
+            const okInfo = { title: res.matchedTitle ?? "OK", count, total };
+            if (source === "camera") setBigSuccess(okInfo);
+            else setQuickOk((q) => ({ ...okInfo, n: (q?.n ?? 0) + 1 }));
             if (status === "open") setStatus("in_progress");
           } else if (res.status === "overflow") {
             playBeep(false);
@@ -624,7 +666,7 @@ export default function PackMode({
     const barcode = scanInput.trim();
     if (!barcode) return;
     setScanInput("");
-    submitBarcode(barcode);
+    submitBarcode(barcode, "input");
   }
 
   async function handlePhoto(type: PhotoType, file: File) {
@@ -732,6 +774,28 @@ export default function PackMode({
           </button>
           <div className="mt-4 text-white/80 text-sm">
             Tippe „Weiter", um den nächsten Artikel zu scannen.
+          </div>
+        </div>
+      )}
+
+      {/* Nicht-blockierende Erfolgs-Quittung für Handscanner/Tastatur:
+          kleine grüne Toast oben, pointer-events-none → blockiert NIE den
+          nächsten Scan. Verschwindet nach ~1,1s von allein. */}
+      {quickOk && !bigSuccess && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-40 pointer-events-none px-3 w-full max-w-md">
+          <div className="flex items-center gap-3 bg-emerald-600 text-white rounded-xl shadow-lg px-4 py-2.5">
+            <CheckCircle2 size={30} strokeWidth={2.5} className="shrink-0" />
+            <div className="text-left min-w-0">
+              {quickOk.total > 0 && (
+                <div className="text-lg font-black leading-none">
+                  {quickOk.count}/{quickOk.total}
+                  {quickOk.count >= quickOk.total && (
+                    <span className="ml-2 text-emerald-100 text-xs font-semibold align-middle">komplett ✓</span>
+                  )}
+                </div>
+              )}
+              <div className="text-sm font-semibold leading-tight line-clamp-1">{quickOk.title}</div>
+            </div>
           </div>
         </div>
       )}
@@ -956,7 +1020,7 @@ export default function PackMode({
             </div>
           )}
 
-          {phase === "scan" && <CameraScanner onScan={submitBarcode} paused={isPending} onActiveChange={setCameraActive} />}
+          {phase === "scan" && <CameraScanner onScan={(code) => submitBarcode(code, "camera")} paused={isPending} onActiveChange={setCameraActive} />}
 
           {phase === "photos" && (
             <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 shadow-sm text-center">
