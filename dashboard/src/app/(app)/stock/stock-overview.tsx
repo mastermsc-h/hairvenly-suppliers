@@ -160,7 +160,7 @@ export default function StockOverviewClient({ stats, locale }: { stats: StockSta
             {([
               { id: "deadStock", title: "Auf Lager — kein Verkauf (90T)", description: "Hoher Bestand, aber 0 Verkäufe in 90 Tagen — Kapital liegt brach", icon: <Skull size={16} />, color: "rose" as const, products: stats.insights.deadStock },
               { id: "slowMovers", title: "Slow Mover", description: "Lager > 150g, aber kaum Bewegung in 90 Tagen", icon: <Snowflake size={16} />, color: "blue" as const, products: stats.insights.slowMovers },
-              { id: "hotMissing", title: "🔥 Topseller mit niedrigem Lager", description: "TOP7-Produkte unter 200g & nichts unterwegs — dringend nachbestellen", icon: <Flame size={16} />, color: "orange" as const, products: stats.insights.hotMissing },
+              { id: "hotMissing", title: "🔥 Topseller mit niedrigem Lager", description: "TOP7 unter 600g Lager — ⚠ = kein Nachschub unterwegs, ✈ = bestellt", icon: <Flame size={16} />, color: "orange" as const, products: stats.insights.hotMissing },
               { id: "needsReorder", title: "Nachbestellen empfohlen", description: "Lager < Bedarfsprognose und kein Nachschub unterwegs", icon: <ShoppingCart size={16} />, color: "amber" as const, products: stats.insights.needsReorder },
               { id: "trendingUp", title: "Wachsende Verkäufe", description: "30-Tage-Trend deutlich höher als 90-Tage-Schnitt", icon: <TrendingUp size={16} />, color: "emerald" as const, products: stats.insights.trendingUp },
               { id: "overOrdered", title: "Eventuell überbestellt", description: "Mehr als 2× des Bedarfs unterwegs — könnten Lagerproblem werden", icon: <PackagePlus size={16} />, color: "purple" as const, products: stats.insights.overOrdered },

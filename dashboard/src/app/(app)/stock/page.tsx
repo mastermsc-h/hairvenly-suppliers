@@ -120,11 +120,22 @@ function buildInsights(sections: Awaited<ReturnType<typeof readTopseller>>["sect
     .sort((a, b) => b.lagerG - a.lagerG)
     .map((i) => toProduct(i, `${i.lagerG}g · ${i.verkauftG}g 90T`));
 
-  // 2. Hot Sellers ohne Lager + ohne Bestellung
+  // 2. Topseller mit niedrigem Lager. Frueher: nur < 200g UND nichts
+  // unterwegs — sobald alles bestellt war, blieb die Karte leer und
+  // versteckte die eigentlich spannende Info. Jetzt: alle TOP7 < 600g,
+  // nicht-bestellte zuerst (⚠), Bestellmenge sichtbar.
   const hotMissing = all
-    .filter((i) => i.tier === "TOP7" && i.lagerG < 200 && i.unterwegsG === 0)
-    .sort((a, b) => b.verkauft30d - a.verkauft30d)
-    .map((i) => toProduct(i, `${i.lagerG}g · ${i.verkauft30d}g 30T`));
+    .filter((i) => i.tier === "TOP7" && i.lagerG < 600)
+    .sort((a, b) => {
+      const aOrdered = a.unterwegsG > 0 ? 1 : 0;
+      const bOrdered = b.unterwegsG > 0 ? 1 : 0;
+      if (aOrdered !== bOrdered) return aOrdered - bOrdered; // ⚠ nicht bestellt zuerst
+      if (a.lagerG !== b.lagerG) return a.lagerG - b.lagerG;
+      return b.verkauft30d - a.verkauft30d;
+    })
+    .map((i) => toProduct(i, i.unterwegsG > 0
+      ? `${i.lagerG}g · 30T ${i.verkauft30d}g · ✈ ${i.unterwegsG}g`
+      : `${i.lagerG}g · 30T ${i.verkauft30d}g · ⚠ nicht bestellt`));
 
   // 3. Überbestellt: Unterwegs deutlich größer als Bedarfsprognose
   const overOrdered = all
