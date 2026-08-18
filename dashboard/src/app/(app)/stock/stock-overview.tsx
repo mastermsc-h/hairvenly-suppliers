@@ -2,9 +2,12 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Scale, Package, AlertTriangle, AlertCircle, Truck, ArrowRight, Snowflake, Flame, PackagePlus, Skull, TrendingUp, ShoppingCart, ChevronDown, Maximize2, Minimize2 } from "lucide-react";
+import { Scale, Package, AlertTriangle, AlertCircle, Truck, ArrowRight, Snowflake, Flame, PackagePlus, Skull, TrendingUp, ShoppingCart, ChevronDown, Maximize2, Minimize2, LineChart } from "lucide-react";
 import { t, type Locale } from "@/lib/i18n";
 import SyncBadge from "./sync-badge";
+import StockHistoryChart, { type StockSnapshot } from "./stock-history-chart";
+
+export type { StockSnapshot };
 
 interface CollectionStat {
   name: string;
@@ -50,8 +53,9 @@ interface StockStats {
   insights: InsightsData;
 }
 
-export default function StockOverviewClient({ stats, locale }: { stats: StockStats; locale: Locale }) {
+export default function StockOverviewClient({ stats, locale, history = [] }: { stats: StockStats; locale: Locale; history?: StockSnapshot[] }) {
   const [insightsOpen, setInsightsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [focusedCard, setFocusedCard] = useState<string | null>(null);
   const toggleFocus = (id: string) => setFocusedCard((cur) => (cur === id ? null : id));
   return (
@@ -138,6 +142,29 @@ export default function StockOverviewClient({ stats, locale }: { stats: StockSta
           collections={stats.glattCollections}
           accentColor="green"
         />
+      </section>
+
+      {/* Lagerentwicklung — collapsible */}
+      <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
+        <button
+          onClick={() => setHistoryOpen(!historyOpen)}
+          className="w-full flex items-center justify-between px-5 py-4 hover:bg-neutral-50 transition"
+        >
+          <div className="flex items-center gap-3 text-left">
+            <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+              <LineChart size={16} />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-neutral-900">Lagerentwicklung</h2>
+              <p className="text-xs text-neutral-500 mt-0.5">Gesamtbestand über Zeit — täglich/monatlich</p>
+            </div>
+          </div>
+          <ChevronDown
+            size={20}
+            className={`text-neutral-400 transition-transform ${historyOpen ? "rotate-180" : ""}`}
+          />
+        </button>
+        {historyOpen && <StockHistoryChart history={history} />}
       </section>
 
       {/* Insights — collapsible */}

@@ -6,6 +6,7 @@ import {
   cronRefundsSync,
   cronRepurchaseCompute,
   cronProductSalesSync,
+  cronStockSnapshot,
 } from "@/lib/cron-tasks";
 
 // Hobby plan timeout = 60s. If you upgrade to Pro you can bump this.
@@ -68,6 +69,13 @@ export async function GET(req: NextRequest) {
     results.productSales = overBudget()
       ? { skipped: "time budget exceeded" }
       : await cronProductSalesSync(supabase, 2);
+  }
+  // Leichtgewichtig (2 Sheet-Reads) — Lagerbestand-Snapshot für den
+  // Entwicklungs-Chart auf /stock.
+  if (!skip.includes("stocksnapshot")) {
+    results.stockSnapshot = overBudget()
+      ? { skipped: "time budget exceeded" }
+      : await cronStockSnapshot(supabase);
   }
 
   results.finishedAt = new Date().toISOString();

@@ -391,3 +391,47 @@ export async function cronRepurchaseCompute(
     return { exchange: 0, newOrder: 0, lost: 0, pending: 0, skipped: 0, error: e instanceof Error ? e.message : String(e) };
   }
 }
+
+// ── Stock snapshot ─────────────────────────────────────────────
+// Täglicher Lagerbestand-Snapshot für den Entwicklungs-Chart auf /stock.
+// Liest beide Inventar-Tabs aus dem Stock-Calculation-Sheet und upsertet
+// EINEN Datensatz pro Tag (spätester Lauf gewinnt).
+export async function cronStockSnapshot(
+  supabase: SupabaseClient,
+): Promise<{ ok: boolean; totalKg?: number; error?: string }> {
+  try {
+    const { readInventorySheet } = await import("@/lib/stock-sheets");
+    const [wellig, glatt] = await Promise.all([
+      readInventorySheet("Usbekisch - WELLIG"),
+      readInventorySheet("Russisch - GLATT"),
+    ]);
+
+    const welligKg = wellig.rows.reduce((s, r) => s + r.totalWeight, 0) / 1000;
+    const glattKg = glatt.rows.reduce((s, r) => s + r.totalWeight, 0) / 1000;
+    // Leere Sheets (z.B. mitten im Apps-Script-Refresh) nicht als 0 speichern
+    if (wellig.rows.length === 0 || glatt.rows.length === 0) {
+      return { ok: false, error: "Sheet leer — Snapshot übersprungen" };
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const { error } = await supabase.from("stock_snapshots").upsert(
+      {
+        taken_on: today,
+        total_kg: Math.round((welligKg + glattKg) * 100) / 100,
+        wellig_kg: Math.round(welligKg * 100) / 100,
+        glatt_kg: Math.round(glattKg * 100) / 100,
+        wellig_products: wellig.rows.length,
+        glatt_products: glatt.rows.length,
+        zero_count:
+          wellig.rows.filter((r) => r.quantity === 0).length +
+          glatt.rows.filter((r) => r.quantity === 0).length,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "taken_on" },
+    );
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, totalKg: Math.round((welligKg + glattKg) * 100) / 100 };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}

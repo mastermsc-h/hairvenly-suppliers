@@ -1,9 +1,10 @@
 import { requireProfile } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/server";
 import { t, type Locale } from "@/lib/i18n";
 import { readDashboardAlerts, readInventorySheet, readTopseller } from "@/lib/stock-sheets";
 import { fetchOrderIdByName } from "@/lib/order-name-map";
 import { filterArchivedFromStock, filterArchivedFromTopseller } from "@/lib/filter-archived-orders";
-import StockOverviewClient, { type InsightProduct } from "./stock-overview";
+import StockOverviewClient, { type InsightProduct, type StockSnapshot } from "./stock-overview";
 
 export const revalidate = 60;
 
@@ -12,13 +13,20 @@ export default async function StockIndexPage() {
   if (!profile.is_admin) return <div className="p-8 text-neutral-500">Nur für Admins.</div>;
   const locale = (profile.language ?? "de") as Locale;
 
-  const [alertsRaw, wellig, glatt, topsellerRaw, orderIdByName] = await Promise.all([
+  const supabase = await createClient();
+  const [alertsRaw, wellig, glatt, topsellerRaw, orderIdByName, snapshotRes] = await Promise.all([
     readDashboardAlerts(),
     readInventorySheet("Usbekisch - WELLIG"),
     readInventorySheet("Russisch - GLATT"),
     readTopseller(),
     fetchOrderIdByName(),
+    supabase
+      .from("stock_snapshots")
+      .select("taken_on, total_kg, wellig_kg, glatt_kg")
+      .order("taken_on", { ascending: true })
+      .limit(400),
   ]);
+  const history = (snapshotRes.data ?? []) as StockSnapshot[];
 
   // Drop archived orders (stocked / cancelled) from all alert lists + topseller
   const alerts = {
@@ -45,9 +53,40 @@ export default async function StockIndexPage() {
   const welligZero = wellig.rows.filter((r) => r.quantity === 0).length;
   const glattZero = glatt.rows.filter((r) => r.quantity === 0).length;
 
+  // Opportunistischer Tages-Snapshot für den Entwicklungs-Chart: der Cron
+  // (04:00) schreibt ihn primär, aber so wächst die Historie auch bei
+  // Cron-Ausfällen. Fehler bewusst geschluckt — die Seite darf daran nie
+  // scheitern.
+  const today = new Date().toISOString().slice(0, 10);
+  if (welligProducts > 0 && glattProducts > 0) {
+    await supabase.from("stock_snapshots").upsert(
+      {
+        taken_on: today,
+        total_kg: Math.round(totalKg * 100) / 100,
+        wellig_kg: Math.round(welligTotalKg * 100) / 100,
+        glatt_kg: Math.round(glattTotalKg * 100) / 100,
+        wellig_products: welligProducts,
+        glatt_products: glattProducts,
+        zero_count: welligZero + glattZero,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "taken_on" },
+    ).then(() => {});
+    // Heutigen Punkt auch in der Chart-Serie zeigen, falls er gerade erst entstand
+    if (!history.some((h) => h.taken_on === today)) {
+      history.push({
+        taken_on: today,
+        total_kg: Math.round(totalKg * 100) / 100,
+        wellig_kg: Math.round(welligTotalKg * 100) / 100,
+        glatt_kg: Math.round(glattTotalKg * 100) / 100,
+      });
+    }
+  }
+
   return (
     <StockOverviewClient
       locale={locale}
+      history={history}
       stats={{
         totalKg,
         welligKg: welligTotalKg,
