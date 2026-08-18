@@ -202,6 +202,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                   href="/chatbot/inbox"
                   items={[
                     { href: "/chatbot/inbox",         label: "Chat-Inbox", badge: <ChatbotInboxBadge /> },
+                    { href: "/chatbot/stats",         label: "Statistik" },
                     { href: "/chatbot/reservations",  label: "Reservierungen (Produkte)" },
                     { href: "/chatbot/appointments",  label: "Termin-Anfragen" },
                     { href: "/chatbot/guardian",      label: "Wächter (Alerts)" },
