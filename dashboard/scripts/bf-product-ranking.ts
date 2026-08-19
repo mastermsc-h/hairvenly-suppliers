@@ -138,6 +138,35 @@ async function main() {
   mkdirSync("scripts/output", { recursive: true });
   writeFileSync("scripts/output/bf-2025-ranking.csv", csv.join("\n"), "utf-8");
   console.log(`\n✓ CSV geschrieben: scripts/output/bf-2025-ranking.csv`);
+
+  // ── Split in zwei Lieferanten-CSVs ──────────────────────────────
+  // Russisch Glatt = Amanda, Usbekisch Wellig = Ebru/China. Zuordnung
+  // wie in classify(): RUSSISCH/RU/GLATT-keywords + Clips → glatt;
+  // Butterfly/Ponytail + alles ohne Russisch-Marker → wellig.
+  const isGlatt = (title: string): boolean => {
+    const u = title.toUpperCase();
+    if (/BUTTERFLY/.test(u)) return false;
+    if (/CLIP/.test(u)) return true;
+    if (/PONYTAIL/.test(u)) return false;
+    return /RUSSISCH|RU\s|GLATT/.test(u);
+  };
+
+  const header = "Rang;Produkt;Gramm;Stück;Umsatz EUR;Stück Aktion1;Stück Aktion2";
+  for (const [label, file, filterFn] of [
+    ["USBEKISCH WELLIG (China/Ebru)", "bf-2025-ranking-usbekisch-wellig.csv", (t: string) => !isGlatt(t)],
+    ["RUSSISCH GLATT (Amanda)", "bf-2025-ranking-russisch-glatt.csv", (t: string) => isGlatt(t)],
+  ] as const) {
+    const subset = hair.filter(([title]) => filterFn(title));
+    const subCsv = [header];
+    let totalG = 0;
+    subset.forEach(([title, v], i) => {
+      const grams = Math.round(v.kg * 1000);
+      totalG += grams;
+      subCsv.push(`${i + 1};"${title}";${grams};${v.pieces};${v.revenue.toFixed(0)};${v.a1Pieces};${v.a2Pieces}`);
+    });
+    writeFileSync(`scripts/output/${file}`, subCsv.join("\n"), "utf-8");
+    console.log(`✓ ${label}: ${subset.length} Produkte · ${(totalG / 1000).toFixed(1)} kg → scripts/output/${file}`);
+  }
 }
 
 main().catch((e) => { console.error("Fatal:", e); process.exit(1); });
