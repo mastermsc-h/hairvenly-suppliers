@@ -117,17 +117,16 @@ async function main() {
   const hair = all.filter(([, v]) => v.kg > 0).sort((a, b) => b[1].kg - a[1].kg);
   const accessories = all.filter(([, v]) => v.kg === 0).sort((a, b) => b[1].pieces - a[1].pieces);
 
-  const lines: string[] = [];
-  const csv: string[] = ["Rang;Produkt;kg;Stück;Umsatz EUR;Stück Aktion1;Stück Aktion2"];
+  const csv: string[] = ["Rang;Produkt;Gramm;Stück;Umsatz EUR;Stück Aktion1;Stück Aktion2"];
 
   console.log(`\n══════ GESAMTRANKING BLACK FRIDAY 2025 (beide Aktionen, ${hair.length} Haar-Produkte) ══════\n`);
-  console.log("Rang   kg     Stk   Umsatz   A1/A2   Produkt");
+  console.log("Rang   Gramm   Stk   Umsatz   A1/A2   Produkt");
   console.log("─".repeat(110));
   hair.forEach(([title, v], i) => {
-    const line = `${String(i + 1).padStart(3)}. ${v.kg.toFixed(2).padStart(6)} kg ${String(v.pieces).padStart(4)}  ${v.revenue.toFixed(0).padStart(6)}€  ${String(v.a1Pieces).padStart(3)}/${String(v.a2Pieces).padEnd(3)}  ${title.slice(0, 70)}`;
+    const grams = Math.round(v.kg * 1000);
+    const line = `${String(i + 1).padStart(3)}. ${String(grams).padStart(6)}g ${String(v.pieces).padStart(4)} Stk ${v.revenue.toFixed(0).padStart(6)}€  ${String(v.a1Pieces).padStart(3)}/${String(v.a2Pieces).padEnd(3)}  ${title.slice(0, 70)}`;
     console.log(line);
-    lines.push(line);
-    csv.push(`${i + 1};"${title}";${v.kg.toFixed(2)};${v.pieces};${v.revenue.toFixed(0)};${v.a1Pieces};${v.a2Pieces}`);
+    csv.push(`${i + 1};"${title}";${grams};${v.pieces};${v.revenue.toFixed(0)};${v.a1Pieces};${v.a2Pieces}`);
   });
 
   console.log(`\n══════ ZUBEHÖR / SONSTIGES (${accessories.length} Produkte, nach Stück) ══════\n`);
