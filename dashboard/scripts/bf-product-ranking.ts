@@ -73,7 +73,7 @@ async function fetchLineItems(from: string, to: string): Promise<Row[]> {
 function gramsPerUnit(title: string, variantTitle: string | null): number {
   const u = title.toUpperCase();
   const isAccessory =
-    /ZUBEH|KLEBER|BÜRSTE|BUERSTE|ENTFERNER|KAMM|KLAMMER|MICRORING|ZANGE|SCHABLONE|FADEN|SHAMPOO|CONDITIONER|MASKE|SPRAY|PFLEGE|FARBRING|TESTSTRÄHNE|FARBMUSTER|THERMOBÜRSTE|GUTSCHEIN|GIFT/.test(u);
+    /ZUBEH|KLEBER|LÖSER|LOSER|REMOVER|BÜRSTE|BUERSTE|ENTFERNER|KAMM|KLAMMER|MICRORING|ZANGE|SCHABLONE|FADEN|SHAMPOO|CONDITIONER|MASKE|SPRAY|PFLEGE|FARBRING|TESTSTRÄHNE|FARBMUSTER|THERMOBÜRSTE|GUTSCHEIN|GIFT/.test(u);
   if (isAccessory) return 0;
   const variantGrams = (() => {
     const m = (variantTitle ?? "").match(/(\d{2,3})\s*G/i);

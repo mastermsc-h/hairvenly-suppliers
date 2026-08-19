@@ -108,11 +108,11 @@ function classify(title: string, variantTitle: string | null): {
 } {
   const u = title.toUpperCase();
   const isAccessory =
-    /ZUBEH|KLEBER|BÜRSTE|BUERSTE|ENTFERNER|KAMM|KLAMMER|MICRORING|ZANGE|SCHABLONE|FADEN|SHAMPOO|CONDITIONER|MASKE|SPRAY|PFLEGE|FARBRING|TESTSTRÄHNE|FARBMUSTER|THERMOBÜRSTE|GUTSCHEIN|GIFT/.test(u);
+    /ZUBEH|KLEBER|LÖSER|LOSER|REMOVER|BÜRSTE|BUERSTE|ENTFERNER|KAMM|KLAMMER|MICRORING|ZANGE|SCHABLONE|FADEN|SHAMPOO|CONDITIONER|MASKE|SPRAY|PFLEGE|FARBRING|TESTSTRÄHNE|FARBMUSTER|THERMOBÜRSTE|GUTSCHEIN|GIFT/.test(u);
   if (isAccessory) return { quality: "zubehoer", method: "Zubehör", gramsPerUnit: 0 };
 
   const quality: "wellig" | "glatt" =
-    /WELLIG|USBEKISCH|BUTTERFLY/.test(u) ? "wellig" : "glatt";
+    /BUTTERFLY/.test(u) ? "wellig" : /CLIP/.test(u) ? "glatt" : /PONYTAIL/.test(u) ? "wellig" : /RUSSISCH|RU\s|GLATT/.test(u) ? "glatt" : "wellig";
 
   const variantGrams = (() => {
     const m = (variantTitle ?? "").match(/(\d{2,3})\s*G/i);
