@@ -1942,9 +1942,12 @@ export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[
             name
             createdAt
             subtotalPriceSet { shopMoney { amount currencyCode } }
+            currentSubtotalPriceSet { shopMoney { amount currencyCode } }
             totalDiscountsSet { shopMoney { amount currencyCode } }
+            currentTotalDiscountsSet { shopMoney { amount currencyCode } }
             totalShippingPriceSet { shopMoney { amount currencyCode } }
             totalPriceSet { shopMoney { amount currencyCode } }
+            currentTotalPriceSet { shopMoney { amount currencyCode } }
             shippingAddress { name address1 zip city country }
             lineItems(first: 30) {
               edges {
@@ -1974,9 +1977,12 @@ export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[
           name: string;
           createdAt: string;
           subtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+          currentSubtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
           totalDiscountsSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+          currentTotalDiscountsSet: { shopMoney: { amount: string; currencyCode: string } } | null;
           totalShippingPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
           totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
+          currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
           shippingAddress: PrintAllOrder["shippingAddress"];
           lineItems: {
             edges: {
@@ -2003,10 +2009,13 @@ export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[
       name: o.name,
       numberClean: o.name.replace(/^#/, ""),
       createdAt: o.createdAt,
-      subtotalPrice: o.subtotalPriceSet?.shopMoney.amount ?? "0",
-      totalDiscounts: o.totalDiscountsSet?.shopMoney.amount ?? "0",
+      // current* = Beträge NACH Rückgabe/Erstattung (Fallback = Original,
+      // damit nicht-erstattete Bestellungen identisch bleiben). So passt die
+      // Summe zu den (ebenfalls current-gefilterten) Positionen.
+      subtotalPrice: (o.currentSubtotalPriceSet ?? o.subtotalPriceSet)?.shopMoney.amount ?? "0",
+      totalDiscounts: (o.currentTotalDiscountsSet ?? o.totalDiscountsSet)?.shopMoney.amount ?? "0",
       shippingPrice: o.totalShippingPriceSet?.shopMoney.amount ?? "0",
-      totalPrice: o.totalPriceSet?.shopMoney.amount ?? "0",
+      totalPrice: (o.currentTotalPriceSet ?? o.totalPriceSet)?.shopMoney.amount ?? "0",
       currency: o.totalPriceSet?.shopMoney.currencyCode ?? "EUR",
       shippingAddress: o.shippingAddress,
       lineItems: o.lineItems.edges
