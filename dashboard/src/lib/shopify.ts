@@ -1330,6 +1330,7 @@ interface PackOrderNode {
       node: {
         title: string;
         quantity: number;
+        currentQuantity?: number;
         image: { url: string } | null;
         variant: {
           id: string;
@@ -1371,6 +1372,7 @@ const PACK_ORDER_FIELDS_SLIM = `
     edges { node {
       title
       quantity
+      currentQuantity
       image { url }
       variant {
         id
@@ -1397,6 +1399,7 @@ const PACK_ORDER_FIELDS = `
     edges { node {
       title
       quantity
+      currentQuantity
       image { url }
       variant {
         id
@@ -1421,22 +1424,28 @@ function mapPackOrder(node: PackOrderNode): PackOrder {
   const numericId = node.id.split("/").pop() ?? node.id;
   const numberClean = node.name.replace(/^#/, "");
 
-  const lineItems: PackOrderLineItem[] = node.lineItems.edges.map((e) => {
-    const v = e.node.variant;
-    const imageUrl =
-      e.node.image?.url ?? v?.image?.url ?? v?.product?.featuredImage?.url ?? null;
-    return {
-      title: e.node.title,
-      variantTitle: v?.title ?? null,
-      quantity: e.node.quantity,
-      barcode: v?.barcode ?? null,
-      variantId: v?.id ?? null,
-      inventoryItemId: v?.inventoryItem?.id ?? null,
-      imageUrl,
-      fulfillmentOrderLineItemId: null, // wird separat geholt für Auto-Fulfill
-      collectionHandles: v?.product?.collections?.edges.map((c) => c.node.handle) ?? [],
-    };
-  });
+  const lineItems: PackOrderLineItem[] = node.lineItems.edges
+    // Zurückgegebene/erstattete/entfernte Positionen ausschließen: currentQuantity
+    // (Bestellmenge minus refunded/removed) statt quantity (Ursprungsmenge).
+    // currentQuantity === 0 → gehört nicht mehr in den Karton. Fallback auf
+    // quantity, falls das Feld mal fehlt (defensive).
+    .filter((e) => (e.node.currentQuantity ?? e.node.quantity) > 0)
+    .map((e) => {
+      const v = e.node.variant;
+      const imageUrl =
+        e.node.image?.url ?? v?.image?.url ?? v?.product?.featuredImage?.url ?? null;
+      return {
+        title: e.node.title,
+        variantTitle: v?.title ?? null,
+        quantity: e.node.currentQuantity ?? e.node.quantity,
+        barcode: v?.barcode ?? null,
+        variantId: v?.id ?? null,
+        inventoryItemId: v?.inventoryItem?.id ?? null,
+        imageUrl,
+        fulfillmentOrderLineItemId: null, // wird separat geholt für Auto-Fulfill
+        collectionHandles: v?.product?.collections?.edges.map((c) => c.node.handle) ?? [],
+      };
+    });
 
   // Customer-Name aus shippingAddress (read_customers scope nicht verfügbar)
   const sa = node.shippingAddress;
@@ -1942,6 +1951,7 @@ export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[
                 node {
                   title
                   quantity
+                  currentQuantity
                   discountedUnitPriceSet { shopMoney { amount currencyCode } }
                   variant {
                     title
@@ -1973,6 +1983,7 @@ export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[
               node: {
                 title: string;
                 quantity: number;
+                currentQuantity?: number;
                 discountedUnitPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
                 variant: {
                   title: string | null;
@@ -1998,19 +2009,24 @@ export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[
       totalPrice: o.totalPriceSet?.shopMoney.amount ?? "0",
       currency: o.totalPriceSet?.shopMoney.currencyCode ?? "EUR",
       shippingAddress: o.shippingAddress,
-      lineItems: o.lineItems.edges.map((le) => {
-        const li = le.node;
-        const unit = parseFloat(li.discountedUnitPriceSet?.shopMoney.amount ?? "0");
-        const unitStr = li.discountedUnitPriceSet?.shopMoney.amount ?? "0";
-        return {
-          title: li.title,
-          variantTitle: li.variant?.title && li.variant.title !== "Default Title" ? li.variant.title : null,
-          quantity: li.quantity,
-          collectionHandles: li.variant?.product?.collections.edges.map((c) => c.node.handle) ?? [],
-          unitPrice: unitStr,
-          lineTotal: (unit * li.quantity).toFixed(2),
-        };
-      }),
+      lineItems: o.lineItems.edges
+        // Zurückgegebene/erstattete/entfernte Positionen NICHT auf den
+        // Lieferschein: currentQuantity (nach refund/removal) statt quantity.
+        .filter((le) => (le.node.currentQuantity ?? le.node.quantity) > 0)
+        .map((le) => {
+          const li = le.node;
+          const qty = li.currentQuantity ?? li.quantity;
+          const unit = parseFloat(li.discountedUnitPriceSet?.shopMoney.amount ?? "0");
+          const unitStr = li.discountedUnitPriceSet?.shopMoney.amount ?? "0";
+          return {
+            title: li.title,
+            variantTitle: li.variant?.title && li.variant.title !== "Default Title" ? li.variant.title : null,
+            quantity: qty,
+            collectionHandles: li.variant?.product?.collections.edges.map((c) => c.node.handle) ?? [],
+            unitPrice: unitStr,
+            lineTotal: (unit * qty).toFixed(2),
+          };
+        }),
     };
   });
 }
