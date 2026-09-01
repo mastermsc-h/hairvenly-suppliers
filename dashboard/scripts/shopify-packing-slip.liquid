@@ -157,12 +157,15 @@
   </thead>
   <tbody>
     {% assign skip_handles = "accessoires-werkzeuge,extensions-zubehoer,blessed-haarpflege,haarpflegeprodukte,sonstige-haarpflege,extensions-schulungen" | split: "," %}
-    {% comment %} Zwischensumme aus AKTUELLEN Mengen (nach Rückgabe) selbst
-       aufsummieren, damit sie zu den gedruckten Zeilen passt. {% endcomment %}
-    {% assign computed_subtotal = 0 %}
-    {% assign order_has_refunds = false %}
-    {% if order.refunds.size > 0 %}{% assign order_has_refunds = true %}{% endif %}
-    {% for line_item in order.line_items %}
+    {% comment %} WICHTIG: über `line_items` iterieren (NUR die Artikel DIESER
+       Sendung/Fulfillment) statt `order.line_items` (alle Artikel der ganzen
+       Bestellung). Shopify erzeugt eine Packzettel-Seite pro Fulfillment; so
+       steht auf der Umtausch-Sendung nur der Umtauschartikel — wie früher.
+       Zwischensumme/Rabatt/Gesamt werden aus den gezeigten Zeilen berechnet,
+       damit sie zur jeweiligen Sendung passen. {% endcomment %}
+    {% assign computed_orig = 0 %}
+    {% assign computed_final = 0 %}
+    {% for line_item in line_items %}
       {% comment %} Zurückgegebene/erstattete Menge dieser Position ermitteln:
          Summe über alle refund_line_items, die auf diese Position zeigen.
          Vollständig zurückgegebene Positionen NICHT drucken. {% endcomment %}
@@ -177,7 +180,9 @@
       {% assign current_qty = line_item.quantity | minus: refunded_qty %}
       {% if current_qty <= 0 %}{% continue %}{% endif %}
       {% assign line_current_total = line_item.final_price | times: current_qty %}
-      {% assign computed_subtotal = computed_subtotal | plus: line_current_total %}
+      {% assign line_orig_total = line_item.original_price | times: current_qty %}
+      {% assign computed_orig = computed_orig | plus: line_orig_total %}
+      {% assign computed_final = computed_final | plus: line_current_total %}
       {% comment %} Skip-Collection-Check: keine Methode/Länge/Herkunft-Badges
          für Zubehör, Pflegeprodukte oder Schulungen — title-heuristik
          matcht z.B. "Bonding Löser" sonst falsch als BONDINGS. {% endcomment %}
@@ -269,42 +274,30 @@
         </td>
       </tr>
     {% endfor %}
-    {% if order_has_refunds %}
-      {% comment %} Nach Rückgabe: Summen aus den aktuellen Zeilen. final_price
-         enthält bereits alle Rabatte, daher keine separate Rabatt-Zeile. {% endcomment %}
-      {% assign computed_total = computed_subtotal | plus: order.shipping_price %}
+    {% comment %} Summen NUR aus den gezeigten (dieser-Sendung-)Zeilen:
+       computed_orig = vor Rabatt, computed_final = nach allen Rabatten
+       (final_price enthält Positions- + Order-Rabatte). So passt die Summe
+       zu den gedruckten Artikeln — auch bei Teil-Sendungen/Umtausch. {% endcomment %}
+    {% assign computed_discount = computed_orig | minus: computed_final %}
+    {% assign computed_total = computed_final | plus: order.shipping_price %}
+    <tr>
+      <td colspan="3" class="sum-label sum-top">Zwischensumme</td>
+      <td class="sum-value sum-top">{{ computed_orig | money }}</td>
+    </tr>
+    {% if computed_discount > 0 %}
       <tr>
-        <td colspan="3" class="sum-label sum-top">Zwischensumme</td>
-        <td class="sum-value sum-top">{{ computed_subtotal | money }}</td>
-      </tr>
-      <tr>
-        <td colspan="3" class="sum-label">Versand</td>
-        <td class="sum-value">{% if order.shipping_price > 0 %}{{ order.shipping_price | money }}{% else %}Kostenlos{% endif %}</td>
-      </tr>
-      <tr>
-        <td colspan="3" class="total-label">Gesamt</td>
-        <td class="total-value">{{ computed_total | money }}</td>
-      </tr>
-    {% else %}
-      <tr>
-        <td colspan="3" class="sum-label sum-top">Zwischensumme</td>
-        <td class="sum-value sum-top">{{ order.line_items_subtotal_price | money }}</td>
-      </tr>
-      {% if order.total_discounts > 0 %}
-        <tr>
-          <td colspan="3" class="sum-label sum-discount">Rabatt</td>
-          <td class="sum-value sum-discount">&minus; {{ order.total_discounts | money }}</td>
-        </tr>
-      {% endif %}
-      <tr>
-        <td colspan="3" class="sum-label">Versand</td>
-        <td class="sum-value">{% if order.shipping_price > 0 %}{{ order.shipping_price | money }}{% else %}Kostenlos{% endif %}</td>
-      </tr>
-      <tr>
-        <td colspan="3" class="total-label">Gesamt</td>
-        <td class="total-value">{{ order.total_price | money }}</td>
+        <td colspan="3" class="sum-label sum-discount">Rabatt</td>
+        <td class="sum-value sum-discount">&minus; {{ computed_discount | money }}</td>
       </tr>
     {% endif %}
+    <tr>
+      <td colspan="3" class="sum-label">Versand</td>
+      <td class="sum-value">{% if order.shipping_price > 0 %}{{ order.shipping_price | money }}{% else %}Kostenlos{% endif %}</td>
+    </tr>
+    <tr>
+      <td colspan="3" class="total-label">Gesamt</td>
+      <td class="total-value">{{ computed_total | money }}</td>
+    </tr>
   </tbody>
 </table>
 
