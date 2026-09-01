@@ -157,15 +157,18 @@
   </thead>
   <tbody>
     {% assign skip_handles = "accessoires-werkzeuge,extensions-zubehoer,blessed-haarpflege,haarpflegeprodukte,sonstige-haarpflege,extensions-schulungen" | split: "," %}
-    {% comment %} WICHTIG: über `line_items` iterieren (NUR die Artikel DIESER
-       Sendung/Fulfillment) statt `order.line_items` (alle Artikel der ganzen
-       Bestellung). Shopify erzeugt eine Packzettel-Seite pro Fulfillment; so
-       steht auf der Umtausch-Sendung nur der Umtauschartikel — wie früher.
-       Zwischensumme/Rabatt/Gesamt werden aus den gezeigten Zeilen berechnet,
-       damit sie zur jeweiligen Sendung passen. {% endcomment %}
+    {% comment %} WICHTIG: Artikel DIESER Sendung bestimmen. Shopify rendert
+       eine Packzettel-Seite pro Fulfillment → `fulfillment.line_items` gibt
+       nur die Artikel der aktuellen Sendung (so steht auf der Umtausch-Sendung
+       nur der Umtauschartikel — wie früher). FALLBACK auf `order.line_items`,
+       falls kein Fulfillment-Kontext vorhanden ist, damit NIE eine leere
+       Liste gedruckt wird. Zwischensumme/Rabatt/Gesamt aus den gezeigten
+       Zeilen berechnet, passend zur jeweiligen Sendung. {% endcomment %}
+    {% assign slip_items = fulfillment.line_items %}
+    {% if slip_items == blank %}{% assign slip_items = order.line_items %}{% endif %}
     {% assign computed_orig = 0 %}
     {% assign computed_final = 0 %}
-    {% for line_item in line_items %}
+    {% for line_item in slip_items %}
       {% comment %} Zurückgegebene/erstattete Menge dieser Position ermitteln:
          Summe über alle refund_line_items, die auf diese Position zeigen.
          Vollständig zurückgegebene Positionen NICHT drucken. {% endcomment %}
