@@ -9,6 +9,8 @@
  * - WHATSAPP_PHONE_NUMBER_ID    — WhatsApp Phone Number ID (falls WA Cloud API direkt)
  */
 
+import { getMetaToken } from "./meta-token";
+
 const GRAPH_VERSION = "v21.0";
 
 /**
@@ -49,7 +51,7 @@ export async function sendInstagramMessage(
   recipientIgId: string,
   text: string,
 ): Promise<SendResult> {
-  const token = process.env.META_PAGE_ACCESS_TOKEN;
+  const token = await getMetaToken();
   const igUserId = process.env.META_INSTAGRAM_USER_ID;
   if (!token || !igUserId) {
     return { success: false, error: "META_PAGE_ACCESS_TOKEN or META_INSTAGRAM_USER_ID not set" };
@@ -80,7 +82,7 @@ export async function sendWhatsAppMessage(
   recipientPhone: string,
   text: string,
 ): Promise<SendResult> {
-  const token = process.env.META_PAGE_ACCESS_TOKEN;
+  const token = await getMetaToken();
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   if (!token || !phoneNumberId) {
     return { success: false, error: "META_PAGE_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID not set" };
@@ -115,7 +117,7 @@ export async function sendWhatsAppMessage(
  * Fire-and-forget — blockt den Caller nicht. Fehler werden geloggt, nicht geworfen.
  */
 export async function markInstagramSeen(recipientIgId: string): Promise<{ success: boolean; error?: string }> {
-  const token = process.env.META_PAGE_ACCESS_TOKEN;
+  const token = await getMetaToken();
   const igUserId = process.env.META_INSTAGRAM_USER_ID;
   if (!token || !igUserId) {
     return { success: false, error: "META_PAGE_ACCESS_TOKEN or META_INSTAGRAM_USER_ID not set" };
@@ -146,7 +148,7 @@ export async function markInstagramSeen(recipientIgId: string): Promise<{ succes
 export async function getInstagramUserInfo(
   igsid: string,
 ): Promise<{ username: string | null; name: string | null } | null> {
-  const token = process.env.META_PAGE_ACCESS_TOKEN;
+  const token = await getMetaToken();
   if (!token) return null;
   const host = token.startsWith("IGAA") ? "https://graph.instagram.com" : "https://graph.facebook.com";
   try {
