@@ -171,6 +171,44 @@ export async function readInventorySheet(
   return { rows, lastUpdated };
 }
 
+// ── Gesamt-Lagerbestand in kg (für Firmen-Gesundheits-Kennzahl) ──
+
+export interface TotalStockKg {
+  russianKg: number;
+  uzbekKg: number;
+  totalKg: number;
+  lastUpdated: string | null;
+  /** true wenn mindestens ein Tab nicht gelesen werden konnte (Sheet leer/fehlt) */
+  partial: boolean;
+}
+
+/**
+ * Summiert den physischen Lagerbestand (totalWeight aller Produkte) über
+ * beide Inventar-Tabs. Fehler pro Tab werden abgefangen (z.B. Tab existiert
+ * noch nicht nach Sheet-Neuaufbau) → partial=true statt Gesamtausfall.
+ */
+export async function getTotalStockKg(): Promise<TotalStockKg> {
+  const result: TotalStockKg = { russianKg: 0, uzbekKg: 0, totalKg: 0, lastUpdated: null, partial: false };
+
+  const read = async (tab: "Russisch - GLATT" | "Usbekisch - WELLIG"): Promise<number> => {
+    try {
+      const { rows, lastUpdated } = await readInventorySheet(tab);
+      if (lastUpdated && !result.lastUpdated) result.lastUpdated = lastUpdated;
+      return rows.reduce((sum, r) => sum + (r.totalWeight || 0), 0) / 1000;
+    } catch (e) {
+      console.warn(`[getTotalStockKg] ${tab} nicht lesbar:`, e instanceof Error ? e.message : e);
+      result.partial = true;
+      return 0;
+    }
+  };
+
+  const [ru, uz] = await Promise.all([read("Russisch - GLATT"), read("Usbekisch - WELLIG")]);
+  result.russianKg = Math.round(ru * 10) / 10;
+  result.uzbekKg = Math.round(uz * 10) / 10;
+  result.totalKg = Math.round((ru + uz) * 10) / 10;
+  return result;
+}
+
 // ── Read Topseller ─────────────────────────────────────────────
 
 export async function readTopseller(): Promise<{ sections: TopsSellerSection[]; lastUpdated: string | null }> {

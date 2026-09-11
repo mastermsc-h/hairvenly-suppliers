@@ -3,7 +3,7 @@ import { requireProfile, hasFeature } from "@/lib/auth";
 import { signOut } from "@/lib/actions/auth";
 import { t, type Locale } from "@/lib/i18n";
 import type { FeatureKey } from "@/lib/types";
-import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings, Truck, Globe2, Bot, Scissors, CalendarDays } from "lucide-react";
+import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings, Truck, Globe2, Bot, Scissors, CalendarDays, HeartPulse } from "lucide-react";
 import SidebarGroup from "./sidebar-group";
 import ChatbotInboxBadge from "./chatbot-inbox-badge";
 import LanguageSwitcher from "./language-switcher";
@@ -238,6 +238,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                     { href: "/finances/transfers", label: t(locale, "nav.finances.transfers") },
                   ]}
                 />
+                <NavLink href="/health" icon={<HeartPulse size={16} />} label={t(locale, "nav.health")} />
               </>
             )}
 
