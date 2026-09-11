@@ -15,6 +15,9 @@ interface Props {
   suppliers: Supplier[];
   catalogs: Record<string, CatalogMethod[]>;
   locale: Locale;
+  /** Spreadsheet-ID des Stock-Calculation-Sheets (aus env GOOGLE_SHEET_STOCK,
+   *  vom Server durchgereicht — NIE hardcoden, das Sheet kann neu angelegt werden). */
+  stockSheetId?: string;
 }
 
 interface CartItem {
@@ -69,7 +72,7 @@ function colorTokens(s: string): Set<string> {
 let _nextId = 1;
 const uid = () => `wi-${_nextId++}`;
 
-export default function WizardForm({ suppliers, catalogs, locale }: Props) {
+export default function WizardForm({ suppliers, catalogs, locale, stockSheetId }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
@@ -562,18 +565,12 @@ export default function WizardForm({ suppliers, catalogs, locale }: Props) {
                         </span>
                       ) : null;
                     })()}
-                    {(() => {
-                      const stockSheetId = "1Tmj3jB76yxGjxD1LOrunq5BwV0BCNpayIfoaR7uqj9w";
-                      const isAmanda = selectedSupplier?.name?.toLowerCase().includes("amanda");
-                      const tabName = isAmanda ? "Vorschlag - Amanda" : "Vorschlag - China";
-                      const url = `https://docs.google.com/spreadsheets/d/${stockSheetId}/edit#gid=0`;
-                      return (
-                        <a href={url} target="_blank" rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-[10px] text-indigo-600 hover:text-indigo-800 font-medium">
-                          Sheet öffnen <ExternalLink size={10} />
-                        </a>
-                      );
-                    })()}
+                    {stockSheetId && (
+                      <a href={`https://docs.google.com/spreadsheets/d/${stockSheetId}/edit#gid=0`} target="_blank" rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-[10px] text-indigo-600 hover:text-indigo-800 font-medium">
+                        Sheet öffnen <ExternalLink size={10} />
+                      </a>
+                    )}
                   </div>
                 ) : (
                   <p className="text-xs text-neutral-400 mt-0.5">Vorschläge aus dem Stock-Sheet laden oder neu generieren</p>

@@ -24,6 +24,7 @@ export default async function WizardPage() {
         suppliers={(suppliers ?? []) as Supplier[]}
         catalogs={catalogs}
         locale={locale}
+        stockSheetId={process.env.GOOGLE_SHEET_STOCK}
       />
     </div>
   );
