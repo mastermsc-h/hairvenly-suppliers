@@ -9,7 +9,7 @@ async function main() {
   const colls = new Map<string, number>();
   for (const r of rows) colls.set(r.collection, (colls.get(r.collection) ?? 0) + 1);
   for (const [c, n] of colls) console.log("  " + c + ": " + n);
-  const nb = rows.filter((r) => /butterfly|invisible tape/i.test(r.collection + " " + r.product));
+  const inv2 = rows.filter((r) => r.collection === "Invisible Tapes Wellig 65cm"); console.log("Invisible-Mengen:"); for (const r of inv2) console.log("  " + r.product.slice(0, 42).padEnd(43) + r.unitWeight + "g x " + r.quantity + " = " + r.totalWeight + "g"); const nb = rows.filter((r) => /butterfly|invisible tape/i.test(r.collection + " " + r.product));
   console.log("Butterfly/Invisible-Tape-Zeilen:", nb.length);
   if (nb.length > 0) {
     for (const r of nb.slice(0, 5)) console.log("  " + r.collection + " | " + r.product.slice(0, 45) + " | " + r.unitWeight + "g/Stk × " + r.quantity);
