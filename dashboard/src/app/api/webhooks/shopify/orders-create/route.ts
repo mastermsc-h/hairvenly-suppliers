@@ -19,15 +19,28 @@ import { normalizeGermanStreet } from "@/lib/address-normalize";
  */
 export const dynamic = "force-dynamic";
 
+/**
+ * Shopify nutzt je nach Registrierungsweg unterschiedliche Signier-Secrets:
+ * - Admin-UI-Webhooks (Einstellungen → Benachrichtigungen): das dort
+ *   angezeigte Signing-Secret → bei uns SHOPIFY_WEBHOOK_SECRET
+ * - Per-API registrierte Webhooks (unsere orders/create-Subscription):
+ *   der "API secret key" der Custom App → bei uns SHOPIFY_API_SECRET
+ * Wir prüfen gegen ALLE konfigurierten Secrets — ein Treffer genügt.
+ */
 function verifyHmac(rawBody: string, hmacHeader: string | null): boolean {
-  const secret = process.env.SHOPIFY_WEBHOOK_SECRET;
-  if (!secret || !hmacHeader) return false;
-  const digest = crypto.createHmac("sha256", secret).update(rawBody, "utf8").digest("base64");
-  try {
-    return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(hmacHeader));
-  } catch {
-    return false;
+  if (!hmacHeader) return false;
+  const secrets = [process.env.SHOPIFY_API_SECRET, process.env.SHOPIFY_WEBHOOK_SECRET].filter(
+    (s): s is string => !!s,
+  );
+  for (const secret of secrets) {
+    const digest = crypto.createHmac("sha256", secret).update(rawBody, "utf8").digest("base64");
+    try {
+      if (crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(hmacHeader))) return true;
+    } catch {
+      // Längen-Mismatch etc. — nächstes Secret probieren
+    }
   }
+  return false;
 }
 
 export async function POST(request: Request) {
