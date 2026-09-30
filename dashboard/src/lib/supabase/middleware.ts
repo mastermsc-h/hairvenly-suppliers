@@ -43,6 +43,11 @@ export async function updateSession(request: NextRequest) {
     path.startsWith("/api/debug-") ||  // temp debug
     path.startsWith("/api/webhooks/") ||  // shopify ruft webhooks ohne login auf
     path === "/api/pack/cleanup" ||  // vercel cron job (mit eigenem secret)
+    // Vercel-Cron-Jobs haben keine Login-Cookies — jede Route unter /api/cron/
+    // schützt sich selbst per CRON_SECRET-Header-Guard. Ohne diese Ausnahme
+    // wurden order-reminders/refresh/fix-addresses zur Login-Seite redirected
+    // und liefen still ins Leere (Bug gefunden 30.09.2026).
+    path.startsWith("/api/cron/") ||
     path === "/favicon.ico";
 
   if (!user && !isPublic) {
