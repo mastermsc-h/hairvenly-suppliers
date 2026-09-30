@@ -4,11 +4,17 @@ import { shopifyGraphQL } from "@/lib/shopify";
 import { normalizeGermanStreet } from "@/lib/address-normalize";
 
 /**
- * Shopify-Webhook orders/create — On-the-fly Adress-Normalisierung.
+ * Shopify-Webhook orders/create + orders/updated — On-the-fly Adress-Fix.
  *
- * Feuert bei JEDER neuen Bestellung sofort. Wenn die Versandadresse das
- * "Hausnummer-ohne-Leerzeichen"-Muster hat (z.B. "Schwebelstr.22"), wird sie
- * direkt korrigiert — bevor jemand ein DHL-Label erstellen will.
+ * BEIDE Topics zeigen auf diesen Endpoint:
+ * - orders/create: normale Bestellungen sofort bei Eingang
+ * - orders/updated: deckt den Draft-Order-Fall ab (dort ist die Adresse beim
+ *   create-Event noch nicht an der Order — sie kommt erst mit dem Draft-Merge,
+ *   der ein updated-Event feuert; Bug #27414, 30.09.2026) UND nachträgliche
+ *   Adressänderungen durch Kunde/Support.
+ * Idempotent: saubere Adresse → "clean" ohne Mutation; unser eigenes
+ * orderUpdate triggert zwar ein weiteres updated-Event, das endet aber
+ * sofort in "clean" — keine Schleife.
  *
  * Sicherheits-Design:
  * - HMAC-Verifikation gegen SHOPIFY_WEBHOOK_SECRET (Pflicht).
