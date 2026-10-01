@@ -1,4 +1,5 @@
 import { google } from "googleapis";
+import { extractShopifyColorSegment } from "@/lib/catalog-color-match";
 import { readFileSync } from "fs";
 import path from "path";
 
@@ -307,6 +308,8 @@ export const COLLECTION_TO_METHOD: Record<string, string> = {
   "russische classic tressen (glatt)": "Classic Weft",
   "russische genius tressen (glatt)": "Genius Weft",
   "russische invisible tressen (glatt)": "Invisible Weft",
+  // Collection wurde im April 2026 umbenannt — alter Name bleibt als Fallback
+  "russische invisible tressen (glatt) | butterfly weft": "Invisible Weft",
   // Eyfel Ebru (Usbekisch WELLIG)
   "tapes wellig 45cm": "Tapes",
   "tapes wellig 55cm": "Tapes",
@@ -362,50 +365,10 @@ export async function importShopifyNames(tabName: string): Promise<{ products: S
       if (!collection || collection.startsWith("Total") || collection === "GRAND TOTAL") continue;
       if (!shopifyName || !shopifyName.includes("#")) continue;
 
-      // Normalize: extract from the # onwards (handles "TRESSEN #FROSTY..." and "INVISIBLE TRESSEN #PEARL...")
-      const hashIdx = shopifyName.indexOf("#");
-      const afterHash = shopifyName.substring(hashIdx + 1).trim();
-
-      // Extract the color name (first meaningful part before descriptive words)
-      let colorName = afterHash;
-      // Smart extraction: if it starts with a short code (number/letter combo), take just that
-      // e.g. "2E DUNKELBRAUNE..." → "2E", "24A SANDBLONDE..." → "24A"
-      const codeMatch = colorName.match(/^([A-Z0-9][A-Z0-9/]*(?:\s*[A-Z0-9/]+)?)\s+[A-ZÄÖÜ]/);
-      if (codeMatch) {
-        const code = codeMatch[1].trim();
-        // Only use if it's short (typical color codes are 1-8 chars)
-        if (code.length <= 8 && !code.includes(" ")) {
-          colorName = code;
-        }
-      }
-
-      // For longer names: take the part before common descriptive/method words
-      if (colorName.length > 10) {
-        const stopWords = [
-          " RUSSISCHE", " RU GLATT", " GLATT", " US WELLIGE", " WELLIGE", " US ",
-          " STANDARD ", " MINI TAPE", " BONDINGS", " INVISIBLE", " CLASSIC",
-          " GENIUS", " TAPE EXT", " CLIP EXT", " TRESSEN", " WEFT",
-          " EXTENSIONS", " - ", " TIEFSCHWARZ", " SCHWARZBRAUN", " DUNKELBRAUN",
-          " MITTELBRAUN", " HELLBRAUN", " DUNKELBLOND", " HELLBLOND", " LICHTBLOND",
-          " LIGHTBLOND", " PLATINBLOND", " OMBRES ", " BALAYAGE ", " GESTRÄHN",
-          " HONIGBLOND", " GOLDBLOND", " SAMTBRAUN", " MOKKA", " ASCHBRAUN",
-          " REHBRAUN", " KUPFER", " KIRSCHE", " SANDBLOND", " SCHOKOLAD",
-          " KÜHLES ", " HELLES ", " DUNKLE",
-        ];
-        for (const sw of stopWords) {
-          const idx = colorName.toUpperCase().indexOf(sw.toUpperCase());
-          if (idx > 0) {
-            const candidate = colorName.substring(0, idx).trim();
-            if (candidate.length >= 1) {
-              colorName = candidate;
-              break;
-            }
-          }
-        }
-      }
-
-      // Clean up: remove trailing special chars and "TRESSEN" prefix artifacts
-      colorName = colorName.replace(/\s+TRESSEN$/i, "").replace(/[♡\-–,\s]+$/, "").trim();
+      // Farb-Abschnitt extrahieren — kennt Legacy- UND neues "|"-Titelformat.
+      // Neu-Format liefert "Dubai Warmes Goldbraun" (inkl. Beschreibung); die
+      // eigentliche Farbe wird im Katalog-Sync per matchKnownColor bestimmt.
+      const colorName = extractShopifyColorSegment(shopifyName);
 
       products.push({ collection, shopifyName, colorName, variant });
     }

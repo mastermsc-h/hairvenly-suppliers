@@ -307,6 +307,22 @@ export async function syncCatalogFromSheets(supplierId: string): Promise<{
     }
   }
 
+  // 2b) Bestehende Katalog-Farbnamen dieses Lieferanten als zusätzliche
+  //     Match-Kandidaten (zuverlässiger als die Bestell-Sheets und nötig für
+  //     das neue "|"-Titelformat, wo die Farbe nur per Abgleich bestimmbar ist).
+  const { data: catRows } = await supabase
+    .from("product_colors")
+    .select("name_hairvenly, product_lengths!inner(product_methods!inner(name, supplier_id))")
+    .eq("product_lengths.product_methods.supplier_id", supplierId);
+  type CatRow = { name_hairvenly: string; product_lengths: { product_methods: { name: string } } };
+  const catalogByMethod = new Map<string, Set<string>>();
+  for (const r of (catRows ?? []) as unknown as CatRow[]) {
+    const m = r.product_lengths.product_methods.name.toLowerCase();
+    if (!catalogByMethod.has(m)) catalogByMethod.set(m, new Set());
+    catalogByMethod.get(m)!.add(r.name_hairvenly);
+  }
+  const { matchKnownColor, isNewTitleFormat } = await import("@/lib/catalog-color-match");
+
   // 3) For each Shopify product: ensure method + length exist, then create/update color
   let methodsCreated = 0, lengthsCreated = 0, colorsCreated = 0, hairvenlyMatched = 0;
   const seen = new Set<string>(); // Avoid processing duplicates
@@ -368,75 +384,36 @@ export async function syncCatalogFromSheets(supplierId: string): Promise<{
     }
     if (!existingLength) continue;
 
-    // Try to find matching Hairvenly color code from order sheets
-    const shopifyColor = product.colorName.toLowerCase();
-    // Also check all method variations (e.g. "Classic Weft" might be "Classic Tressen" in orders)
+    // Farbe bestimmen: Abgleich des Farb-Abschnitts gegen bekannte Namen
+    // (Bestell-Sheets + bestehender Katalog), längster Präfix gewinnt.
+    // Methoden-Varianten (z.B. "Classic Weft" ↔ "Classic Tressen") zählen mit.
     const methodVariations = [methodName.toLowerCase()];
     if (methodName === "Classic Weft") methodVariations.push("classic tressen", "classic weft");
     if (methodName === "Classic Tressen") methodVariations.push("classic weft", "classic tressen");
 
-    let allMethodColors = new Set<string>();
+    const sameMethod = new Set<string>();
     for (const mv of methodVariations) {
-      const colors = hairvenlyLookup.get(mv);
-      if (colors) for (const c of colors) allMethodColors.add(c);
+      for (const c of hairvenlyLookup.get(mv) ?? []) sameMethod.add(c);
+      for (const c of catalogByMethod.get(mv) ?? []) sameMethod.add(c);
     }
-    // Also add colors from ALL methods as fallback (color codes like "1A" are universal)
+    // Fallback-Kandidaten aus ALLEN Methoden (Farbcodes wie "1A" sind universell)
     const allColors = new Set<string>();
-    for (const colorSet of hairvenlyLookup.values()) {
-      for (const c of colorSet) allColors.add(c);
+    for (const s of hairvenlyLookup.values()) for (const c of s) allColors.add(c);
+    for (const s of catalogByMethod.values()) for (const c of s) allColors.add(c);
+
+    let bestHairvenlyName =
+      matchKnownColor(product.colorName, sameMethod) ??
+      matchKnownColor(product.colorName, allColors) ??
+      "";
+    if (bestHairvenlyName) hairvenlyMatched++;
+
+    // Neues Titelformat ohne bekannte Farbe: Farb-Abschnitt ist bereits sauber
+    // (Text vor dem ersten "|") — die Legacy-Kürzung unten würde ihn zerstückeln.
+    if (!bestHairvenlyName && isNewTitleFormat(product.shopifyName)) {
+      bestHairvenlyName = product.colorName;
     }
 
-    let bestHairvenlyName = ""; // Empty = needs manual assignment
-    let matched = false;
-
-    // 1) Exact match in same method
-    for (const hvColor of allMethodColors) {
-      const hvLower = hvColor.toLowerCase();
-      if (hvLower === shopifyColor) {
-        bestHairvenlyName = hvColor;
-        hairvenlyMatched++;
-        matched = true;
-        break;
-      }
-    }
-    // 2) Starts-with match in same method
-    if (!matched) {
-      for (const hvColor of allMethodColors) {
-        const hvLower = hvColor.toLowerCase();
-        if (shopifyColor.startsWith(hvLower + " ") || shopifyColor.startsWith(hvLower + "-") || hvLower.startsWith(shopifyColor)) {
-          bestHairvenlyName = hvColor;
-          hairvenlyMatched++;
-          matched = true;
-          break;
-        }
-      }
-    }
-    // 3) Exact match across all methods
-    if (!matched) {
-      for (const hvColor of allColors) {
-        const hvLower = hvColor.toLowerCase();
-        if (hvLower === shopifyColor) {
-          bestHairvenlyName = hvColor;
-          hairvenlyMatched++;
-          matched = true;
-          break;
-        }
-      }
-    }
-    // 4) Starts-with across all methods (longest match first to prefer "Pearl White" over "Pearl")
-    if (!matched) {
-      const sorted = [...allColors].sort((a, b) => b.length - a.length);
-      for (const hvColor of sorted) {
-        const hvLower = hvColor.toLowerCase();
-        if (hvLower.length >= 2 && (shopifyColor.startsWith(hvLower + " ") || shopifyColor.startsWith(hvLower + "-") || shopifyColor === hvLower)) {
-          bestHairvenlyName = hvColor;
-          hairvenlyMatched++;
-          matched = true;
-          break;
-        }
-      }
-    }
-    // 5) If still no match, try to extract a short color name from Shopify name
+    // Legacy-Fallback: kurzen Farbnamen aus dem alten Titelformat ableiten
     if (!bestHairvenlyName) {
       // Take first word(s) that look like a color code (before descriptive words)
       const raw = product.shopifyName.replace(/^#/, "").trim();
@@ -466,15 +443,22 @@ export async function syncCatalogFromSheets(supplierId: string): Promise<{
 
     if (byShopify) continue; // Already exists with this Shopify name
 
-    // Check if a matching hairvenly name exists (to update it with shopify name)
+    // Existiert die Farbe in dieser Länge schon? Tolerant abgleichen — sonst
+    // entstehen Dubletten bei Altlast-Namen ("NORVEGIAN KÜHLES BLOND US WELLIGE")
+    // und bei in Shopify umbenannten Produkten (name_shopify veraltet).
     if (bestHairvenlyName) {
-      const { data: byHairvenly } = await supabase
+      const { data: lengthColors } = await supabase
         .from("product_colors")
-        .select("id, name_shopify")
-        .eq("length_id", existingLength.id)
-        .ilike("name_hairvenly", bestHairvenlyName)
-        .limit(1)
-        .single();
+        .select("id, name_hairvenly, name_shopify")
+        .eq("length_id", existingLength.id);
+      const { findExistingColor } = await import("@/lib/catalog-color-match");
+      const existingName = findExistingColor(
+        bestHairvenlyName,
+        (lengthColors ?? []).map((c) => c.name_hairvenly),
+      );
+      const byHairvenly = existingName
+        ? (lengthColors ?? []).find((c) => c.name_hairvenly === existingName)
+        : null;
 
       if (byHairvenly) {
         if (!byHairvenly.name_shopify) {
