@@ -50,26 +50,38 @@ function detectAttributes(title: string, variantTitle: string | null) {
   else if (upper.includes("MINI TAPE") || upper.includes("MINI-TAPE"))
     method = { label: "MINI-TAPES", cls: "method-tapes" };
   else if (upper.includes("TAPE")) method = { label: "TAPES", cls: "method-tapes" };
-  else if (upper.includes("INVISIBLE") && upper.includes("TRESSE")) method = { label: "INVISIBLE TRESSE", cls: "method-invisible" };
+  // "Weft" ist Shopifys Wort für Tresse ("Genius Weft", "Classic Weft") —
+  // ohne diese Gleichsetzung blieb z.B. "Genius Weft" komplett ohne Methode.
+  else if (upper.includes("INVISIBLE") && /TRESSE|WEFT/.test(upper)) method = { label: "INVISIBLE TRESSE", cls: "method-invisible" };
   else if (upper.includes("BUTTERFLY") && upper.includes("WEFT")) method = { label: "INVISIBLE TRESSE", cls: "method-invisible" };
-  else if (upper.includes("GENIUS") && upper.includes("TRESSE")) method = { label: "GENIUS TRESSE", cls: "method-genius" };
-  else if (upper.includes("CLASSIC") && upper.includes("TRESSE")) method = { label: "CLASSIC TRESSE", cls: "method-tressen" };
-  else if (upper.includes("TRESSE")) method = { label: "TRESSEN", cls: "method-tressen" };
+  else if (upper.includes("GENIUS") && /TRESSE|WEFT/.test(upper)) method = { label: "GENIUS TRESSE", cls: "method-genius" };
+  else if (upper.includes("CLASSIC") && /TRESSE|WEFT/.test(upper)) method = { label: "CLASSIC TRESSE", cls: "method-tressen" };
+  else if (/TRESSE|WEFT/.test(upper)) method = { label: "TRESSEN", cls: "method-tressen" };
   else if (upper.includes("CLIP")) method = { label: "CLIP-IN", cls: "method-clipin" };
   else if (upper.includes("PONYTAIL")) method = { label: "PONYTAIL", cls: "method-ponytail" };
 
+  // Länge: Shopify schreibt "65 cm" MIT Leerzeichen (und 60cm existiert) —
+  // die feste Liste ohne Leerzeichen hat beides verpasst.
   let length = "";
-  for (const cm of [45, 55, 65, 75, 85]) {
-    if (upper.includes(`${cm}CM`)) {
-      length = `${cm}cm`;
-      break;
-    }
-  }
+  const lenMatch = upper.match(/(\d{2})\s*CM\b/);
+  if (lenMatch) length = `${lenMatch[1]}cm`;
+
   let origin = "";
   if (upper.includes("RU GLATT") || upper.includes("RUSSISCH")) origin = "RU";
   else if (upper.includes("US WELLIG") || upper.includes("USBEKISCH")) origin = "US";
 
-  return { method, length, origin };
+  // Farbbezeichnung = erstes Segment vor " | " (Shopify-Konvention:
+  // "#Vanilla Mocha Balayage | Echthaar Genius Weft | …"). Nur wenn es wie
+  // eine Farbe aussieht (beginnt mit #), sonst leer.
+  let color = "";
+  if (title.includes("|")) {
+    const firstSeg = title.split("|")[0]?.trim() ?? "";
+    if (firstSeg.startsWith("#") && firstSeg.length <= 40) color = firstSeg;
+  }
+  // Alte Titel ohne "|" (z.B. "#SILVER 45CM TAPE EXTENSIONS") → kein Farb-Tag,
+  // sonst stünde der komplette Titel doppelt da.
+
+  return { method, length, origin, color };
 }
 
 function formatDate(iso: string): string {
@@ -219,6 +231,7 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
         }
         .tag-length { background: #475569 !important; }
         .tag-origin { background: #b91c1c !important; }
+        .tag-color  { background: #b45309 !important; letter-spacing: 0.4px; text-transform: none; }
       `}</style>
 
       <div className="print-bar bg-white border-b border-neutral-200 p-3 flex items-center justify-between gap-3 no-print">
@@ -293,13 +306,14 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
                   return (
                     <tr key={i} className="border-b border-neutral-200">
                       <td className="py-3 align-top">
-                        {it.isExtension && (attrs.method.label || attrs.length || attrs.origin) && (
+                        {it.isExtension && (attrs.method.label || attrs.length || attrs.origin || attrs.color) && (
                           <div className="mb-1">
                             {attrs.method.label && (
                               <span className={`method-badge ${attrs.method.cls}`}>{attrs.method.label}</span>
                             )}
                             {attrs.length && <span className="tag-secondary tag-length">{attrs.length}</span>}
                             {attrs.origin && <span className="tag-secondary tag-origin">{attrs.origin}</span>}
+                            {attrs.color && <span className="tag-secondary tag-color">{attrs.color}</span>}
                           </div>
                         )}
                         <div className="text-sm leading-snug">{it.title}</div>

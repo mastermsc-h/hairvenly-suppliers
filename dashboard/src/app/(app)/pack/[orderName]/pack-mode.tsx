@@ -64,21 +64,20 @@ function detectAttributes(title: string): {
   else if (upper.includes("MINI TAPE") || upper.includes("MINI-TAPE"))
     method = { label: "MINI-TAPES", cls: "bg-blue-700" };
   else if (upper.includes("TAPE")) method = { label: "TAPES", cls: "bg-blue-700" };
-  else if (upper.includes("INVISIBLE") && upper.includes("TRESSE")) method = { label: "INVISIBLE TRESSE", cls: "bg-purple-700" };
+  // "Weft" = Shopifys Wort für Tresse ("Genius Weft") — sonst keine Methode erkannt.
+  else if (upper.includes("INVISIBLE") && /TRESSE|WEFT/.test(upper)) method = { label: "INVISIBLE TRESSE", cls: "bg-purple-700" };
   else if (upper.includes("BUTTERFLY") && upper.includes("WEFT")) method = { label: "INVISIBLE TRESSE", cls: "bg-purple-700" };
-  else if (upper.includes("GENIUS") && upper.includes("TRESSE")) method = { label: "GENIUS TRESSE", cls: "bg-teal-700" };
-  else if (upper.includes("CLASSIC") && upper.includes("TRESSE")) method = { label: "CLASSIC TRESSE", cls: "bg-green-700" };
-  else if (upper.includes("TRESSE")) method = { label: "TRESSEN", cls: "bg-green-700" };
+  else if (upper.includes("GENIUS") && /TRESSE|WEFT/.test(upper)) method = { label: "GENIUS TRESSE", cls: "bg-teal-700" };
+  else if (upper.includes("CLASSIC") && /TRESSE|WEFT/.test(upper)) method = { label: "CLASSIC TRESSE", cls: "bg-green-700" };
+  else if (/TRESSE|WEFT/.test(upper)) method = { label: "TRESSEN", cls: "bg-green-700" };
   else if (upper.includes("CLIP")) method = { label: "CLIP-IN", cls: "bg-violet-600" };
   else if (upper.includes("PONYTAIL")) method = { label: "PONYTAIL", cls: "bg-pink-700" };
 
+  // Länge: Shopify schreibt "65 cm" MIT Leerzeichen — die feste Liste ohne
+  // Leerzeichen hat das verpasst (deshalb fehlte das Längen-Tag im Pack-Modus).
   let length = "";
-  for (const cm of [45, 55, 65, 75, 85]) {
-    if (upper.includes(`${cm}CM`)) {
-      length = `${cm}cm`;
-      break;
-    }
-  }
+  const lenMatch = upper.match(/(\d{2})\s*CM\b/);
+  if (lenMatch) length = `${lenMatch[1]}cm`;
 
   let origin = "";
   if (upper.includes("RU GLATT") || upper.includes("RUSSISCH")) origin = "RU";
