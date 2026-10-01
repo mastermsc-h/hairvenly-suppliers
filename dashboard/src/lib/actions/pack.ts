@@ -675,7 +675,7 @@ export async function completePackSession(sessionId: string): Promise<{
   if (!session.shopify_order_id || session.order_name?.startsWith("#DEMO-")) {
     await supabase
       .from("pack_sessions")
-      .update({ status: "shipped", fulfilled_at: new Date().toISOString() })
+      .update({ status: "shipped", fulfilled_at: new Date().toISOString(), fulfilled_by: profile.id })
       .eq("id", sessionId);
     revalidatePath("/pack");
     return { success: true };
@@ -694,7 +694,7 @@ export async function completePackSession(sessionId: string): Promise<{
     // Vermutlich schon fulfilled in Shopify — als shipped markieren
     await supabase
       .from("pack_sessions")
-      .update({ status: "shipped", fulfilled_at: new Date().toISOString() })
+      .update({ status: "shipped", fulfilled_at: new Date().toISOString(), fulfilled_by: profile.id })
       .eq("id", sessionId);
     revalidatePath("/pack");
     return { success: true };
@@ -714,7 +714,7 @@ export async function completePackSession(sessionId: string): Promise<{
 
   await supabase
     .from("pack_sessions")
-    .update({ status: "shipped", fulfilled_at: new Date().toISOString() })
+    .update({ status: "shipped", fulfilled_at: new Date().toISOString(), fulfilled_by: profile.id })
     .eq("id", sessionId);
 
   revalidatePath("/pack");

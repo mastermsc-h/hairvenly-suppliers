@@ -28,15 +28,19 @@ export default async function ArchiveDetailPage({
   const { data: session } = await supabase
     .from("pack_sessions")
     .select(
-      "id, order_name, shopify_order_id, status, expected_items, started_at, finished_at, fulfilled_at, notes, profiles:packed_by(display_name, username)",
+      "id, order_name, shopify_order_id, status, expected_items, started_at, finished_at, fulfilled_at, notes, profiles:packed_by(display_name, username), shipper:fulfilled_by(display_name, username)",
     )
     .eq("order_name", cleanName)
     .maybeSingle();
 
   if (!session) notFound();
 
-  const profileRel = (session as { profiles?: { display_name?: string | null; username?: string | null } | null }).profiles;
+  type NameRel = { display_name?: string | null; username?: string | null } | null;
+  const profileRel = (session as { profiles?: NameRel }).profiles;
   const packedByName = profileRel?.display_name || profileRel?.username || null;
+  // "Versendet von" kann von "Gepackt von" abweichen (z.B. User 2 versendet am iPhone)
+  const shipperRel = (session as { shipper?: NameRel }).shipper;
+  const fulfilledByName = shipperRel?.display_name || shipperRel?.username || null;
 
   // Lieferschein-Druck-Status
   const { data: slip } = await supabase
@@ -125,6 +129,17 @@ export default async function ArchiveDetailPage({
         <div>
           <div className="text-xs font-medium text-neutral-500 uppercase">{t(locale, "shipping.packed_by")}</div>
           <div className="text-sm text-neutral-900 mt-1">{packedByName ?? "—"}</div>
+        </div>
+        <div>
+          <div className="text-xs font-medium text-neutral-500 uppercase">{t(locale, "shipping.fulfilled_by")}</div>
+          <div className="text-sm text-neutral-900 mt-1">
+            {fulfilledByName ?? (session.fulfilled_at ? "—" : "noch nicht versendet")}
+            {fulfilledByName && packedByName && fulfilledByName !== packedByName && (
+              <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-0.5 align-middle">
+                ≠ Packer
+              </span>
+            )}
+          </div>
         </div>
         <div>
           <div className="text-xs font-medium text-neutral-500 uppercase">{t(locale, "shipping.archive_started_at")}</div>
