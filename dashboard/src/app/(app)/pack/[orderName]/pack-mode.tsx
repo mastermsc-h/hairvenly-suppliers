@@ -34,6 +34,7 @@ import CameraScanner from "./camera-scanner";
 import OrderQrScanner from "../order-qr-scanner";
 import { isAccessoryCode } from "../accessory-code";
 import { createPhotoHandoffLink } from "@/lib/actions/pack-handoff";
+import { extractOrderNumberFromScan } from "../scan-order";
 
 interface ExpectedItem {
   variantId: string | null;
@@ -571,9 +572,10 @@ export default function PackMode({
       }
       // Order-QR erkannt (Lieferschein-QR enthält /pack/<nr>-URL):
       // gleicher Auftrag → ignorieren, anderer → dorthin navigieren.
-      const packUrl = trimmed.match(/\/pack\/(\d+)/);
-      if (packUrl) {
-        const scannedOrder = packUrl[1];
+      // Layout-unabhängig (Handscanner verwürfelt "/" und "y" auf QWERTZ)
+      const scannedOrderNo = extractOrderNumberFromScan(trimmed);
+      if (scannedOrderNo) {
+        const scannedOrder = scannedOrderNo;
         const currentOrder = orderName.replace(/^#/, "");
         if (scannedOrder !== currentOrder) {
           window.location.href = `/pack/${scannedOrder}`;

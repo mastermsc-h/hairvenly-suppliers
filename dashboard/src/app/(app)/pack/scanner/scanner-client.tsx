@@ -6,6 +6,7 @@ import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { Camera, CameraOff, AlertTriangle, Search, ArrowLeft, ScanLine, RefreshCw, Flashlight } from "lucide-react";
 import { type Locale } from "@/lib/i18n";
 import { scanProductByBarcode } from "@/lib/actions/pack";
+import { extractOrderNumberFromScan } from "../scan-order";
 
 // Nur die Formate erlauben, die wir tatsächlich brauchen — das beschleunigt
 // die Dekodierung deutlich (die Lib probiert sonst alle ~15 Symbologien durch).
@@ -91,9 +92,10 @@ export default function ScannerClient({ locale: _locale }: { locale: Locale }) {
     const trimmed = barcode.trim();
     if (!trimmed) return;
     // Order-QR erkannt (Lieferschein-QR) → direkt in den Pack-Mode springen
-    const packUrl = trimmed.match(/\/pack\/(\d+)/);
-    if (packUrl) {
-      window.location.href = `/pack/${packUrl[1]}`;
+    // Layout-unabhängig (Handscanner verwürfelt "/" und "y" auf QWERTZ)
+    const scannedOrder = extractOrderNumberFromScan(trimmed);
+    if (scannedOrder) {
+      window.location.href = `/pack/${scannedOrder}`;
       return;
     }
     setScanned(trimmed);

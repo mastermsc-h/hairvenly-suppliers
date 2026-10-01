@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, useTransition, type KeyboardEvent
 import { Search, Package2, ArrowRight, RefreshCw, ArrowDown, ArrowUp, Printer, X } from "lucide-react";
 import { t, type Locale } from "@/lib/i18n";
 import type { PackOrderWithStatus } from "./page";
+import { extractOrderNumberFromScan } from "./scan-order";
 import { useRouter } from "next/navigation";
 import { resetSlipPrint, resetSlipPrintBulk } from "@/lib/actions/pack";
 
@@ -79,42 +80,51 @@ export default function PackList({
 
   const localeStr = locale === "de" ? "de-DE" : locale === "tr" ? "tr-TR" : "en-US";
 
-  // Scanner-Einstieg am iMac: Der Handscanner tippt den Lieferschein-QR
-  // (eine /pack/<nr>-URL) oder eine Bestellnummer ins Suchfeld. Erkannte
-  // URL → sofort öffnen (auch ohne Enter). Nackte Nummer → bei Enter öffnen.
-  function openIfScanned(raw: string): boolean {
-    const m = raw.match(/\/pack\/(\d{3,})/);
-    if (m) {
-      router.push(`/pack/${m[1]}`);
-      return true;
-    }
-    return false;
+  // Scanner-Einstieg am iMac: Der Handscanner tippt den Lieferschein-QR ins
+  // Suchfeld — auf deutscher Tastatur VERWÜRFELT ("httpsÖ--…-pack-27449",
+  // siehe scan-order.ts). Erkennung daher layout-unabhängig. Navigiert wird
+  // NIE mitten im Tippen (sonst "/pack/274" statt 27449), sondern bei Enter
+  // (Scanner sendet das meist) oder nach 400ms Ruhe.
+  const SCAN_IDLE_MS = 400;
+  const searchIdleRef = useRef<number | null>(null);
+  function resolveScan(raw: string): string | null {
+    const fromUrl = extractOrderNumberFromScan(raw);
+    if (fromUrl) return fromUrl;
+    const num = raw.trim().replace(/^#/, "");
+    return /^\d{3,}$/.test(num) ? num : null;
+  }
+  function openOrder(num: string) {
+    setQuery("");
+    router.push(`/pack/${num}`);
   }
   function handleSearchChange(value: string) {
-    if (openIfScanned(value)) {
-      setQuery("");
-      return;
-    }
     setQuery(value);
+    if (searchIdleRef.current) window.clearTimeout(searchIdleRef.current);
+    // Nur URL-artige Scans per Idle öffnen — eine nackte Nummer könnte auch
+    // eine Suche nach Bestellnummer sein; die öffnet erst bei Enter.
+    if (extractOrderNumberFromScan(value)) {
+      searchIdleRef.current = window.setTimeout(() => {
+        const n = extractOrderNumberFromScan(value);
+        if (n) openOrder(n);
+      }, SCAN_IDLE_MS);
+    }
   }
   function handleSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key !== "Enter") return;
-    const raw = query.trim();
-    if (!raw) return;
-    if (openIfScanned(raw)) return;
-    const num = raw.replace(/^#/, "");
-    if (/^\d{3,}$/.test(num)) {
+    if (searchIdleRef.current) window.clearTimeout(searchIdleRef.current);
+    const n = resolveScan(query);
+    if (n) {
       e.preventDefault();
-      router.push(`/pack/${num}`);
+      openOrder(n);
     }
   }
 
   // "Einfach scannen" ohne vorher irgendwo reinzuklicken: Tastatur-Scanner
   // tippen nur in ein fokussiertes Feld. Liegt der Fokus auf keinem Eingabe-
   // element (z.B. nach Klick ins Leere), fängt dieser globale Listener die
-  // Zeichen ab, puffert sie und öffnet bei erkannter /pack/<nr>-URL oder bei
-  // Enter + nackter Bestellnummer die Bestellung. Scanner tippen in <50ms pro
-  // Zeichen — menschliches Tippen (langsamer) leert den Puffer nach 400ms.
+  // Zeichen ab, puffert sie und öffnet bei Enter oder nach 400ms Ruhe.
+  // Scanner tippen schnell; menschliches Tippen leert den Puffer ebenfalls
+  // nach 400ms (und matcht ohnehin kein URL-Muster).
   const scanBufRef = useRef("");
   const scanTimerRef = useRef<number | null>(null);
   // Suchfeld nur am Desktop (md+) automatisch fokussieren — am iPhone würde
@@ -128,34 +138,34 @@ export default function PackList({
       if (!el) return false;
       return !!el.closest("input, textarea, select, [contenteditable]");
     }
+    function finish(raw: string) {
+      scanBufRef.current = "";
+      const n = extractOrderNumberFromScan(raw);
+      if (n) {
+        router.push(`/pack/${n}`);
+        return;
+      }
+      const num = raw.trim().replace(/^#/, "");
+      if (/^\d{3,}$/.test(num)) router.push(`/pack/${num}`);
+    }
     function onKey(e: globalThis.KeyboardEvent) {
       if (isEditable(document.activeElement)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (scanTimerRef.current) window.clearTimeout(scanTimerRef.current);
       if (e.key === "Enter") {
-        const raw = scanBufRef.current;
-        scanBufRef.current = "";
-        const m = raw.match(/\/pack\/(\d{3,})/);
-        if (m) { router.push(`/pack/${m[1]}`); return; }
-        const num = raw.trim().replace(/^#/, "");
-        if (/^\d{3,}$/.test(num)) router.push(`/pack/${num}`);
+        finish(scanBufRef.current);
         return;
       }
       if (e.key.length !== 1) return;
       scanBufRef.current += e.key;
-      const m = scanBufRef.current.match(/\/pack\/(\d{3,})/);
-      if (m && /\d$/.test(scanBufRef.current) === false) {
-        // URL vollständig (nach der Nummer kam ein Nicht-Ziffern-Zeichen)
-        scanBufRef.current = "";
-        router.push(`/pack/${m[1]}`);
-        return;
-      }
       scanTimerRef.current = window.setTimeout(() => {
-        // Idle: wenn eine komplette /pack/<nr>-URL im Puffer steht, öffnen
-        const done = scanBufRef.current.match(/\/pack\/(\d{3,})$/);
+        // Idle: nur URL-artige Scans öffnen (nackte Nummern brauchen Enter,
+        // sonst würde zufälliges Tippen von Ziffern navigieren)
+        const raw = scanBufRef.current;
         scanBufRef.current = "";
-        if (done) router.push(`/pack/${done[1]}`);
-      }, 400);
+        const n = extractOrderNumberFromScan(raw);
+        if (n) router.push(`/pack/${n}`);
+      }, SCAN_IDLE_MS);
     }
     document.addEventListener("keydown", onKey);
     return () => {
