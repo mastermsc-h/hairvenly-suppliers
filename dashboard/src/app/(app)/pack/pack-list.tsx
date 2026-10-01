@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type KeyboardEvent } from "react";
 import { Search, Package2, ArrowRight, RefreshCw, ArrowDown, ArrowUp, Printer, X } from "lucide-react";
 import { t, type Locale } from "@/lib/i18n";
 import type { PackOrderWithStatus } from "./page";
@@ -109,6 +109,61 @@ export default function PackList({
     }
   }
 
+  // "Einfach scannen" ohne vorher irgendwo reinzuklicken: Tastatur-Scanner
+  // tippen nur in ein fokussiertes Feld. Liegt der Fokus auf keinem Eingabe-
+  // element (z.B. nach Klick ins Leere), fängt dieser globale Listener die
+  // Zeichen ab, puffert sie und öffnet bei erkannter /pack/<nr>-URL oder bei
+  // Enter + nackter Bestellnummer die Bestellung. Scanner tippen in <50ms pro
+  // Zeichen — menschliches Tippen (langsamer) leert den Puffer nach 400ms.
+  const scanBufRef = useRef("");
+  const scanTimerRef = useRef<number | null>(null);
+  // Suchfeld nur am Desktop (md+) automatisch fokussieren — am iPhone würde
+  // das beim Öffnen die Tastatur hochklappen und die Liste verdecken.
+  const searchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (window.matchMedia("(min-width: 768px)").matches) searchRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    function isEditable(el: Element | null): boolean {
+      if (!el) return false;
+      return !!el.closest("input, textarea, select, [contenteditable]");
+    }
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (isEditable(document.activeElement)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (scanTimerRef.current) window.clearTimeout(scanTimerRef.current);
+      if (e.key === "Enter") {
+        const raw = scanBufRef.current;
+        scanBufRef.current = "";
+        const m = raw.match(/\/pack\/(\d{3,})/);
+        if (m) { router.push(`/pack/${m[1]}`); return; }
+        const num = raw.trim().replace(/^#/, "");
+        if (/^\d{3,}$/.test(num)) router.push(`/pack/${num}`);
+        return;
+      }
+      if (e.key.length !== 1) return;
+      scanBufRef.current += e.key;
+      const m = scanBufRef.current.match(/\/pack\/(\d{3,})/);
+      if (m && /\d$/.test(scanBufRef.current) === false) {
+        // URL vollständig (nach der Nummer kam ein Nicht-Ziffern-Zeichen)
+        scanBufRef.current = "";
+        router.push(`/pack/${m[1]}`);
+        return;
+      }
+      scanTimerRef.current = window.setTimeout(() => {
+        // Idle: wenn eine komplette /pack/<nr>-URL im Puffer steht, öffnen
+        const done = scanBufRef.current.match(/\/pack\/(\d{3,})$/);
+        scanBufRef.current = "";
+        if (done) router.push(`/pack/${done[1]}`);
+      }, 400);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      if (scanTimerRef.current) window.clearTimeout(scanTimerRef.current);
+    };
+  }, [router]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col md:flex-row md:items-center gap-3">
@@ -120,6 +175,7 @@ export default function PackList({
             onChange={(e) => handleSearchChange(e.target.value)}
             onKeyDown={handleSearchKeyDown}
             autoComplete="off"
+            ref={searchRef}
             placeholder={`${t(locale, "shipping.col_order")}, ${t(locale, "shipping.col_customer")} — oder Lieferschein-QR scannen`}
             className="w-full pl-9 pr-3 py-2 rounded-lg border border-neutral-300 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
           />
