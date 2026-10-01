@@ -4,3 +4,8 @@ node_modules/
 .vercel
 # Apps Script source enthält Shopify Access Token — niemals committen
 src/Code.js
+
+# Backups/Clasp-Kopien: enthalten Apps-Script-Quellen mit Shopify-Token bzw. Credentials — niemals committen
+backups/
+*.backup
+.clasp.json.*
