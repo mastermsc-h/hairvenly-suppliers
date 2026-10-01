@@ -547,6 +547,23 @@ export async function recordManualConfirm(
     }));
     await supabase.from("pack_scans").insert(rows);
     scannedCounts[counterKey] = item.quantity;
+
+    // Race-Repair (wie bei recordPackScan): zwei Geräte bestätigen dieselbe
+    // Position gleichzeitig → beide sehen "remaining=1" und fügen je 1 ein →
+    // Überzählung. Nach dem Insert rezählen, Überschuss (jüngste) auf
+    // 'overflow' downgraden. Idempotent für beide beteiligten Requests.
+    const { data: allMatches } = await supabase
+      .from("pack_scans")
+      .select("id, scanned_at")
+      .eq("session_id", sessionId)
+      .eq("scanned_barcode", counterKey)
+      .eq("status", "match")
+      .order("scanned_at", { ascending: true })
+      .order("id", { ascending: true });
+    if (allMatches && allMatches.length > item.quantity) {
+      const surplusIds = allMatches.slice(item.quantity).map((r) => r.id);
+      await supabase.from("pack_scans").update({ status: "overflow" }).in("id", surplusIds);
+    }
   }
 
   // Session immer anfassen — hält updated_at frisch fürs Display-Stale-Fenster
@@ -597,6 +614,13 @@ export async function completePackSession(sessionId: string): Promise<{
     .single();
 
   if (sErr || !session) return { success: false, error: "Session nicht gefunden" };
+
+  // Idempotent: schon versendet (z.B. zweites Gerät hat gerade geklickt, oder
+  // Doppelklick) → Erfolg melden statt Shopify erneut zu fulfillen. Sonst
+  // sähe der Zweite "Shopify-Fulfill fehlgeschlagen", obwohl alles gut ist.
+  if (session.status === "shipped") {
+    return { success: true };
+  }
 
   // Foto-Check: alle 3 müssen vorhanden sein — außer Foto-Pflicht ist übersprungen
   if (!session.photos_skipped) {
@@ -1244,11 +1268,16 @@ export async function unskipPackPhotos(
 }
 
 /**
- * Liest den aktuellen Foto-Stand einer Session (für Live-Polling am Desktop):
- * Wird das Beweisfoto parallel am Handy aufgenommen (QR-Handoff), erkennt der
- * iMac so automatisch, dass ein Foto da ist, und geht weiter zu Schritt 3.
+ * Kompletter Live-Stand einer Session (Zähler + Status + Fotos) für das
+ * geräteübergreifende Polling: iPhone/iPad/iMac arbeiten an DERSELBEN Session
+ * und spiegeln sich gegenseitig — Scans vom Handy erscheinen am iMac, ein
+ * Versand/Abbruch auf einem Gerät zeigt sich sofort auf dem anderen, das
+ * Beweisfoto vom Handy lässt den iMac automatisch zu Schritt 3 springen.
+ * Zählung = Server-Wahrheit (match-Rows), identisch zu recordPackScan.
  */
-export async function fetchSessionPhotos(sessionId: string): Promise<{
+export async function fetchSessionState(sessionId: string): Promise<{
+  status: string;
+  scannedCounts: Record<string, number>;
   photos: Record<string, { id: string; url: string }[]>;
   photosSkipped: boolean;
   photosSkipReason: PhotoSkipReason | null;
@@ -1257,17 +1286,28 @@ export async function fetchSessionPhotos(sessionId: string): Promise<{
   if (!hasFeature(profile, "shipping")) throw new Error("Forbidden");
   const supabase = await createClient();
 
-  const { data: session } = await supabase
-    .from("pack_sessions")
-    .select("photos_skipped, photos_skip_reason")
-    .eq("id", sessionId)
-    .single();
+  const [{ data: session }, { data: matchScans }, { data: photos }] = await Promise.all([
+    supabase
+      .from("pack_sessions")
+      .select("status, photos_skipped, photos_skip_reason")
+      .eq("id", sessionId)
+      .single(),
+    supabase
+      .from("pack_scans")
+      .select("scanned_barcode")
+      .eq("session_id", sessionId)
+      .eq("status", "match"),
+    supabase
+      .from("pack_photos")
+      .select("id, photo_type, storage_path, taken_at")
+      .eq("session_id", sessionId)
+      .order("taken_at", { ascending: true }),
+  ]);
 
-  const { data: photos } = await supabase
-    .from("pack_photos")
-    .select("id, photo_type, storage_path, taken_at")
-    .eq("session_id", sessionId)
-    .order("taken_at", { ascending: true });
+  const scannedCounts: Record<string, number> = {};
+  for (const s of matchScans ?? []) {
+    scannedCounts[s.scanned_barcode] = (scannedCounts[s.scanned_barcode] ?? 0) + 1;
+  }
 
   const photoMap: Record<string, { id: string; url: string }[]> = {};
   for (const p of photos ?? []) {
@@ -1281,6 +1321,8 @@ export async function fetchSessionPhotos(sessionId: string): Promise<{
   }
 
   return {
+    status: session?.status ?? "open",
+    scannedCounts,
     photos: photoMap,
     photosSkipped: session?.photos_skipped ?? false,
     photosSkipReason: (session?.photos_skip_reason as PhotoSkipReason | null) ?? null,

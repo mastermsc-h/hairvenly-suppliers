@@ -16,7 +16,7 @@ import {
   unskipPackPhotos,
   updateShippingAddress,
   refreshSessionSnapshot,
-  fetchSessionPhotos,
+  fetchSessionState,
   type PhotoSkipReason,
 } from "@/lib/actions/pack";
 import CelebrationOverlay from "../celebration-overlay";
@@ -216,6 +216,16 @@ export default function PackMode({
   const inputRef = useRef<HTMLInputElement>(null);
   // Verhindert parallele Server-Calls (Camera kann während laufendem Call erneut scannen)
   const inFlightRef = useRef(false);
+  // Warteschlange für Handscanner-Scans, die eintreffen während ein Server-Call
+  // läuft. Vorher wurden die STILL verworfen → bei schnellem Durchscannen ging
+  // jeder zweite Scan verloren. Jetzt: einreihen, nach dem Call abarbeiten.
+  const pendingScanRef = useRef<string[]>([]);
+  // Zeitstempel der letzten lokalen Mutation (Scan/Confirm/Reset/Foto/Versand).
+  // Das Geräte-Polling verwirft Antworten, die ÄLTER sind als diese Mutation,
+  // damit ein gerade gemachter Scan nicht von einer veralteten Antwort
+  // überschrieben wird.
+  const lastMutationRef = useRef(0);
+  const submitBarcodeRef = useRef<((b: string, s: "camera" | "input") => void) | null>(null);
   // Pro Item: Manual-Confirm Form aufgeklappt + Checkbox-States (5: Methode/Länge/Herkunft/Farbe/Menge)
   const [manualForms, setManualForms] = useState<Record<number, { open: boolean; checks: boolean[] }>>({});
   // Live-Scan-Historie
@@ -252,11 +262,6 @@ export default function PackMode({
       return { ...prev, [idx]: { ...cur, checks: newChecks } };
     });
   }
-
-  // Autofocus aufs Eingabefeld nach jedem Scan
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, [counts]);
 
   // Scan-History initial laden + nach Änderungen aktualisieren
   const refreshHistory = useCallback(async () => {
@@ -355,6 +360,7 @@ export default function PackMode({
       startTransition(async () => {
         try {
           const res = await recordManualConfirm(sessionId, idx);
+          lastMutationRef.current = Date.now();
           setCounts(res.scannedCounts);
           if (res.status === "match") {
             playBeep(true);
@@ -376,7 +382,8 @@ export default function PackMode({
             playBeep(false);
             setFlash({ kind: "overflow", message: t(locale, "shipping.scan_overflow") });
           }
-          await refreshHistory();
+          // Historie im Hintergrund — blockiert die Bestätigung nicht.
+          void refreshHistory();
         } catch (err) {
           playBeep(false);
           setFlash({ kind: "mismatch", message: err instanceof Error ? err.message : "Fehler" });
@@ -389,20 +396,6 @@ export default function PackMode({
   const allPhotosUploaded =
     photosSkipped || PHOTO_TYPES.every((p) => (photos[p]?.length ?? 0) > 0);
   const canFulfill = isComplete && allPhotosUploaded && status !== "shipped";
-
-  // QR-Code zum Wechsel auf iPhone für Foto-Aufnahme (nur auf desktop sichtbar)
-  const [phoneQrDataUrl, setPhoneQrDataUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const url = `${window.location.origin}/pack/${orderName.replace(/^#/, "")}`;
-    void QRCode.toDataURL(url, {
-      width: 320,
-      margin: 1,
-      color: { dark: "#000000", light: "#FFFFFF" },
-    })
-      .then((dataUrl) => setPhoneQrDataUrl(dataUrl))
-      .catch(() => setPhoneQrDataUrl(null));
-  }, [orderName]);
 
   // Phase-State für den Assistent-Workflow
   const phase: "scan" | "photos" | "ready" | "shipped" = useMemo(() => {
@@ -422,6 +415,14 @@ export default function PackMode({
   // Kamera aktiv? → Ziel-Karte kollabiert dann zur schmalen Leiste, damit
   // das Kamerabild am iPhone die volle Höhe bekommt (sonst unten abgeschnitten).
   const [cameraActive, setCameraActive] = useState(false);
+
+  // Autofocus aufs Eingabefeld nach jedem Zähler-Update (Handscanner tippt nur
+  // ins fokussierte Feld). NICHT während die Kamera läuft — am Handy wird
+  // gescannt, nicht getippt, da wäre ein Fokus-Sprung nur störend.
+  useEffect(() => {
+    if (cameraActive) return;
+    inputRef.current?.focus();
+  }, [counts, cameraActive]);
 
   useEffect(() => {
     if (lastPhaseRef.current === phase) return;
@@ -469,19 +470,27 @@ export default function PackMode({
     return () => document.removeEventListener("click", onDocClick);
   }, [phase]);
 
-  // Handy-Handoff: Während Schritt 2 (Fotos) pollt der iMac den Foto-Stand.
-  // Wird das Beweisfoto parallel am Handy aufgenommen (QR öffnet dieselbe
-  // Bestellung), erscheint es hier automatisch → weiter zu Schritt 3. Merge
-  // statt Überschreiben, damit ein gerade lokal (Desktop) hochgeladenes Foto
-  // nicht von einer veralteten Antwort weggeräumt wird.
+  // Geräteübergreifendes Live-Polling: iPhone/iPad/iMac arbeiten an DERSELBEN
+  // Session und spiegeln sich. Scans vom Handy erscheinen am iMac, ein
+  // Versand/Abbruch auf einem Gerät zeigt sich auf dem anderen, das
+  // Beweisfoto vom Handy lässt den iMac automatisch zu Schritt 3 springen.
+  // Läuft in allen aktiven Phasen (bis 'shipped'), nur bei sichtbarem Tab.
+  // Zähler = Server-Wahrheit. Stale-Guard: Antworten, die vor der letzten
+  // lokalen Mutation gestartet wurden, werden verworfen — sonst könnte ein
+  // gerade gemachter Scan kurz "zurückspringen". Fotos werden gemergt (lokal
+  // vorhandene bleiben), damit ein frischer Desktop-Upload nicht verschwindet.
   useEffect(() => {
-    if (phase !== "photos") return;
+    if (phase === "shipped") return;
     let cancelled = false;
     const poll = async () => {
       if (document.visibilityState !== "visible") return;
+      if (inFlightRef.current) return; // eigener Call läuft — nächster Tick
+      const startedAt = Date.now();
       try {
-        const res = await fetchSessionPhotos(sessionId);
+        const res = await fetchSessionState(sessionId);
         if (cancelled) return;
+        if (startedAt < lastMutationRef.current) return;
+        setCounts(res.scannedCounts);
         setPhotos((local) => {
           const merged: typeof local = { ...res.photos };
           for (const k of Object.keys(local)) {
@@ -491,11 +500,19 @@ export default function PackMode({
         });
         setPhotosSkipped((cur) => cur || res.photosSkipped);
         if (res.photosSkipReason) setPhotosSkipReason(res.photosSkipReason);
+        if (
+          res.status === "shipped" ||
+          res.status === "verified" ||
+          res.status === "in_progress" ||
+          res.status === "open"
+        ) {
+          setStatus(res.status);
+        }
       } catch {
         // ignore — nächster Tick versucht es erneut
       }
     };
-    const iv = setInterval(poll, 3500);
+    const iv = setInterval(poll, 3000);
     return () => {
       cancelled = true;
       clearInterval(iv);
@@ -521,10 +538,18 @@ export default function PackMode({
     (barcode: string, source: "camera" | "input" = "input") => {
       // Solange Erfolgs-Overlay offen ist → keine neuen Scans annehmen
       if (bigSuccess) return;
-      // Solange ein Server-Call läuft → keine parallelen Scans
-      if (inFlightRef.current) return;
       const trimmed = barcode.trim();
       if (!trimmed) return;
+      // Server-Call läuft: Handscanner-Scans EINREIHEN statt verwerfen (sonst
+      // geht bei schnellem Durchscannen jeder zweite Scan still verloren).
+      // Kamera-Scans weiterhin verwerfen — die Kamera liefert denselben Code
+      // ohnehin im nächsten Frame erneut.
+      if (inFlightRef.current) {
+        if (source === "input" && pendingScanRef.current.length < 20) {
+          pendingScanRef.current.push(trimmed);
+        }
+        return;
+      }
       // Order-QR erkannt (Lieferschein-QR enthält /pack/<nr>-URL):
       // gleicher Auftrag → ignorieren, anderer → dorthin navigieren.
       const packUrl = trimmed.match(/\/pack\/(\d+)/);
@@ -554,6 +579,7 @@ export default function PackMode({
         startTransition(async () => {
           try {
             const res = await recordManualConfirm(sessionId, accIdx);
+            lastMutationRef.current = Date.now();
             setCounts(res.scannedCounts);
             const item = expectedItems[accIdx];
             const counterKey = item.barcode || `manual:${accIdx}`;
@@ -573,7 +599,7 @@ export default function PackMode({
               playBeep(false);
               setFlash({ kind: "overflow", message: t(locale, "shipping.scan_overflow") });
             }
-            await refreshHistory();
+            void refreshHistory();
           } catch (err) {
             playBeep(false);
             const raw = err instanceof Error ? err.message : "Fehler";
@@ -584,6 +610,8 @@ export default function PackMode({
             });
           } finally {
             inFlightRef.current = false;
+            const next = pendingScanRef.current.shift();
+            if (next) setTimeout(() => submitBarcodeRef.current?.(next, "input"), 0);
           }
         });
         return;
@@ -592,6 +620,7 @@ export default function PackMode({
       startTransition(async () => {
         try {
           const res = await recordPackScan(sessionId, trimmed);
+          lastMutationRef.current = Date.now();
           setCounts(res.scannedCounts);
           if (res.status === "match") {
             playBeep(true);
@@ -621,7 +650,9 @@ export default function PackMode({
               message: t(locale, "shipping.scan_mismatch"),
             });
           }
-          await refreshHistory();
+          // Historie im Hintergrund — der nächste Scan muss NICHT darauf
+          // warten (vorher: jeder Scan = Scan-Call + Historien-Call in Serie).
+          void refreshHistory();
         } catch (err) {
           playBeep(false);
           const raw = err instanceof Error ? err.message : "Fehler";
@@ -633,11 +664,17 @@ export default function PackMode({
           });
         } finally {
           inFlightRef.current = false;
+          // Warteschlange abarbeiten (Handscanner-Scans während des Calls)
+          const next = pendingScanRef.current.shift();
+          if (next) setTimeout(() => submitBarcodeRef.current?.(next, "input"), 0);
         }
       });
     },
     [sessionId, status, locale, refreshHistory, bigSuccess, expectedItems, orderName, counts],
   );
+  useEffect(() => {
+    submitBarcodeRef.current = submitBarcode;
+  }, [submitBarcode]);
 
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
 
@@ -699,8 +736,9 @@ export default function PackMode({
       startTransition(async () => {
         const res = await resetItemConfirms(sessionId, idx);
         if (res.success) {
+          lastMutationRef.current = Date.now();
           setCounts(res.scannedCounts);
-          await refreshHistory();
+          void refreshHistory();
         }
       });
     },
@@ -760,6 +798,7 @@ export default function PackMode({
     startTransition(async () => {
       const res = await completePackSession(sessionId);
       if (res.success) {
+        lastMutationRef.current = Date.now();
         setStatus("shipped");
         setShowCelebration(true);
       } else {
@@ -1444,31 +1483,6 @@ export default function PackMode({
             )}
           </div>
 
-          {/* Phone hand-off — nur desktop, nur solange noch Fotos fehlen */}
-          {isComplete && !allPhotosUploaded && (
-            <div className="hidden md:flex items-center gap-6 bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 shadow-sm scroll-mt-6">
-              <div className="bg-white rounded-xl p-3 shrink-0">
-                {phoneQrDataUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={phoneQrDataUrl} alt="QR-Code: auf iPhone öffnen" className="w-44 h-44" />
-                ) : (
-                  <div className="w-44 h-44 bg-neutral-200 animate-pulse rounded-lg" />
-                )}
-              </div>
-              <div>
-                <div className="flex items-center gap-2 text-amber-900 mb-1">
-                  <Smartphone size={28} />
-                  <div className="text-2xl font-black leading-tight">
-                    {t(locale, "shipping.display_phone_qr_title")}
-                  </div>
-                </div>
-                <div className="text-sm text-amber-900/90 leading-relaxed">
-                  {t(locale, "shipping.display_phone_qr_hint")}
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Foto-Pflicht übersprungen — Banner statt Foto-Stations */}
           {isComplete && photosSkipped && (
             <div ref={photoSectionRef} className="bg-emerald-50 border-2 border-emerald-300 rounded-2xl p-5 shadow-sm scroll-mt-6 flex items-start gap-4">
@@ -1519,9 +1533,10 @@ export default function PackMode({
                 </button>
               </div>
               {/* Handy-Handoff: Foto am iPhone aufnehmen — erscheint hier automatisch.
-                  Ideal am iMac, wo die Webcam zum Abfotografieren ungeeignet ist. */}
+                  Nur am Desktop/iPad-Querformat (md+): auf dem Handy selbst wäre
+                  "scanne diesen QR mit dem Handy" sinnlos. */}
               {handoffQr && (
-                <div className="mb-3 flex flex-col sm:flex-row items-center gap-4 bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <div className="mb-3 hidden md:flex flex-row items-center gap-4 bg-blue-50 border border-blue-200 rounded-xl p-4">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={handoffQr} alt="Handy-QR" className="w-28 h-28 rounded-lg bg-white p-1 shrink-0" />
                   <div className="text-sm text-blue-900 min-w-0">
