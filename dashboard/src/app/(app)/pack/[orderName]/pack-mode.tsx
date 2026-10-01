@@ -33,6 +33,7 @@ import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X,
 import CameraScanner from "./camera-scanner";
 import OrderQrScanner from "../order-qr-scanner";
 import { isAccessoryCode } from "../accessory-code";
+import { createPhotoHandoffLink } from "@/lib/actions/pack-handoff";
 
 interface ExpectedItem {
   variantId: string | null;
@@ -519,17 +520,35 @@ export default function PackMode({
     };
   }, [phase, sessionId]);
 
-  // QR für den Handy-Handoff (öffnet dieselbe Bestellung am Handy zum Fotografieren)
+  // QR für den Handy-Handoff: signierter, 2h gültiger Link auf die öffentliche
+  // Foto-Seite (/pack-foto/<token>) → am iPhone KEIN Login nötig. Fällt der
+  // Server-Call aus, zeigt der QR ersatzweise die normale Bestellseite (Login).
   const [handoffQr, setHandoffQr] = useState<string>("");
   useEffect(() => {
     if (phase !== "photos") return;
     if (typeof window === "undefined") return;
+    let cancelled = false;
     const clean = orderName.replace(/^#/, "");
-    const url = `${window.location.origin}/pack/${clean}`;
-    QRCode.toDataURL(url, { width: 320, margin: 1, errorCorrectionLevel: "M" })
-      .then(setHandoffQr)
-      .catch(() => setHandoffQr(""));
-  }, [phase, orderName]);
+    const fallback = `${window.location.origin}/pack/${clean}`;
+    (async () => {
+      let url = fallback;
+      try {
+        const r = await createPhotoHandoffLink(sessionId);
+        if (r.success && r.path) url = `${window.location.origin}${r.path}`;
+      } catch {
+        /* fallback bleibt */
+      }
+      if (cancelled) return;
+      try {
+        setHandoffQr(await QRCode.toDataURL(url, { width: 320, margin: 1, errorCorrectionLevel: "M" }));
+      } catch {
+        setHandoffQr("");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [phase, orderName, sessionId]);
 
   const submitBarcode = useCallback(
     // source: "camera" → blockierendes Erfolgs-Overlay (verhindert Doppel-Lesung
@@ -1544,9 +1563,9 @@ export default function PackMode({
                       <Smartphone size={16} /> Foto am Handy aufnehmen
                     </div>
                     <div className="text-xs text-blue-800/90 mt-1 leading-relaxed">
-                      QR mit dem iPhone scannen → dieselbe Bestellung öffnet sich → dort das
+                      QR mit dem iPhone scannen → Foto-Seite öffnet sich <strong>ohne Login</strong> →
                       Beweisfoto machen. Es <strong>erscheint hier automatisch</strong> und der
-                      Vorgang springt weiter zu Schritt 3. Kein Datei-Upload am iMac nötig.
+                      Vorgang springt weiter zu Schritt 3. Link gilt 2 Std., nur für diese Bestellung.
                     </div>
                     <div className="text-[11px] text-blue-700/80 mt-1.5 flex items-center gap-1">
                       <Loader2 size={11} className="animate-spin" /> Warte auf Foto vom Handy…

@@ -48,6 +48,10 @@ export async function updateSession(request: NextRequest) {
     // wurden order-reminders/refresh/fix-addresses zur Login-Seite redirected
     // und liefen still ins Leere (Bug gefunden 30.09.2026).
     path.startsWith("/api/cron/") ||
+    // Foto-Handoff iMac → iPhone: /pack-foto/<token> ist öffentlich, der Zugriff
+    // wird durch den signierten, 2h gültigen Session-Token geschützt (kein
+    // Login am Handy nötig). Nur Foto-Upload möglich, keine Bestelldaten.
+    path.startsWith("/pack-foto/") ||
     path === "/favicon.ico";
 
   if (!user && !isPublic) {
