@@ -81,7 +81,15 @@ function detectAttributes(title: string, variantTitle: string | null) {
   // Alte Titel ohne "|" (z.B. "#SILVER 45CM TAPE EXTENSIONS") → kein Farb-Tag,
   // sonst stünde der komplette Titel doppelt da.
 
-  return { method, length, origin, color };
+  // Grammzahl: nur bei Clip-ins relevant, steht in der VARIANTE ("100g",
+  // "150g", "225g"). Andere Methoden haben Strähnen-Varianten, kein "g".
+  let grams = "";
+  if (method.label === "CLIP-IN") {
+    const gm = upper.match(/(\d{2,3})\s*G\b/);
+    if (gm) grams = `${gm[1]}g`;
+  }
+
+  return { method, length, origin, color, grams };
 }
 
 function formatDate(iso: string): string {
@@ -232,6 +240,7 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
         .tag-length { background: #475569 !important; }
         .tag-origin { background: #b91c1c !important; }
         .tag-color  { background: #b45309 !important; letter-spacing: 0.4px; text-transform: none; }
+        .tag-grams  { background: #0e7490 !important; }
       `}</style>
 
       <div className="print-bar bg-white border-b border-neutral-200 p-3 flex items-center justify-between gap-3 no-print">
@@ -306,12 +315,13 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
                   return (
                     <tr key={i} className="border-b border-neutral-200">
                       <td className="py-3 align-top">
-                        {it.isExtension && (attrs.method.label || attrs.length || attrs.origin || attrs.color) && (
+                        {it.isExtension && (attrs.method.label || attrs.length || attrs.origin || attrs.color || attrs.grams) && (
                           <div className="mb-1">
                             {attrs.method.label && (
                               <span className={`method-badge ${attrs.method.cls}`}>{attrs.method.label}</span>
                             )}
                             {attrs.length && <span className="tag-secondary tag-length">{attrs.length}</span>}
+                            {attrs.grams && <span className="tag-secondary tag-grams">{attrs.grams}</span>}
                             {attrs.origin && <span className="tag-secondary tag-origin">{attrs.origin}</span>}
                             {attrs.color && <span className="tag-secondary tag-color">{attrs.color}</span>}
                           </div>
