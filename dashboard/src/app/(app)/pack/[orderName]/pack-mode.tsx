@@ -551,6 +551,19 @@ export default function PackMode({
     };
   }, [phase, orderName, sessionId]);
 
+  // Übergangs-Hinweis: Im Moment, in dem der letzte Artikel gescannt ist,
+  // weiß der Packer sonst nicht, dass JETZT das iPhone dran ist (die Foto-Box
+  // liegt rechts unten). Darum ein großes Fenster beim Wechsel scan→photos,
+  // das sich von selbst schließt, sobald das Foto da ist (phase verlässt photos).
+  const [showPhotoPrompt, setShowPhotoPrompt] = useState(false);
+  const prevPhaseForPromptRef = useRef<typeof phase | null>(null);
+  useEffect(() => {
+    const prev = prevPhaseForPromptRef.current;
+    prevPhaseForPromptRef.current = phase;
+    if (prev === "scan" && phase === "photos") setShowPhotoPrompt(true);
+    if (phase !== "photos") setShowPhotoPrompt(false);
+  }, [phase]);
+
   const submitBarcode = useCallback(
     // source: "camera" → blockierendes Erfolgs-Overlay (verhindert Doppel-Lesung
     // desselben Codes im Kamerabild). "input" (Handscanner/Tastatur) → nicht-
@@ -906,6 +919,68 @@ export default function PackMode({
         </div>
       )}
 
+      {/* ÜBERGANGS-HINWEIS (nur Desktop): letzter Artikel gescannt → jetzt ist
+          das iPhone dran. Groß, mit QR, unübersehbar. Schließt sich von selbst,
+          sobald das Foto angekommen ist (phase → ready). */}
+      {showPhotoPrompt && phase === "photos" && (
+        <div className="fixed inset-0 z-40 hidden md:flex items-center justify-center bg-neutral-900/70 p-6">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8 relative">
+            <button
+              type="button"
+              onClick={() => setShowPhotoPrompt(false)}
+              className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-700"
+              aria-label="Hinweis schließen"
+            >
+              <X size={22} />
+            </button>
+            <div className="flex items-center gap-2 text-emerald-700 font-bold">
+              <CheckCircle2 size={22} /> Alle Artikel gescannt
+            </div>
+            <div className="text-3xl font-black text-neutral-900 mt-2">
+              Schritt 2: Beweisfoto — jetzt das iPhone
+            </div>
+            <div className="mt-6 flex items-center gap-8">
+              {handoffQr ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={handoffQr} alt="QR fürs iPhone" className="w-56 h-56 rounded-xl border border-neutral-200 shrink-0" />
+              ) : (
+                <div className="w-56 h-56 rounded-xl bg-neutral-100 animate-pulse shrink-0" />
+              )}
+              <ol className="text-lg text-neutral-800 space-y-3 leading-snug">
+                <li className="flex gap-3"><span className="font-black text-amber-600 w-6">1.</span> iPhone nehmen, <strong className="ml-1">Kamera-App</strong>&nbsp;öffnen</li>
+                <li className="flex gap-3"><span className="font-black text-amber-600 w-6">2.</span> auf den <strong className="mx-1">QR</strong> halten → Link antippen <span className="text-neutral-500 text-base ml-1">(kein Login nötig)</span></li>
+                <li className="flex gap-3"><span className="font-black text-amber-600 w-6">3.</span> Produkte <strong className="mx-1">mit Rechnung</strong> fotografieren</li>
+              </ol>
+            </div>
+            <div className="mt-6 flex items-center gap-2 text-sm text-neutral-600">
+              <Loader2 size={14} className="animate-spin" /> Dieses Fenster schließt sich automatisch, sobald das Foto angekommen ist.
+            </div>
+            <div className="mt-4 flex gap-4 text-sm">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPhotoPrompt(false);
+                  setTimeout(() => photoSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+                }}
+                className="text-neutral-600 hover:text-neutral-900 underline"
+              >
+                Stattdessen Datei vom iMac hochladen
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPhotoPrompt(false);
+                  setSkipModalOpen(true);
+                }}
+                className="text-neutral-600 hover:text-neutral-900 underline"
+              >
+                Fotos überspringen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Phase Indicator (kompakt) */}
       <div className="bg-white rounded-xl border border-neutral-200 p-1.5 shadow-sm flex items-center gap-1 text-xs">
         {([
@@ -1130,23 +1205,60 @@ export default function PackMode({
 
           {phase === "photos" && (
             <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 shadow-sm text-center">
-              <ImagePlus className="mx-auto text-amber-700 mb-2" size={48} />
+              <ImagePlus className="mx-auto text-amber-700 mb-2" size={40} />
               <div className="text-sm font-bold text-amber-900 uppercase tracking-wide">
                 Schritt 2 von 3
               </div>
               <div className="text-xl font-black text-amber-900 mt-1">
                 Beweis-Foto aufnehmen
               </div>
-              <div className="text-xs text-amber-800 mt-2 leading-relaxed">
-                Alle Artikel sind bestätigt ✓<br />
-                Bitte ein Foto der Produkte mit der Rechnung machen. Mehrere Aufnahmen sind möglich.
+              <div className="text-xs text-amber-800 mt-1">Alle Artikel sind bestätigt ✓</div>
+
+              {/* Desktop: die Handlung direkt HIER — QR + Schritte. Auf dem
+                  Handy (unter md) wird unten direkt fotografiert. */}
+              <div className="hidden md:block mt-4 bg-white rounded-xl border border-amber-200 p-3 text-left">
+                <div className="flex items-start gap-3">
+                  {handoffQr ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={handoffQr} alt="QR fürs iPhone" className="w-32 h-32 rounded-lg shrink-0" />
+                  ) : (
+                    <div className="w-32 h-32 rounded-lg bg-neutral-100 animate-pulse shrink-0" />
+                  )}
+                  <ol className="text-sm text-neutral-800 space-y-1.5 leading-snug">
+                    <li><span className="font-bold text-amber-700">1.</span> iPhone nehmen, <strong>Kamera-App</strong> öffnen</li>
+                    <li><span className="font-bold text-amber-700">2.</span> auf diesen <strong>QR</strong> halten → Link antippen <span className="text-neutral-500">(kein Login)</span></li>
+                    <li><span className="font-bold text-amber-700">3.</span> Produkte <strong>mit Rechnung</strong> fotografieren</li>
+                  </ol>
+                </div>
+                <div className="mt-2 text-[11px] text-amber-800 flex items-center gap-1">
+                  <Loader2 size={11} className="animate-spin" /> Der iMac macht automatisch weiter, sobald das Foto da ist.
+                </div>
+                <div className="mt-2 flex gap-3 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => photoSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    className="text-neutral-600 hover:text-neutral-900 underline"
+                  >
+                    Stattdessen Datei vom iMac hochladen
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSkipModalOpen(true)}
+                    className="text-neutral-600 hover:text-neutral-900 underline"
+                  >
+                    Fotos überspringen
+                  </button>
+                </div>
+              </div>
+              <div className="md:hidden text-xs text-amber-800 mt-2 leading-relaxed">
+                Unten auf „Jetzt aufnehmen" tippen — Produkte mit der Rechnung fotografieren.
               </div>
             </div>
           )}
 
           {phase === "ready" && (
             <div className="bg-emerald-50 border-2 border-emerald-400 rounded-2xl p-5 shadow-sm text-center">
-              <CheckCircle2 className="mx-auto text-emerald-700 mb-2" size={48} />
+              <CheckCircle2 className="mx-auto text-emerald-700 mb-2" size={40} />
               <div className="text-sm font-bold text-emerald-900 uppercase tracking-wide">
                 Schritt 3 von 3
               </div>
@@ -1154,8 +1266,22 @@ export default function PackMode({
                 Bereit zum Versenden
               </div>
               <div className="text-xs text-emerald-800 mt-2">
-                Karton schließen und Bestellung als versendet markieren.
+                Karton schließen, dann hier abschließen:
               </div>
+              {/* Die Handlung direkt in der Karte — nicht erst rechts unten suchen */}
+              <button
+                onClick={handleFulfill}
+                disabled={isPending || status === "shipped"}
+                className="mt-3 w-full inline-flex items-center justify-center gap-2 px-5 py-3 bg-emerald-600 text-white text-base font-bold rounded-xl hover:bg-emerald-700 transition disabled:opacity-50"
+              >
+                {isPending ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
+                {t(locale, "shipping.fulfill")}
+              </button>
+              {fulfillError && (
+                <div className="text-xs text-red-700 mt-2 bg-red-50 border border-red-200 p-2 rounded">
+                  {fulfillError}
+                </div>
+              )}
             </div>
           )}
 
