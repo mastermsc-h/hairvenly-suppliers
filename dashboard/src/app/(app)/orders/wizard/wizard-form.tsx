@@ -349,11 +349,14 @@ export default function WizardForm({ suppliers, catalogs, locale, stockSheetId }
         const sheetColor = suggestion.colorCode.replace(/^#/, "").trim().toLowerCase();
 
         // 1) Find the matching catalog method (with aliases)
+        // Exakter Treffer vor Teilstring: "Invisible Tapes" enthält "Tapes" und darf nicht bei Tapes landen
         const aliases = methodAliases[sheetMethod] ?? [sheetMethod];
-        const catalogMethod = methods.find((m) => {
-          const mName = m.name.toLowerCase();
-          return aliases.some((a) => mName === a || mName.includes(a) || a.includes(mName));
-        });
+        const catalogMethod =
+          methods.find((m) => aliases.includes(m.name.toLowerCase().trim())) ??
+          methods.find((m) => {
+            const mName = m.name.toLowerCase();
+            return aliases.some((a) => mName.includes(a) || a.includes(mName));
+          });
 
         if (!catalogMethod) {
           unmatched.push(`${suggestion.colorCode} (Methode "${suggestion.method}" nicht gefunden)`);
