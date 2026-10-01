@@ -265,7 +265,7 @@ export async function createSickDay(_prev: unknown, formData: FormData) {
   // AU-Pflicht in DE i.d.R. ab dem 4. Kalendertag der Erkrankung.
   const certRequired = days > 3;
 
-  const { error } = await svc.from("sick_days").insert({
+  const { data: inserted, error } = await svc.from("sick_days").insert({
     staff_id: staffId,
     start_date: start,
     end_date: end,
@@ -274,8 +274,23 @@ export async function createSickDay(_prev: unknown, formData: FormData) {
     certificate_required: certRequired,
     certificate_expires_on: str(formData.get("certificate_expires_on")),
     note: str(formData.get("note")),
-  });
+  }).select("id").single();
   if (error) return { error: error.message };
+
+  // Optional: Bescheinigung direkt beim Anlegen mit hochladen.
+  const file = formData.get("file") as File | null;
+  if (inserted && file && file.size > 0) {
+    const safeName = file.name.replace(/[^\w.\-]+/g, "_");
+    const path = `${inserted.id}/${Date.now()}_${safeName}`;
+    const { error: upErr } = await svc.storage.from(BUCKET).upload(path, file, { contentType: file.type, upsert: false });
+    if (!upErr) {
+      await svc.from("sick_days").update({
+        certificate_uploaded: true,
+        certificate_path: path,
+        certificate_file_name: file.name,
+      }).eq("id", inserted.id);
+    }
+  }
   revalidateAll();
   return { ok: true };
 }

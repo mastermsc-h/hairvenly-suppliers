@@ -218,10 +218,14 @@ function SickForm({ members, onDone, onCancel }: { members: StaffMember[]; onDon
           <label className={labelCls}>Notiz (optional)</label>
           <input name="note" className={inputCls} />
         </div>
+        <div className="md:col-span-3">
+          <label className={labelCls}>Bescheinigung / AU (optional, PDF oder Bild)</label>
+          <input name="file" type="file" accept="application/pdf,image/*" className="mt-1 block w-full text-sm text-neutral-600 file:mr-3 file:rounded-lg file:border-0 file:bg-neutral-900 file:text-white file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-neutral-800" />
+        </div>
       </div>
       {calDays !== null && (
         <div className="text-xs text-neutral-500">
-          {calDays} Kalendertag(e){certNeeded && <span className="text-amber-700 font-medium"> — AU-Bescheinigung erforderlich (&gt; 3 Tage). Nach dem Anlegen hochladen.</span>}
+          {calDays} Kalendertag(e){certNeeded && <span className="text-amber-700 font-medium"> — AU-Bescheinigung erforderlich (&gt; 3 Tage).</span>} Du kannst die Bescheinigung gleich hier hochladen oder später in der Tabelle.
         </div>
       )}
       {error && <div className="text-rose-600 text-sm">{error}</div>}
