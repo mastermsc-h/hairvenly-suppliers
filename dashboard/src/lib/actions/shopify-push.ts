@@ -82,6 +82,10 @@ function gramsPerPiece(methodName: string | null, lengthValue: string | null): n
   if (m === "standardtapes" || m === "tapes") return 25;
   if (m === "minitapes") return 50;
   if (m === "classicweft" || m === "invisibleweft") return 50;
+  // Werte aus der Gewichtstabelle des Apps Script (sanitizeWeightForCollection)
+  if (m === "geniusweft" || m === "classictressen" || m === "butterflytressen") return 50;
+  if (m === "invisibletapes") return 25;
+  // Ponytail bewusst NICHT: Gewicht pro Stück variiert → lieber blockieren als falsch zählen
   if (m === "clipins") {
     if (!lengthValue) return null;
     const match = String(lengthValue).match(/(\d+)\s*g/i);

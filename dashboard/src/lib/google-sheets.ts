@@ -319,6 +319,8 @@ export const COLLECTION_TO_METHOD: Record<string, string> = {
   "bondings wellig 85cm": "Bondings",
   "usbekische classic tressen (wellig)": "Classic Tressen",
   "usbekische genius tressen (wellig)": "Genius Weft",
+  "usbekische butterfly tressen (wellig)": "Butterfly Tressen",
+  "invisible tapes wellig 65cm": "Invisible Tapes",
   "ponytail extensions kaufen": "Ponytail",
 };
 
