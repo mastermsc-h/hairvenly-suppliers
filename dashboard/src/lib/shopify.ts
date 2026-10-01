@@ -1311,6 +1311,7 @@ interface PackOrderNode {
   id: string;
   name: string;
   createdAt: string;
+  cancelledAt?: string | null;
   displayFinancialStatus: string;
   displayFulfillmentStatus: string;
   email: string | null;
@@ -1363,6 +1364,7 @@ const PACK_ORDER_FIELDS_SLIM = `
   id
   name
   createdAt
+  cancelledAt
   displayFinancialStatus
   displayFulfillmentStatus
   email
@@ -1391,6 +1393,7 @@ const PACK_ORDER_FIELDS = `
   id
   name
   createdAt
+  cancelledAt
   displayFinancialStatus
   displayFulfillmentStatus
   email
@@ -1493,7 +1496,11 @@ export const PACK_SKIP_TAGS = [
 
 function buildPackOrderQuery(): string {
   const skipTags = PACK_SKIP_TAGS.map((t) => `-tag:"${t}"`).join(" AND ");
-  return `financial_status:paid AND fulfillment_status:unfulfilled${skipTags ? ` AND ${skipTags}` : ""}`;
+  // status:open = weder storniert noch archiviert. Ohne das tauchte ein
+  // stornierter 0-€-Entwurf (#27405: Position entfernt, "Fulfillment nicht
+  // erforderlich") als "bezahlt & versandbereit" auf — Shopify zählt ihn
+  // technisch als paid + unfulfilled.
+  return `status:open AND financial_status:paid AND fulfillment_status:unfulfilled${skipTags ? ` AND ${skipTags}` : ""}`;
 }
 
 /**
@@ -1514,7 +1521,13 @@ export async function fetchUnfulfilledPaidOrders(limit = 100): Promise<PackOrder
     query,
     { q, first: limit },
   );
-  return res.data?.orders.edges.map((e) => mapPackOrder(e.node)) ?? [];
+  // Doppelter Schutz zur Query (Shopifys Suchindex hinkt manchmal nach):
+  // storniert → raus; nach currentQuantity-Filter keine Position mehr → raus
+  // (nichts zu packen, z.B. alle Artikel entfernt/erstattet).
+  return (res.data?.orders.edges ?? [])
+    .filter((e) => !e.node.cancelledAt)
+    .map((e) => mapPackOrder(e.node))
+    .filter((o) => o.lineItems.length > 0);
 }
 
 /**
@@ -1538,13 +1551,17 @@ export async function fetchUnfulfilledUnpaidOrders(limit = 250): Promise<PackOrd
   // Keine Zeitgrenze — auch uralte offene Bestellungen sollen sichtbar sein
   // (werden farblich als überfällig markiert, damit man sie canceln kann).
   const q =
-    `fulfillment_status:unfulfilled AND (financial_status:pending OR financial_status:authorized OR financial_status:partially_paid)` +
+    `status:open AND fulfillment_status:unfulfilled AND (financial_status:pending OR financial_status:authorized OR financial_status:partially_paid)` +
     (skipTags ? ` AND ${skipTags}` : "");
   const res = await shopifyGraphQL<{ orders: { edges: { node: PackOrderNode }[] } }>(
     query,
     { q, first: limit },
   );
-  return res.data?.orders.edges.map((e) => mapPackOrder(e.node)) ?? [];
+  // Doppelter Schutz wie bei der bezahlt-Liste: storniert / keine Position → raus.
+  return (res.data?.orders.edges ?? [])
+    .filter((e) => !e.node.cancelledAt)
+    .map((e) => mapPackOrder(e.node))
+    .filter((o) => o.lineItems.length > 0);
 }
 
 /**
