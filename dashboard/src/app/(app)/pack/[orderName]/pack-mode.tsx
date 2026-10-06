@@ -591,6 +591,9 @@ export default function PackMode({
         const currentOrder = orderName.replace(/^#/, "");
         if (scannedOrder !== currentOrder) {
           window.location.href = `/pack/${scannedOrder}`;
+        } else {
+          // Sonst wirkt der Scan wie "geht nicht" — kurz sagen, dass alles passt.
+          setQuickOk((q) => ({ title: `Lieferschein ${orderName} erkannt — Bestellung ist bereits geöffnet`, count: 0, total: 0, n: (q?.n ?? 0) + 1 }));
         }
         return;
       }

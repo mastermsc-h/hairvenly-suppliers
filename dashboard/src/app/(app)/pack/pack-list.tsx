@@ -93,8 +93,12 @@ export default function PackList({
     const num = raw.trim().replace(/^#/, "");
     return /^\d{3,}$/.test(num) ? num : null;
   }
+  // Sichtbares Feedback unter dem Suchfeld: Was kam an, was wurde daraus?
+  // Hilft im Betrieb sofort zu sehen, ob der Scanner verwürfelt tippt.
+  const [scanInfo, setScanInfo] = useState<{ ok: boolean; text: string } | null>(null);
   function openOrder(num: string) {
     setQuery("");
+    setScanInfo({ ok: true, text: `#${num}` });
     router.push(`/pack/${num}`);
   }
   function handleSearchChange(value: string) {
@@ -112,10 +116,16 @@ export default function PackList({
   function handleSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key !== "Enter") return;
     if (searchIdleRef.current) window.clearTimeout(searchIdleRef.current);
-    const n = resolveScan(query);
+    // DOM-Wert, NICHT `query` aus dem Closure: Ein Handscanner tippt die URL in
+    // Millisekunden und schickt sofort Enter — der React-State hinkt dann noch
+    // hinterher und enthielte z.B. "…pack-2744" → falsche/404-Bestellung.
+    const raw = e.currentTarget.value;
+    const n = resolveScan(raw);
     if (n) {
       e.preventDefault();
       openOrder(n);
+    } else if (raw.trim()) {
+      setScanInfo({ ok: false, text: raw.trim() });
     }
   }
 
@@ -146,7 +156,11 @@ export default function PackList({
         return;
       }
       const num = raw.trim().replace(/^#/, "");
-      if (/^\d{3,}$/.test(num)) router.push(`/pack/${num}`);
+      if (/^\d{3,}$/.test(num)) {
+        router.push(`/pack/${num}`);
+        return;
+      }
+      if (raw.trim().length >= 6) setScanInfo({ ok: false, text: raw.trim() });
     }
     function onKey(e: globalThis.KeyboardEvent) {
       if (isEditable(document.activeElement)) return;
@@ -189,6 +203,13 @@ export default function PackList({
             placeholder={`${t(locale, "shipping.col_order")}, ${t(locale, "shipping.col_customer")} — oder Lieferschein-QR scannen`}
             className="w-full pl-9 pr-3 py-2 rounded-lg border border-neutral-300 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
           />
+          {scanInfo && (
+            <div className={`mt-1 text-xs ${scanInfo.ok ? "text-emerald-700" : "text-red-700"}`}>
+              {scanInfo.ok
+                ? `Lieferschein erkannt → öffne ${scanInfo.text} …`
+                : `Scan nicht erkannt: „${scanInfo.text}" — bitte so an den Admin melden.`}
+            </div>
+          )}
         </div>
         <button
           onClick={handleRefresh}

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
 import { Camera, X, ScanLine } from "lucide-react";
+import { extractOrderNumberFromScan } from "./scan-order";
 
 const READER_ID = "order-qr-reader";
 
@@ -74,15 +75,13 @@ export default function OrderQrScanner({
           { fps: 10, qrbox: { width: 280, height: 280 } },
           async (decodedText) => {
             if (cancelled || teardownRef.current) return;
-            // URL parsen → /pack/<order>
-            let orderName: string | null = null;
-            try {
-              const u = new URL(decodedText);
-              const m = u.pathname.match(/\/pack\/([^/?#]+)/);
-              if (m) orderName = decodeURIComponent(m[1]);
-            } catch {
-              // Kein gültiger URL — vielleicht direkte Bestellnummer
-              const m = decodedText.match(/^#?(\d{3,})$/);
+            // Bestellnummer extrahieren — derselbe layout-unabhängige Extraktor
+            // wie überall (Kamera liefert die URL zwar sauber, aber ein
+            // Erkennungs-Pfad für alle Eingaben = ein Ort zum Pflegen).
+            let orderName: string | null = extractOrderNumberFromScan(decodedText);
+            if (!orderName) {
+              // Kein URL-Muster — vielleicht direkte Bestellnummer
+              const m = decodedText.trim().match(/^#?(\d{3,})$/);
               if (m) orderName = m[1];
             }
             if (orderName) {
