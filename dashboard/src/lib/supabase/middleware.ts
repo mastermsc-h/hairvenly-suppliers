@@ -52,6 +52,9 @@ export async function updateSession(request: NextRequest) {
     // wird durch den signierten, 2h gültigen Session-Token geschützt (kein
     // Login am Handy nötig). Nur Foto-Upload möglich, keine Bestelldaten.
     path.startsWith("/pack-foto/") ||
+    // Web-App-Manifeste (PWA/Homescreen) muessen ohne Login abrufbar sein —
+    // iOS/Browser laden sie teils ohne Cookies; sie enthalten keine Geheimnisse.
+    path.endsWith(".webmanifest") ||
     path === "/favicon.ico";
 
   if (!user && !isPublic) {
