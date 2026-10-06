@@ -11,6 +11,8 @@ export const dynamic = "force-dynamic";
 // So kann man ein separates Scanner-Icon anlegen das direkt hier startet.
 export const metadata: Metadata = {
   title: "Scanner",
+  // Eigenes Manifest mit start_url=/pack/scanner (siehe kamera/page.tsx)
+  manifest: "/manifest-scanner.webmanifest",
   appleWebApp: { capable: true, statusBarStyle: "default", title: "Scanner" },
   icons: { apple: "/scanner-icon.png", icon: "/scanner-icon-192.png" },
 };

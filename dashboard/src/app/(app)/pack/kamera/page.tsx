@@ -9,8 +9,12 @@ export const dynamic = "force-dynamic";
 // Kamera an der Packstation bereit (kein QR pro Bestellung mehr nötig).
 export const metadata: Metadata = {
   title: "Kamera",
+  // Eigenes Manifest mit start_url=/pack/kamera: iOS öffnet ein Homescreen-Icon
+  // IMMER an der start_url des Manifests — mit dem globalen Manifest (start_url
+  // "/") landete man auf der Startseite, egal von welcher Seite man hinzufügte.
+  manifest: "/manifest-kamera.webmanifest",
   appleWebApp: { capable: true, statusBarStyle: "default", title: "Kamera" },
-  icons: { apple: "/scanner-icon.png", icon: "/scanner-icon-192.png" },
+  icons: { apple: "/kamera-icon.png", icon: "/kamera-icon-192.png" },
 };
 
 export default async function KameraPage() {
