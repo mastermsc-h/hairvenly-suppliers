@@ -95,3 +95,46 @@ export async function uploadPackPhotoByToken(
 
   return { success: true, count: count ?? 1 };
 }
+
+/**
+ * Kamera-Station (iPhone liegt dauerhaft als Kamera bereit): Welche
+ * Bestellungen werden gerade gepackt? = aktive Sessions (in_progress/verified,
+ * nicht übersprungen, nicht versendet), zuletzt berührt zuerst — jeder Scan am
+ * iMac aktualisiert updated_at, die oberste ist also "die aktuelle".
+ * Max. 3h alt, damit Karteileichen nicht als "aktuell" erscheinen.
+ */
+export async function fetchActivePackSessions(): Promise<
+  { sessionId: string; orderName: string; updatedAt: string; photoCount: number; itemCount: number }[]
+> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) return [];
+  const supabase = await createClient();
+  const since = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+
+  const { data: sessions } = await supabase
+    .from("pack_sessions")
+    .select("id, order_name, updated_at, expected_items")
+    .in("status", ["in_progress", "verified"])
+    .eq("photos_skipped", false)
+    .gt("updated_at", since)
+    .order("updated_at", { ascending: false })
+    .limit(5);
+
+  const list = (sessions ?? []).filter((s) => !String(s.order_name).startsWith("#DEMO-"));
+  if (list.length === 0) return [];
+
+  const { data: photos } = await supabase
+    .from("pack_photos")
+    .select("session_id")
+    .in("session_id", list.map((s) => s.id));
+  const counts: Record<string, number> = {};
+  for (const p of photos ?? []) counts[p.session_id] = (counts[p.session_id] ?? 0) + 1;
+
+  return list.map((s) => ({
+    sessionId: s.id,
+    orderName: s.order_name,
+    updatedAt: s.updated_at,
+    photoCount: counts[s.id] ?? 0,
+    itemCount: Array.isArray(s.expected_items) ? (s.expected_items as unknown[]).length : 0,
+  }));
+}

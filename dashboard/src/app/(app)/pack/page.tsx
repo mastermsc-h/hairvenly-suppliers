@@ -157,6 +157,13 @@ export default async function PackPage() {
           >
             🏷️ Zubehör-Code
           </a>
+          <a
+            href="/pack/kamera"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-neutral-300 text-neutral-900 text-sm font-medium hover:bg-neutral-50 transition"
+            title="iPhone dauerhaft als Beweisfoto-Kamera: folgt automatisch der gerade gepackten Bestellung"
+          >
+            📷 Kamera-Station (iPhone)
+          </a>
           <OrderQrScanner />
           <BackfillButton />
           <DemoButton />

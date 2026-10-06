@@ -150,6 +150,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                   { href: "/pack/archive", label: t(locale, "nav.shipping.archive") },
                   { href: "/pack/stats", label: t(locale, "nav.shipping.stats") },
                   { href: "/pack/display", label: t(locale, "nav.shipping.display") },
+                  { href: "/pack/kamera", label: t(locale, "nav.shipping.camera") },
                 ]}
               />
             )}
