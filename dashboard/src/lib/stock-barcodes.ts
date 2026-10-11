@@ -9,6 +9,12 @@ function normalize(s: string): string {
     .trim();
 }
 
+// Zweitschlüssel ohne jegliche Leerzeichen: fängt Shopify-Umbenennungen wie
+// "#Mochamelt" → "#Mocha Melt" ab, solange das Sheet noch den alten Titel führt.
+function normalizeLoose(s: string): string {
+  return normalize(s).replace(/ /g, "");
+}
+
 /**
  * Reichert InventoryRow[] um die EAN-Barcodes aus Shopify an.
  *
@@ -31,14 +37,20 @@ export async function enrichInventoryWithBarcodes<T extends InventoryRow>(
 
   // Map: normalisierter Produkt-Titel → Liste von Varianten
   const byProduct = new Map<string, BarcodeVariant[]>();
+  const byProductLoose = new Map<string, BarcodeVariant[]>();
   for (const v of variants) {
     const key = normalize(v.productTitle);
     if (!byProduct.has(key)) byProduct.set(key, []);
     byProduct.get(key)!.push(v);
+    const loose = normalizeLoose(v.productTitle);
+    if (!byProductLoose.has(loose)) byProductLoose.set(loose, []);
+    byProductLoose.get(loose)!.push(v);
   }
 
   return rows.map((row) => {
-    const list = byProduct.get(normalize(row.product));
+    const list =
+      byProduct.get(normalize(row.product)) ??
+      byProductLoose.get(normalizeLoose(row.product));
     if (!list || list.length === 0) return row;
     if (list.length === 1) return { ...row, barcode: list[0].barcode };
 
