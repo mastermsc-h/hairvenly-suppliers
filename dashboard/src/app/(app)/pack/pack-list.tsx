@@ -6,6 +6,7 @@ import { Search, Package2, ArrowRight, RefreshCw, ArrowDown, ArrowUp, Printer, X
 import { t, type Locale } from "@/lib/i18n";
 import type { PackOrderWithStatus } from "./page";
 import { extractOrderNumberFromScan } from "./scan-order";
+import OrderNoteCell, { type OrderNote } from "./order-note-cell";
 import { useRouter } from "next/navigation";
 import { resetSlipPrint, resetSlipPrintBulk } from "@/lib/actions/pack";
 
@@ -21,14 +22,22 @@ const statusBadge: Record<PackOrderWithStatus["packStatus"], string> = {
 export default function PackList({
   orders,
   locale,
+  notes,
 }: {
   orders: PackOrderWithStatus[];
   locale: Locale;
+  notes: Record<string, OrderNote>;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   // Standard: neueste oben (descending). Klick auf Datum-Header toggelt.
   const [sortDesc, setSortDesc] = useState(true);
+  // Notizen: lokaler Stand (sofort sichtbar nach Speichern), bei Server-Refresh
+  // (Aktualisieren / Polling anderer Geräte) wieder mit den Serverdaten abgeglichen.
+  const [noteMap, setNoteMap] = useState<Record<string, OrderNote>>(notes);
+  useEffect(() => setNoteMap(notes), [notes]);
+  // Schnellfilter: "gedruckt" = Lieferschein gedruckt, aber nicht versendet
+  const [filter, setFilter] = useState<"all" | "printed" | "noted">("all");
   const [isPending, startTransition] = useTransition();
   const [isRefreshing, startRefresh] = useTransition();
 
@@ -60,7 +69,10 @@ export default function PackList({
   }
 
   const filtered = useMemo(() => {
-    const sorted = [...orders].sort((a, b) => {
+    const base = orders.filter((o) =>
+      filter === "printed" ? !!o.slipPrintedAt : filter === "noted" ? !!noteMap[o.name] : true,
+    );
+    const sorted = [...base].sort((a, b) => {
       const diff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       return sortDesc ? -diff : diff;
     });
@@ -73,10 +85,11 @@ export default function PackList({
         o.customerName ?? "",
         o.customerEmail ?? "",
         o.shippingAddress?.city ?? "",
+        noteMap[o.name]?.note ?? "",
       ].join(" ").toLowerCase();
       return haystack.includes(q);
     });
-  }, [orders, query, sortDesc]);
+  }, [orders, query, sortDesc, filter, noteMap]);
 
   const localeStr = locale === "de" ? "de-DE" : locale === "tr" ? "tr-TR" : "en-US";
 
@@ -224,6 +237,29 @@ export default function PackList({
         </div>
       </div>
 
+      {/* Schnellfilter — v.a. "Gedruckt": Lieferschein liegt vor, Bestellung ist
+          aber nicht raus → genau die, bei denen eine Notiz fehlt/wichtig ist */}
+      <div className="flex flex-wrap items-center gap-2 -mt-1">
+        {([
+          ["all", "Alle", orders.length],
+          ["printed", "Gedruckt, nicht versendet", orders.filter((o) => o.slipPrintedAt).length],
+          ["noted", "Mit Notiz", orders.filter((o) => noteMap[o.name]).length],
+        ] as const).map(([key, label, count]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setFilter(key)}
+            className={`px-3 py-1 rounded-full border text-xs font-medium transition ${
+              filter === key
+                ? "bg-neutral-900 text-white border-neutral-900"
+                : "bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-50"
+            }`}
+          >
+            {label} <span className={filter === key ? "text-neutral-300" : "text-neutral-400"}>{count}</span>
+          </button>
+        ))}
+      </div>
+
       {filtered.length === 0 ? (
         <div className="bg-white rounded-2xl border border-neutral-200 p-10 text-center text-neutral-500 shadow-sm">
           <Package2 className="mx-auto mb-3 text-neutral-300" size={40} />
@@ -287,6 +323,20 @@ export default function PackList({
                     )}
                   </div>
                 )}
+                <div className="mt-2">
+                  <OrderNoteCell
+                    orderName={o.name}
+                    value={noteMap[o.name] ?? null}
+                    onChange={(v) =>
+                      setNoteMap((m) => {
+                        const next = { ...m };
+                        if (v) next[o.name] = v;
+                        else delete next[o.name];
+                        return next;
+                      })
+                    }
+                  />
+                </div>
                 <div className="mt-3 flex items-center gap-2">
                   <Link
                     href={`/pack/${o.numberClean}`}
@@ -347,6 +397,7 @@ export default function PackList({
                       )}
                     </div>
                   </th>
+                  <th className="text-left px-4 py-3 font-medium">Notiz</th>
                   <th className="text-right px-4 py-3 font-medium">{t(locale, "shipping.col_action")}</th>
                 </tr>
               </thead>
@@ -444,6 +495,20 @@ export default function PackList({
                           </button>
                         </div>
                       )}
+                    </td>
+                    <td className="px-4 py-3 align-top min-w-[220px] max-w-[320px]">
+                      <OrderNoteCell
+                        orderName={o.name}
+                        value={noteMap[o.name] ?? null}
+                        onChange={(v) =>
+                          setNoteMap((m) => {
+                            const next = { ...m };
+                            if (v) next[o.name] = v;
+                            else delete next[o.name];
+                            return next;
+                          })
+                        }
+                      />
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="inline-flex items-center gap-2">

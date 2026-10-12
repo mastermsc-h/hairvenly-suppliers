@@ -1425,3 +1425,54 @@ export async function deletePackPhoto(
   if (error) return { success: false, error: error.message };
   return { success: true };
 }
+
+/**
+ * Notiz zu einer Bestellung in der Versand-Übersicht ("warum noch nicht raus?").
+ * Eine aktuelle Notiz je Bestellnummer; leer speichern = Notiz löschen.
+ * Gilt auch für Bestellungen ohne Pack-Session (daher eigene Tabelle).
+ */
+export async function savePackOrderNote(
+  orderName: string,
+  note: string,
+): Promise<{
+  success: boolean;
+  error?: string;
+  note: string | null;
+  updatedAt?: string;
+  updatedByName?: string | null;
+}> {
+  const profile = await requireProfile();
+  if (!hasFeature(profile, "shipping")) return { success: false, error: "Forbidden", note: null };
+
+  const clean = orderName.startsWith("#") ? orderName : `#${orderName}`;
+  if (!/^#[A-Za-z0-9-]{2,30}$/.test(clean)) return { success: false, error: "Ungültige Bestellnummer", note: null };
+
+  const trimmed = note.trim();
+  if (trimmed.length > 500) return { success: false, error: "Notiz zu lang (max. 500 Zeichen)", note: null };
+
+  const supabase = await createClient();
+
+  if (!trimmed) {
+    const { error } = await supabase.from("pack_order_notes").delete().eq("order_name", clean);
+    if (error) return { success: false, error: error.message, note: null };
+    revalidatePath("/pack");
+    return { success: true, note: null };
+  }
+
+  const updatedAt = new Date().toISOString();
+  const { error } = await supabase
+    .from("pack_order_notes")
+    .upsert(
+      { order_name: clean, note: trimmed, updated_by: profile.id, updated_at: updatedAt },
+      { onConflict: "order_name" },
+    );
+  if (error) return { success: false, error: error.message, note: null };
+
+  revalidatePath("/pack");
+  return {
+    success: true,
+    note: trimmed,
+    updatedAt,
+    updatedByName: profile.display_name || profile.username || null,
+  };
+}

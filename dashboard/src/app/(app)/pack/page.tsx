@@ -5,6 +5,7 @@ import { fetchUnfulfilledPaidOrders, fetchUnfulfilledUnpaidOrders, fetchOrderFor
 import { createClient } from "@/lib/supabase/server";
 import PackList from "./pack-list";
 import UnpaidList from "./unpaid-list";
+import type { OrderNote } from "./order-note-cell";
 import BackfillButton from "./backfill-button";
 import DemoButton from "./demo-button";
 import OrderQrScanner from "./order-qr-scanner";
@@ -100,6 +101,25 @@ export default async function PackPage() {
     slipMap.set(p.order_name, { printedAt: p.printed_at, printedBy: p.printed_by_name });
   }
 
+  // Notizen pro Bestellung (paid + unpaid) — eigene Tabelle, da viele offene
+  // Bestellungen noch keine Pack-Session haben.
+  const noteNames = [...orderNames, ...unpaidOrders.map((o) => o.name)];
+  const notesByOrder: Record<string, OrderNote> = {};
+  if (noteNames.length > 0) {
+    const { data: noteRows } = await supabase
+      .from("pack_order_notes")
+      .select("order_name, note, updated_at, profiles:updated_by(display_name, username)")
+      .in("order_name", noteNames);
+    for (const r of noteRows ?? []) {
+      const rel = (r as { profiles?: { display_name?: string | null; username?: string | null } | null }).profiles;
+      notesByOrder[r.order_name] = {
+        note: r.note,
+        by: rel?.display_name || rel?.username || null,
+        at: r.updated_at,
+      };
+    }
+  }
+
   const ordersWithStatus: PackOrderWithStatus[] = orders.map((o) => {
     const session = sessionMap.get(o.name);
     const slip = slipMap.get(o.name);
@@ -191,7 +211,7 @@ export default async function PackPage() {
             <p className="text-sm text-neutral-500 -mt-1">
               Diese Bestellungen sind <strong>bezahlt</strong>, aber noch <strong>nicht versendet</strong> — sie können jetzt gepackt werden.
             </p>
-            <PackList orders={ordersWithStatus} locale={locale} />
+            <PackList orders={ordersWithStatus} locale={locale} notes={notesByOrder} />
           </section>
 
           {/* Sektion 2: noch nicht bezahlt */}
@@ -208,7 +228,7 @@ export default async function PackPage() {
             <p className="text-sm text-neutral-500 -mt-1">
               Offene Bestellungen die noch <strong>auf Zahlung warten</strong> (z.B. Vorkasse) — noch nicht versandbereit. Ältere als 14 Tage sind eingeklappt; überfällige farblich markiert.
             </p>
-            <UnpaidList orders={unpaidOrders} locale={locale} />
+            <UnpaidList orders={unpaidOrders} locale={locale} notes={notesByOrder} />
           </section>
         </>
       )}

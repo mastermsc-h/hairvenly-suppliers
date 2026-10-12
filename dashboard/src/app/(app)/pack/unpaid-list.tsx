@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { type Locale } from "@/lib/i18n";
 import type { PackOrder } from "@/lib/shopify";
 import { Clock, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
+import OrderNoteCell, { type OrderNote } from "./order-note-cell";
 
 const SHOPIFY_STORE_HANDLE = "339520-3";
 
@@ -33,12 +34,16 @@ interface Aged {
 export default function UnpaidList({
   orders,
   locale,
+  notes,
 }: {
   orders: PackOrder[];
   locale: Locale;
+  notes: Record<string, OrderNote>;
 }) {
   const localeStr = locale === "de" ? "de-DE" : locale === "tr" ? "tr-TR" : "en-US";
   const [showOld, setShowOld] = useState(false);
+  const [noteMap, setNoteMap] = useState<Record<string, OrderNote>>(notes);
+  useEffect(() => setNoteMap(notes), [notes]);
 
   if (orders.length === 0) {
     return (
@@ -129,6 +134,20 @@ export default function UnpaidList({
             );
           })()}
         </td>
+        <td className="px-4 py-3 align-top min-w-[220px] max-w-[320px]">
+          <OrderNoteCell
+            orderName={o.name}
+            value={noteMap[o.name] ?? null}
+            onChange={(v) =>
+              setNoteMap((m) => {
+                const next = { ...m };
+                if (v) next[o.name] = v;
+                else delete next[o.name];
+                return next;
+              })
+            }
+          />
+        </td>
       </tr>
     );
   };
@@ -145,6 +164,7 @@ export default function UnpaidList({
               <th className="text-left px-4 py-3 font-medium">Kunde</th>
               <th className="text-left px-4 py-3 font-medium">Artikel</th>
               <th className="text-left px-4 py-3 font-medium">Zahlung</th>
+              <th className="text-left px-4 py-3 font-medium">Notiz</th>
             </tr>
           </thead>
           <tbody>
@@ -152,7 +172,7 @@ export default function UnpaidList({
               recent.map(renderRow)
             ) : (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-sm text-neutral-500">
+                <td colSpan={7} className="px-4 py-6 text-center text-sm text-neutral-500">
                   Keine aktuellen unbezahlten Bestellungen (≤ {HIDE_AFTER_DAYS} Tage).
                 </td>
               </tr>
@@ -162,7 +182,7 @@ export default function UnpaidList({
             {old.length > 0 && (
               <>
                 <tr>
-                  <td colSpan={6} className="px-0 py-0">
+                  <td colSpan={7} className="px-0 py-0">
                     <button
                       type="button"
                       onClick={() => setShowOld((v) => !v)}
