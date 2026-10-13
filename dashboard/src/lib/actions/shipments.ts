@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth";
+import { syncShipmentArrivalToSheet } from "@/lib/shipment-sheet-sync";
 
 const num = (v: FormDataEntryValue | null) => {
   const s = String(v ?? "").trim();
@@ -119,6 +120,10 @@ export async function updateShipment(shipmentId: string, formData: FormData) {
     `Teillieferung aktualisiert: ${Object.keys(update).join(", ")}`,
   );
 
+  if ("arrived_at" in update) {
+    await syncShipmentArrivalToSheet(supabase, shipmentId, profile.id);
+  }
+
   revalidatePath(`/orders/${shipment.order_id}`);
   return { ok: true };
 }
@@ -166,6 +171,8 @@ export async function markShipmentArrived(
     "shipment",
     `Teillieferung als angekommen markiert (${today})`,
   );
+
+  await syncShipmentArrivalToSheet(supabase, shipmentId, profile.id);
 
   revalidatePath(`/orders/${shipment.order_id}`);
   return { ok: true };

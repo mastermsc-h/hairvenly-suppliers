@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth";
+import { syncShipmentArrivalToSheet } from "@/lib/shipment-sheet-sync";
 
 export type RowStatus = "matched" | "color_unknown" | "method_unknown" | "length_unknown" | "error";
 
@@ -403,6 +404,7 @@ export async function commitLieferschein(payload: {
 
       // Zuerst alle Items dem Shipment zuordnen
       await supabase.from("order_items").update({ shipment_id: shipment.id }).in("id", info.items);
+      if (payload.arrived_at) await syncShipmentArrivalToSheet(supabase, shipment.id, null);
 
       // Pro betroffener Bestellposition die tatsächliche Liefermenge setzen
       // (Ordered + Excess). Bei Mehrlieferung landet der Überschuss damit
@@ -480,6 +482,7 @@ export async function commitLieferschein(payload: {
         .single();
       if (shErr || !shipment) continue;
       await supabase.from("order_items").update({ shipment_id: shipment.id }).in("id", info.items);
+      if (payload.arrived_at) await syncShipmentArrivalToSheet(supabase, shipment.id, null);
       shipmentsCreated++;
     }
 
