@@ -648,6 +648,7 @@ export type SteuerArt =
   | "ust_va"
   | "ust_nachzahlung"
   | "eust"
+  | "lst_anmeldung"
   | "est_vz"
   | "est_nachzahlung"
   | "gewst_vz"

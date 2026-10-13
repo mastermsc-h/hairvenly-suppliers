@@ -309,11 +309,17 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
   const yrTax = taxChain(yrGewinn, lastRecorded.gewstHebesatz, lastRecorded.gewstFreibetrag);
   const yrNettoGewinn = yrGewinn - yrTax.steuerGesamt;
 
-  // Finanzamt-Ist des Jahres (aus dem Steuer-Ledger): Zahlungen minus Erstattungen
+  // Finanzamt-Ist des Jahres (aus dem Steuer-Ledger): Zahlungen minus Erstattungen.
+  // Lohnsteuer und EUSt laufen separat: die Lohnsteuer steckt im Bruttolohn (Personalkosten),
+  // die EUSt im Material-Brutto (wird über die USt-VA als Vorsteuer verrechnet). Im Vergleich
+  // mit der berechneten Steuerlast würden beide eine falsche Abweichung erzeugen.
   const jahrPosten = steuerPosten[jahr] ?? [];
-  const istJahr =
-    jahrPosten.filter((p) => p.richtung === "zahlung").reduce((s, p) => s + (Number(p.ist_betrag) || 0), 0) -
-    jahrPosten.filter((p) => p.richtung === "erstattung").reduce((s, p) => s + (Number(p.ist_betrag) || 0), 0);
+  const signedIst = (p: SteuerPosten) => (p.richtung === "erstattung" ? -1 : 1) * (Number(p.ist_betrag) || 0);
+  const istJahr = jahrPosten
+    .filter((p) => p.art !== "lst_anmeldung" && p.art !== "eust")
+    .reduce((s, p) => s + signedIst(p), 0);
+  const lstJahr = jahrPosten.filter((p) => p.art === "lst_anmeldung").reduce((s, p) => s + signedIst(p), 0);
+  const eustJahr = jahrPosten.filter((p) => p.art === "eust").reduce((s, p) => s + signedIst(p), 0);
 
   function updatePosten(j: number, p: SteuerPosten) {
     setSteuerPosten((prev) => {
@@ -421,6 +427,8 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
           months={yearMonths}
           sums={{ yrNetto, yrAusgaben, yrUst, yrGewinn, yrNettoGewinn }}
           istJahr={istJahr}
+          lstJahr={lstJahr}
+          eustJahr={eustJahr}
           tax={yrTax}
           hebesatz={lastRecorded.gewstHebesatz}
           freibetrag={lastRecorded.gewstFreibetrag}
@@ -555,6 +563,10 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
               >
                 <Plus size={14} /> {t(locale, "finance.add_employee")}
               </button>
+              <p className="mt-2 text-xs text-neutral-400">
+                Im Bruttolohn stecken Lohnsteuer und Arbeitnehmer-Sozialversicherung — beides wird einbehalten und abgeführt,
+                ist also kein Zusatzaufwand. Die Lohnsteuer-Zahlung wird unten im Finanzamt-Abgleich erfasst.
+              </p>
             </SubSection>
 
             {/* B. Materialkosten */}
@@ -896,6 +908,7 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
             monat={monat}
             posten={jahrPosten}
             ustBerechnet={c.ustZahllast}
+            personnelBrutto={c.personnelBrutto}
             onPostenSaved={(p) => updatePosten(jahr, p)}
           />
 
@@ -957,6 +970,8 @@ function YearView({
   months,
   sums,
   istJahr,
+  lstJahr,
+  eustJahr,
   tax,
   hebesatz,
   freibetrag,
@@ -968,6 +983,8 @@ function YearView({
   months: Array<{ monat: number; input: FinanzInput | null; calc: ReturnType<typeof compute> | null }>;
   sums: { yrNetto: number; yrAusgaben: number; yrUst: number; yrGewinn: number; yrNettoGewinn: number };
   istJahr: number;
+  lstJahr: number;
+  eustJahr: number;
   tax: ReturnType<typeof taxChain>;
   hebesatz: number;
   freibetrag: number;
@@ -1075,6 +1092,28 @@ function YearView({
             </span>
           </div>
         </div>
+        {/* Separat abgeführt — nicht Teil der Abweichung oben */}
+        <div className="mt-3 space-y-1 text-sm border-t border-neutral-100 pt-3">
+          <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-1">
+            Zusätzlich ans Finanzamt / den Zoll abgeführt
+          </div>
+          <div className="flex justify-between">
+            <span className="text-neutral-600">
+              Lohnsteuer <span className="text-xs text-neutral-400">(im Bruttolohn enthalten, kein Zusatzaufwand)</span>
+            </span>
+            <span className="tabular-nums">{fmt(lstJahr)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-neutral-600">
+              Einfuhrumsatzsteuer <span className="text-xs text-neutral-400">(im Material-Brutto enthalten, wird als Vorsteuer verrechnet)</span>
+            </span>
+            <span className="tabular-nums">{fmt(eustJahr)}</span>
+          </div>
+          <div className="flex justify-between font-semibold border-t border-neutral-100 pt-1">
+            <span className="text-neutral-700">Gesamt tatsächlich abgeführt</span>
+            <span className="tabular-nums">{fmt(istJahr + lstJahr + eustJahr)}</span>
+          </div>
+        </div>
         <div className="flex justify-between items-center bg-green-100 rounded-lg px-4 py-3 font-bold text-green-900 mt-2">
           <span>
             {t(locale, "finance.net_profit.amount")}{" "}
@@ -1088,6 +1127,16 @@ function YearView({
 }
 
 // ---- Finanzamt Soll/Ist-Abgleich (Monat) ----
+// Monatliche Steuerarten werden ihrem Zeitraum zugeordnet, nicht dem Fälligkeitsmonat.
+const MONTHLY_ARTS: SteuerArt[] = ["ust_va", "eust", "lst_anmeldung"];
+
+// Fälligkeit Lohnsteuer-Anmeldung: 10. des Folgemonats, Wochenende → nächster Montag.
+function lstDueDate(jahr: number, monat: number): string {
+  const d = new Date(Date.UTC(monat === 12 ? jahr + 1 : jahr, monat === 12 ? 0 : monat, 10));
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
   const [y, m, d] = iso.split("-");
@@ -1100,6 +1149,7 @@ function FinanzamtAbgleich({
   monat,
   posten,
   ustBerechnet,
+  personnelBrutto,
   onPostenSaved,
 }: {
   locale: Locale;
@@ -1107,6 +1157,7 @@ function FinanzamtAbgleich({
   monat: number;
   posten: SteuerPosten[];
   ustBerechnet: number;
+  personnelBrutto: number;
   onPostenSaved: (p: SteuerPosten) => void;
 }) {
   const zeitraum = `${jahr}-${String(monat).padStart(2, "0")}`;
@@ -1114,14 +1165,16 @@ function FinanzamtAbgleich({
 
   const ustRow = posten.find((p) => p.art === "ust_va" && p.zeitraum === zeitraum) ?? null;
   const eustRow = posten.find((p) => p.art === "eust" && p.zeitraum === zeitraum) ?? null;
+  const lstRow = posten.find((p) => p.art === "lst_anmeldung" && p.zeitraum === zeitraum) ?? null;
 
-  // Weitere Posten, die in diesem Monat fällig sind (ESt-VZ, GewSt-VZ, Nachzahlungen, …)
+  // Weitere Posten, die in diesem Monat fällig sind (ESt-VZ, GewSt-VZ, Nachzahlungen, …).
+  // Monatliche Arten stehen nur in ihrem eigenen Zeitraum — sonst erschiene z.B. die
+  // USt-VA/Lohnsteuer des Vormonats (fällig am 10.) hier ein zweites Mal.
   const monthStart = `${zeitraum}-01`;
   const monthEnd = `${jahr}-${String(monat).padStart(2, "0")}-31`;
   const dueRows = posten.filter(
     (p) =>
-      p.id !== ustRow?.id &&
-      p.id !== eustRow?.id &&
+      !MONTHLY_ARTS.includes(p.art) &&
       p.faellig_am &&
       p.faellig_am >= monthStart &&
       p.faellig_am <= monthEnd
@@ -1141,7 +1194,24 @@ function FinanzamtAbgleich({
   if (zeitraum < currentYm && (!eustRow || (Number(eustRow.ist_betrag) || 0) <= 0)) {
     hints.push({ tone: "info", text: t(locale, "finance.fa.eust_missing") });
   }
-  for (const p of [ustRow, eustRow, ...dueRows]) {
+
+  // Lohnsteuer: fehlt sie nach Fälligkeit, obwohl Löhne gezahlt wurden? Quote plausibel?
+  const lstIst = Number(lstRow?.ist_betrag) || 0;
+  const lstDue = lstRow?.faellig_am ?? lstDueDate(jahr, monat);
+  const todayIso = now.toISOString().slice(0, 10);
+  if (personnelBrutto > 0 && lstIst <= 0 && lstDue < todayIso) {
+    hints.push({ tone: "warn", text: `Lohnsteuer für ${zeitraum} ist seit ${fmtDate(lstDue)} fällig, aber noch nicht erfasst — Betrag aus der Lohnabrechnung eintragen.` });
+  }
+  if (lstIst > 0 && personnelBrutto > 0) {
+    const quote = lstIst / personnelBrutto;
+    if (quote > 0.35) {
+      hints.push({ tone: "warn", text: `Lohnsteuer ungewöhnlich hoch: ${pct(quote)} der Bruttolöhne (${fmt(personnelBrutto)}). Üblich sind ca. 5–25 % — Betrag oder Mitarbeiterliste prüfen.` });
+    } else if (quote < 0.02) {
+      hints.push({ tone: "info", text: `Lohnsteuer sehr niedrig: ${pct(quote)} der Bruttolöhne (${fmt(personnelBrutto)}). Plausibel nur bei vielen Minijobs/Azubis — sonst prüfen.` });
+    }
+  }
+
+  for (const p of [ustRow, eustRow, lstRow, ...dueRows]) {
     if (!p) continue;
     if (p.bezahlt_am && p.faellig_am) {
       const late = (new Date(p.bezahlt_am).getTime() - new Date(p.faellig_am).getTime()) / 86_400_000;
@@ -1167,6 +1237,7 @@ function FinanzamtAbgleich({
   }> = [
     { key: "ust", label: artLabel("ust_va"), row: ustRow, art: "ust_va", zeitraum, berechnet: ustBerechnet },
     { key: "eust", label: artLabel("eust"), row: eustRow, art: "eust", zeitraum, berechnet: null },
+    { key: "lst", label: artLabel("lst_anmeldung"), row: lstRow, art: "lst_anmeldung", zeitraum, berechnet: null },
     ...dueRows.map((p) => ({
       key: p.id,
       label: `${artLabel(p.art)} (${p.zeitraum})`,
@@ -1220,7 +1291,7 @@ function FinanzamtAbgleich({
               </tr>
             );
           })}
-          {rows.length === 2 && dueRows.length === 0 && (
+          {dueRows.length === 0 && (
             <tr>
               <td colSpan={6} className="py-2 text-xs text-neutral-400">{t(locale, "finance.fa.none")}</td>
             </tr>
