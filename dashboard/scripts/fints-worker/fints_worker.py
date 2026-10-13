@@ -91,6 +91,13 @@ class BankResponses:
         return [(c, t) for c, t in self.items if c.startswith("9")]
 
     def auth_failed(self) -> bool:
+        codes = {c for c, _ in self.items}
+        # Sparkasse verschleiert falsche Anmeldedaten: bei unbekanntem Anmeldenamen
+        # bzw. falscher PIN kommt NICHT 9931, sondern 9050 "Die Nachricht enthält
+        # Fehler" + 9010 "Initialisierung fehlgeschlagen" — ab dem 3. Versuch dann
+        # 3938 "vorläufig gesperrt" (nachgemessen 13.10.2026 mit Fake-Kennungen).
+        if "3938" in codes or {"9050", "9010"} <= codes:
+            return True
         return any(c in AUTH_CODES or any(w in t.lower() for w in AUTH_WORDS) for c, t in self.errors())
 
     def summary(self) -> str:
@@ -501,10 +508,14 @@ def cmd_renew(fresh: bool = False) -> int:
         status["last_error"] = f"Bank: {bank}" if bank else str(e)[:300]
         if BANK.auth_failed():
             status["auth_failed"] = True
+            if "3938" in {c for c, _ in BANK.items}:
+                print("\n  ⛔ Der Online-Banking-Zugang ist vorläufig GESPERRT.")
+                print("     Sperre im Online-Banking/bei der Sparkasse aufheben, erst dann erneut einrichten.")
             print("\n  ⚠️  Die Sparkasse lehnt die Anmeldung ab. NICHT einfach wiederholen –")
             print("     nach 3 Fehlversuchen wird der Online-Banking-Zugang gesperrt.")
             print("     Erst im Browser/in der App mit demselben Anmeldenamen + PIN anmelden.")
-            print("     Klappt das, `fints setup` erneut ausführen und die PIN neu speichern.")
+            print("     Klappt das: in `fints setup` statt des Anmeldenamens die Legitimations-ID")
+            print("     probieren und die PIN neu speichern (Frage „Neu setzen?“ mit j beantworten).")
         save_json(STATUS_PATH, status)
         return 1
     print(f"✓ {len(rows)} Umsätze abgerufen ({sum(1 for r in rows if r['amount'] > 0)} Eingänge). Sende ans Dashboard …")
