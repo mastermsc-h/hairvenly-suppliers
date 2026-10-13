@@ -163,9 +163,12 @@ export default async function PackPage() {
               target="_blank"
               rel="noopener"
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-neutral-300 text-neutral-900 text-sm font-medium hover:bg-neutral-50 transition"
-              title="Druckansicht aller offenen Lieferscheine — automatisches Druckfenster"
+              title="Druckt alle noch NICHT gedruckten Lieferscheine. Bereits gedruckte nachdrucken: Drucker-Symbol in der Zeile."
             >
               🧾 Alle Lieferscheine drucken
+              <span className="text-xs text-neutral-500">
+                ({ordersWithStatus.filter((o) => !o.slipPrintedAt).length} neu)
+              </span>
             </a>
           )}
           <a

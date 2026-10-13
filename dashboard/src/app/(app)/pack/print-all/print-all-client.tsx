@@ -101,7 +101,14 @@ function formatDate(iso: string): string {
   }
 }
 
-export default function PrintAllClient({ slips }: { slips: Slip[] }) {
+export default function PrintAllClient({
+  slips,
+  skippedPrinted = [],
+}: {
+  slips: Slip[];
+  /** Massendruck: bereits gedruckte, daher ausgelassene Bestellungen */
+  skippedPrinted?: string[];
+}) {
   const [qrMap, setQrMap] = useState<Record<string, string>>({});
   const [ready, setReady] = useState(false);
   const printedRef = useRef(false);
@@ -160,7 +167,17 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
           <ArrowLeft size={16} /> Zurück
         </Link>
         <div className="bg-white rounded-2xl border border-neutral-200 p-8 text-center text-neutral-500">
-          Keine offenen Bestellungen zum Drucken.
+          {skippedPrinted.length > 0 ? (
+            <>
+              <div className="font-medium text-neutral-800">Alle offenen Lieferscheine sind bereits gedruckt.</div>
+              <div className="text-sm mt-2">
+                {skippedPrinted.length} ausgelassen ({skippedPrinted.join(", ")}). Nachdrucken einzeln über das
+                Drucker-Symbol in der Übersicht.
+              </div>
+            </>
+          ) : (
+            "Keine offenen Bestellungen zum Drucken."
+          )}
         </div>
       </div>
     );
@@ -251,6 +268,14 @@ export default function PrintAllClient({ slips }: { slips: Slip[] }) {
           <div className="text-sm text-neutral-700">
             <strong>{slips.length}</strong> Lieferschein{slips.length === 1 ? "" : "e"}
             {justPrinted && <span className="text-emerald-700 ml-1">· gedruckt ✓</span>}
+            {skippedPrinted.length > 0 && (
+              <span
+                className="text-amber-700 ml-1"
+                title={`Bereits gedruckt: ${skippedPrinted.join(", ")} — einzeln über das Drucker-Symbol nachdrucken`}
+              >
+                · {skippedPrinted.length} bereits gedruckte ausgelassen
+              </span>
+            )}
             {!ready && <span className="text-neutral-400 ml-1">· wird vorbereitet…</span>}
           </div>
         </div>
