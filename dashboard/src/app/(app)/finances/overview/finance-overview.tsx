@@ -452,15 +452,6 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
         />
       ) : (
         <div key={k} className="space-y-6">
-          {/* RÜCKLAGE: für Steuern beiseitelegen */}
-          <RuecklageBox
-            monatLabel={`${monthName(locale, monat)} ${jahr}`}
-            ust={c.ustZahllast}
-            est={c.estMonat}
-            gewst={c.gewstMonat}
-            lst={lstFor(jahrPosten, `${jahr}-${String(monat).padStart(2, "0")}`)}
-          />
-
           {/* EINNAHMEN */}
           <SectionCard title={t(locale, "finance.revenue")} color="blue">
             <table className="w-full text-sm">
@@ -986,6 +977,15 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
               <KpiCard label={t(locale, "finance.kpi.effective_tax_rate")} value={pct(c.effSteuersatz)} desc="Steuern / Gewinn vor Steuern" />
             </div>
           </SectionCard>
+
+          {/* RÜCKLAGE: für Steuern beiseitelegen */}
+          <RuecklageBox
+            monatLabel={`${monthName(locale, monat)} ${jahr}`}
+            ust={c.ustZahllast}
+            est={c.estMonat}
+            gewst={c.gewstMonat}
+            lst={lstFor(jahrPosten, `${jahr}-${String(monat).padStart(2, "0")}`)}
+          />
         </div>
       )}
     </div>
