@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { t, type Locale } from "@/lib/i18n";
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, Plus, Trash2 } from "lucide-react";
-import type { FinanzInput, FinanzMonatsdaten, SteuerArt, SteuerPosten } from "@/lib/types";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, Users } from "lucide-react";
+import type { FinanzInput, FinanzMitarbeiter, FinanzMonatsdaten, SteuerArt, SteuerPosten } from "@/lib/types";
 import { fetchFinanzJahr, saveFinanzMonat } from "@/lib/actions/finanzen";
 import { fetchSteuerPosten, upsertSteuerIst } from "@/lib/actions/steuer";
 
@@ -15,27 +15,9 @@ const DEFAULTS: FinanzInput = {
   shopMaterialRate: 60,
   shopFeeRate: 4,
   ustRate: 19,
-  employees: [
-    { name: "Thao", brutto: 3_000 },
-    { name: "Ailar", brutto: 2_000 },
-    { name: "Tanja", brutto: 2_350 },
-    { name: "Larissa", brutto: 2_600 },
-    { name: "Mustafa", brutto: 2_500 },
-    { name: "Dana", brutto: 3_100 },
-    { name: "Aylin", brutto: 3_000 },
-    { name: "Ahmet", brutto: 570 },
-    { name: "Yonca (Azubi)", brutto: 900 },
-    { name: "Amira (Azubi)", brutto: 900 },
-    { name: "Alina", brutto: 3_000 },
-    { name: "Rasul", brutto: 3_300 },
-    { name: "Liah (Azubi)", brutto: 700 },
-    { name: "Tuana", brutto: 1_500 },
-    { name: "Berat (Azubi)", brutto: 680 },
-    { name: "Aleyna", brutto: 2_600 },
-    { name: "Mehmet", brutto: 4_800 },
-    { name: "Mariam", brutto: 2_160 },
-    { name: "Ibo", brutto: 2_300 },
-  ],
+  // Mitarbeiter kommen aus dem Mitarbeiter-Bereich (staff_members/staff_salary_changes),
+  // nicht aus dem Code — echte Gehälter gehören nicht ins Client-Bundle.
+  employees: [],
   agRate: 25,
   shopifyPlan: 105,
   shopifyPos: 79,
@@ -210,9 +192,10 @@ type Props = {
   initialMonat: number;
   initialRows: FinanzMonatsdaten[];
   initialSteuerPosten: SteuerPosten[];
+  staffEmployees: FinanzMitarbeiter[];
 };
 
-export default function FinanceOverview({ locale, initialJahr, initialMonat, initialRows, initialSteuerPosten }: Props) {
+export default function FinanceOverview({ locale, initialJahr, initialMonat, initialRows, initialSteuerPosten, staffEmployees }: Props) {
   const [jahr, setJahr] = useState(initialJahr);
   const [monat, setMonat] = useState(initialMonat);
   const [view, setView] = useState<"month" | "year">("month");
@@ -258,13 +241,14 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
   const effective = (j: number, m: number): FinanzInput | null =>
     edits[keyOf(j, m)] ?? saved[keyOf(j, m)] ?? null;
 
-  // Vorbefüllung für einen leeren Monat: letzter erfasster Monat davor, sonst Vorjahres-Dezember, sonst Defaults
+  // Vorbefüllung für einen leeren Monat: letzter erfasster Monat davor, sonst Vorjahres-Dezember,
+  // sonst Defaults mit den aktuellen Gehältern aus dem Mitarbeiter-Bereich
   function prefillFor(j: number, m: number): FinanzInput {
     for (let p = m - 1; p >= 1; p--) {
       const hit = effective(j, p);
       if (hit) return hit;
     }
-    return effective(j - 1, 12) ?? DEFAULTS;
+    return effective(j - 1, 12) ?? { ...DEFAULTS, employees: staffEmployees };
   }
 
   const k = keyOf(jahr, monat);
@@ -492,9 +476,20 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
             <SubSection
               title={t(locale, "finance.expenses.personnel")}
               right={
-                <span className="flex items-center gap-1 text-xs text-neutral-500">
-                  {t(locale, "finance.expenses.personnel.ag2")}
-                  <NumField value={current.agRate} onCommit={(v) => update({ agRate: v })} className={`${inputCls} w-14`} />%
+                <span className="flex items-center gap-3">
+                  {staffEmployees.length > 0 && (
+                    <button
+                      onClick={() => update({ employees: staffEmployees })}
+                      className="flex items-center gap-1 text-xs font-medium text-neutral-600 hover:text-neutral-900 border border-neutral-300 rounded-lg px-2 py-1 bg-white"
+                      title={`Aktuelle Gehälter aller aktiven Mitarbeiter aus dem Mitarbeiter-Bereich übernehmen (${staffEmployees.length})`}
+                    >
+                      <Users size={13} /> Aus Mitarbeiter-Bereich übernehmen
+                    </button>
+                  )}
+                  <span className="flex items-center gap-1 text-xs text-neutral-500">
+                    {t(locale, "finance.expenses.personnel.ag2")}
+                    <NumField value={current.agRate} onCommit={(v) => update({ agRate: v })} className={`${inputCls} w-14`} />%
+                  </span>
                 </span>
               }
             >

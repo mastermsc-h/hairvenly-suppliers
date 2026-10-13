@@ -1,6 +1,6 @@
 import { requireFeature } from "@/lib/auth";
 import { type Locale } from "@/lib/i18n";
-import { fetchFinanzJahr } from "@/lib/actions/finanzen";
+import { fetchFinanzJahr, fetchStaffGehaelter } from "@/lib/actions/finanzen";
 import { fetchSteuerPosten } from "@/lib/actions/steuer";
 import FinanceOverview from "./finance-overview";
 
@@ -9,7 +9,11 @@ export default async function FinanceOverviewPage() {
   const locale = (profile.language ?? "de") as Locale;
   const now = new Date();
   const jahr = now.getFullYear();
-  const [rows, posten] = await Promise.all([fetchFinanzJahr(jahr), fetchSteuerPosten(jahr)]);
+  const [rows, posten, staffEmployees] = await Promise.all([
+    fetchFinanzJahr(jahr),
+    fetchSteuerPosten(jahr),
+    fetchStaffGehaelter(), // liefert [] für Nicht-Admins (Gehälter sind Admin-only)
+  ]);
 
   return (
     <FinanceOverview
@@ -18,6 +22,7 @@ export default async function FinanceOverviewPage() {
       initialMonat={now.getMonth() + 1}
       initialRows={rows}
       initialSteuerPosten={posten}
+      staffEmployees={staffEmployees}
     />
   );
 }

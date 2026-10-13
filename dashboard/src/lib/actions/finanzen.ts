@@ -1,9 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireFeature } from "@/lib/auth";
-import type { FinanzInput, FinanzMonatsdaten } from "@/lib/types";
+import type { FinanzInput, FinanzMitarbeiter, FinanzMonatsdaten } from "@/lib/types";
 
 const PATH = "/finances/overview";
 
@@ -18,6 +18,48 @@ export async function fetchFinanzJahr(jahr: number): Promise<FinanzMonatsdaten[]
     .order("monat", { ascending: true });
   if (error) throw new Error(error.message);
   return (data ?? []) as FinanzMonatsdaten[];
+}
+
+/**
+ * Aktuelle Brutto-Gehälter aller aktiven Mitarbeiter aus dem Mitarbeiter-Bereich
+ * (staff_members + staff_salary_changes, neuester wirksamer Eintrag = aktuell).
+ * Gehälter sind strikt Admin-only (role === "admin") — wie im Staff-Bereich.
+ */
+export async function fetchStaffGehaelter(): Promise<FinanzMitarbeiter[]> {
+  const profile = await requireFeature("finances");
+  if (profile.role !== "admin") return [];
+  const svc = createServiceClient();
+
+  const { data: members, error } = await svc
+    .from("staff_members")
+    .select("id, name, is_trainee")
+    .eq("active", true)
+    .order("name", { ascending: true });
+  if (error) throw new Error(error.message);
+
+  const { data: salaries, error: err2 } = await svc
+    .from("staff_salary_changes")
+    .select("staff_id, amount, effective_date")
+    .order("effective_date", { ascending: false });
+  if (err2) throw new Error(err2.message);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const current = new Map<string, number>();
+  for (const s of salaries ?? []) {
+    if (current.has(s.staff_id)) continue;
+    // Einträge sind absteigend sortiert: erster mit effective_date <= heute gewinnt
+    if (s.effective_date && s.effective_date > today) continue;
+    current.set(s.staff_id, Number(s.amount) || 0);
+  }
+  // Mitarbeiter, deren einziger Eintrag in der Zukunft liegt: neuesten nehmen statt 0
+  for (const s of salaries ?? []) {
+    if (!current.has(s.staff_id)) current.set(s.staff_id, Number(s.amount) || 0);
+  }
+
+  return (members ?? []).map((m) => ({
+    name: m.is_trainee ? `${m.name} (Azubi)` : m.name,
+    brutto: current.get(m.id) ?? 0,
+  }));
 }
 
 const n = (v: unknown): number => {
