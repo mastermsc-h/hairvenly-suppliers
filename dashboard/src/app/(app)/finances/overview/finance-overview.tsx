@@ -1,13 +1,20 @@
 "use client";
 
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { t, type Locale } from "@/lib/i18n";
-import { TrendingUp, TrendingDown, AlertTriangle } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, Plus, Trash2 } from "lucide-react";
+import type { FinanzInput, FinanzMonatsdaten, SteuerArt, SteuerPosten } from "@/lib/types";
+import { fetchFinanzJahr, saveFinanzMonat } from "@/lib/actions/finanzen";
+import { fetchSteuerPosten, upsertSteuerIst } from "@/lib/actions/steuer";
 
-// ---- Demo data (Oktober 2025) ----
-const DEMO = {
-  month: "Oktober 2025",
-  salon: { brutto: 58_000, ustRate: 19, materialRate: 30, hint: "Material: 30%" },
-  shop: { brutto: 182_000, ustRate: 19, materialRate: 60, feeRate: 4, hint: "Material: 60%, Gebühren: 4%" },
+// ---- Standardwerte für neue Monate (bisherige Demo-Werte als Startpunkt) ----
+const DEFAULTS: FinanzInput = {
+  salonBrutto: 58_000,
+  salonMaterialRate: 30,
+  shopBrutto: 182_000,
+  shopMaterialRate: 60,
+  shopFeeRate: 4,
+  ustRate: 19,
   employees: [
     { name: "Thao", brutto: 3_000 },
     { name: "Ailar", brutto: 2_000 },
@@ -30,14 +37,17 @@ const DEMO = {
     { name: "Ibo", brutto: 2_300 },
   ],
   agRate: 25,
-  shopify: { plan: 105, pos: 79, apps: 80 },
-  shipping: { count: 900, pricePerOrder: 3.9 },
+  shopifyPlan: 105,
+  shopifyPos: 79,
+  shopifyApps: 80,
+  shippingCount: 900,
+  shippingPrice: 3.9,
   otherExpenses: [
     { label: "Marketing", netto: 3_500, ustRate: 0 },
     { label: "Miete", netto: 2_941.18, ustRate: 19 },
     { label: "SWB (Strom)", netto: 550, ustRate: 0 },
     { label: "Amazon Bestellungen", netto: 840.34, ustRate: 19 },
-    { label: "Steuerberater", netto: 1_008.40, ustRate: 19 },
+    { label: "Steuerberater", netto: 1_008.4, ustRate: 19 },
     { label: "Extra Material", netto: 1_428.57, ustRate: 19 },
   ],
   gewstHebesatz: 460,
@@ -57,6 +67,14 @@ function fmt(n: number) {
 function pct(n: number) {
   return (n * 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
 }
+function safeDiv(a: number, b: number) {
+  return b === 0 ? 0 : a / b;
+}
+
+const LOCALE_TAG: Record<Locale, string> = { de: "de-DE", en: "en-US", tr: "tr-TR" };
+function monthName(locale: Locale, monat: number) {
+  return new Date(2000, monat - 1, 1).toLocaleDateString(LOCALE_TAG[locale], { month: "long" });
+}
 
 // ---- ESt Tarif 2025 (Grundtarif) ----
 function calcESt(zvE: number): number {
@@ -75,15 +93,39 @@ function calcESt(zvE: number): number {
   return 0.45 * zvE - 18_936.88;
 }
 
-export default function FinanceOverview({ locale }: { locale: Locale }) {
-  const d = DEMO;
+// GewSt + ESt-Kette auf einen Jahresgewinn (für Monats-Hochrechnung UND echte Jahres-Summe).
+function taxChain(gewinnJahr: number, hebesatz: number, freibetrag: number) {
+  const gewstBasis = Math.max(0, gewinnJahr - freibetrag);
+  const gewstMessbetrag = gewstBasis * 0.035;
+  const gewstJahr = gewstMessbetrag * (hebesatz / 100);
+  const gewinnNachGewSt = gewinnJahr - gewstJahr;
+  const estRoh = calcESt(gewinnNachGewSt);
+  const gewstAnrechnung = Math.min(estRoh, Math.max(0, gewinnJahr) * 0.038);
+  const estGekuerzt = estRoh - gewstAnrechnung;
+  const soli = estGekuerzt * 0.055;
+  const estGesamt = estGekuerzt + soli;
+  return {
+    gewstBasis,
+    gewstMessbetrag,
+    gewstJahr,
+    gewinnNachGewSt,
+    estRoh,
+    gewstAnrechnung,
+    estGekuerzt,
+    soli,
+    estGesamt,
+    steuerGesamt: gewstJahr + estGesamt,
+  };
+}
 
+// ---- Komplette Monats-Kalkulation (pure, reagiert auf jede Eingabe) ----
+function compute(d: FinanzInput) {
   // Revenue
-  const salonNetto = nettoFromBrutto(d.salon.brutto, d.salon.ustRate);
-  const salonUst = ust(d.salon.brutto, d.salon.ustRate);
-  const shopNetto = nettoFromBrutto(d.shop.brutto, d.shop.ustRate);
-  const shopUst = ust(d.shop.brutto, d.shop.ustRate);
-  const totalBrutto = d.salon.brutto + d.shop.brutto;
+  const salonNetto = nettoFromBrutto(d.salonBrutto, d.ustRate);
+  const salonUst = ust(d.salonBrutto, d.ustRate);
+  const shopNetto = nettoFromBrutto(d.shopBrutto, d.ustRate);
+  const shopUst = ust(d.shopBrutto, d.ustRate);
+  const totalBrutto = d.salonBrutto + d.shopBrutto;
   const totalNetto = salonNetto + shopNetto;
   const totalUstEinnahmen = salonUst + shopUst;
 
@@ -98,10 +140,10 @@ export default function FinanceOverview({ locale }: { locale: Locale }) {
   const personnelTotal = personnelRows.reduce((s, r) => s + r.total, 0);
 
   // B. Material
-  const matSalonBrutto = d.salon.brutto * (d.salon.materialRate / 100);
+  const matSalonBrutto = d.salonBrutto * (d.salonMaterialRate / 100);
   const matSalonNetto = nettoFromBrutto(matSalonBrutto, 19);
   const matSalonVst = ust(matSalonBrutto, 19);
-  const matShopBrutto = d.shop.brutto * (d.shop.materialRate / 100);
+  const matShopBrutto = d.shopBrutto * (d.shopMaterialRate / 100);
   const matShopNetto = nettoFromBrutto(matShopBrutto, 19);
   const matShopVst = ust(matShopBrutto, 19);
   const matTotalBrutto = matSalonBrutto + matShopBrutto;
@@ -109,11 +151,11 @@ export default function FinanceOverview({ locale }: { locale: Locale }) {
   const matTotalVst = matSalonVst + matShopVst;
 
   // C. Shopify
-  const shopifyFees = shopNetto * (d.shop.feeRate / 100);
-  const shopifyTotal = d.shopify.plan + d.shopify.pos + d.shopify.apps + shopifyFees;
+  const shopifyFees = shopNetto * (d.shopFeeRate / 100);
+  const shopifyTotal = d.shopifyPlan + d.shopifyPos + d.shopifyApps + shopifyFees;
 
   // D. Shipping
-  const shippingBrutto = d.shipping.count * d.shipping.pricePerOrder;
+  const shippingBrutto = d.shippingCount * d.shippingPrice;
   const shippingNetto = nettoFromBrutto(shippingBrutto, 19);
   const shippingVst = ust(shippingBrutto, 19);
 
@@ -125,421 +167,1177 @@ export default function FinanceOverview({ locale }: { locale: Locale }) {
   // Totals
   const totalExpensesNetto = personnelTotal + matTotalNetto + shopifyTotal + shippingNetto + otherTotal;
   const totalVorsteuer = matTotalVst + shippingVst + otherVst;
-
-  // USt
   const ustZahllast = totalUstEinnahmen - totalVorsteuer;
 
-  // P&L
+  // P&L (Monats-Sicht: Jahr = Hochrechnung ×12)
   const gewinnVorSteuern = totalNetto - totalExpensesNetto;
   const gewinnJahr = gewinnVorSteuern * 12;
+  const tax = taxChain(gewinnJahr, d.gewstHebesatz, d.gewstFreibetrag);
+  const gewstMonat = tax.gewstJahr / 12;
+  const estMonat = tax.estGesamt / 12;
+  const steuerMonat = tax.steuerGesamt / 12;
 
-  // GewSt
-  const gewstBasis = Math.max(0, gewinnJahr - d.gewstFreibetrag);
-  const gewstMessbetrag = gewstBasis * 0.035;
-  const gewstJahr = gewstMessbetrag * (d.gewstHebesatz / 100);
-  const gewstMonat = gewstJahr / 12;
-
-  // ESt
-  const gewinnNachGewSt = gewinnJahr - gewstJahr;
-  const estRoh = calcESt(gewinnNachGewSt);
-  const gewstAnrechnung = Math.min(estRoh, gewinnJahr * 0.038);
-  const estGekuerzt = estRoh - gewstAnrechnung;
-  const soli = estGekuerzt * 0.055;
-  const estGesamt = estGekuerzt + soli;
-  const estMonat = estGesamt / 12;
-
-  // Total tax
-  const steuerGesamt = gewstJahr + estGesamt;
-  const steuerMonat = steuerGesamt / 12;
-
-  // Net profit
   const nettoGewinnMonat = gewinnVorSteuern - steuerMonat;
-  const nettoGewinnJahr = gewinnJahr - steuerGesamt;
+  const nettoGewinnJahr = gewinnJahr - tax.steuerGesamt;
 
-  // KPIs
-  const bruttoMarge = gewinnVorSteuern / totalNetto;
-  const nettoMarge = nettoGewinnMonat / totalNetto;
-  const personalQuote = personnelTotal / totalNetto;
-  const materialQuote = matTotalNetto / totalNetto;
-  const effSteuersatz = steuerGesamt / gewinnJahr;
+  // KPIs (gegen Division durch 0 abgesichert)
+  const bruttoMarge = safeDiv(gewinnVorSteuern, totalNetto);
+  const nettoMarge = safeDiv(nettoGewinnMonat, totalNetto);
+  const personalQuote = safeDiv(personnelTotal, totalNetto);
+  const materialQuote = safeDiv(matTotalNetto, totalNetto);
+  const effSteuersatz = safeDiv(tax.steuerGesamt, gewinnJahr);
+
+  return {
+    salonNetto, salonUst, shopNetto, shopUst, totalBrutto, totalNetto, totalUstEinnahmen,
+    personnelRows, personnelBrutto, personnelAg, personnelTotal,
+    matSalonBrutto, matSalonNetto, matSalonVst, matShopBrutto, matShopNetto, matShopVst,
+    matTotalBrutto, matTotalNetto, matTotalVst,
+    shopifyFees, shopifyTotal,
+    shippingBrutto, shippingNetto, shippingVst,
+    otherTotal, otherVst, otherBrutto,
+    totalExpensesNetto, totalVorsteuer, ustZahllast,
+    gewinnVorSteuern, gewinnJahr, tax, gewstMonat, estMonat, steuerMonat,
+    nettoGewinnMonat, nettoGewinnJahr,
+    bruttoMarge, nettoMarge, personalQuote, materialQuote, effSteuersatz,
+  };
+}
+
+const keyOf = (jahr: number, monat: number) => `${jahr}-${monat}`;
+
+type Props = {
+  locale: Locale;
+  initialJahr: number;
+  initialMonat: number;
+  initialRows: FinanzMonatsdaten[];
+  initialSteuerPosten: SteuerPosten[];
+};
+
+export default function FinanceOverview({ locale, initialJahr, initialMonat, initialRows, initialSteuerPosten }: Props) {
+  const [jahr, setJahr] = useState(initialJahr);
+  const [monat, setMonat] = useState(initialMonat);
+  const [view, setView] = useState<"month" | "year">("month");
+  const [saved, setSaved] = useState<Record<string, FinanzInput>>(() =>
+    Object.fromEntries(initialRows.map((r) => [keyOf(r.jahr, r.monat), r.daten]))
+  );
+  const [loadedYears, setLoadedYears] = useState<number[]>([initialJahr]);
+  const [steuerPosten, setSteuerPosten] = useState<Record<number, SteuerPosten[]>>({
+    [initialJahr]: initialSteuerPosten,
+  });
+  const [edits, setEdits] = useState<Record<string, FinanzInput>>({});
+  const [saving, setSaving] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [yearLoading, startYearLoad] = useTransition();
+
+  const dirtyCount = Object.keys(edits).length;
+
+  // Ungespeicherte Änderungen nicht stillschweigend verlieren
+  useEffect(() => {
+    if (dirtyCount === 0) return;
+    const handler = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirtyCount]);
+
+  function changeYear(next: number) {
+    setJahr(next);
+    if (!loadedYears.includes(next)) {
+      startYearLoad(async () => {
+        const [rows, posten] = await Promise.all([fetchFinanzJahr(next), fetchSteuerPosten(next)]);
+        setSaved((prev) => ({
+          ...prev,
+          ...Object.fromEntries(rows.map((r) => [keyOf(r.jahr, r.monat), r.daten])),
+        }));
+        setSteuerPosten((prev) => ({ ...prev, [next]: posten }));
+        setLoadedYears((prev) => [...prev, next]);
+      });
+    }
+  }
+
+  // Effektive Eingaben eines Monats: lokale Edits > gespeichert > nichts
+  const effective = (j: number, m: number): FinanzInput | null =>
+    edits[keyOf(j, m)] ?? saved[keyOf(j, m)] ?? null;
+
+  // Vorbefüllung für einen leeren Monat: letzter erfasster Monat davor, sonst Vorjahres-Dezember, sonst Defaults
+  function prefillFor(j: number, m: number): FinanzInput {
+    for (let p = m - 1; p >= 1; p--) {
+      const hit = effective(j, p);
+      if (hit) return hit;
+    }
+    return effective(j - 1, 12) ?? DEFAULTS;
+  }
+
+  const k = keyOf(jahr, monat);
+  const isSaved = k in saved && !(k in edits);
+  const isEdited = k in edits;
+  const current: FinanzInput = edits[k] ?? saved[k] ?? prefillFor(jahr, monat);
+  const isPrefilled = !isSaved && !isEdited;
+
+  const c = useMemo(() => compute(current), [current]);
+
+  function update(patch: Partial<FinanzInput>) {
+    setEdits((prev) => ({ ...prev, [k]: { ...current, ...patch } }));
+    setSavedFlash(false);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setSaveError(null);
+    // Edits speichern; wenn keine da sind, den aktuell angezeigten (vorbefüllten) Monat anlegen
+    const toSave: Array<[string, FinanzInput]> =
+      dirtyCount > 0 ? Object.entries(edits) : [[k, current]];
+    for (const [kk, input] of toSave) {
+      const [j, m] = kk.split("-").map(Number);
+      const res = await saveFinanzMonat(j, m, input);
+      if (!res.ok) {
+        setSaveError(res.error ?? "Fehler");
+        setSaving(false);
+        return;
+      }
+      setSaved((prev) => ({ ...prev, [kk]: input }));
+      setEdits((prev) => {
+        const next = { ...prev };
+        delete next[kk];
+        return next;
+      });
+    }
+    setSaving(false);
+    setSavedFlash(true);
+  }
+
+  // ---- Jahresansicht: echte Summen über erfasste Monate ----
+  const yearMonths = useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, i) => {
+        const m = i + 1;
+        const input = effective(jahr, m);
+        return { monat: m, input, calc: input ? compute(input) : null };
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [jahr, saved, edits]
+  );
+  const recorded = yearMonths.filter((r) => r.calc);
+  const yrNetto = recorded.reduce((s, r) => s + r.calc!.totalNetto, 0);
+  const yrAusgaben = recorded.reduce((s, r) => s + r.calc!.totalExpensesNetto, 0);
+  const yrUst = recorded.reduce((s, r) => s + r.calc!.ustZahllast, 0);
+  const yrGewinn = recorded.reduce((s, r) => s + r.calc!.gewinnVorSteuern, 0);
+  const lastRecorded = recorded.length ? recorded[recorded.length - 1].input! : DEFAULTS;
+  const yrTax = taxChain(yrGewinn, lastRecorded.gewstHebesatz, lastRecorded.gewstFreibetrag);
+  const yrNettoGewinn = yrGewinn - yrTax.steuerGesamt;
+
+  // Finanzamt-Ist des Jahres (aus dem Steuer-Ledger): Zahlungen minus Erstattungen
+  const jahrPosten = steuerPosten[jahr] ?? [];
+  const istJahr =
+    jahrPosten.filter((p) => p.richtung === "zahlung").reduce((s, p) => s + (Number(p.ist_betrag) || 0), 0) -
+    jahrPosten.filter((p) => p.richtung === "erstattung").reduce((s, p) => s + (Number(p.ist_betrag) || 0), 0);
+
+  function updatePosten(j: number, p: SteuerPosten) {
+    setSteuerPosten((prev) => {
+      const list = prev[j] ?? [];
+      const exists = list.some((x) => x.id === p.id);
+      return { ...prev, [j]: exists ? list.map((x) => (x.id === p.id ? p : x)) : [...list, p] };
+    });
+  }
+
+  const inputCls =
+    "rounded-lg border border-neutral-300 px-2 py-1 text-sm text-right tabular-nums focus:ring-2 focus:ring-neutral-900 focus:outline-none bg-white";
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      {/* Header + Steuerung */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-neutral-900">{t(locale, "finance.title")}</h1>
-          <p className="text-sm text-neutral-500 mt-1">{d.month} — Bremen (Einzelunternehmen)</p>
+          <p className="text-sm text-neutral-500 mt-1">
+            {view === "month" ? `${monthName(locale, monat)} ${jahr}` : jahr} — Bremen (Einzelunternehmen)
+          </p>
         </div>
-        <div className="bg-amber-50 text-amber-700 text-xs font-medium px-3 py-1.5 rounded-lg border border-amber-200">
-          Demo-Daten
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Jahr */}
+          <div className="flex items-center rounded-lg border border-neutral-300 bg-white">
+            <button onClick={() => changeYear(jahr - 1)} className="px-2 py-1.5 text-neutral-500 hover:text-neutral-900" aria-label="prev">
+              <ChevronLeft size={16} />
+            </button>
+            <span className="px-1 text-sm font-semibold tabular-nums">
+              {yearLoading ? <Loader2 size={14} className="animate-spin inline" /> : jahr}
+            </span>
+            <button onClick={() => changeYear(jahr + 1)} className="px-2 py-1.5 text-neutral-500 hover:text-neutral-900" aria-label="next">
+              <ChevronRight size={16} />
+            </button>
+          </div>
+          {/* Monat */}
+          {view === "month" && (
+            <select
+              value={monat}
+              onChange={(e) => setMonat(Number(e.target.value))}
+              className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-neutral-900 focus:outline-none"
+            >
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
+                const kk = keyOf(jahr, m);
+                const marker = kk in edits ? " ✎" : kk in saved ? " ●" : "";
+                return (
+                  <option key={m} value={m}>
+                    {monthName(locale, m)}{marker}
+                  </option>
+                );
+              })}
+            </select>
+          )}
+          {/* Ansicht */}
+          <div className="flex rounded-lg border border-neutral-300 overflow-hidden text-sm">
+            <button
+              onClick={() => setView("month")}
+              className={`px-3 py-1.5 ${view === "month" ? "bg-neutral-900 text-white" : "bg-white text-neutral-600"}`}
+            >
+              {t(locale, "finance.month")}
+            </button>
+            <button
+              onClick={() => setView("year")}
+              className={`px-3 py-1.5 ${view === "year" ? "bg-neutral-900 text-white" : "bg-white text-neutral-600"}`}
+            >
+              {t(locale, "finance.year")}
+            </button>
+          </div>
+          {/* Speichern */}
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-1.5 bg-neutral-900 text-white font-medium rounded-lg px-4 py-1.5 text-sm disabled:opacity-50"
+          >
+            {saving ? <Loader2 size={14} className="animate-spin" /> : savedFlash && dirtyCount === 0 ? <Check size={14} /> : null}
+            {saving
+              ? t(locale, "finance.saving")
+              : dirtyCount > 1
+                ? `${t(locale, "finance.save")} (${dirtyCount})`
+                : t(locale, "finance.save")}
+          </button>
         </div>
       </div>
 
-      {/* EINNAHMEN */}
-      <SectionCard title={t(locale, "finance.revenue")} color="blue">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-neutral-200">
-              <Th>{t(locale, "finance.revenue.hint")}</Th>
-              <Th right>{t(locale, "finance.revenue.brutto")}</Th>
-              <Th right>{t(locale, "finance.revenue.netto")}</Th>
-              <Th right>{t(locale, "finance.revenue.ust")}</Th>
-              <Th>{t(locale, "finance.revenue.hint")}</Th>
-            </tr>
-          </thead>
-          <tbody>
-            <Row cells={[d.salon.hint, fmt(d.salon.brutto), fmt(salonNetto), fmt(salonUst), d.salon.hint]} label={t(locale, "finance.revenue.salon")} />
-            <Row cells={[d.shop.hint, fmt(d.shop.brutto), fmt(shopNetto), fmt(shopUst), d.shop.hint]} label={t(locale, "finance.revenue.shop")} />
-            <SumRow cells={[fmt(totalBrutto), fmt(totalNetto), fmt(totalUstEinnahmen), ""]} label={t(locale, "finance.revenue.total")} color="green" />
-          </tbody>
-        </table>
-      </SectionCard>
-
-      {/* AUSGABEN */}
-      <SectionCard title={t(locale, "finance.expenses")} color="orange">
-        {/* A. Personalkosten */}
-        <SubSection title={t(locale, "finance.expenses.personnel")} subtitle={t(locale, "finance.expenses.personnel.subtitle")}>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-neutral-200">
-                <Th>{t(locale, "finance.expenses.personnel.employee")}</Th>
-                <Th right>{t(locale, "finance.expenses.personnel.brutto")}</Th>
-                <Th right>{t(locale, "finance.expenses.personnel.ag")}</Th>
-                <Th right>{t(locale, "finance.expenses.personnel.total")}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {personnelRows.map((r) => (
-                <tr key={r.name} className="border-b border-neutral-100">
-                  <td className="py-1.5 text-neutral-700">{r.name}</td>
-                  <td className="py-1.5 text-right text-neutral-700 tabular-nums">{fmt(r.brutto)}</td>
-                  <td className="py-1.5 text-right text-neutral-500 tabular-nums">{fmt(r.ag)}</td>
-                  <td className="py-1.5 text-right text-neutral-700 tabular-nums">{fmt(r.total)}</td>
-                </tr>
-              ))}
-              <SumRow4 label={t(locale, "finance.expenses.personnel.sum")} cells={[fmt(personnelBrutto), fmt(personnelAg), fmt(personnelTotal)]} />
-            </tbody>
-          </table>
-        </SubSection>
-
-        {/* B. Materialkosten */}
-        <SubSection title={t(locale, "finance.expenses.material")}>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-neutral-200">
-                <Th>Kategorie</Th>
-                <Th right>{t(locale, "finance.expenses.material.brutto")}</Th>
-                <Th right>{t(locale, "finance.expenses.material.netto")}</Th>
-                <Th right>{t(locale, "finance.expenses.material.vorsteuer")}</Th>
-                <Th>Berechnung</Th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="border-b border-neutral-100">
-                <td className="py-1.5 text-neutral-700">{t(locale, "finance.expenses.material.salon")}</td>
-                <td className="py-1.5 text-right tabular-nums">{fmt(matSalonBrutto)}</td>
-                <td className="py-1.5 text-right tabular-nums">{fmt(matSalonNetto)}</td>
-                <td className="py-1.5 text-right tabular-nums">{fmt(matSalonVst)}</td>
-                <td className="py-1.5 text-neutral-500 text-xs">30% vom Salon-Umsatz</td>
-              </tr>
-              <tr className="border-b border-neutral-100">
-                <td className="py-1.5 text-neutral-700">{t(locale, "finance.expenses.material.shop")}</td>
-                <td className="py-1.5 text-right tabular-nums">{fmt(matShopBrutto)}</td>
-                <td className="py-1.5 text-right tabular-nums">{fmt(matShopNetto)}</td>
-                <td className="py-1.5 text-right tabular-nums">{fmt(matShopVst)}</td>
-                <td className="py-1.5 text-neutral-500 text-xs">60% vom Shop-Umsatz (40% Marge)</td>
-              </tr>
-              <SumRow cells={[fmt(matTotalBrutto), fmt(matTotalNetto), fmt(matTotalVst), ""]} label={t(locale, "finance.expenses.material.sum")} color="yellow" />
-            </tbody>
-          </table>
-        </SubSection>
-
-        {/* C. Shopify-Kosten */}
-        <SubSection title={t(locale, "finance.expenses.shopify")}>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-neutral-200">
-                <Th>Kategorie</Th>
-                <Th right>Betrag/Basis</Th>
-                <Th right>Netto</Th>
-                <Th>{t(locale, "finance.revenue.hint")}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="border-b border-neutral-100">
-                <td className="py-1.5 text-neutral-700">{t(locale, "finance.expenses.shopify.plan")}</td>
-                <td className="py-1.5 text-right tabular-nums">{fmt(d.shopify.plan)}</td>
-                <td className="py-1.5 text-right tabular-nums">{fmt(d.shopify.plan)}</td>
-                <td className="py-1.5 text-neutral-500 text-xs">Monatliche Gebühr (Netto)</td>
-              </tr>
-              <tr className="border-b border-neutral-100">
-                <td className="py-1.5 text-neutral-700">{t(locale, "finance.expenses.shopify.pos")}</td>
-                <td className="py-1.5 text-right tabular-nums">{fmt(d.shopify.pos)}</td>
-                <td className="py-1.5 text-right tabular-nums">{fmt(d.shopify.pos)}</td>
-                <td className="py-1.5 text-neutral-500 text-xs">Monatliche Gebühr (Netto)</td>
-              </tr>
-              <tr className="border-b border-neutral-100">
-                <td className="py-1.5 text-neutral-700">{t(locale, "finance.expenses.shopify.apps")}</td>
-                <td className="py-1.5 text-right tabular-nums">{fmt(d.shopify.apps)}</td>
-                <td className="py-1.5 text-right tabular-nums">{fmt(d.shopify.apps)}</td>
-                <td className="py-1.5 text-neutral-500 text-xs">Monatliche Gebühr (Netto)</td>
-              </tr>
-              <tr className="border-b border-neutral-100">
-                <td className="py-1.5 text-neutral-700">{t(locale, "finance.expenses.shopify.fees")}</td>
-                <td className="py-1.5 text-right tabular-nums">{fmt(shopNetto)}</td>
-                <td className="py-1.5 text-right tabular-nums">{fmt(shopifyFees)}</td>
-                <td className="py-1.5 text-neutral-500 text-xs">4% vom Netto-Umsatz</td>
-              </tr>
-              <tr className="bg-yellow-50 font-semibold">
-                <td className="py-2 text-neutral-900">{t(locale, "finance.expenses.shopify.sum")}</td>
-                <td className="py-2 text-right" />
-                <td className="py-2 text-right tabular-nums text-yellow-700">{fmt(shopifyTotal)}</td>
-                <td className="py-2 text-yellow-700 text-xs font-semibold">keine USt!</td>
-              </tr>
-            </tbody>
-          </table>
-        </SubSection>
-
-        {/* D. Versandkosten */}
-        <SubSection title={t(locale, "finance.expenses.shipping")}>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-neutral-200">
-                <Th>Kategorie</Th>
-                <Th right>Anzahl/Preis</Th>
-                <Th right>Netto</Th>
-                <Th right>{t(locale, "finance.expenses.material.vorsteuer")}</Th>
-                <Th>Berechnung</Th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="border-b border-neutral-100">
-                <td className="py-1.5 text-neutral-700">{t(locale, "finance.expenses.shipping.count")}</td>
-                <td className="py-1.5 text-right tabular-nums">{d.shipping.count}</td>
-                <td className="py-1.5" />
-                <td className="py-1.5" />
-                <td className="py-1.5 text-neutral-500 text-xs">Eingabe</td>
-              </tr>
-              <tr className="border-b border-neutral-100">
-                <td className="py-1.5 text-neutral-700">{t(locale, "finance.expenses.shipping.price")}</td>
-                <td className="py-1.5 text-right tabular-nums">{fmt(d.shipping.pricePerOrder)}</td>
-                <td className="py-1.5" />
-                <td className="py-1.5" />
-                <td className="py-1.5 text-neutral-500 text-xs">Brutto mit 19% USt</td>
-              </tr>
-              <tr className="bg-yellow-50 font-semibold">
-                <td className="py-2 text-neutral-900">{t(locale, "finance.expenses.shipping.total")}</td>
-                <td className="py-2 text-right tabular-nums">{fmt(shippingBrutto)}</td>
-                <td className="py-2 text-right tabular-nums text-yellow-700">{fmt(shippingNetto)}</td>
-                <td className="py-2 text-right tabular-nums text-green-700">{fmt(shippingVst)}</td>
-                <td className="py-2 text-neutral-500 text-xs">Automatisch berechnet</td>
-              </tr>
-            </tbody>
-          </table>
-        </SubSection>
-
-        {/* E. Sonstige */}
-        <SubSection title={t(locale, "finance.expenses.other")}>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-neutral-200">
-                <Th>Kategorie</Th>
-                <Th right>Brutto/Gesamt</Th>
-                <Th right>Netto</Th>
-                <Th right>{t(locale, "finance.expenses.material.vorsteuer")}</Th>
-                <Th>{t(locale, "finance.revenue.hint")}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {d.otherExpenses.map((e) => {
-                const brutto = e.netto * (1 + e.ustRate / 100);
-                const vst = e.netto * (e.ustRate / 100);
-                return (
-                  <tr key={e.label} className="border-b border-neutral-100">
-                    <td className="py-1.5 text-neutral-700">{e.label}</td>
-                    <td className="py-1.5 text-right tabular-nums">{fmt(brutto)}</td>
-                    <td className="py-1.5 text-right tabular-nums">{fmt(e.netto)}</td>
-                    <td className="py-1.5 text-right tabular-nums">{fmt(vst)}</td>
-                    <td className="py-1.5 text-neutral-500 text-xs">{e.ustRate === 0 ? "Netto, keine Vorsteuer" : `Brutto mit ${e.ustRate}% USt`}</td>
-                  </tr>
-                );
-              })}
-              <SumRow cells={[fmt(otherBrutto), fmt(otherTotal), fmt(otherVst), ""]} label={t(locale, "finance.expenses.other.sum")} color="yellow" />
-            </tbody>
-          </table>
-        </SubSection>
-
-        {/* Summen */}
-        <div className="mt-4 space-y-2">
-          <div className="flex justify-between items-center bg-neutral-100 rounded-lg px-4 py-2 font-semibold text-sm">
-            <span>{t(locale, "finance.expenses.total")}</span>
-            <span className="tabular-nums">{fmt(totalExpensesNetto)}</span>
-          </div>
-          <div className="flex justify-between items-center bg-green-50 rounded-lg px-4 py-2 font-semibold text-sm text-green-800">
-            <span>{t(locale, "finance.expenses.vorsteuer_total")}</span>
-            <span className="tabular-nums">{fmt(totalVorsteuer)}</span>
-          </div>
-        </div>
-      </SectionCard>
-
-      {/* UMSATZSTEUER */}
-      <SectionCard title={t(locale, "finance.vat")} color="red">
-        <div className="space-y-2 text-sm">
-          <div className="flex justify-between">
-            <span className="text-neutral-600">{t(locale, "finance.vat.from_revenue")}</span>
-            <span className="tabular-nums">{fmt(totalUstEinnahmen)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-neutral-600">{t(locale, "finance.vat.input_tax")}</span>
-            <span className="tabular-nums text-red-600">-{fmt(totalVorsteuer)}</span>
-          </div>
-          <div className="flex justify-between items-center bg-red-50 rounded-lg px-4 py-2 font-bold text-red-800">
-            <span>{t(locale, "finance.vat.liability")}</span>
-            <div className="text-right">
-              <div className="tabular-nums">{fmt(ustZahllast)}</div>
-              <div className="text-xs font-normal text-red-600 tabular-nums">{fmt(ustZahllast * 12)} / Jahr</div>
-            </div>
-          </div>
-        </div>
-        <div className="mt-3 flex items-start gap-2 bg-amber-50 text-amber-800 text-xs rounded-lg px-3 py-2">
+      {/* Status */}
+      {saveError && (
+        <div className="bg-red-50 text-red-700 text-xs rounded-lg px-3 py-2 border border-red-200">{saveError}</div>
+      )}
+      {view === "month" && isPrefilled && (
+        <div className="flex items-start gap-2 bg-amber-50 text-amber-800 text-xs rounded-lg px-3 py-2 border border-amber-200">
           <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-          {t(locale, "finance.vat.warning")}
+          {t(locale, "finance.month.prefilled")}
         </div>
-      </SectionCard>
+      )}
+      {view === "month" && isEdited && (
+        <div className="bg-amber-50 text-amber-800 text-xs rounded-lg px-3 py-2 border border-amber-200">
+          ✎ {t(locale, "finance.unsaved")}
+        </div>
+      )}
 
-      {/* GEWINN & VERLUST */}
-      <SectionCard title={t(locale, "finance.pnl")} color="blue">
+      {view === "year" ? (
+        <YearView
+          locale={locale}
+          jahr={jahr}
+          months={yearMonths}
+          sums={{ yrNetto, yrAusgaben, yrUst, yrGewinn, yrNettoGewinn }}
+          istJahr={istJahr}
+          tax={yrTax}
+          hebesatz={lastRecorded.gewstHebesatz}
+          freibetrag={lastRecorded.gewstFreibetrag}
+          recordedCount={recorded.length}
+          onOpenMonth={(m) => {
+            setMonat(m);
+            setView("month");
+          }}
+        />
+      ) : (
+        <div key={k} className="space-y-6">
+          {/* EINNAHMEN */}
+          <SectionCard title={t(locale, "finance.revenue")} color="blue">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-neutral-200">
+                  <Th>{""}</Th>
+                  <Th right>{t(locale, "finance.revenue.brutto")}</Th>
+                  <Th right>{t(locale, "finance.revenue.netto")}</Th>
+                  <Th right>{t(locale, "finance.revenue.ust")}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b border-neutral-100">
+                  <td className="py-1.5 text-neutral-700">{t(locale, "finance.revenue.salon")}</td>
+                  <td className="py-1.5 text-right">
+                    <NumField value={current.salonBrutto} onCommit={(v) => update({ salonBrutto: v })} className={`${inputCls} w-28`} />
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums">{fmt(c.salonNetto)}</td>
+                  <td className="py-1.5 text-right tabular-nums">{fmt(c.salonUst)}</td>
+                </tr>
+                <tr className="border-b border-neutral-100">
+                  <td className="py-1.5 text-neutral-700">{t(locale, "finance.revenue.shop")}</td>
+                  <td className="py-1.5 text-right">
+                    <NumField value={current.shopBrutto} onCommit={(v) => update({ shopBrutto: v })} className={`${inputCls} w-28`} />
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums">{fmt(c.shopNetto)}</td>
+                  <td className="py-1.5 text-right tabular-nums">{fmt(c.shopUst)}</td>
+                </tr>
+                <tr className="bg-green-50 font-semibold text-green-800">
+                  <td className="py-2">{t(locale, "finance.revenue.total")}</td>
+                  <td className="py-2 text-right tabular-nums">{fmt(c.totalBrutto)}</td>
+                  <td className="py-2 text-right tabular-nums">{fmt(c.totalNetto)}</td>
+                  <td className="py-2 text-right tabular-nums">{fmt(c.totalUstEinnahmen)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </SectionCard>
+
+          {/* AUSGABEN */}
+          <SectionCard title={t(locale, "finance.expenses")} color="orange">
+            {/* A. Personalkosten */}
+            <SubSection
+              title={t(locale, "finance.expenses.personnel")}
+              right={
+                <span className="flex items-center gap-1 text-xs text-neutral-500">
+                  {t(locale, "finance.expenses.personnel.ag2")}
+                  <NumField value={current.agRate} onCommit={(v) => update({ agRate: v })} className={`${inputCls} w-14`} />%
+                </span>
+              }
+            >
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-neutral-200">
+                    <Th>{t(locale, "finance.expenses.personnel.employee")}</Th>
+                    <Th right>{t(locale, "finance.expenses.personnel.brutto")}</Th>
+                    <Th right>{`${t(locale, "finance.expenses.personnel.ag2")} (${current.agRate}%)`}</Th>
+                    <Th right>{t(locale, "finance.expenses.personnel.total")}</Th>
+                    <Th right>{""}</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {c.personnelRows.map((r, i) => (
+                    <tr key={i} className="border-b border-neutral-100">
+                      <td className="py-1.5">
+                        <input
+                          type="text"
+                          value={r.name}
+                          onChange={(e) => {
+                            const employees = current.employees.map((emp, j) => (j === i ? { ...emp, name: e.target.value } : emp));
+                            update({ employees });
+                          }}
+                          className="rounded-lg border border-neutral-300 px-2 py-1 text-sm w-full max-w-[180px] focus:ring-2 focus:ring-neutral-900 focus:outline-none bg-white"
+                        />
+                      </td>
+                      <td className="py-1.5 text-right">
+                        <NumField
+                          value={r.brutto}
+                          onCommit={(v) => {
+                            const employees = current.employees.map((emp, j) => (j === i ? { ...emp, brutto: v } : emp));
+                            update({ employees });
+                          }}
+                          className={`${inputCls} w-24`}
+                        />
+                      </td>
+                      <td className="py-1.5 text-right text-neutral-500 tabular-nums">{fmt(r.ag)}</td>
+                      <td className="py-1.5 text-right text-neutral-700 tabular-nums">{fmt(r.total)}</td>
+                      <td className="py-1.5 text-right">
+                        <button
+                          onClick={() => update({ employees: current.employees.filter((_, j) => j !== i) })}
+                          className="text-neutral-400 hover:text-red-600"
+                          title={t(locale, "finance.remove")}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="bg-yellow-50 font-semibold text-yellow-800">
+                    <td className="py-2">{t(locale, "finance.expenses.personnel.sum")}</td>
+                    <td className="py-2 text-right tabular-nums">{fmt(c.personnelBrutto)}</td>
+                    <td className="py-2 text-right tabular-nums">{fmt(c.personnelAg)}</td>
+                    <td className="py-2 text-right tabular-nums">{fmt(c.personnelTotal)}</td>
+                    <td />
+                  </tr>
+                </tbody>
+              </table>
+              <button
+                onClick={() => update({ employees: [...current.employees, { name: "", brutto: 0 }] })}
+                className="mt-2 flex items-center gap-1 text-xs font-medium text-neutral-600 hover:text-neutral-900"
+              >
+                <Plus size={14} /> {t(locale, "finance.add_employee")}
+              </button>
+            </SubSection>
+
+            {/* B. Materialkosten */}
+            <SubSection title={t(locale, "finance.expenses.material")}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-neutral-200">
+                    <Th>{""}</Th>
+                    <Th right>{t(locale, "finance.param.of_revenue")}</Th>
+                    <Th right>{t(locale, "finance.expenses.material.brutto")}</Th>
+                    <Th right>{t(locale, "finance.expenses.material.netto")}</Th>
+                    <Th right>{t(locale, "finance.expenses.material.vorsteuer")}</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-neutral-100">
+                    <td className="py-1.5 text-neutral-700">{t(locale, "finance.expenses.material.salon2")}</td>
+                    <td className="py-1.5 text-right">
+                      <NumField value={current.salonMaterialRate} onCommit={(v) => update({ salonMaterialRate: v })} className={`${inputCls} w-16`} />
+                      <span className="text-neutral-500 ml-1">%</span>
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">{fmt(c.matSalonBrutto)}</td>
+                    <td className="py-1.5 text-right tabular-nums">{fmt(c.matSalonNetto)}</td>
+                    <td className="py-1.5 text-right tabular-nums">{fmt(c.matSalonVst)}</td>
+                  </tr>
+                  <tr className="border-b border-neutral-100">
+                    <td className="py-1.5 text-neutral-700">{t(locale, "finance.expenses.material.shop2")}</td>
+                    <td className="py-1.5 text-right">
+                      <NumField value={current.shopMaterialRate} onCommit={(v) => update({ shopMaterialRate: v })} className={`${inputCls} w-16`} />
+                      <span className="text-neutral-500 ml-1">%</span>
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">{fmt(c.matShopBrutto)}</td>
+                    <td className="py-1.5 text-right tabular-nums">{fmt(c.matShopNetto)}</td>
+                    <td className="py-1.5 text-right tabular-nums">{fmt(c.matShopVst)}</td>
+                  </tr>
+                  <tr className="bg-yellow-50 font-semibold text-yellow-800">
+                    <td className="py-2">{t(locale, "finance.expenses.material.sum")}</td>
+                    <td />
+                    <td className="py-2 text-right tabular-nums">{fmt(c.matTotalBrutto)}</td>
+                    <td className="py-2 text-right tabular-nums">{fmt(c.matTotalNetto)}</td>
+                    <td className="py-2 text-right tabular-nums">{fmt(c.matTotalVst)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </SubSection>
+
+            {/* C. Shopify-Kosten */}
+            <SubSection title={t(locale, "finance.expenses.shopify")}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-neutral-200">
+                    <Th>{""}</Th>
+                    <Th right>Betrag/Basis</Th>
+                    <Th right>Netto</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(
+                    [
+                      ["finance.expenses.shopify.plan", "shopifyPlan"],
+                      ["finance.expenses.shopify.pos", "shopifyPos"],
+                      ["finance.expenses.shopify.apps", "shopifyApps"],
+                    ] as const
+                  ).map(([label, field]) => (
+                    <tr key={field} className="border-b border-neutral-100">
+                      <td className="py-1.5 text-neutral-700">{t(locale, label)}</td>
+                      <td className="py-1.5 text-right">
+                        <NumField value={current[field]} onCommit={(v) => update({ [field]: v })} className={`${inputCls} w-24`} />
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums">{fmt(current[field])}</td>
+                    </tr>
+                  ))}
+                  <tr className="border-b border-neutral-100">
+                    <td className="py-1.5 text-neutral-700">
+                      {t(locale, "finance.expenses.shopify.fees2")}{" "}
+                      <span className="whitespace-nowrap">
+                        <NumField value={current.shopFeeRate} onCommit={(v) => update({ shopFeeRate: v })} className={`${inputCls} w-14`} />
+                        <span className="text-neutral-500 ml-1 text-xs">{t(locale, "finance.param.of_net")}</span>
+                      </span>
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">{fmt(c.shopNetto)}</td>
+                    <td className="py-1.5 text-right tabular-nums">{fmt(c.shopifyFees)}</td>
+                  </tr>
+                  <tr className="bg-yellow-50 font-semibold">
+                    <td className="py-2 text-neutral-900">{t(locale, "finance.expenses.shopify.sum")}</td>
+                    <td className="py-2 text-right text-yellow-700 text-xs font-semibold">keine USt!</td>
+                    <td className="py-2 text-right tabular-nums text-yellow-700">{fmt(c.shopifyTotal)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </SubSection>
+
+            {/* D. Versandkosten */}
+            <SubSection title={t(locale, "finance.expenses.shipping")}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-neutral-200">
+                    <Th>{""}</Th>
+                    <Th right>Anzahl/Preis</Th>
+                    <Th right>Netto</Th>
+                    <Th right>{t(locale, "finance.expenses.material.vorsteuer")}</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-neutral-100">
+                    <td className="py-1.5 text-neutral-700">{t(locale, "finance.expenses.shipping.count")}</td>
+                    <td className="py-1.5 text-right">
+                      <NumField value={current.shippingCount} onCommit={(v) => update({ shippingCount: v })} className={`${inputCls} w-24`} />
+                    </td>
+                    <td className="py-1.5" />
+                    <td className="py-1.5" />
+                  </tr>
+                  <tr className="border-b border-neutral-100">
+                    <td className="py-1.5 text-neutral-700">{t(locale, "finance.expenses.shipping.price")}</td>
+                    <td className="py-1.5 text-right">
+                      <NumField value={current.shippingPrice} onCommit={(v) => update({ shippingPrice: v })} className={`${inputCls} w-24`} />
+                    </td>
+                    <td className="py-1.5" />
+                    <td className="py-1.5" />
+                  </tr>
+                  <tr className="bg-yellow-50 font-semibold">
+                    <td className="py-2 text-neutral-900">{t(locale, "finance.expenses.shipping.total")}</td>
+                    <td className="py-2 text-right tabular-nums">{fmt(c.shippingBrutto)}</td>
+                    <td className="py-2 text-right tabular-nums text-yellow-700">{fmt(c.shippingNetto)}</td>
+                    <td className="py-2 text-right tabular-nums text-green-700">{fmt(c.shippingVst)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </SubSection>
+
+            {/* E. Sonstige */}
+            <SubSection title={t(locale, "finance.expenses.other")}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-neutral-200">
+                    <Th>{""}</Th>
+                    <Th right>Netto</Th>
+                    <Th right>USt %</Th>
+                    <Th right>Brutto</Th>
+                    <Th right>{t(locale, "finance.expenses.material.vorsteuer")}</Th>
+                    <Th right>{""}</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {current.otherExpenses.map((e, i) => {
+                    const brutto = e.netto * (1 + e.ustRate / 100);
+                    const vst = e.netto * (e.ustRate / 100);
+                    const setExpense = (patch: Partial<typeof e>) =>
+                      update({ otherExpenses: current.otherExpenses.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
+                    return (
+                      <tr key={i} className="border-b border-neutral-100">
+                        <td className="py-1.5">
+                          <input
+                            type="text"
+                            value={e.label}
+                            onChange={(ev) => setExpense({ label: ev.target.value })}
+                            className="rounded-lg border border-neutral-300 px-2 py-1 text-sm w-full max-w-[200px] focus:ring-2 focus:ring-neutral-900 focus:outline-none bg-white"
+                          />
+                        </td>
+                        <td className="py-1.5 text-right">
+                          <NumField value={e.netto} onCommit={(v) => setExpense({ netto: v })} className={`${inputCls} w-24`} />
+                        </td>
+                        <td className="py-1.5 text-right">
+                          <select
+                            value={e.ustRate}
+                            onChange={(ev) => setExpense({ ustRate: Number(ev.target.value) })}
+                            className="rounded-lg border border-neutral-300 px-2 py-1 text-sm bg-white focus:ring-2 focus:ring-neutral-900 focus:outline-none"
+                          >
+                            <option value={0}>0%</option>
+                            <option value={7}>7%</option>
+                            <option value={19}>19%</option>
+                          </select>
+                        </td>
+                        <td className="py-1.5 text-right tabular-nums">{fmt(brutto)}</td>
+                        <td className="py-1.5 text-right tabular-nums">{fmt(vst)}</td>
+                        <td className="py-1.5 text-right">
+                          <button
+                            onClick={() => update({ otherExpenses: current.otherExpenses.filter((_, j) => j !== i) })}
+                            className="text-neutral-400 hover:text-red-600"
+                            title={t(locale, "finance.remove")}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  <tr className="bg-yellow-50 font-semibold text-yellow-800">
+                    <td className="py-2">{t(locale, "finance.expenses.other.sum")}</td>
+                    <td className="py-2 text-right tabular-nums">{fmt(c.otherTotal)}</td>
+                    <td />
+                    <td className="py-2 text-right tabular-nums">{fmt(c.otherBrutto)}</td>
+                    <td className="py-2 text-right tabular-nums">{fmt(c.otherVst)}</td>
+                    <td />
+                  </tr>
+                </tbody>
+              </table>
+              <button
+                onClick={() => update({ otherExpenses: [...current.otherExpenses, { label: "", netto: 0, ustRate: 19 }] })}
+                className="mt-2 flex items-center gap-1 text-xs font-medium text-neutral-600 hover:text-neutral-900"
+              >
+                <Plus size={14} /> {t(locale, "finance.add_expense")}
+              </button>
+            </SubSection>
+
+            {/* Summen */}
+            <div className="mt-4 space-y-2">
+              <div className="flex justify-between items-center bg-neutral-100 rounded-lg px-4 py-2 font-semibold text-sm">
+                <span>{t(locale, "finance.expenses.total")}</span>
+                <span className="tabular-nums">{fmt(c.totalExpensesNetto)}</span>
+              </div>
+              <div className="flex justify-between items-center bg-green-50 rounded-lg px-4 py-2 font-semibold text-sm text-green-800">
+                <span>{t(locale, "finance.expenses.vorsteuer_total")}</span>
+                <span className="tabular-nums">{fmt(c.totalVorsteuer)}</span>
+              </div>
+            </div>
+          </SectionCard>
+
+          {/* UMSATZSTEUER */}
+          <SectionCard title={t(locale, "finance.vat")} color="red">
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-neutral-600">{t(locale, "finance.vat.from_revenue")}</span>
+                <span className="tabular-nums">{fmt(c.totalUstEinnahmen)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-neutral-600">{t(locale, "finance.vat.input_tax")}</span>
+                <span className="tabular-nums text-red-600">-{fmt(c.totalVorsteuer)}</span>
+              </div>
+              <div className="flex justify-between items-center bg-red-50 rounded-lg px-4 py-2 font-bold text-red-800">
+                <span>{t(locale, "finance.vat.liability")}</span>
+                <div className="text-right">
+                  <div className="tabular-nums">{fmt(c.ustZahllast)}</div>
+                  <div className="text-xs font-normal text-red-600 tabular-nums">{fmt(c.ustZahllast * 12)} / Jahr</div>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 flex items-start gap-2 bg-amber-50 text-amber-800 text-xs rounded-lg px-3 py-2">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              {t(locale, "finance.vat.warning")}
+            </div>
+          </SectionCard>
+
+          {/* GEWINN & VERLUST */}
+          <SectionCard title={t(locale, "finance.pnl")} color="blue">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-neutral-200">
+                  <Th>{""}</Th>
+                  <Th right>{t(locale, "finance.pnl.monthly")}</Th>
+                  <Th right>{t(locale, "finance.pnl.annual")}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b border-neutral-100">
+                  <td className="py-1.5 text-neutral-700">{t(locale, "finance.pnl.revenue")}</td>
+                  <td className="py-1.5 text-right tabular-nums">{fmt(c.totalNetto)}</td>
+                  <td className="py-1.5 text-right tabular-nums">{fmt(c.totalNetto * 12)}</td>
+                </tr>
+                <tr className="border-b border-neutral-100">
+                  <td className="py-1.5 text-neutral-700">{t(locale, "finance.pnl.expenses")}</td>
+                  <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(c.totalExpensesNetto)}</td>
+                  <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(c.totalExpensesNetto * 12)}</td>
+                </tr>
+                <tr className="bg-green-50 font-bold text-green-800">
+                  <td className="py-2">{t(locale, "finance.pnl.profit")}</td>
+                  <td className="py-2 text-right tabular-nums">{fmt(c.gewinnVorSteuern)}</td>
+                  <td className="py-2 text-right tabular-nums">{fmt(c.gewinnJahr)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </SectionCard>
+
+          {/* STEUERN */}
+          <SectionCard title={t(locale, "finance.tax")} color="red">
+            <SubSection title={t(locale, "finance.tax.gewst")}>
+              <div className="grid grid-cols-3 gap-y-1 text-sm items-center">
+                <span className="text-neutral-600">{t(locale, "finance.tax.gewst.profit")}</span>
+                <span className="text-right tabular-nums">{fmt(c.gewinnJahr)}</span>
+                <span />
+                <span className="text-neutral-600">{t(locale, "finance.tax.gewst.freibetrag")}</span>
+                <span className="text-right">
+                  <NumField value={current.gewstFreibetrag} onCommit={(v) => update({ gewstFreibetrag: v })} className={`${inputCls} w-24`} />
+                </span>
+                <span className="text-xs text-neutral-400 pl-2">Einzelunternehmen</span>
+                <span className="text-neutral-600">{t(locale, "finance.tax.gewst.basis")}</span>
+                <span className="text-right tabular-nums font-medium">{fmt(c.tax.gewstBasis)}</span>
+                <span />
+                <span className="text-neutral-600">{t(locale, "finance.tax.gewst.messbetrag")}</span>
+                <span className="text-right tabular-nums">{fmt(c.tax.gewstMessbetrag)}</span>
+                <span />
+                <span className="text-neutral-600">{t(locale, "finance.tax.gewst.hebesatz")}</span>
+                <span className="text-right">
+                  <NumField value={current.gewstHebesatz} onCommit={(v) => update({ gewstHebesatz: v })} className={`${inputCls} w-20`} />
+                </span>
+                <span className="text-xs text-neutral-400 pl-2">Bremen: 460</span>
+                <span className="font-semibold text-neutral-900">{t(locale, "finance.tax.gewst.amount2")}</span>
+                <span className="text-right tabular-nums font-semibold">{fmt(c.tax.gewstJahr)}</span>
+                <span className="text-right tabular-nums text-neutral-500">{fmt(c.gewstMonat)}/m</span>
+              </div>
+            </SubSection>
+
+            <SubSection title={t(locale, "finance.tax.est")}>
+              <div className="grid grid-cols-3 gap-y-1 text-sm">
+                <span className="text-neutral-600">{t(locale, "finance.tax.est.after_gewst")}</span>
+                <span className="text-right tabular-nums">{fmt(c.tax.gewinnNachGewSt)}</span>
+                <span />
+                <span className="text-neutral-600">{t(locale, "finance.tax.est.tariff")}</span>
+                <span className="text-right tabular-nums">{fmt(c.tax.estRoh)}</span>
+                <span className="text-xs text-neutral-400 pl-2">Nach deutschem ESt-Tarif</span>
+                <span className="text-neutral-600">{t(locale, "finance.tax.est.anrechnung")}</span>
+                <span className="text-right tabular-nums text-red-600">-{fmt(c.tax.gewstAnrechnung)}</span>
+                <span className="text-xs text-neutral-400 pl-2">3,8% vom Gewerbeertrag</span>
+                <span className="text-neutral-600">{t(locale, "finance.tax.est.reduced")}</span>
+                <span className="text-right tabular-nums">{fmt(c.tax.estGekuerzt)}</span>
+                <span className="text-xs text-neutral-400 pl-2">Nach Anrechnung</span>
+                <span className="text-neutral-600">{t(locale, "finance.tax.est.soli")}</span>
+                <span className="text-right tabular-nums">{fmt(c.tax.soli)}</span>
+                <span className="text-xs text-neutral-400 pl-2">5,5% auf ESt</span>
+                <span className="font-semibold text-neutral-900">{t(locale, "finance.tax.est.total")}</span>
+                <span className="text-right tabular-nums font-semibold">{fmt(c.tax.estGesamt)}</span>
+                <span />
+              </div>
+            </SubSection>
+
+            <div className="flex justify-between items-center bg-red-50 rounded-lg px-4 py-3 font-bold text-red-800 mt-2">
+              <span>{t(locale, "finance.tax.total")}</span>
+              <div className="text-right">
+                <div className="tabular-nums">{fmt(c.tax.steuerGesamt)}</div>
+                <div className="text-xs font-normal text-red-600 tabular-nums">{fmt(c.steuerMonat)} / Monat</div>
+              </div>
+            </div>
+          </SectionCard>
+
+          {/* FINANZAMT SOLL/IST */}
+          <FinanzamtAbgleich
+            locale={locale}
+            jahr={jahr}
+            monat={monat}
+            posten={jahrPosten}
+            ustBerechnet={c.ustZahllast}
+            onPostenSaved={(p) => updatePosten(jahr, p)}
+          />
+
+          {/* NETTOGEWINN */}
+          <SectionCard title={t(locale, "finance.net_profit")} color="green">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-neutral-200">
+                  <Th>{""}</Th>
+                  <Th right>{t(locale, "finance.pnl.monthly")}</Th>
+                  <Th right>{t(locale, "finance.pnl.annual")}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b border-neutral-100">
+                  <td className="py-1.5 text-neutral-700">{t(locale, "finance.net_profit.before_tax")}</td>
+                  <td className="py-1.5 text-right tabular-nums">{fmt(c.gewinnVorSteuern)}</td>
+                  <td className="py-1.5 text-right tabular-nums">{fmt(c.gewinnJahr)}</td>
+                </tr>
+                <tr className="border-b border-neutral-100">
+                  <td className="py-1.5 text-neutral-700">{t(locale, "finance.net_profit.taxes")}</td>
+                  <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(c.steuerMonat)}</td>
+                  <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(c.tax.steuerGesamt)}</td>
+                </tr>
+                <tr className="bg-green-100 font-bold text-green-900">
+                  <td className="py-2">
+                    <span className="flex items-center gap-2">
+                      {t(locale, "finance.net_profit.amount")}
+                      <span className="text-xs font-normal text-green-700">{t(locale, "finance.net_profit.after_all")}</span>
+                    </span>
+                  </td>
+                  <td className="py-2 text-right tabular-nums text-lg">{fmt(c.nettoGewinnMonat)}</td>
+                  <td className="py-2 text-right tabular-nums text-lg">{fmt(c.nettoGewinnJahr)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </SectionCard>
+
+          {/* KENNZAHLEN */}
+          <SectionCard title={t(locale, "finance.kpi")} color="blue">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <KpiCard label={t(locale, "finance.kpi.gross_margin")} value={pct(c.bruttoMarge)} desc="Gewinn vor Steuern / Umsatz" />
+              <KpiCard label={t(locale, "finance.kpi.net_margin")} value={pct(c.nettoMarge)} desc="Nettogewinn / Umsatz" />
+              <KpiCard label={t(locale, "finance.kpi.personnel_ratio")} value={pct(c.personalQuote)} desc="Personalkosten / Umsatz" />
+              <KpiCard label={t(locale, "finance.kpi.material_ratio")} value={pct(c.materialQuote)} desc="Materialkosten / Umsatz" />
+              <KpiCard label={t(locale, "finance.kpi.effective_tax_rate")} value={pct(c.effSteuersatz)} desc="Steuern / Gewinn vor Steuern" />
+            </div>
+          </SectionCard>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Jahresansicht ----
+function YearView({
+  locale,
+  jahr,
+  months,
+  sums,
+  istJahr,
+  tax,
+  hebesatz,
+  freibetrag,
+  recordedCount,
+  onOpenMonth,
+}: {
+  locale: Locale;
+  jahr: number;
+  months: Array<{ monat: number; input: FinanzInput | null; calc: ReturnType<typeof compute> | null }>;
+  sums: { yrNetto: number; yrAusgaben: number; yrUst: number; yrGewinn: number; yrNettoGewinn: number };
+  istJahr: number;
+  tax: ReturnType<typeof taxChain>;
+  hebesatz: number;
+  freibetrag: number;
+  recordedCount: number;
+  onOpenMonth: (m: number) => void;
+}) {
+  return (
+    <div className="space-y-6">
+      {/* KPI-Kacheln Jahr */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiCard label={t(locale, "finance.pnl.revenue")} value={fmt(sums.yrNetto)} desc={`${jahr}`} />
+        <KpiCard label={t(locale, "finance.pnl.expenses")} value={fmt(sums.yrAusgaben)} desc={`${jahr}`} />
+        <KpiCard label={t(locale, "finance.pnl.profit")} value={fmt(sums.yrGewinn)} desc={`${jahr}`} />
+        <KpiCard label={t(locale, "finance.net_profit.amount")} value={fmt(sums.yrNettoGewinn)} desc={t(locale, "finance.net_profit.after_all")} />
+      </div>
+
+      {/* Monats-Tabelle */}
+      <SectionCard title={`${t(locale, "finance.year.overview")} ${jahr}`} color="blue">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-neutral-200">
-              <Th>Berechnung</Th>
-              <Th right>{t(locale, "finance.pnl.monthly")}</Th>
-              <Th right>{t(locale, "finance.pnl.annual")}</Th>
+              <Th>{t(locale, "finance.month")}</Th>
+              <Th right>{t(locale, "finance.pnl.revenue")}</Th>
+              <Th right>{t(locale, "finance.pnl.expenses")}</Th>
+              <Th right>{t(locale, "finance.year.ust")}</Th>
+              <Th right>{t(locale, "finance.pnl.profit")}</Th>
             </tr>
           </thead>
           <tbody>
-            <tr className="border-b border-neutral-100">
-              <td className="py-1.5 text-neutral-700">{t(locale, "finance.pnl.revenue")}</td>
-              <td className="py-1.5 text-right tabular-nums">{fmt(totalNetto)}</td>
-              <td className="py-1.5 text-right tabular-nums">{fmt(totalNetto * 12)}</td>
-            </tr>
-            <tr className="border-b border-neutral-100">
-              <td className="py-1.5 text-neutral-700">{t(locale, "finance.pnl.expenses")}</td>
-              <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(totalExpensesNetto)}</td>
-              <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(totalExpensesNetto * 12)}</td>
-            </tr>
+            {months.map(({ monat, calc }) => (
+              <tr
+                key={monat}
+                onClick={() => onOpenMonth(monat)}
+                className="border-b border-neutral-100 cursor-pointer hover:bg-neutral-50"
+                title={monthName(locale, monat)}
+              >
+                <td className="py-1.5 text-neutral-700">{monthName(locale, monat)}</td>
+                {calc ? (
+                  <>
+                    <td className="py-1.5 text-right tabular-nums">{fmt(calc.totalNetto)}</td>
+                    <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(calc.totalExpensesNetto)}</td>
+                    <td className="py-1.5 text-right tabular-nums">{fmt(calc.ustZahllast)}</td>
+                    <td className={`py-1.5 text-right tabular-nums font-medium ${calc.gewinnVorSteuern >= 0 ? "text-green-700" : "text-red-600"}`}>
+                      {fmt(calc.gewinnVorSteuern)}
+                    </td>
+                  </>
+                ) : (
+                  <td colSpan={4} className="py-1.5 text-right text-xs text-neutral-400">
+                    {t(locale, "finance.year.no_data")}
+                  </td>
+                )}
+              </tr>
+            ))}
             <tr className="bg-green-50 font-bold text-green-800">
-              <td className="py-2">{t(locale, "finance.pnl.profit")}</td>
-              <td className="py-2 text-right tabular-nums">{fmt(gewinnVorSteuern)}</td>
-              <td className="py-2 text-right tabular-nums">{fmt(gewinnJahr)}</td>
-            </tr>
-          </tbody>
-        </table>
-      </SectionCard>
-
-      {/* STEUERN */}
-      <SectionCard title={t(locale, "finance.tax")} color="red">
-        {/* Gewerbesteuer */}
-        <SubSection title={t(locale, "finance.tax.gewst")}>
-          <div className="grid grid-cols-3 gap-y-1 text-sm">
-            <span className="text-neutral-600">{t(locale, "finance.tax.gewst.profit")}</span>
-            <span className="text-right tabular-nums">{fmt(gewinnJahr)}</span>
-            <span />
-            <span className="text-neutral-600">{t(locale, "finance.tax.gewst.freibetrag")}</span>
-            <span className="text-right tabular-nums text-red-600">-{fmt(d.gewstFreibetrag)}</span>
-            <span className="text-xs text-neutral-400 pl-2">Einzelunternehmen</span>
-            <span className="text-neutral-600">{t(locale, "finance.tax.gewst.basis")}</span>
-            <span className="text-right tabular-nums font-medium">{fmt(gewstBasis)}</span>
-            <span />
-            <span className="text-neutral-600">{t(locale, "finance.tax.gewst.messbetrag")}</span>
-            <span className="text-right tabular-nums">{fmt(gewstMessbetrag)}</span>
-            <span />
-            <span className="font-semibold text-neutral-900">{t(locale, "finance.tax.gewst.amount")}</span>
-            <span className="text-right tabular-nums font-semibold">{fmt(gewstJahr)}</span>
-            <span className="text-right tabular-nums text-neutral-500">{fmt(gewstMonat)}/m</span>
-          </div>
-        </SubSection>
-
-        {/* Einkommensteuer */}
-        <SubSection title={t(locale, "finance.tax.est")}>
-          <div className="grid grid-cols-3 gap-y-1 text-sm">
-            <span className="text-neutral-600">{t(locale, "finance.tax.est.after_gewst")}</span>
-            <span className="text-right tabular-nums">{fmt(gewinnNachGewSt)}</span>
-            <span />
-            <span className="text-neutral-600">{t(locale, "finance.tax.est.tariff")}</span>
-            <span className="text-right tabular-nums">{fmt(estRoh)}</span>
-            <span className="text-xs text-neutral-400 pl-2">Nach deutschem ESt-Tarif</span>
-            <span className="text-neutral-600">{t(locale, "finance.tax.est.anrechnung")}</span>
-            <span className="text-right tabular-nums text-red-600">-{fmt(gewstAnrechnung)}</span>
-            <span className="text-xs text-neutral-400 pl-2">3,8% vom Gewerbeertrag</span>
-            <span className="text-neutral-600">{t(locale, "finance.tax.est.reduced")}</span>
-            <span className="text-right tabular-nums">{fmt(estGekuerzt)}</span>
-            <span className="text-xs text-neutral-400 pl-2">Nach Anrechnung</span>
-            <span className="text-neutral-600">{t(locale, "finance.tax.est.soli")}</span>
-            <span className="text-right tabular-nums">{fmt(soli)}</span>
-            <span className="text-xs text-neutral-400 pl-2">5,5% auf ESt</span>
-            <span className="font-semibold text-neutral-900">{t(locale, "finance.tax.est.total")}</span>
-            <span className="text-right tabular-nums font-semibold">{fmt(estGesamt)}</span>
-            <span />
-          </div>
-        </SubSection>
-
-        <div className="flex justify-between items-center bg-red-50 rounded-lg px-4 py-3 font-bold text-red-800 mt-2">
-          <span>{t(locale, "finance.tax.total")}</span>
-          <div className="text-right">
-            <div className="tabular-nums">{fmt(steuerGesamt)}</div>
-            <div className="text-xs font-normal text-red-600 tabular-nums">{fmt(steuerMonat)} / Monat</div>
-          </div>
-        </div>
-      </SectionCard>
-
-      {/* NETTOGEWINN */}
-      <SectionCard title={t(locale, "finance.net_profit")} color="green">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-neutral-200">
-              <Th>Berechnung</Th>
-              <Th right>{t(locale, "finance.pnl.monthly")}</Th>
-              <Th right>{t(locale, "finance.pnl.annual")}</Th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr className="border-b border-neutral-100">
-              <td className="py-1.5 text-neutral-700">{t(locale, "finance.net_profit.before_tax")}</td>
-              <td className="py-1.5 text-right tabular-nums">{fmt(gewinnVorSteuern)}</td>
-              <td className="py-1.5 text-right tabular-nums">{fmt(gewinnJahr)}</td>
-            </tr>
-            <tr className="border-b border-neutral-100">
-              <td className="py-1.5 text-neutral-700">{t(locale, "finance.net_profit.taxes")}</td>
-              <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(steuerMonat)}</td>
-              <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(steuerGesamt)}</td>
-            </tr>
-            <tr className="bg-green-100 font-bold text-green-900">
               <td className="py-2">
-                <span className="flex items-center gap-2">
-                  {t(locale, "finance.net_profit.amount")}
-                  <span className="text-xs font-normal text-green-700">{t(locale, "finance.net_profit.after_all")}</span>
+                {t(locale, "finance.year.sum")}{" "}
+                <span className="text-xs font-normal">
+                  ({recordedCount} {t(locale, "finance.year.months_recorded")})
                 </span>
               </td>
-              <td className="py-2 text-right tabular-nums text-lg">{fmt(nettoGewinnMonat)}</td>
-              <td className="py-2 text-right tabular-nums text-lg">{fmt(nettoGewinnJahr)}</td>
+              <td className="py-2 text-right tabular-nums">{fmt(sums.yrNetto)}</td>
+              <td className="py-2 text-right tabular-nums">-{fmt(sums.yrAusgaben)}</td>
+              <td className="py-2 text-right tabular-nums">{fmt(sums.yrUst)}</td>
+              <td className="py-2 text-right tabular-nums">{fmt(sums.yrGewinn)}</td>
             </tr>
           </tbody>
         </table>
       </SectionCard>
 
-      {/* KENNZAHLEN */}
-      <SectionCard title={t(locale, "finance.kpi")} color="blue">
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <KpiCard label={t(locale, "finance.kpi.gross_margin")} value={pct(bruttoMarge)} desc="Gewinn vor Steuern / Umsatz" />
-          <KpiCard label={t(locale, "finance.kpi.net_margin")} value={pct(nettoMarge)} desc="Nettogewinn / Umsatz" />
-          <KpiCard label={t(locale, "finance.kpi.personnel_ratio")} value={pct(personalQuote)} desc="Personalkosten / Umsatz" />
-          <KpiCard label={t(locale, "finance.kpi.material_ratio")} value={pct(materialQuote)} desc="Materialkosten / Umsatz" />
-          <KpiCard label={t(locale, "finance.kpi.effective_tax_rate")} value={pct(effSteuersatz)} desc="Steuern / Gewinn vor Steuern" />
+      {/* Steuern auf die echte Jahres-Summe */}
+      <SectionCard title={t(locale, "finance.tax")} color="red">
+        <p className="text-xs text-neutral-500 mb-3">{t(locale, "finance.year.taxes_hint")}</p>
+        <div className="grid grid-cols-3 gap-y-1 text-sm">
+          <span className="text-neutral-600">{t(locale, "finance.year.profit_sum")}</span>
+          <span className="text-right tabular-nums font-medium">{fmt(sums.yrGewinn)}</span>
+          <span />
+          <span className="text-neutral-600">{t(locale, "finance.tax.gewst.freibetrag")}</span>
+          <span className="text-right tabular-nums text-red-600">-{fmt(freibetrag)}</span>
+          <span />
+          <span className="text-neutral-600">{`${t(locale, "finance.tax.gewst.amount2")} (${hebesatz}%)`}</span>
+          <span className="text-right tabular-nums">{fmt(tax.gewstJahr)}</span>
+          <span />
+          <span className="text-neutral-600">{t(locale, "finance.tax.est.total")}</span>
+          <span className="text-right tabular-nums">{fmt(tax.estGesamt)}</span>
+          <span className="text-xs text-neutral-400 pl-2">inkl. Soli</span>
+        </div>
+        <div className="flex justify-between items-center bg-red-50 rounded-lg px-4 py-3 font-bold text-red-800 mt-3">
+          <span>{t(locale, "finance.tax.total")}</span>
+          <span className="tabular-nums">{fmt(tax.steuerGesamt)}</span>
+        </div>
+        {/* Berechnet vs. tatsächlich ans Finanzamt gezahlt (Ist aus dem Steuer-Ledger) */}
+        <div className="mt-3 space-y-1 text-sm border-t border-neutral-100 pt-3">
+          <div className="flex justify-between">
+            <span className="text-neutral-600">{t(locale, "finance.fa.year_calc")}</span>
+            <span className="tabular-nums">{fmt(sums.yrUst + tax.steuerGesamt)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-neutral-600">{t(locale, "finance.fa.year_ist")}</span>
+            <span className="tabular-nums">{fmt(istJahr)}</span>
+          </div>
+          <div className="flex justify-between font-semibold">
+            <span className="text-neutral-700">{t(locale, "finance.fa.diff")}</span>
+            <span className={`tabular-nums ${Math.abs(istJahr - (sums.yrUst + tax.steuerGesamt)) > 100 ? "text-amber-600" : "text-neutral-700"}`}>
+              {fmt(istJahr - (sums.yrUst + tax.steuerGesamt))}
+            </span>
+          </div>
+        </div>
+        <div className="flex justify-between items-center bg-green-100 rounded-lg px-4 py-3 font-bold text-green-900 mt-2">
+          <span>
+            {t(locale, "finance.net_profit.amount")}{" "}
+            <span className="text-xs font-normal text-green-700">{t(locale, "finance.net_profit.after_all")}</span>
+          </span>
+          <span className="tabular-nums text-lg">{fmt(sums.yrNettoGewinn)}</span>
         </div>
       </SectionCard>
     </div>
+  );
+}
+
+// ---- Finanzamt Soll/Ist-Abgleich (Monat) ----
+function fmtDate(iso: string | null) {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-");
+  return `${d}.${m}.${y}`;
+}
+
+function FinanzamtAbgleich({
+  locale,
+  jahr,
+  monat,
+  posten,
+  ustBerechnet,
+  onPostenSaved,
+}: {
+  locale: Locale;
+  jahr: number;
+  monat: number;
+  posten: SteuerPosten[];
+  ustBerechnet: number;
+  onPostenSaved: (p: SteuerPosten) => void;
+}) {
+  const zeitraum = `${jahr}-${String(monat).padStart(2, "0")}`;
+  const artLabel = (a: SteuerArt) => t(locale, `finance.tax_ledger.art.${a}`);
+
+  const ustRow = posten.find((p) => p.art === "ust_va" && p.zeitraum === zeitraum) ?? null;
+  const eustRow = posten.find((p) => p.art === "eust" && p.zeitraum === zeitraum) ?? null;
+
+  // Weitere Posten, die in diesem Monat fällig sind (ESt-VZ, GewSt-VZ, Nachzahlungen, …)
+  const monthStart = `${zeitraum}-01`;
+  const monthEnd = `${jahr}-${String(monat).padStart(2, "0")}-31`;
+  const dueRows = posten.filter(
+    (p) =>
+      p.id !== ustRow?.id &&
+      p.id !== eustRow?.id &&
+      p.faellig_am &&
+      p.faellig_am >= monthStart &&
+      p.faellig_am <= monthEnd
+  );
+
+  // ---- Hinweise (Abweichungen & Auffälligkeiten) ----
+  const hints: Array<{ tone: "warn" | "info"; text: string }> = [];
+  const ustIst = Number(ustRow?.ist_betrag) || 0;
+  if (ustIst > 0 && Math.abs(ustIst - ustBerechnet) > Math.max(50, Math.abs(ustBerechnet) * 0.05)) {
+    hints.push({
+      tone: "warn",
+      text: `${t(locale, "finance.fa.ust_diff_warn")} (${t(locale, "finance.fa.calculated")}: ${fmt(ustBerechnet)}, ${t(locale, "finance.fa.ist")}: ${fmt(ustIst)}, ${t(locale, "finance.fa.diff")}: ${fmt(ustIst - ustBerechnet)})`,
+    });
+  }
+  const now = new Date();
+  const currentYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  if (zeitraum < currentYm && (!eustRow || (Number(eustRow.ist_betrag) || 0) <= 0)) {
+    hints.push({ tone: "info", text: t(locale, "finance.fa.eust_missing") });
+  }
+  for (const p of [ustRow, eustRow, ...dueRows]) {
+    if (!p) continue;
+    if (p.bezahlt_am && p.faellig_am) {
+      const late = (new Date(p.bezahlt_am).getTime() - new Date(p.faellig_am).getTime()) / 86_400_000;
+      if (late > 14) {
+        hints.push({
+          tone: "warn",
+          text: `${artLabel(p.art)} ${p.zeitraum}: ${t(locale, "finance.fa.late")} (fällig ${fmtDate(p.faellig_am)}, gezahlt ${fmtDate(p.bezahlt_am)})`,
+        });
+      }
+    }
+    if (p.richtung === "erstattung" && Number(p.soll_betrag) > 0 && (Number(p.ist_betrag) || 0) <= 0) {
+      hints.push({ tone: "info", text: `${artLabel(p.art)} ${p.zeitraum}: ${t(locale, "finance.fa.refund_open")} (${fmt(Number(p.soll_betrag))})` });
+    }
+  }
+
+  const rows: Array<{
+    key: string;
+    label: string;
+    row: SteuerPosten | null;
+    art: SteuerArt;
+    zeitraum: string;
+    berechnet: number | null;
+  }> = [
+    { key: "ust", label: artLabel("ust_va"), row: ustRow, art: "ust_va", zeitraum, berechnet: ustBerechnet },
+    { key: "eust", label: artLabel("eust"), row: eustRow, art: "eust", zeitraum, berechnet: null },
+    ...dueRows.map((p) => ({
+      key: p.id,
+      label: `${artLabel(p.art)} (${p.zeitraum})`,
+      row: p as SteuerPosten | null,
+      art: p.art,
+      zeitraum: p.zeitraum,
+      berechnet: null,
+    })),
+  ];
+
+  return (
+    <SectionCard title={t(locale, "finance.fa.title")} color="red">
+      <p className="text-xs text-neutral-500 mb-3">{t(locale, "finance.fa.subtitle")}</p>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-neutral-200">
+            <Th>{t(locale, "finance.fa.posten")}</Th>
+            <Th right>{t(locale, "finance.fa.calculated")}</Th>
+            <Th right>{t(locale, "finance.fa.soll")}</Th>
+            <Th right>{t(locale, "finance.fa.ist")}</Th>
+            <Th right>{t(locale, "finance.fa.diff")}</Th>
+            <Th right>Bezahlt am</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ key, label, row, art, zeitraum: zr, berechnet }) => {
+            const ist = Number(row?.ist_betrag) || 0;
+            const vergleich = berechnet ?? (Number(row?.soll_betrag) || 0);
+            const diff = ist > 0 && vergleich !== 0 ? ist - vergleich : null;
+            const diffWarn = diff !== null && Math.abs(diff) > Math.max(50, Math.abs(vergleich) * 0.05);
+            return (
+              <tr key={key} className="border-b border-neutral-100">
+                <td className="py-1.5 text-neutral-700">{label}</td>
+                <td className="py-1.5 text-right tabular-nums">{berechnet !== null ? fmt(berechnet) : "—"}</td>
+                <td className="py-1.5 text-right tabular-nums text-neutral-500">
+                  {row && Number(row.soll_betrag) !== 0 ? fmt(Number(row.soll_betrag)) : "—"}
+                </td>
+                <td className="py-1.5 text-right">
+                  <IstField
+                    row={row}
+                    art={art}
+                    zeitraum={zr}
+                    jahr={jahr}
+                    onSaved={onPostenSaved}
+                  />
+                </td>
+                <td className={`py-1.5 text-right tabular-nums ${diff === null ? "text-neutral-400" : diffWarn ? "text-amber-600 font-semibold" : "text-neutral-600"}`}>
+                  {diff !== null ? fmt(diff) : "—"}
+                </td>
+                <td className="py-1.5 text-right tabular-nums text-neutral-500 text-xs">{fmtDate(row?.bezahlt_am ?? null)}</td>
+              </tr>
+            );
+          })}
+          {rows.length === 2 && dueRows.length === 0 && (
+            <tr>
+              <td colSpan={6} className="py-2 text-xs text-neutral-400">{t(locale, "finance.fa.none")}</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      {hints.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          {hints.map((h, i) => (
+            <div
+              key={i}
+              className={`flex items-start gap-2 text-xs rounded-lg px-3 py-2 ${h.tone === "warn" ? "bg-amber-50 text-amber-800" : "bg-blue-50 text-blue-800"}`}
+            >
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              {h.text}
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="text-xs text-neutral-400 mt-3">{t(locale, "finance.fa.ledger_hint")}</p>
+    </SectionCard>
+  );
+}
+
+// Ist-Betrag-Feld: speichert beim Verlassen direkt in den Steuer-Ledger (steuer_posten)
+function IstField({
+  row,
+  art,
+  zeitraum,
+  jahr,
+  onSaved,
+}: {
+  row: SteuerPosten | null;
+  art: SteuerArt;
+  zeitraum: string;
+  jahr: number;
+  onSaved: (p: SteuerPosten) => void;
+}) {
+  const value = Number(row?.ist_betrag) || 0;
+  const [text, setText] = useState(() => fmtEdit(value));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    setText(fmtEdit(Number(row?.ist_betrag) || 0));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row?.id, row?.ist_betrag]);
+
+  async function commit() {
+    const n = parseNum(text);
+    setText(fmtEdit(n));
+    if (n === value) return;
+    setBusy(true);
+    setErr(false);
+    const res = await upsertSteuerIst({ id: row?.id ?? null, art, zeitraum, jahr, ist_betrag: n });
+    setBusy(false);
+    if (res.ok && res.posten) onSaved(res.posten);
+    else setErr(true);
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      {busy && <Loader2 size={12} className="animate-spin text-neutral-400" />}
+      <input
+        type="text"
+        inputMode="decimal"
+        value={text}
+        disabled={busy}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        }}
+        className={`rounded-lg border px-2 py-1 text-sm text-right tabular-nums w-24 focus:ring-2 focus:ring-neutral-900 focus:outline-none bg-white ${err ? "border-red-400" : "border-neutral-300"}`}
+      />
+    </span>
+  );
+}
+
+// ---- Editierbares Zahlenfeld (deutsches Format: Komma als Dezimaltrenner) ----
+function parseNum(s: string): number {
+  const v = s.trim();
+  if (!v) return 0;
+  const norm = v.includes(",") ? v.replace(/\./g, "").replace(",", ".") : v;
+  const x = Number(norm);
+  return Number.isFinite(x) ? x : 0;
+}
+function fmtEdit(n: number): string {
+  return String(Math.round(n * 100) / 100).replace(".", ",");
+}
+
+function NumField({ value, onCommit, className }: { value: number; onCommit: (n: number) => void; className?: string }) {
+  const [text, setText] = useState(() => fmtEdit(value));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setText(fmtEdit(value));
+  }, [value, focused]);
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={text}
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false);
+        setText(fmtEdit(parseNum(text)));
+      }}
+      onChange={(e) => {
+        setText(e.target.value);
+        onCommit(parseNum(e.target.value));
+      }}
+      className={className}
+    />
   );
 }
 
@@ -562,12 +1360,12 @@ function SectionCard({ title, color, children }: { title: string; color: "blue" 
   );
 }
 
-function SubSection({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function SubSection({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="mb-6 last:mb-0">
-      <div className="mb-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-neutral-800">{title}</h3>
-        {subtitle && <p className="text-xs text-neutral-500">{subtitle}</p>}
+        {right}
       </div>
       {children}
     </div>
@@ -579,44 +1377,6 @@ function Th({ children, right }: { children: React.ReactNode; right?: boolean })
     <th className={`py-2 text-xs font-medium text-neutral-500 uppercase tracking-wide ${right ? "text-right" : "text-left"}`}>
       {children}
     </th>
-  );
-}
-
-function Row({ label, cells }: { label: string; cells: string[] }) {
-  return (
-    <tr className="border-b border-neutral-100">
-      <td className="py-1.5 text-neutral-700">{label}</td>
-      {cells.map((c, i) => (
-        <td key={i} className={`py-1.5 tabular-nums ${i < cells.length - 1 ? "text-right" : "text-neutral-500 text-xs"}`}>
-          {c}
-        </td>
-      ))}
-    </tr>
-  );
-}
-
-function SumRow({ label, cells, color = "yellow" }: { label: string; cells: string[]; color?: "yellow" | "green" }) {
-  const bg = color === "green" ? "bg-green-50 text-green-800" : "bg-yellow-50 text-yellow-800";
-  return (
-    <tr className={`${bg} font-semibold`}>
-      <td className="py-2">{label}</td>
-      {cells.map((c, i) => (
-        <td key={i} className={`py-2 tabular-nums ${i < cells.length - 1 ? "text-right" : "text-xs"}`}>
-          {c}
-        </td>
-      ))}
-    </tr>
-  );
-}
-
-function SumRow4({ label, cells }: { label: string; cells: string[] }) {
-  return (
-    <tr className="bg-yellow-50 font-semibold text-yellow-800">
-      <td className="py-2">{label}</td>
-      {cells.map((c, i) => (
-        <td key={i} className="py-2 text-right tabular-nums">{c}</td>
-      ))}
-    </tr>
   );
 }
 

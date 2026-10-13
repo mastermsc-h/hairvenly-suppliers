@@ -26,7 +26,7 @@ function fmtDate(iso: string | null) {
 }
 
 const ART_ORDER: SteuerArt[] = [
-  "ust_va", "est_vz", "gewst_vz",
+  "ust_va", "eust", "est_vz", "gewst_vz",
   "ust_nachzahlung", "est_nachzahlung", "gewst_nachzahlung", "sonstige",
 ];
 
@@ -335,7 +335,7 @@ function KpiTile({ icon, label, value, sub, tone, subWarn }: {
 }
 
 const ART_OPTIONS: SteuerArt[] = [
-  "ust_va", "est_vz", "gewst_vz",
+  "ust_va", "eust", "est_vz", "gewst_vz",
   "ust_nachzahlung", "est_nachzahlung", "gewst_nachzahlung", "sonstige",
 ];
 

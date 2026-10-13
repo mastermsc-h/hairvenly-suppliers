@@ -647,6 +647,7 @@ export interface SickDay {
 export type SteuerArt =
   | "ust_va"
   | "ust_nachzahlung"
+  | "eust"
   | "est_vz"
   | "est_nachzahlung"
   | "gewst_vz"
@@ -667,6 +668,47 @@ export interface SteuerPosten {
   bezahlt_am: string | null;
   bescheid_ref: string | null;
   notiz: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---- Finanz-Monatsdaten (Finanzen / Übersicht) ----
+export interface FinanzMitarbeiter {
+  name: string;
+  brutto: number;
+}
+
+export interface FinanzSonstigeAusgabe {
+  label: string;
+  netto: number;
+  ustRate: number;
+}
+
+/** Editierbare Eingaben des Finanz-Rechners, pro Monat als jsonb gespeichert. */
+export interface FinanzInput {
+  salonBrutto: number;
+  salonMaterialRate: number;
+  shopBrutto: number;
+  shopMaterialRate: number;
+  shopFeeRate: number;
+  ustRate: number;
+  employees: FinanzMitarbeiter[];
+  agRate: number;
+  shopifyPlan: number;
+  shopifyPos: number;
+  shopifyApps: number;
+  shippingCount: number;
+  shippingPrice: number;
+  otherExpenses: FinanzSonstigeAusgabe[];
+  gewstHebesatz: number;
+  gewstFreibetrag: number;
+}
+
+export interface FinanzMonatsdaten {
+  id: string;
+  jahr: number;
+  monat: number;
+  daten: FinanzInput;
   created_at: string;
   updated_at: string;
 }

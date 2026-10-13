@@ -1,10 +1,23 @@
 import { requireFeature } from "@/lib/auth";
-import { t, type Locale } from "@/lib/i18n";
+import { type Locale } from "@/lib/i18n";
+import { fetchFinanzJahr } from "@/lib/actions/finanzen";
+import { fetchSteuerPosten } from "@/lib/actions/steuer";
 import FinanceOverview from "./finance-overview";
 
 export default async function FinanceOverviewPage() {
   const profile = await requireFeature("finances");
   const locale = (profile.language ?? "de") as Locale;
+  const now = new Date();
+  const jahr = now.getFullYear();
+  const [rows, posten] = await Promise.all([fetchFinanzJahr(jahr), fetchSteuerPosten(jahr)]);
 
-  return <FinanceOverview locale={locale} />;
+  return (
+    <FinanceOverview
+      locale={locale}
+      initialJahr={jahr}
+      initialMonat={now.getMonth() + 1}
+      initialRows={rows}
+      initialSteuerPosten={posten}
+    />
+  );
 }
