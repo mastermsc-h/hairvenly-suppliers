@@ -7,6 +7,11 @@ import type { FinanzInput, FinanzMitarbeiter, FinanzMonatsdaten, SteuerArt, Steu
 import { fetchFinanzJahr, saveFinanzMonat } from "@/lib/actions/finanzen";
 import { fetchSteuerPosten, upsertSteuerIst } from "@/lib/actions/steuer";
 
+// Gespeichert wird Netto; eingegeben wird (wie im Sheet) der Brutto-Rechnungsbetrag.
+function fromBrutto(label: string, brutto: number, ustRate: number) {
+  return { label, netto: brutto / (1 + ustRate / 100), ustRate };
+}
+
 // ---- Standardwerte für neue Monate (bisherige Demo-Werte als Startpunkt) ----
 const DEFAULTS: FinanzInput = {
   salonBrutto: 58_000,
@@ -25,12 +30,19 @@ const DEFAULTS: FinanzInput = {
   shippingCount: 900,
   shippingPrice: 3.9,
   otherExpenses: [
-    { label: "Marketing", netto: 3_500, ustRate: 0 },
-    { label: "Miete", netto: 2_941.18, ustRate: 19 },
-    { label: "SWB (Strom)", netto: 550, ustRate: 0 },
-    { label: "Amazon Bestellungen", netto: 840.34, ustRate: 19 },
-    { label: "Steuerberater", netto: 1_008.4, ustRate: 19 },
-    { label: "Extra Material", netto: 1_428.57, ustRate: 19 },
+    fromBrutto("Marketing", 3_500, 0),
+    fromBrutto("Miete", 3_500, 19),
+    fromBrutto("SWB (Strom)", 550, 0),
+    fromBrutto("Amazon Bestellungen", 1_000, 19),
+    fromBrutto("Steuerberater", 1_200, 19),
+    fromBrutto("Extra Material", 1_700, 19),
+    fromBrutto("Handyverträge", 150, 19),
+    fromBrutto("Lagerkosten", 180, 19),
+    fromBrutto("Wasserspender, Cafe etc.", 250, 19),
+    fromBrutto("Obstkorb", 120, 7),
+    // Versicherungsbeiträge sind umsatzsteuerfrei (§ 4 Nr. 10 UStG); die enthaltene
+    // Versicherungsteuer ist keine abziehbare Vorsteuer.
+    fromBrutto("Versicherungen Arag + VHV", 250, 0),
   ],
   gewstHebesatz: 460,
   gewstFreibetrag: 24_500,
@@ -702,10 +714,10 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-neutral-200">
-                    <Th>{""}</Th>
-                    <Th right>Netto</Th>
-                    <Th right>USt %</Th>
+                    <Th>Kategorie</Th>
                     <Th right>Brutto</Th>
+                    <Th right>USt %</Th>
+                    <Th right>Netto</Th>
                     <Th right>{t(locale, "finance.expenses.material.vorsteuer")}</Th>
                     <Th right>{""}</Th>
                   </tr>
@@ -727,12 +739,20 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
                           />
                         </td>
                         <td className="py-1.5 text-right">
-                          <NumField value={e.netto} onCommit={(v) => setExpense({ netto: v })} className={`${inputCls} w-24`} />
+                          <NumField
+                            value={brutto}
+                            onCommit={(v) => setExpense({ netto: v / (1 + e.ustRate / 100) })}
+                            className={`${inputCls} w-24`}
+                          />
                         </td>
                         <td className="py-1.5 text-right">
                           <select
                             value={e.ustRate}
-                            onChange={(ev) => setExpense({ ustRate: Number(ev.target.value) })}
+                            onChange={(ev) => {
+                              // Brutto (Rechnungsbetrag) bleibt fest, Netto/Vorsteuer werden neu aufgeteilt
+                              const rate = Number(ev.target.value);
+                              setExpense({ ustRate: rate, netto: brutto / (1 + rate / 100) });
+                            }}
                             className="rounded-lg border border-neutral-300 px-2 py-1 text-sm bg-white focus:ring-2 focus:ring-neutral-900 focus:outline-none"
                           >
                             <option value={0}>0%</option>
@@ -740,7 +760,7 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
                             <option value={19}>19%</option>
                           </select>
                         </td>
-                        <td className="py-1.5 text-right tabular-nums">{fmt(brutto)}</td>
+                        <td className="py-1.5 text-right tabular-nums">{fmt(e.netto)}</td>
                         <td className="py-1.5 text-right tabular-nums">{fmt(vst)}</td>
                         <td className="py-1.5 text-right">
                           <button
@@ -756,9 +776,9 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
                   })}
                   <tr className="bg-yellow-50 font-semibold text-yellow-800">
                     <td className="py-2">{t(locale, "finance.expenses.other.sum")}</td>
-                    <td className="py-2 text-right tabular-nums">{fmt(c.otherTotal)}</td>
-                    <td />
                     <td className="py-2 text-right tabular-nums">{fmt(c.otherBrutto)}</td>
+                    <td />
+                    <td className="py-2 text-right tabular-nums">{fmt(c.otherTotal)}</td>
                     <td className="py-2 text-right tabular-nums">{fmt(c.otherVst)}</td>
                     <td />
                   </tr>
