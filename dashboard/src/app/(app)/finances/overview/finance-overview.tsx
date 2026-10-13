@@ -452,6 +452,15 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
         />
       ) : (
         <div key={k} className="space-y-6">
+          {/* RÜCKLAGE: für Steuern beiseitelegen */}
+          <RuecklageBox
+            monatLabel={`${monthName(locale, monat)} ${jahr}`}
+            ust={c.ustZahllast}
+            est={c.estMonat}
+            gewst={c.gewstMonat}
+            lst={lstFor(jahrPosten, `${jahr}-${String(monat).padStart(2, "0")}`)}
+          />
+
           {/* EINNAHMEN */}
           <SectionCard title={t(locale, "finance.revenue")} color="blue">
             <table className="w-full text-sm">
@@ -1013,6 +1022,14 @@ function YearView({
 }) {
   return (
     <div className="space-y-6">
+      {/* Steuern Jahr: zu zahlen / bezahlt / offen */}
+      <JahresSteuerBox
+        jahr={jahr}
+        berechnet={sums.yrUst + tax.steuerGesamt}
+        bezahlt={istJahr}
+        recordedCount={recordedCount}
+      />
+
       {/* KPI-Kacheln Jahr */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard label={t(locale, "finance.pnl.revenue")} value={fmt(sums.yrNetto)} desc={`${jahr}`} />
@@ -1142,6 +1159,134 @@ function YearView({
           <span className="tabular-nums text-lg">{fmt(sums.yrNettoGewinn)}</span>
         </div>
       </SectionCard>
+    </div>
+  );
+}
+
+// ---- Rücklage: was diesen Monat für Steuern beiseitegelegt werden muss ----
+type LstInfo = { amount: number; source: "ist" | "soll" | null };
+
+// Lohnsteuer wird nicht berechnet — Ist aus der Lohnabrechnung, sonst Soll, sonst unbekannt.
+function lstFor(posten: SteuerPosten[], zeitraum: string): LstInfo {
+  const row = posten.find((p) => p.art === "lst_anmeldung" && p.zeitraum === zeitraum);
+  const ist = Number(row?.ist_betrag) || 0;
+  if (ist > 0) return { amount: ist, source: "ist" };
+  const soll = Number(row?.soll_betrag) || 0;
+  if (soll > 0) return { amount: soll, source: "soll" };
+  return { amount: 0, source: null };
+}
+
+function RuecklageBox({
+  monatLabel,
+  ust,
+  est,
+  gewst,
+  lst,
+}: {
+  monatLabel: string;
+  ust: number;
+  est: number;
+  gewst: number;
+  lst: LstInfo;
+}) {
+  const gesamt = Math.max(0, ust + est + gewst + lst.amount);
+  const lines: Array<{ label: string; hint: string; value: number | null }> = [
+    { label: "Umsatzsteuer-Zahllast", hint: "USt-VA, fällig am 10. des Folgemonats", value: ust },
+    { label: "Einkommensteuer inkl. Soli", hint: "Monatsanteil (Hochrechnung aufs Jahr)", value: est },
+    { label: "Gewerbesteuer", hint: "Monatsanteil (Hochrechnung aufs Jahr)", value: gewst },
+    {
+      label: "Lohnsteuer",
+      hint:
+        lst.source === "ist"
+          ? "laut Lohnabrechnung, im Bruttolohn enthalten"
+          : lst.source === "soll"
+            ? "Soll-Betrag, im Bruttolohn enthalten"
+            : "noch nicht erfasst — Betrag aus der Lohnabrechnung im Finanzamt-Abgleich eintragen",
+      value: lst.source ? lst.amount : null,
+    },
+  ];
+
+  return (
+    <div className="rounded-2xl border-2 border-red-300 bg-red-50 shadow-sm overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 md:px-6 py-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-600 text-white">
+            <AlertTriangle size={22} />
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-red-700">
+              Für Steuern beiseitelegen — {monatLabel}
+            </div>
+            <div className="text-xs text-red-600/80">Dieses Geld gehört dem Finanzamt, nicht dem Gewinn.</div>
+          </div>
+        </div>
+        <div className="text-3xl font-bold tabular-nums text-red-800">{fmt(gesamt)}</div>
+      </div>
+      <div className="border-t border-red-200 bg-white/60 px-4 md:px-6 py-3">
+        <div className="space-y-1 text-sm">
+          {lines.map((l) => (
+            <div key={l.label} className="flex items-baseline justify-between gap-3">
+              <span className="text-neutral-700">
+                {l.label} <span className="text-xs text-neutral-400">({l.hint})</span>
+              </span>
+              <span className={`tabular-nums ${l.value === null ? "text-amber-600 text-xs font-medium" : "text-neutral-900"}`}>
+                {l.value === null ? "fehlt" : fmt(l.value)}
+              </span>
+            </div>
+          ))}
+        </div>
+        {ust < 0 && (
+          <p className="mt-2 text-xs text-blue-700">
+            Die USt-Zahllast ist negativ — das Finanzamt erstattet {fmt(-ust)}; das mindert die Rücklage.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function JahresSteuerBox({
+  jahr,
+  berechnet,
+  bezahlt,
+  recordedCount,
+}: {
+  jahr: number;
+  berechnet: number;
+  bezahlt: number;
+  recordedCount: number;
+}) {
+  const offen = berechnet - bezahlt;
+  return (
+    <div className="rounded-2xl border-2 border-red-300 bg-red-50 shadow-sm px-4 md:px-6 py-4">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-600 text-white">
+          <AlertTriangle size={22} />
+        </div>
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-red-700">Steuern {jahr} — noch offen</div>
+          <div className="text-xs text-red-600/80">
+            USt + ESt + GewSt auf {recordedCount} erfasste Monate, abzüglich der im Finanzamt-Abgleich erfassten Zahlungen
+            (ohne Lohnsteuer/EUSt)
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3 text-center">
+        <div className="rounded-xl bg-white/70 p-3">
+          <div className="text-xs font-medium uppercase tracking-wide text-neutral-500">Zu zahlen</div>
+          <div className="text-lg font-bold tabular-nums text-neutral-900">{fmt(berechnet)}</div>
+        </div>
+        <div className="rounded-xl bg-white/70 p-3">
+          <div className="text-xs font-medium uppercase tracking-wide text-neutral-500">Bezahlt</div>
+          <div className="text-lg font-bold tabular-nums text-emerald-700">{fmt(bezahlt)}</div>
+        </div>
+        <div className="rounded-xl bg-white p-3 ring-2 ring-red-300">
+          <div className="text-xs font-semibold uppercase tracking-wide text-red-700">
+            {offen >= 0 ? "Noch offen" : "Zu viel gezahlt"}
+          </div>
+          <div className={`text-2xl font-bold tabular-nums ${offen >= 0 ? "text-red-800" : "text-blue-700"}`}>{fmt(Math.abs(offen))}</div>
+        </div>
+      </div>
     </div>
   );
 }
