@@ -204,7 +204,8 @@ export default function PaymentsBoard({
 function WorkerStatus({ state, tr }: { state: BankSyncState | null; tr: (k: string) => string }) {
   let tone = "neutral", icon = <Landmark size={18} />, text = tr("bank.worker.never");
   if (state?.last_fetch_at) {
-    if (state.last_fetch_code === "needs_tan") { tone = "amber"; icon = <AlertTriangle size={18} />; text = tr("bank.worker.needs_tan"); }
+    if (state.last_fetch_code === "auth_failed") { tone = "red"; icon = <AlertTriangle size={18} />; text = tr("bank.worker.auth_failed"); }
+    else if (state.last_fetch_code === "needs_tan") { tone = "amber"; icon = <AlertTriangle size={18} />; text = tr("bank.worker.needs_tan"); }
     else if (state.last_fetch_ok === false) { tone = "red"; icon = <AlertTriangle size={18} />; text = tr("bank.worker.error"); }
     else { tone = "emerald"; icon = <Check size={18} />; text = tr("bank.worker.ok"); }
   }

@@ -36,12 +36,13 @@ export async function GET(request: Request) {
   const now = Date.now();
   const lastSuccess = state.last_success_at ? new Date(state.last_success_at).getTime() : 0;
   const needsTan = state.last_fetch_code === "needs_tan";
+  const authFailed = state.last_fetch_code === "auth_failed";
   // 72h statt 24h: der Worker läuft auf dem Mac — ein ausgeschaltetes
   // Wochenende soll keinen Fehlalarm auslösen. TAN-Bedarf meldet sofort.
   const stale = now - lastSuccess > 72 * 3600_000;
   const recentlyAlerted = state.last_alert_at && now - new Date(state.last_alert_at).getTime() < 23 * 3600_000;
 
-  if (!(needsTan || stale) || recentlyAlerted) {
+  if (!(needsTan || authFailed || stale) || recentlyAlerted) {
     return NextResponse.json({ ok: true, matching, alert: null });
   }
 
@@ -54,7 +55,9 @@ export async function GET(request: Request) {
     .filter((u) => u.email && !(u.denied_features ?? []).includes("finances"))
     .map((u) => u.email as string);
 
-  const reason = needsTan
+  const reason = authFailed
+    ? "Die Sparkasse hat die Anmeldung abgelehnt (PIN oder Anmeldename). Der automatische Abruf ist gestoppt, damit der Zugang nicht gesperrt wird. Erst im Online-Banking anmelden, dann am Mac <code>fints setup</code> ausführen."
+    : needsTan
     ? "Die Sparkasse verlangt eine neue pushTAN-Freigabe für den Umsatzabruf."
     : `Der Bank-Abruf hat seit ${state.last_success_at ? new Date(state.last_success_at).toLocaleString("de-DE", { timeZone: "Europe/Berlin" }) : "Beginn"} keine Umsätze geliefert${state.last_fetch_message ? ` (${state.last_fetch_message})` : ""}.`;
   const html = `
@@ -68,5 +71,5 @@ export async function GET(request: Request) {
   if (emails.length) mail = await sendMail({ to: emails, subject: "Bank-Abgleich: Aktion nötig", html });
   if (mail.ok) await sb.from("bank_sync_state").update({ last_alert_at: new Date().toISOString() }).eq("id", 1);
 
-  return NextResponse.json({ ok: true, matching, alert: needsTan ? "needs_tan" : "stale", mail });
+  return NextResponse.json({ ok: true, matching, alert: authFailed ? "auth_failed" : needsTan ? "needs_tan" : "stale", mail });
 }

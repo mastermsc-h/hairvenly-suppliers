@@ -65,6 +65,41 @@ DEFAULT_CONFIG = {
 
 log = logging.getLogger("fints-worker")
 
+# Antwort-Codes der Bank, bei denen PIN/Anmeldename falsch oder gesperrt ist.
+# Danach darf KEIN automatischer Versuch mehr laufen: nach 3 Fehlversuchen
+# sperrt die Sparkasse den Online-Banking-Zugang.
+AUTH_CODES = {"9340", "9910", "9930", "9931", "9941", "9942", "9943", "9944", "9945", "9946", "9947", "9948", "9951"}
+AUTH_WORDS = ("pin", "kennung", "anmelde", "gesperrt", "legitimation", "zugang", "benutzer")
+
+
+class BankResponses:
+    """Sammelt die Rückmeldungen der Bank (Code + Text). Gespeist aus
+    FinTS3PinTanClient._process_response (siehe make_client) — python-fints
+    selbst loggt die Antworten beim Verbindungsaufbau nicht."""
+
+    def __init__(self) -> None:
+        self.items: list[tuple[str, str]] = []
+
+    def add(self, code: str, text: str) -> None:
+        item = (str(code), str(text or "").strip())
+        if item not in self.items:
+            self.items.append(item)
+            if item[0][:1] in ("3", "9"):
+                log.warning("Bank %s %s", *item)
+
+    def errors(self) -> list[tuple[str, str]]:
+        return [(c, t) for c, t in self.items if c.startswith("9")]
+
+    def auth_failed(self) -> bool:
+        return any(c in AUTH_CODES or any(w in t.lower() for w in AUTH_WORDS) for c, t in self.errors())
+
+    def summary(self) -> str:
+        errs = self.errors() or [(c, t) for c, t in self.items if c.startswith("3")]
+        return "; ".join(f"{c} {t}".strip() for c, t in errs[:4])
+
+
+BANK = BankResponses()
+
 
 # ── Infrastruktur ────────────────────────────────────────────────────────────
 
@@ -79,8 +114,16 @@ def setup_logging(verbose: bool) -> None:
         sh.setFormatter(logging.Formatter("%(message)s"))
         log.addHandler(sh)
     log.setLevel(logging.INFO)
-    # python-fints loggt Nachrichten-Inhalte auf DEBUG — nie in die Datei.
-    logging.getLogger("fints").setLevel(logging.WARNING)
+    # python-fints: Bank-Rückmeldungen (Code + Text) einsammeln und ab WARNING
+    # ins Log schreiben. Nachrichten-Inhalte loggt python-fints nur auf DEBUG —
+    # die landen nie in der Datei.
+    fl = logging.getLogger("fints")
+    fl.setLevel(logging.WARNING)
+    bank_fh = logging.handlers.RotatingFileHandler(LOG_PATH, maxBytes=512_000, backupCount=3)
+    bank_fh.setLevel(logging.WARNING)
+    bank_fh.setFormatter(logging.Formatter("%(asctime)s BANK %(message)s"))
+    fl.addHandler(bank_fh)
+    fl.propagate = False
 
 
 def load_json(path: Path, default: dict) -> dict:
@@ -251,8 +294,14 @@ class NeedsTan(Exception):
 
 def make_client(cfg: dict, pin: str, with_state: bool = True):
     from fints.client import FinTS3PinTanClient
+
+    class Client(FinTS3PinTanClient):
+        def _process_response(self, dialog, segment, response):
+            BANK.add(response.code, response.text)
+            return super()._process_response(dialog, segment, response)
+
     state = STATE_PATH.read_bytes() if with_state and STATE_PATH.exists() else None
-    return FinTS3PinTanClient(
+    return Client(
         cfg["blz"], cfg["user_id"], pin, cfg["server"],
         product_id=cfg["product_id"], product_version=PRODUCT_VERSION,
         from_data=state,
@@ -377,6 +426,7 @@ def deliver(cfg: dict, rows: list[dict]) -> dict | None:
         status = load_status()
         status.update({
             "needs_tan": False,
+            "auth_failed": False,
             "last_success_date": dt.date.today().isoformat(),
             "last_success_at": dt.datetime.now().isoformat(timespec="seconds"),
             "last_error": None,
@@ -396,6 +446,10 @@ def cmd_run() -> int:
     if not cfg["user_id"] or not cfg["product_id"]:
         log.info("Nicht eingerichtet — `fints setup` ausführen.")
         return 0
+    if status.get("auth_failed"):
+        # Bewusst KEIN Bankkontakt: ein weiterer Fehlversuch kann den Zugang sperren.
+        log.info("Anmeldung zuletzt abgelehnt — kein Abruf bis `fints setup`.")
+        return 0
     if status.get("needs_tan"):
         # Bewusst KEIN Bankkontakt: jeder Versuch würde eine pushTAN aufs Handy schicken.
         log.info("Wartet auf Freigabe (`fints renew`) — kein Abruf.")
@@ -410,8 +464,16 @@ def cmd_run() -> int:
         notify("Hairvenly Bank-Abgleich", "Sparkasse verlangt eine neue Freigabe. Terminal: fints renew")
         return 0
     except Exception as e:
-        msg = f"{type(e).__name__}: {e}"[:300]
+        bank = BANK.summary()
+        msg = (f"Bank: {bank}" if bank else f"{type(e).__name__}: {e}")[:300]
         status["last_error"] = msg
+        if BANK.auth_failed():
+            status["auth_failed"] = True
+            save_json(STATUS_PATH, status)
+            log.error("Anmeldung abgelehnt (%s) — automatischer Abruf gestoppt.", msg)
+            report_status(cfg, False, "auth_failed", f"Anmeldung abgelehnt – bitte `fints setup` ausführen. {msg}")
+            notify("Hairvenly Bank-Abgleich", "Sparkasse lehnt die Anmeldung ab. Abruf gestoppt – Terminal: fints setup")
+            return 1
         save_json(STATUS_PATH, status)
         log.error("Abruf fehlgeschlagen: %s", msg)
         report_status(cfg, False, "error", msg)
@@ -428,10 +490,22 @@ def cmd_renew(fresh: bool = False) -> int:
     try:
         rows = fetch(cfg, interactive=True, fresh=fresh)
     except Exception as e:
-        print(f"\n✗ Fehlgeschlagen: {type(e).__name__}: {e}")
-        log.error("renew fehlgeschlagen: %s: %s", type(e).__name__, e)
-        if "PIN" in str(e) or "9931" in str(e) or "9942" in str(e):
-            print("  Tipp: PIN/Anmeldename prüfen und `fints setup` erneut ausführen.")
+        bank = BANK.summary()
+        log.error("renew fehlgeschlagen: %s: %s | Bank: %s", type(e).__name__, e, bank or "—")
+        print("\n✗ Fehlgeschlagen.")
+        if bank:
+            print(f"  Antwort der Sparkasse: {bank}")
+        else:
+            print(f"  {type(e).__name__}: {e}")
+        status = load_status()
+        status["last_error"] = f"Bank: {bank}" if bank else str(e)[:300]
+        if BANK.auth_failed():
+            status["auth_failed"] = True
+            print("\n  ⚠️  Die Sparkasse lehnt die Anmeldung ab. NICHT einfach wiederholen –")
+            print("     nach 3 Fehlversuchen wird der Online-Banking-Zugang gesperrt.")
+            print("     Erst im Browser/in der App mit demselben Anmeldenamen + PIN anmelden.")
+            print("     Klappt das, `fints setup` erneut ausführen und die PIN neu speichern.")
+        save_json(STATUS_PATH, status)
         return 1
     print(f"✓ {len(rows)} Umsätze abgerufen ({sum(1 for r in rows if r['amount'] > 0)} Eingänge). Sende ans Dashboard …")
     res = deliver(cfg, rows)
@@ -478,6 +552,7 @@ def cmd_status() -> int:
     print(f"Konten:           {', '.join('…' + i[-4:] for i in cfg['account_ibans']) or 'alle'}")
     print(f"PIN im Keychain:  {'ja' if cfg['user_id'] and keychain_get_pin(cfg['user_id']) else 'nein'}")
     print(f"Zugang gesichert: {'ja' if STATE_PATH.exists() else 'nein'}")
+    print(f"Anmeldung abgel.: {'JA → fints setup' if st.get('auth_failed') else 'nein'}")
     print(f"Wartet auf TAN:   {'JA → fints renew' if st.get('needs_tan') else 'nein'}")
     print(f"Letzter Erfolg:   {st.get('last_success_at') or '—'}")
     print(f"Letzter Fehler:   {st.get('last_error') or '—'}")
