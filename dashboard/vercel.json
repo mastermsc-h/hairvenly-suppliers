@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/fix-addresses",
       "schedule": "30 2 * * *"
+    },
+    {
+      "path": "/api/cron/bank-check",
+      "schedule": "0 7 * * *"
     }
   ]
 }

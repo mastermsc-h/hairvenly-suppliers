@@ -1,0 +1,11 @@
+#!/bin/bash
+# Startskript für den Hairvenly FinTS-Worker.
+# Legt beim ersten Aufruf eine eigene Python-Umgebung (.venv) an.
+set -e
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ ! -x "$DIR/.venv/bin/python" ]; then
+  echo "Erster Start: richte Python-Umgebung ein …"
+  /usr/bin/env python3 -m venv "$DIR/.venv"
+  "$DIR/.venv/bin/pip" install --quiet --disable-pip-version-check -r "$DIR/requirements.txt"
+fi
+exec "$DIR/.venv/bin/python" "$DIR/fints_worker.py" "$@"

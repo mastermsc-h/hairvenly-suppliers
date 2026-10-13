@@ -48,6 +48,9 @@ export async function updateSession(request: NextRequest) {
     // wurden order-reminders/refresh/fix-addresses zur Login-Seite redirected
     // und liefen still ins Leere (Bug gefunden 30.09.2026).
     path.startsWith("/api/cron/") ||
+    // Lokaler FinTS-Worker (Mac) liefert Kontoumsätze — kein Login-Cookie,
+    // schützt sich per Bearer-Secret (fail-closed) in der Route selbst.
+    path === "/api/bank/ingest" ||
     // Foto-Handoff iMac → iPhone: /pack-foto/<token> ist öffentlich, der Zugriff
     // wird durch den signierten, 2h gültigen Session-Token geschützt (kein
     // Login am Handy nötig). Nur Foto-Upload möglich, keine Bestelldaten.
