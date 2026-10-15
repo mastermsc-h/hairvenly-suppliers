@@ -10,10 +10,12 @@ Läuft LOKAL auf dem Mac (launchd, stündlich 7–21 Uhr). Geheimnisse:
                           (oder BANK_INGEST_SECRET, falls dort gesetzt)
   - FinTS-Produkt-ID    → config.json (NICHT im Repo — Repo ist öffentlich)
 
-Sicherheitsregel: Der automatische Lauf löst NIE selbst eine TAN aus. Verlangt
-die Bank eine Freigabe, stoppt er, meldet "needs_tan" ans Dashboard und wartet,
-bis jemand interaktiv `fints renew` ausführt. Unerwartete pushTAN-Anfragen auf
-dem Handy würden sonst dazu erziehen, blind zu bestätigen.
+Sicherheitsregel: Der automatische Lauf wartet NIE auf eine TAN. Läuft die
+Freigabe ab (alle ~90–180 Tage), schickt die Sparkasse beim nächsten Abruf von
+sich aus einmal eine pushTAN — der Worker bestätigt nichts, setzt "needs_tan",
+meldet das ans Dashboard und kontaktiert die Bank erst wieder nach einem
+interaktiven `fints renew`. So kommt höchstens EINE unerwartete Anfrage aufs
+Handy (Mac-Mitteilung erklärt sie) statt einer pro Stunde.
 
 Befehle:
   fints setup      Ersteinrichtung (Anmeldename, PIN, Konto) + erste Freigabe
@@ -385,16 +387,12 @@ def fetch(cfg: dict, interactive: bool, fresh: bool = False) -> list[dict]:
             client.set_tan_mechanism(pick)
             print(f"TAN-Verfahren: {mech[pick].name}")
         if client.selected_tan_medium is None and client.is_tan_media_required():
-            media = client.get_tan_media()[1]
-            if len(media) == 0:
-                client.selected_tan_medium = ""
-            elif len(media) == 1:
-                client.set_tan_medium(media[0])
-            else:
-                print("\nMehrere TAN-Geräte gefunden:")
-                for i, m in enumerate(media):
-                    print(f"  {i}  {m.tan_medium_name}")
-                client.set_tan_medium(media[int(input("Nummer: ").strip() or 0)])
+            # KEIN get_tan_media() in eigenem Dialog: die Sparkasse fordert schon
+            # bei dessen Init die pushTAN an (3955) und legt beim Beenden mit
+            # offener Freigabe auf (RemoteDisconnected, gemessen 15.10.2026).
+            # python-fints liefert in genau diesem Fall ohnehin [] → Medium "".
+            # pushTAN 2.0 (decoupled) braucht bei der Sparkasse keinen Gerätenamen.
+            client.selected_tan_medium = ""
     elif not client.get_current_tan_mechanism():
         raise RuntimeError("Kein gespeicherter Zugang — bitte `fints setup` ausführen.")
 
@@ -408,6 +406,7 @@ def fetch(cfg: dict, interactive: bool, fresh: bool = False) -> list[dict]:
 
     rows: list[dict] = []
     try:
+        # Ein einziger Dialog: Init (ggf. pushTAN) → Freigabe → Konten → Umsätze.
         with client:
             if client.init_tan_response:
                 resolve_tan(client, client.init_tan_response, interactive)
@@ -417,6 +416,14 @@ def fetch(cfg: dict, interactive: bool, fresh: bool = False) -> list[dict]:
                 mapped = [m for m in (map_transaction(t, acc.iban) for t in (res or [])) if m]
                 log.info("Konto …%s: %d Umsätze seit %s", acc.iban[-4:], len(mapped), start.isoformat())
                 rows.extend(mapped)
+    except Exception as e:
+        # Beendet die Bank den Dialog mit offener Freigabe, wirft das __exit__
+        # (HKEND) einen Verbindungsfehler, der NeedsTan überdeckt. Dann trotzdem
+        # als "wartet auf TAN" behandeln — sonst versucht der stündliche Lauf es
+        # erneut und schickt jedes Mal eine pushTAN aufs Handy.
+        if isinstance(e, NeedsTan) or isinstance(e.__context__, NeedsTan):
+            raise NeedsTan() from None
+        raise
     finally:
         # Zustand (System-ID, BPD/UPD) immer sichern — sonst gilt der Mac
         # beim nächsten Lauf als neues Gerät und die Bank verlangt eine TAN.
@@ -468,7 +475,7 @@ def cmd_run() -> int:
         save_json(STATUS_PATH, status)
         log.warning("Bank verlangt pushTAN-Freigabe — automatischer Abruf pausiert.")
         report_status(cfg, False, "needs_tan", "Sparkasse verlangt eine neue pushTAN-Freigabe (fints renew).")
-        notify("Hairvenly Bank-Abgleich", "Sparkasse verlangt eine neue Freigabe. Terminal: fints renew")
+        notify("Hairvenly Bank-Abgleich", "Sparkasse verlangt eine neue Freigabe – pushTAN-Anfrage ignorieren, im Terminal: fints renew")
         return 0
     except Exception as e:
         bank = BANK.summary()

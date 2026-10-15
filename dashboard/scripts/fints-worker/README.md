@@ -33,9 +33,11 @@ S-pushTAN-App freigeben. Am Ende wird der stündliche Abruf aktiviert.
 | `fints run` | Manueller Abruf ohne TAN |
 | `fints install` / `fints uninstall` | Stündlichen Abruf an/aus |
 
-Der automatische Lauf fordert **nie** selbst eine TAN an. Verlangt die
-Sparkasse eine Freigabe, pausiert er, meldet das ans Dashboard (plus
-Mitteilung am Mac und tägliche Mail) und wartet auf `fints renew`.
+Der automatische Lauf wartet **nie** auf eine TAN. Läuft die Freigabe ab,
+schickt die Sparkasse beim nächsten Abruf von sich aus einmal eine pushTAN –
+die bitte **ablehnen bzw. ignorieren**. Der Worker pausiert dann, meldet das ans
+Dashboard (plus Mitteilung am Mac und tägliche Mail) und wartet auf
+`fints renew`, wo du die Freigabe bewusst bestätigst.
 
 ## Dateien
 
