@@ -4,6 +4,8 @@ import { fetchBankOverview } from "@/lib/actions/bank";
 import PaymentsBoard from "./payments-board";
 
 export const dynamic = "force-dynamic";
+// Server Actions dieser Seite (Abgleich, CSV-Import) dürfen bis 60 s laufen.
+export const maxDuration = 60;
 
 export default async function PaymentsPage() {
   const profile = await requireFeature("finances");

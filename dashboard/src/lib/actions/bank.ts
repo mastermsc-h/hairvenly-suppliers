@@ -82,7 +82,7 @@ export async function setBankModeAction(mode: BankMode): Promise<ActionResult> {
 export async function runBankMatchingAction(): Promise<ActionResult & { summary?: RunSummary }> {
   await requireFeature("finances");
   try {
-    const summary = await runBankMatching();
+    const summary = await runBankMatching({ budgetMs: 40_000 });
     revalidatePath(PATH);
     return { ok: true, summary };
   } catch (e) {
@@ -107,7 +107,7 @@ export async function assignBankByNumberAction(txId: string, orderNumber: string
 export async function ignoreBankTxAction(txId: string, ignored: boolean): Promise<ActionResult> {
   const profile = await requireFeature("finances");
   const res = await setTransactionIgnored(txId, ignored, profile.id);
-  if (res.ok && !ignored) await runBankMatching().catch(() => null);
+  if (res.ok && !ignored) await runBankMatching({ budgetMs: 40_000 }).catch(() => null);
   revalidatePath(PATH);
   return res;
 }
@@ -130,7 +130,7 @@ export async function importBankCsvAction(_prev: unknown, formData: FormData): P
 
   try {
     const imp = await ingestBankRows(parsed.rows, "csv");
-    const summary = await runBankMatching();
+    const summary = await runBankMatching({ budgetMs: 40_000 });
     revalidatePath(PATH);
     const credits = parsed.rows.filter((r) => r.amount > 0).length;
     return {

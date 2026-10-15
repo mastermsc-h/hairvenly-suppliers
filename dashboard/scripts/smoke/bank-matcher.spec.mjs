@@ -75,6 +75,46 @@ check("Bereits anderem Eingang zugeordnet → order_not_open",
   reason(M.matchTransaction(tx(158.97, "27405"), open.filter((o) => o.number !== "27405"),
     { "27405": { name: "#27405", state: "matched", detail: "" } })), "order_not_open");
 
+// ── Bezahl-Zeitpunkt: von Hand erledigt vs. Doppelzahlung (echte Daten 15.10.) ──
+const paidAfter = { "26206": { name: "#26206", state: "paid", detail: "PAID", paidAt: "2026-08-26T10:00:00Z" } };
+check("Bezahlt markiert am Tag NACH Eingang → von Hand erledigt (ignored)",
+  M.matchTransaction(tx(122.97, "26206", "Gaye Norman", "2026-08-25"), open, paidAfter).reason, "already_paid");
+check("Bezahlt markiert am Eingangstag → erledigt",
+  M.matchTransaction(tx(122.97, "26206", "X", "2026-08-26"), open, paidAfter).reason, "already_paid");
+check("Bezahlt markiert 1 Tag VOR Buchung (Toleranz) → erledigt",
+  M.matchTransaction(tx(122.97, "26206", "X", "2026-08-27"), open, paidAfter).reason, "already_paid");
+check("Bezahlt 2+ Tage VOR Eingang → mögliche Doppelzahlung (review)",
+  M.matchTransaction(tx(122.97, "26206", "X", "2026-09-10"), open, paidAfter).reason, "order_not_open");
+check("Doppelzahlung-Text nennt Datum",
+  /26\.08\.2026/.test(M.matchTransaction(tx(122.97, "26206", "X", "2026-09-10"), open, paidAfter).detail), true);
+check("Storniert → review",
+  M.matchTransaction(tx(50, "26100", "X"), open, { "26100": { name: "#26100", state: "cancelled", detail: "", paidAt: null } }).reason, "order_not_open");
+// Bug 15.10.: Zweck nennt bezahlte #26976, Betrag zufällig gleich offener #27409 → NIE fremde Bestellung vorschlagen
+const paid26976 = { "26976": { name: "#26976", state: "paid", detail: "PAID", paidAt: "2026-09-16T08:00:00Z" } };
+check("Nummer einer bezahlten Bestellung → kein Betrags-Vorschlag einer fremden",
+  M.matchTransaction(tx(29.69, "26976", "Felicitas K", "2026-09-15"), open, paid26976).kind, "ignored");
+check("…und nicht als amount_only",
+  M.matchTransaction(tx(29.69, "26976", "Felicitas K", "2026-09-15"), open, paid26976).reason !== "amount_only", true);
+check("Zahl ohne Bestellung + Betrag passt → amount_only mit korrektem Text",
+  /gehören zu keiner Bestellung/.test(M.matchTransaction(tx(447.92, "Rechnung 1234", "X"), open).detail ?? ""), true);
+
+check("Führende Null ist keine Bestellnummer", M.extractOrderNumbers("Z0367DJ87 02740"), []);
+check("Erstattete Bestellung, bezahlt nach Eingang → erledigt + Hinweis",
+  /später erstattet/.test(M.matchTransaction(tx(152.99, "26620", "Anja S", "2026-09-02"), open,
+    { "26620": { name: "#26620", state: "paid", detail: "REFUNDED", paidAt: "2026-09-03T09:00:00Z" } }).detail ?? ""), true);
+check("DHL-Gutschrift mit Zahl → ignored", M.matchTransaction(tx(275.6, "/OBO/Deutsche Post AG/INV/2609 24831", "DHL AG"), open).kind, "ignored");
+
+// ── Eigene Bewegungen ──────────────────────────────────────────────────────
+const own = ["DE56290501010084626001", "DE55290501010084626019"];
+check("Übertrag von eigenem Konto → own_transfer",
+  M.matchTransaction({ ...tx(500, "Umbuchung"), counterparty_iban: "DE55 2905 0101 0084 6260 19" }, open, {}, own).reason, "own_transfer");
+check("SB-Einzahlung → cash_deposit",
+  M.matchTransaction({ ...tx(300, "SB-EINZAHLUNG SPKHB-F054GA 2120 / 19.09.26", null) }, open, {}, own).reason, "cash_deposit");
+check("Kunde schreibt 'Anzahlung' → NICHT Bareinzahlung",
+  M.matchTransaction(tx(447.92, "Anzahlung Haare"), open, {}, own).reason, "amount_only");
+check("Sicherer Treffer schlägt eigenes Konto (Nr+Betrag)",
+  M.matchTransaction({ ...tx(158.97, "27405"), counterparty_iban: own[0] }, open, {}, own).kind, "sure");
+
 // ── Ignorieren / Ausgänge ──────────────────────────────────────────────────
 check("Ausgang → debit", kind(M.matchTransaction(tx(-50, "Miete"), open)), "debit");
 check("0 € → debit", kind(M.matchTransaction(tx(0, ""), open)), "debit");

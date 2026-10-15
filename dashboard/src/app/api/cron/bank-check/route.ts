@@ -22,7 +22,7 @@ export async function GET(request: Request) {
   const sb = createServiceClient();
   let matching: unknown = null;
   try {
-    matching = await runBankMatching();
+    matching = await runBankMatching({ budgetMs: 40_000 });
   } catch (e) {
     matching = { error: e instanceof Error ? e.message : String(e) };
   }

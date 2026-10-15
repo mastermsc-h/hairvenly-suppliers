@@ -27,9 +27,19 @@ interface TxRow {
   amount: number;
   purpose: string | null;
   counterparty_name: string | null;
+  counterparty_iban?: string | null;
+  posting_text?: string | null;
   end_to_end_ref: string | null;
   match_status: string;
   candidates?: unknown;
+}
+
+const TX_FIELDS =
+  "id, booking_date, amount, purpose, counterparty_name, counterparty_iban, posting_text, end_to_end_ref, match_status";
+
+/** Führt fn für alle Elemente aus, je `size` parallel. */
+async function inBatches<T>(items: T[], size: number, fn: (x: T) => PromiseLike<unknown>): Promise<void> {
+  for (let i = 0; i < items.length; i += size) await Promise.all(items.slice(i, i + size).map(fn));
 }
 
 function eur(n: number): string {
@@ -116,21 +126,33 @@ export interface RunSummary {
   shadow: number;
   review: number;
   ignored: number;
+  /** Noch offen (Zeitbudget erschöpft) — Aufrufer kann erneut anstoßen. */
+  remaining: number;
   errors: string[];
 }
 
 /**
- * Gleicht alle offenen Eingänge ab. Idempotent und parallel-sicher:
- *  - jeder Umsatz wird per bedingtem Update "geclaimt" (pending → processing),
- *    ein zweiter Lauf überspringt ihn;
+ * Gleicht alle offenen Eingänge ab. Idempotent, parallel-sicher, zeitbegrenzt:
+ *  - Umsätze werden blockweise per bedingtem Update "geclaimt"
+ *    (pending/shadow → processing); ein zweiter Lauf überspringt sie;
  *  - vor jedem orderMarkAsPaid liest markOrderPaidVerified den Live-Status —
  *    eine schon bezahlte Bestellung wird nie zweimal markiert;
- *  - hängengebliebene Claims (>10 Min) werden beim nächsten Lauf freigegeben.
+ *  - nach `budgetMs` werden unbearbeitete Claims sofort zurückgegeben
+ *    (Vercel bricht Funktionen nach 60 s ab — gemessen beim Erstimport
+ *    von 243 Eingängen am 15.10.2026); `remaining` sagt, ob noch etwas offen ist;
+ *  - hängengebliebene Claims (>10 Min) gibt der nächste Lauf frei.
  */
-export async function runBankMatching(): Promise<RunSummary> {
+export async function runBankMatching(opts: { budgetMs?: number } = {}): Promise<RunSummary> {
+  const started = Date.now();
+  const budget = opts.budgetMs ?? 40_000;
   const sb = createServiceClient();
-  const mode = await getBankMode(sb);
-  const summary: RunSummary = { mode, processed: 0, autoPaid: 0, shadow: 0, review: 0, ignored: 0, errors: [] };
+  const { data: st } = await sb
+    .from("bank_sync_state").select("auto_mark_mode, matching_since").eq("id", 1).maybeSingle();
+  const mode = (["off", "shadow", "live"].includes(st?.auto_mark_mode) ? st?.auto_mark_mode : "shadow") as BankMode;
+  // Vor dem Start des Abgleichs gebuchte Eingänge ohne jeden Bezug werden nicht
+  // zur Prüfung vorgelegt (Rückgriff beim Erstimport = 90 Tage Altlasten).
+  const matchingSince: string = st?.matching_since ?? "1970-01-01";
+  const summary: RunSummary = { mode, processed: 0, autoPaid: 0, shadow: 0, review: 0, ignored: 0, remaining: 0, errors: [] };
   if (mode === "off") return summary;
 
   await sb
@@ -140,43 +162,77 @@ export async function runBankMatching(): Promise<RunSummary> {
     .lt("updated_at", new Date(Date.now() - 10 * 60_000).toISOString());
 
   const statuses = mode === "live" ? ["pending", "shadow"] : ["pending"];
+  const countRemaining = async () => {
+    const { count } = await sb
+      .from("bank_transactions").select("id", { count: "exact", head: true })
+      .in("match_status", statuses).gt("amount", 0);
+    return count ?? 0;
+  };
+
   const { data: txData, error } = await sb
     .from("bank_transactions")
-    .select("id, booking_date, amount, purpose, counterparty_name, end_to_end_ref, match_status")
+    .select(TX_FIELDS)
     .in("match_status", statuses)
     .gt("amount", 0)
     .order("booking_date", { ascending: true })
-    .limit(300);
+    .limit(400);
   if (error) throw new Error(error.message);
-  const txs = (txData ?? []) as TxRow[];
-  if (txs.length === 0) return summary;
+  const candidates = (txData ?? []) as TxRow[];
+  if (candidates.length === 0) return summary;
+
+  // Blockweise claimen
+  const original = new Map(candidates.map((t) => [t.id, t.match_status]));
+  const byId = new Map(candidates.map((t) => [t.id, t]));
+  const txs: TxRow[] = [];
+  for (let i = 0; i < candidates.length; i += 100) {
+    const ids = candidates.slice(i, i + 100).map((t) => t.id);
+    const { data: claimed } = await sb
+      .from("bank_transactions")
+      .update({ match_status: "processing" })
+      .in("id", ids)
+      .in("match_status", statuses)
+      .select("id");
+    for (const c of claimed ?? []) txs.push(byId.get(c.id)!);
+  }
+
+  // Eigene Konten (Überträge untereinander ignorieren)
+  const { data: accRows } = await sb.from("bank_transactions").select("account_iban").not("account_iban", "is", null).limit(2000);
+  const ownIbans = [...new Set((accRows ?? []).map((r: { account_iban: string }) => r.account_iban))];
 
   let openOrders: OpenOrder[] = await fetchOpenOrdersForMatching();
   const lookupNums = new Set<string>();
   for (const tx of txs) for (const n of plausibleClosedNumbers({ ...tx, amount: Number(tx.amount) }, openOrders)) lookupNums.add(n);
   const closed: Record<string, ClosedOrderInfo> = lookupNums.size ? await lookupClosedOrders([...lookupNums]) : {};
 
-  for (const tx of txs) {
-    const { data: claimed } = await sb
-      .from("bank_transactions")
-      .update({ match_status: "processing" })
-      .eq("id", tx.id)
-      .eq("match_status", tx.match_status)
-      .select("id");
-    if (!claimed?.length) continue;
-    summary.processed++;
+  const patches: { id: string; patch: Record<string, unknown> }[] = [];
+  const release: string[] = [];
 
+  for (const tx of txs) {
+    if (Date.now() - started > budget) {
+      release.push(tx.id);
+      continue;
+    }
+    summary.processed++;
     let patch: Record<string, unknown>;
     try {
-      const r = matchTransaction({ ...tx, amount: Number(tx.amount) }, openOrders, closed);
+      const r = matchTransaction({ ...tx, amount: Number(tx.amount) }, openOrders, closed, ownIbans);
       if (r.kind === "debit") {
         patch = { match_status: "debit" };
       } else if (r.kind === "ignored") {
         patch = { match_status: "ignored", match_reason: r.reason, match_detail: r.detail, candidates: [] };
         summary.ignored++;
       } else if (r.kind === "review") {
-        patch = { match_status: "review", match_reason: r.reason, match_detail: r.detail, candidates: r.candidates };
-        summary.review++;
+        if (r.reason === "no_candidate" && tx.booking_date < matchingSince) {
+          patch = {
+            match_status: "ignored", match_reason: "before_start",
+            match_detail: "Vor Start des Abgleichs gebucht, keine passende Bestellung – nicht zur Prüfung vorgelegt.",
+            candidates: [],
+          };
+          summary.ignored++;
+        } else {
+          patch = { match_status: "review", match_reason: r.reason, match_detail: r.detail, candidates: r.candidates };
+          summary.review++;
+        }
       } else {
         // Sicherer Treffer — Bestellungen für den Rest des Laufs "verbrauchen",
         // damit ein zweiter Eingang zur selben Bestellung als Doppelzahlung auffällt.
@@ -234,6 +290,10 @@ export async function runBankMatching(): Promise<RunSummary> {
             summary.review++;
             summary.errors.push(...failed.map((x) => x.res.error ?? "?"));
           }
+          // Shopify-Markierung ist erfolgt → Ergebnis SOFORT schreiben, nicht erst
+          // im Sammel-Update (bricht der Lauf ab, darf das nicht verloren gehen).
+          await sb.from("bank_transactions").update(patch).eq("id", tx.id);
+          continue;
         }
       }
     } catch (e) {
@@ -241,8 +301,20 @@ export async function runBankMatching(): Promise<RunSummary> {
       patch = { match_status: "review", match_reason: "error", match_detail: `Fehler beim Abgleich: ${msg.slice(0, 300)}` };
       summary.errors.push(msg);
     }
-    await sb.from("bank_transactions").update(patch).eq("id", tx.id);
+    patches.push({ id: tx.id, patch });
   }
+
+  await inBatches(patches, 10, (p) => sb.from("bank_transactions").update(p.patch).eq("id", p.id));
+
+  // Unbearbeitete Claims sofort zurückgeben (sonst erst nach 10 Min frei)
+  for (const status of statuses) {
+    const ids = release.filter((id) => original.get(id) === status);
+    for (let i = 0; i < ids.length; i += 100) {
+      await sb.from("bank_transactions").update({ match_status: status }).in("id", ids.slice(i, i + 100)).eq("match_status", "processing");
+    }
+  }
+
+  summary.remaining = await countRemaining();
   return summary;
 }
 

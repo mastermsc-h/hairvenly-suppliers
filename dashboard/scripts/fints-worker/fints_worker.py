@@ -497,9 +497,22 @@ def deliver(cfg: dict, rows: list[dict]) -> dict | None:
             "last_error": None,
         })
         save_json(STATUS_PATH, status)
-        m = res.get("matching") or {}
-        log.info("Dashboard: %s neu von %s · Abgleich: %s automatisch, %s Shadow, %s zu prüfen (Modus %s)",
-                 res.get("inserted"), res.get("received"), m.get("autoPaid"), m.get("shadow"), m.get("review"), m.get("mode"))
+        m = dict(res.get("matching") or {})
+        # Abgleich hat ein Zeitbudget pro Aufruf — Rest in Folgeaufrufen nachholen.
+        for _ in range(10):
+            if not m.get("remaining"):
+                break
+            more = post_dashboard(cfg, {"action": "match"})
+            mm = (more or {}).get("matching") or {}
+            if not more or not mm.get("processed"):
+                break
+            for k in ("processed", "autoPaid", "shadow", "review", "ignored"):
+                m[k] = (m.get(k) or 0) + (mm.get(k) or 0)
+            m["remaining"] = mm.get("remaining", 0)
+        res["matching"] = m
+        log.info("Dashboard: %s neu von %s · Abgleich: %s automatisch, %s Shadow, %s zu prüfen, %s offen (Modus %s)",
+                 res.get("inserted"), res.get("received"), m.get("autoPaid"), m.get("shadow"), m.get("review"),
+                 m.get("remaining"), m.get("mode"))
     return res
 
 

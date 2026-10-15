@@ -37,11 +37,20 @@ export async function POST(req: NextRequest) {
   if (auth === null) return NextResponse.json({ error: "Ingest secret not configured" }, { status: 503 });
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  let body: { status?: { ok?: boolean; code?: string; message?: string }; transactions?: unknown[] };
+  let body: { action?: string; status?: { ok?: boolean; code?: string; message?: string }; transactions?: unknown[] };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  // Nur Abgleich fortsetzen (Zeitbudget des vorigen Aufrufs war erschöpft)
+  if (body.action === "match") {
+    try {
+      return NextResponse.json({ ok: true, matching: await runBankMatching({ budgetMs: 40_000 }) });
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
   }
 
   const list = Array.isArray(body.transactions) ? body.transactions.slice(0, 5000) : [];
@@ -58,7 +67,9 @@ export async function POST(req: NextRequest) {
   try {
     const imported = await ingestBankRows(rows, "fints");
     await recordFetchStatus({ ok, code, message: body.status?.message ?? null, success: ok && code === "ok" });
-    const matching = await runBankMatching();
+    // Import ist schnell; der Abgleich hat ein Zeitbudget unter dem 60-s-Limit.
+    // Rest (matching.remaining > 0) holt der Worker per action "match" nach.
+    const matching = await runBankMatching({ budgetMs: 35_000 });
     return NextResponse.json({ ok: true, ...imported, rejected, matching });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

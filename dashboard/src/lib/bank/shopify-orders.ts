@@ -76,23 +76,45 @@ export async function fetchOpenOrdersForMatching(daysBack = 120): Promise<OpenOr
   return out;
 }
 
-/** Status von Bestellungen per Nummer (für "bereits bezahlt / storniert"-Hinweise). */
+/**
+ * Status von Bestellungen per Nummer (für "bereits bezahlt / storniert"-Hinweise),
+ * inkl. Bezahl-Zeitpunkt (letzte erfolgreiche SALE/CAPTURE-Transaktion) — damit
+ * der Matcher "von Hand erledigt" von "Doppelzahlung" unterscheiden kann.
+ * In Blöcken à 25 Nummern (Suchquery-Länge), höchstens 400 Nummern pro Lauf.
+ */
 export async function lookupClosedOrders(numbers: string[]): Promise<Record<string, ClosedOrderInfo>> {
-  const uniq = [...new Set(numbers)].slice(0, 30);
-  if (uniq.length === 0) return {};
-  const q = uniq.map((n) => `name:#${n}`).join(" OR ");
-  const query = `query bankLookup($q: String!) { orders(first: 50, query: $q) { edges { node { ${ORDER_FIELDS} } } } }`;
-  const res = await shopifyGraphQL<{ orders: { edges: { node: OrderNode }[] } }>(query, { q });
+  const uniq = [...new Set(numbers)].slice(0, 400);
   const map: Record<string, ClosedOrderInfo> = {};
-  for (const e of res.data?.orders.edges ?? []) {
-    const n = e.node;
-    const num = n.name.replace(/^#/, "").replace(/^0+/, "");
-    if (!uniq.includes(num)) continue;
-    const fin = n.displayFinancialStatus ?? "";
-    if (n.cancelledAt) map[num] = { name: n.name, state: "cancelled", detail: fin };
-    else if (OPEN_STATUSES.has(fin)) continue; // doch offen (z.B. älter als 120 Tage) — kein "closed"
-    else if (fin === "PAID") map[num] = { name: n.name, state: "paid", detail: fin };
-    else map[num] = { name: n.name, state: "other", detail: fin };
+  const query = `query bankLookup($q: String!) {
+    orders(first: 100, query: $q) { edges { node {
+      ${ORDER_FIELDS}
+      transactions(first: 20) { kind status processedAt }
+    } } }
+  }`;
+  for (let i = 0; i < uniq.length; i += 25) {
+    const chunk = uniq.slice(i, i + 25);
+    const q = chunk.map((n) => `name:#${n}`).join(" OR ");
+    const res = await shopifyGraphQL<{
+      orders: { edges: { node: OrderNode & { transactions: { kind: string; status: string; processedAt: string | null }[] } }[] };
+    }>(query, { q });
+    for (const e of res.data?.orders.edges ?? []) {
+      const n = e.node;
+      const num = n.name.replace(/^#/, "").replace(/^0+/, "");
+      if (!chunk.includes(num)) continue;
+      const fin = n.displayFinancialStatus ?? "";
+      const paidAt = (n.transactions ?? [])
+        .filter((tx) => tx.status === "SUCCESS" && (tx.kind === "SALE" || tx.kind === "CAPTURE") && tx.processedAt)
+        .map((tx) => tx.processedAt as string)
+        .sort()
+        .pop() ?? null;
+      if (n.cancelledAt) map[num] = { name: n.name, state: "cancelled", detail: fin, paidAt };
+      else if (OPEN_STATUSES.has(fin)) continue; // doch offen (z.B. älter als 120 Tage) — kein "closed"
+      // Erstattet = war bezahlt (danach Geld zurück) → für die Frage "gehört diese
+      // Überweisung zu einer schon erledigten Bezahlung?" wie bezahlt behandeln.
+      else if (fin === "PAID" || fin === "REFUNDED" || fin === "PARTIALLY_REFUNDED")
+        map[num] = { name: n.name, state: "paid", detail: fin, paidAt };
+      else map[num] = { name: n.name, state: "other", detail: fin, paidAt };
+    }
   }
   return map;
 }
