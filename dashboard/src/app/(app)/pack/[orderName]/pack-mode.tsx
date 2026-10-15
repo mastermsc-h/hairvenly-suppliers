@@ -28,12 +28,10 @@ function addressLooksIncomplete(address1: string | null | undefined): boolean {
   return !/\d/.test(trimmed);
 }
 import { t, type Locale } from "@/lib/i18n";
-import QRCode from "qrcode";
 import { Camera, CheckCircle2, AlertTriangle, Send, Loader2, ScanLine, Check, X, RotateCcw, History, Package2, ImagePlus, Smartphone } from "lucide-react";
 import CameraScanner from "./camera-scanner";
 import OrderQrScanner from "../order-qr-scanner";
 import { isAccessoryCode } from "../accessory-code";
-import { createPhotoHandoffLink } from "@/lib/actions/pack-handoff";
 import { extractOrderNumberFromScan } from "../scan-order";
 
 interface ExpectedItem {
@@ -520,49 +518,6 @@ export default function PackMode({
     };
   }, [phase, sessionId]);
 
-  // QR für den Handy-Handoff: signierter, 2h gültiger Link auf die öffentliche
-  // Foto-Seite (/pack-foto/<token>) → am iPhone KEIN Login nötig. Fällt der
-  // Server-Call aus, zeigt der QR ersatzweise die normale Bestellseite (Login).
-  const [handoffQr, setHandoffQr] = useState<string>("");
-  useEffect(() => {
-    if (phase !== "photos") return;
-    if (typeof window === "undefined") return;
-    let cancelled = false;
-    const clean = orderName.replace(/^#/, "");
-    const fallback = `${window.location.origin}/pack/${clean}`;
-    (async () => {
-      let url = fallback;
-      try {
-        const r = await createPhotoHandoffLink(sessionId);
-        if (r.success && r.path) url = `${window.location.origin}${r.path}`;
-      } catch {
-        /* fallback bleibt */
-      }
-      if (cancelled) return;
-      try {
-        setHandoffQr(await QRCode.toDataURL(url, { width: 320, margin: 1, errorCorrectionLevel: "M" }));
-      } catch {
-        setHandoffQr("");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [phase, orderName, sessionId]);
-
-  // Übergangs-Hinweis: Im Moment, in dem der letzte Artikel gescannt ist,
-  // weiß der Packer sonst nicht, dass JETZT das iPhone dran ist (die Foto-Box
-  // liegt rechts unten). Darum ein großes Fenster beim Wechsel scan→photos,
-  // das sich von selbst schließt, sobald das Foto da ist (phase verlässt photos).
-  const [showPhotoPrompt, setShowPhotoPrompt] = useState(false);
-  const prevPhaseForPromptRef = useRef<typeof phase | null>(null);
-  useEffect(() => {
-    const prev = prevPhaseForPromptRef.current;
-    prevPhaseForPromptRef.current = phase;
-    if (prev === "scan" && phase === "photos") setShowPhotoPrompt(true);
-    if (phase !== "photos") setShowPhotoPrompt(false);
-  }, [phase]);
-
   const submitBarcode = useCallback(
     // source: "camera" → blockierendes Erfolgs-Overlay (verhindert Doppel-Lesung
     // desselben Codes im Kamerabild). "input" (Handscanner/Tastatur) → nicht-
@@ -921,68 +876,6 @@ export default function PackMode({
         </div>
       )}
 
-      {/* ÜBERGANGS-HINWEIS (nur Desktop): letzter Artikel gescannt → jetzt ist
-          das iPhone dran. Groß, mit QR, unübersehbar. Schließt sich von selbst,
-          sobald das Foto angekommen ist (phase → ready). */}
-      {showPhotoPrompt && phase === "photos" && (
-        <div className="fixed inset-0 z-40 hidden md:flex items-center justify-center bg-neutral-900/70 p-6">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8 relative">
-            <button
-              type="button"
-              onClick={() => setShowPhotoPrompt(false)}
-              className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-700"
-              aria-label="Hinweis schließen"
-            >
-              <X size={22} />
-            </button>
-            <div className="flex items-center gap-2 text-emerald-700 font-bold">
-              <CheckCircle2 size={22} /> Alle Artikel gescannt
-            </div>
-            <div className="text-3xl font-black text-neutral-900 mt-2">
-              Schritt 2: Beweisfoto — jetzt das iPhone
-            </div>
-            <div className="mt-6 flex items-center gap-8">
-              {handoffQr ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={handoffQr} alt="QR fürs iPhone" className="w-56 h-56 rounded-xl border border-neutral-200 shrink-0" />
-              ) : (
-                <div className="w-56 h-56 rounded-xl bg-neutral-100 animate-pulse shrink-0" />
-              )}
-              <ol className="text-lg text-neutral-800 space-y-3 leading-snug">
-                <li className="flex gap-3"><span className="font-black text-amber-600 w-6">1.</span> iPhone nehmen, <strong className="ml-1">Kamera-App</strong>&nbsp;öffnen</li>
-                <li className="flex gap-3"><span className="font-black text-amber-600 w-6">2.</span> auf den <strong className="mx-1">QR</strong> halten → Link antippen <span className="text-neutral-500 text-base ml-1">(kein Login nötig)</span></li>
-                <li className="flex gap-3"><span className="font-black text-amber-600 w-6">3.</span> Produkte <strong className="mx-1">mit Rechnung</strong> fotografieren</li>
-              </ol>
-            </div>
-            <div className="mt-6 flex items-center gap-2 text-sm text-neutral-600">
-              <Loader2 size={14} className="animate-spin" /> Dieses Fenster schließt sich automatisch, sobald das Foto angekommen ist.
-            </div>
-            <div className="mt-4 flex gap-4 text-sm">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPhotoPrompt(false);
-                  setTimeout(() => photoSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-                }}
-                className="text-neutral-600 hover:text-neutral-900 underline"
-              >
-                Stattdessen Datei vom iMac hochladen
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPhotoPrompt(false);
-                  setSkipModalOpen(true);
-                }}
-                className="text-neutral-600 hover:text-neutral-900 underline"
-              >
-                Fotos überspringen
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Phase Indicator (kompakt) */}
       <div className="bg-white rounded-xl border border-neutral-200 p-1.5 shadow-sm flex items-center gap-1 text-xs">
         {([
@@ -1216,21 +1109,15 @@ export default function PackMode({
               </div>
               <div className="text-xs text-amber-800 mt-1">Alle Artikel sind bestätigt ✓</div>
 
-              {/* Desktop: die Handlung direkt HIER — QR + Schritte. Auf dem
-                  Handy (unter md) wird unten direkt fotografiert. */}
+              {/* Kein QR-Popup mehr: das iPhone ist dauerbereit fürs Beweisfoto.
+                  Nur noch der Hinweis, dass jetzt das Foto dran ist. */}
               <div className="hidden md:block mt-4 bg-white rounded-xl border border-amber-200 p-3 text-left">
-                <div className="flex items-start gap-3">
-                  {handoffQr ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={handoffQr} alt="QR fürs iPhone" className="w-32 h-32 rounded-lg shrink-0" />
-                  ) : (
-                    <div className="w-32 h-32 rounded-lg bg-neutral-100 animate-pulse shrink-0" />
-                  )}
-                  <ol className="text-sm text-neutral-800 space-y-1.5 leading-snug">
-                    <li><span className="font-bold text-amber-700">1.</span> iPhone nehmen, <strong>Kamera-App</strong> öffnen</li>
-                    <li><span className="font-bold text-amber-700">2.</span> auf diesen <strong>QR</strong> halten → Link antippen <span className="text-neutral-500">(kein Login)</span></li>
-                    <li><span className="font-bold text-amber-700">3.</span> Produkte <strong>mit Rechnung</strong> fotografieren</li>
-                  </ol>
+                <div className="text-sm text-neutral-800 leading-snug flex items-start gap-2">
+                  <Smartphone size={18} className="text-amber-700 shrink-0 mt-0.5" />
+                  <span>
+                    Jetzt am <strong>iPhone</strong> das Beweisfoto machen
+                    (Produkte <strong>mit Rechnung</strong>).
+                  </span>
                 </div>
                 <div className="mt-2 text-[11px] text-amber-800 flex items-center gap-1">
                   <Loader2 size={11} className="animate-spin" /> Der iMac macht automatisch weiter, sobald das Foto da ist.
@@ -1681,28 +1568,18 @@ export default function PackMode({
                   {t(locale, "shipping.photos_skip_button")}
                 </button>
               </div>
-              {/* Handy-Handoff: Foto am iPhone aufnehmen — erscheint hier automatisch.
-                  Nur am Desktop/iPad-Querformat (md+): auf dem Handy selbst wäre
-                  "scanne diesen QR mit dem Handy" sinnlos. */}
-              {handoffQr && (
-                <div className="mb-3 hidden md:flex flex-row items-center gap-4 bg-blue-50 border border-blue-200 rounded-xl p-4">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={handoffQr} alt="Handy-QR" className="w-28 h-28 rounded-lg bg-white p-1 shrink-0" />
-                  <div className="text-sm text-blue-900 min-w-0">
-                    <div className="font-bold flex items-center gap-1.5">
-                      <Smartphone size={16} /> Foto am Handy aufnehmen
-                    </div>
-                    <div className="text-xs text-blue-800/90 mt-1 leading-relaxed">
-                      QR mit dem iPhone scannen → Foto-Seite öffnet sich <strong>ohne Login</strong> →
-                      Beweisfoto machen. Es <strong>erscheint hier automatisch</strong> und der
-                      Vorgang springt weiter zu Schritt 3. Link gilt 2 Std., nur für diese Bestellung.
-                    </div>
-                    <div className="text-[11px] text-blue-700/80 mt-1.5 flex items-center gap-1">
-                      <Loader2 size={11} className="animate-spin" /> Warte auf Foto vom Handy…
-                    </div>
+              {/* iPhone ist dauerbereit fürs Beweisfoto — nur Hinweis, kein QR.
+                  Das Foto erscheint hier automatisch (Polling) und der Vorgang
+                  springt weiter zu Schritt 3. */}
+              <div className="mb-3 hidden md:flex flex-row items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl p-3">
+                <Smartphone size={18} className="text-blue-700 shrink-0" />
+                <div className="text-sm text-blue-900 min-w-0">
+                  <span>Jetzt am <strong>iPhone</strong> das Beweisfoto aufnehmen — es erscheint hier automatisch, dann geht's weiter.</span>
+                  <div className="text-[11px] text-blue-700/80 mt-1 flex items-center gap-1">
+                    <Loader2 size={11} className="animate-spin" /> Warte auf Foto vom iPhone…
                   </div>
                 </div>
-              )}
+              </div>
               <div className="grid grid-cols-1 gap-3">
                 {PHOTO_TYPES.map((type, idx) => {
                   const nextIdx = PHOTO_TYPES.findIndex((t) => (photos[t]?.length ?? 0) === 0);
