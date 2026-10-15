@@ -301,6 +301,55 @@ class NeedsTan(Exception):
     pass
 
 
+def make_connection(url: str):
+    """FinTS-HTTPS-Verbindung, robust gegen abgebrochene Keep-Alive-Verbindungen.
+
+    Gemessen 15.10.2026: Der Sparkassen-Server schließt offen gehaltene
+    Verbindungen nach wenigen Sekunden; die nächste Anfrage (z.B. eine
+    pushTAN-Statusabfrage) lief dann ins Leere → RemoteDisconnected → ganzer
+    Vorgang weg, bevor die Freigabe bestätigt war.
+      1. "Connection: close" → jede Anfrage auf frischer Verbindung.
+      2. Kam KEINE Antwort (Verbindungsfehler), dieselbe Nachricht bis zu 2×
+         neu senden. python-fints zählt die Nachrichtennummer schon vor dem
+         Senden hoch — ein Neuaufbau auf Dialogebene würde die Nummer
+         verschieben, ein Resend derselben Bytes nicht.
+      3. Timeout 60 s, damit der launchd-Lauf nie ewig hängt.
+    """
+    import requests
+    from fints.connection import FinTSHTTPSConnection
+    from fints.exceptions import FinTSConnectionError
+
+    class TimeoutSession(requests.Session):
+        def request(self, *args, **kwargs):
+            kwargs.setdefault("timeout", 60)
+            return super().request(*args, **kwargs)
+
+    class Connection(FinTSHTTPSConnection):
+        def __init__(self, u):
+            super().__init__(u)
+            self._fresh()
+
+        def _fresh(self):
+            self.session = TimeoutSession()
+            self.session.headers["Connection"] = "close"
+
+        def send(self, msg):
+            for attempt in range(3):
+                try:
+                    return super().send(msg)
+                except FinTSConnectionError as e:
+                    # Nur wenn sicher keine Antwort kam (Verbindungsebene) — bei
+                    # Lese-Timeout könnte die Bank die Nachricht schon verarbeitet haben.
+                    if attempt == 2 or not isinstance(e.__cause__, requests.ConnectionError):
+                        raise
+                    log.warning("Verbindung zur Bank abgebrochen (%s) – sende erneut (%d/2)",
+                                type(e.__cause__).__name__, attempt + 1)
+                    time.sleep(2)
+                    self._fresh()
+
+    return Connection(url)
+
+
 def make_client(cfg: dict, pin: str, with_state: bool = True):
     from fints.client import FinTS3PinTanClient
 
@@ -310,11 +359,13 @@ def make_client(cfg: dict, pin: str, with_state: bool = True):
             return super()._process_response(dialog, segment, response)
 
     state = STATE_PATH.read_bytes() if with_state and STATE_PATH.exists() else None
-    return Client(
+    client = Client(
         cfg["blz"], cfg["user_id"], pin, cfg["server"],
         product_id=cfg["product_id"], product_version=PRODUCT_VERSION,
         from_data=state,
     )
+    client.connection = make_connection(cfg["server"])
+    return client
 
 
 def save_state(client) -> None:
