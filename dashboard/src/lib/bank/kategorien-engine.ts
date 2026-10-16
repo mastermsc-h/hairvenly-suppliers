@@ -2,6 +2,7 @@
 // (Ingest-Endpoint ohne User-Session und Server Actions nach requireFeature-Check).
 import { createServiceClient } from "@/lib/supabase/server";
 import {
+  faelligkeit,
   gleicheSplits,
   kategorisiere,
   ledgerUpdate,
@@ -60,7 +61,9 @@ export async function loadRegeln(sb: Sb): Promise<KategorieRegel[]> {
  *              (z.B. erst nach dem Vorkasse-Abgleich als Kundenzahlung erkennbar).
  * scope "alle": nach Regeländerungen.
  */
-export async function runKategorisierung(opts: { scope: "neu" | "alle"; sb?: Sb } = { scope: "neu" }): Promise<{ geprueft: number; geaendert: number }> {
+export async function runKategorisierung(
+  opts: { scope: "neu" | "alle"; sb?: Sb; maxRows?: number } = { scope: "neu" }
+): Promise<{ geprueft: number; geaendert: number; remaining: number }> {
   const sb = opts.sb ?? createServiceClient();
   const regeln = await loadRegeln(sb);
   const rows = await selectAll<TxKatRow>((from, to) => {
@@ -71,8 +74,12 @@ export async function runKategorisierung(opts: { scope: "neu" | "alle"; sb?: Sb 
     return q;
   });
 
+  // Großer Import (Historie): pro Aufruf nur maxRows bearbeiten — Vercel bricht nach 60 s ab.
+  // Der Rest bleibt "neu" (kategorie null) und wird beim nächsten Aufruf weitergemacht.
+  const batch = opts.maxRows ? rows.slice(0, opts.maxRows) : rows;
+  const remaining = rows.length - batch.length;
   const updates: Array<{ id: string; patch: Record<string, unknown> }> = [];
-  for (const tx of rows) {
+  for (const tx of batch) {
     const r = kategorisiere({ ...tx, amount: Number(tx.amount) }, regeln);
     if (
       tx.kategorie === r.kategorie &&
@@ -89,8 +96,8 @@ export async function runKategorisierung(opts: { scope: "neu" | "alle"; sb?: Sb 
     const { error } = await sb.from("bank_transactions").update(u.patch).eq("id", u.id);
     if (error) throw new Error(error.message);
   });
-  if (rows.length > 0 || updates.length > 0) await syncSteuerLedger(sb);
-  return { geprueft: rows.length, geaendert: updates.length };
+  if (batch.length > 0 || updates.length > 0) await syncSteuerLedger(sb);
+  return { geprueft: batch.length, geaendert: updates.length, remaining };
 }
 
 /** Manuelle Kategorie für einzelne Umsätze (setzt Quelle "manuell"). */
@@ -161,6 +168,7 @@ export async function syncSteuerLedger(sb: Sb = createServiceClient()): Promise<
         soll_betrag: 0,
         ist_betrag: Math.abs(s.netto),
         bezahlt_am: s.letzte_buchung,
+        faellig_am: faelligkeit(s.art, s.zeitraum),
         ist_quelle: "bank",
         bank_betrag: s.netto,
         bank_anzahl: s.anzahl,

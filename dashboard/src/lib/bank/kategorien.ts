@@ -278,6 +278,42 @@ export function steuerSplitFuer(kategorie: string, tx: Pick<KategorieTx, "amount
   return [];
 }
 
+// ── Fälligkeiten ────────────────────────────────────────────────────────────
+
+/**
+ * Hairvenly hat eine Dauerfristverlängerung (User-Bestätigung 16.10.2026):
+ * USt-VA ist erst am 10. des ÜBERNÄCHSTEN Monats fällig. Gilt nur für die USt,
+ * nicht für die Lohnsteuer-Anmeldung.
+ */
+export const DAUERFRISTVERLAENGERUNG = true;
+
+function werktag(jahr: number, monat1: number, tag: number): string {
+  // monat1 darf > 12 sein (Überlauf ins Folgejahr)
+  const d = new Date(Date.UTC(jahr, monat1 - 1, tag));
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Gesetzliche Fälligkeit (Wochenende → Montag; Feiertage nicht berücksichtigt). null = unbekannt. */
+export function faelligkeit(art: SteuerSplit["art"], zeitraum: string): string | null {
+  const m = zeitraum.match(/^(\d{4})-(\d{2})$/);
+  const q = zeitraum.match(/^Q([1-4]) (\d{4})$/);
+  if (m) {
+    const jahr = Number(m[1]);
+    const monat = Number(m[2]);
+    if (art === "ust_va" || art === "eust") return werktag(jahr, monat + (art === "ust_va" && DAUERFRISTVERLAENGERUNG ? 2 : 1), 10);
+    if (art === "lst_anmeldung") return werktag(jahr, monat + 1, 10);
+    return null;
+  }
+  if (q) {
+    const quartal = Number(q[1]);
+    const jahr = Number(q[2]);
+    if (art === "est_vz") return werktag(jahr, quartal * 3, 10); // 10.03./06./09./12.
+    if (art === "gewst_vz") return werktag(jahr, quartal * 3 - 1, 15); // 15.02./05./08./11.
+  }
+  return null;
+}
+
 // ── Abgleich Bank → Steuer-Ledger ───────────────────────────────────────────
 
 export interface SteuerBankSumme {

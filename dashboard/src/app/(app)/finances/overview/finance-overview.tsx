@@ -1191,7 +1191,7 @@ function RuecklageBox({
 }) {
   const gesamt = Math.max(0, ust + est + gewst + lst.amount);
   const lines: Array<{ label: string; hint: string; value: number | null }> = [
-    { label: "Umsatzsteuer-Zahllast", hint: "USt-VA, fällig am 10. des Folgemonats", value: ust },
+    { label: "Umsatzsteuer-Zahllast", hint: "USt-VA, mit Dauerfristverlängerung fällig am 10. des übernächsten Monats", value: ust },
     { label: "Einkommensteuer inkl. Soli", hint: "Monatsanteil (Hochrechnung aufs Jahr)", value: est },
     { label: "Gewerbesteuer", hint: "Monatsanteil (Hochrechnung aufs Jahr)", value: gewst },
     {

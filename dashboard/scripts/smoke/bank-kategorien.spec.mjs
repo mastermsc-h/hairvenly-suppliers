@@ -118,6 +118,16 @@ check("Ungleich bei anderem Betrag",
   K.gleicheSplits([{ art: "ust_va", zeitraum: "2026-07", jahr: 2026, betrag: 1 }], [{ art: "ust_va", zeitraum: "2026-07", jahr: 2026, betrag: 2 }]), false);
 check("null = leer", K.gleicheSplits(null, []), true);
 
+// ── faelligkeit (Dauerfristverlängerung für USt) ───────────────────────────
+check("USt Juli mit DFV → 10.09.", K.faelligkeit("ust_va", "2026-07"), "2026-09-10");
+check("USt August mit DFV → 10.10. ist Samstag → 12.10.", K.faelligkeit("ust_va", "2026-08"), "2026-10-12");
+check("USt November mit DFV → Januar Folgejahr", K.faelligkeit("ust_va", "2026-11"), "2027-01-11");
+check("LSt ohne DFV → 10. Folgemonat", K.faelligkeit("lst_anmeldung", "2026-07"), "2026-08-10");
+check("LSt Dezember → Januar", K.faelligkeit("lst_anmeldung", "2026-12"), "2027-01-11");
+check("ESt Q3 → 10.09.", K.faelligkeit("est_vz", "Q3 2026"), "2026-09-10");
+check("GewSt Q3 → 15.08. ist Samstag → 17.08.", K.faelligkeit("gewst_vz", "Q3 2026"), "2026-08-17");
+check("Nachzahlung → unbekannt", K.faelligkeit("est_nachzahlung", "2024"), null);
+
 // ── Kategorien-Liste konsistent ─────────────────────────────────────────────
 check("Kategorie-Keys eindeutig", new Set(K.KATEGORIEN.map((k) => k.key)).size, K.KATEGORIEN.length);
 check("unklar existiert", !!K.KATEGORIE_BY_KEY.unklar, true);

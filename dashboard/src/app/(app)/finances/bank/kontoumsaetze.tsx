@@ -48,8 +48,11 @@ function zeitraumLabel(z: string) {
   const m = z.match(/^(\d{4})-(\d{2})$/);
   return m ? `${MONATE[Number(m[2]) - 1]} ${m[1]}` : z;
 }
+const BANKEN: Record<string, string> = { "29050101": "Sparkasse", "30020900": "Targobank" };
 function konto(iban: string | null) {
-  return iban ? `…${iban.slice(-4)}` : "—";
+  if (!iban) return "—";
+  const bank = iban.startsWith("DE") ? BANKEN[iban.slice(4, 12)] : undefined;
+  return `${bank ? bank + " " : ""}…${iban.slice(-4)}`;
 }
 const gruppeOf = (k: string | null) => KATEGORIE_BY_KEY[k ?? "unklar"]?.gruppe ?? "neutral";
 
@@ -191,7 +194,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
         <div>
           <h1 className="text-xl font-semibold text-neutral-900">Kontoumsätze</h1>
           <p className="text-sm text-neutral-500 mt-1">
-            {zeitraumText} — Sparkasse Bremen {konten.map(konto).join(", ")}
+            {zeitraumText} — {konten.map(konto).join(", ")}
             {data.letzterAbruf && <> · letzter Bankabruf {deDate(data.letzterAbruf)} {data.letzterAbruf.slice(11, 16)} UTC</>}
           </p>
         </div>
@@ -214,7 +217,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
           <select value={kontoFilter} onChange={(e) => setKontoFilter(e.target.value)} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm bg-white">
             <option value="alle">Alle Konten</option>
             {konten.map((k) => (
-              <option key={k} value={k}>Konto {konto(k)}</option>
+              <option key={k} value={k}>{konto(k)}</option>
             ))}
           </select>
           <button

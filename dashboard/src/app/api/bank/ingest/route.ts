@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
   if (auth === null) return NextResponse.json({ error: "Ingest secret not configured" }, { status: 503 });
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  let body: { action?: string; status?: { ok?: boolean; code?: string; message?: string }; transactions?: unknown[] };
+  let body: { action?: string; status?: { ok?: boolean; code?: string; message?: string; success?: boolean }; transactions?: unknown[] };
   try {
     body = await req.json();
   } catch {
@@ -66,7 +66,10 @@ export async function POST(req: NextRequest) {
   const code = body.status?.code ?? (ok ? "ok" : "error");
   try {
     const imported = await ingestBankRows(rows, "fints");
-    await recordFetchStatus({ ok, code, message: body.status?.message ?? null, success: ok && code === "ok" });
+    // Mehrere Banken: "success" = mindestens eine Bank hat geliefert (Worker setzt das Feld);
+    // ältere Worker ohne das Feld → wie bisher nur bei ok + code "ok".
+    const success = typeof body.status?.success === "boolean" ? body.status.success : ok && code === "ok";
+    await recordFetchStatus({ ok, code, message: body.status?.message ?? null, success });
     // Import ist schnell; der Abgleich hat ein Zeitbudget unter dem 60-s-Limit.
     // Rest (matching.remaining > 0) holt der Worker per action "match" nach.
     const matching = await runBankMatching({ budgetMs: 35_000 });

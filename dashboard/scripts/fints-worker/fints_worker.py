@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Hairvenly FinTS-Worker — holt Kontoumsätze der Sparkasse per FinTS/HBCI und
-schickt sie an das Dashboard (POST /api/bank/ingest). Dort läuft der Abgleich
-gegen offene Shopify-Bestellungen.
+Hairvenly FinTS-Worker — holt Kontoumsätze per FinTS/HBCI (Sparkasse Bremen,
+Targobank-Gehaltskonto) und schickt sie an das Dashboard (POST /api/bank/ingest).
+Dort laufen der Vorkasse-Abgleich und die Kategorisierung (Reiter Kontoumsätze).
 
 Läuft LOKAL auf dem Mac (launchd, stündlich 7–21 Uhr). Geheimnisse:
-  - Online-Banking-PIN  → macOS-Schlüsselbund (Dienst "hairvenly-fints")
+  - Online-Banking-PIN  → macOS-Schlüsselbund (Dienst "hairvenly-fints",
+                          weitere Banken "hairvenly-fints-<bank>")
   - Ingest-Secret       → SUPABASE_SERVICE_ROLE_KEY aus dashboard/.env.local
                           (oder BANK_INGEST_SECRET, falls dort gesetzt)
   - FinTS-Produkt-ID    → config.json (NICHT im Repo — Repo ist öffentlich)
@@ -17,13 +18,18 @@ meldet das ans Dashboard und kontaktiert die Bank erst wieder nach einem
 interaktiven `fints renew`. So kommt höchstens EINE unerwartete Anfrage aufs
 Handy (Mac-Mitteilung erklärt sie) statt einer pro Stunde.
 
+Jede Bank ist unabhängig: braucht eine Bank eine TAN, läuft die andere weiter.
+<bank> = sparkasse (Standard) | targobank
+
 Befehle:
-  fints setup      Ersteinrichtung (Anmeldename, PIN, Konto) + erste Freigabe
-  fints renew      pushTAN-Freigabe erneuern (alle ~90–180 Tage) + Abruf
-  fints run        Abruf ohne TAN (für launchd)
-  fints status     Zustand anzeigen
-  fints install    launchd-Job installieren (stündlich 7–21 Uhr)
-  fints uninstall  launchd-Job entfernen
+  fints setup [bank]       Ersteinrichtung (Anmeldename, PIN, Konto) + erste Freigabe
+  fints renew [bank]       TAN-Freigabe erneuern + Abruf (ohne bank: alle, die warten)
+  fints backfill [bank] [--since JJJJ-MM-TT]
+                           Historie holen (Standard ab 2025-07-01, braucht TAN)
+  fints run                Abruf ohne TAN, alle Banken (für launchd)
+  fints status             Zustand anzeigen
+  fints install            launchd-Job installieren (stündlich 7–21 Uhr)
+  fints uninstall          launchd-Job entfernen
 """
 
 from __future__ import annotations
@@ -63,7 +69,20 @@ DEFAULT_CONFIG = {
     "env_file": str(SCRIPT_DIR.parent.parent / ".env.local"),
     "initial_days": 90,
     "overlap_days": 3,
+    # Weitere Banken: {"targobank": {"user_id": "...", "account_ibans": [...]}}
+    # Die Sparkasse bleibt aus Kompatibilitätsgründen auf oberster Ebene.
+    "banks": {},
 }
+
+# Bekannte Banken (Server laut DK-Institutsliste). Die Sparkasse steht oben in DEFAULT_CONFIG.
+KNOWN_BANKS = {
+    "targobank": {
+        "name": "Targobank",
+        "blz": "30020900",
+        "server": "https://fints.targobank.de/travicretail_fints30pintanbroker/FinTs30PinTanHttpGate",
+    },
+}
+DEFAULT_BACKFILL_SINCE = "2025-07-01"
 
 log = logging.getLogger("fints-worker")
 
@@ -110,6 +129,12 @@ class BankResponses:
 BANK = BankResponses()
 
 
+def reset_bank_responses() -> None:
+    """Pro Bank frisch sammeln — sonst würde ein Fehler der einen Bank der anderen angelastet."""
+    global BANK
+    BANK = BankResponses()
+
+
 # ── Infrastruktur ────────────────────────────────────────────────────────────
 
 def setup_logging(verbose: bool) -> None:
@@ -154,8 +179,69 @@ def load_config() -> dict:
     return load_json(CONFIG_PATH, DEFAULT_CONFIG)
 
 
-def load_status() -> dict:
-    return load_json(STATUS_PATH, {"needs_tan": False, "last_success_date": None})
+# ── Banken (Profile) ─────────────────────────────────────────────────────────
+#
+# Die Sparkasse behält ihre bisherigen Pfade (state.bin, status.json, Keychain-
+# Dienst "hairvenly-fints") — ein Umbau darf ihren gespeicherten Zugang nicht
+# entwerten (sonst neue Geräte-Freigabe per pushTAN nötig).
+
+def profiles(cfg: dict) -> list[dict]:
+    out = [{
+        "key": "sparkasse", "name": "Sparkasse",
+        "blz": cfg["blz"], "server": cfg["server"],
+        "user_id": cfg["user_id"], "account_ibans": list(cfg["account_ibans"]),
+        "keychain": KEYCHAIN_SERVICE, "state": STATE_PATH, "status": STATUS_PATH,
+    }]
+    for key, b in (cfg.get("banks") or {}).items():
+        base = KNOWN_BANKS.get(key, {})
+        out.append({
+            "key": key, "name": b.get("name") or base.get("name") or key.title(),
+            "blz": b.get("blz") or base.get("blz"), "server": b.get("server") or base.get("server"),
+            "user_id": b.get("user_id", ""), "account_ibans": list(b.get("account_ibans", [])),
+            "keychain": f"{KEYCHAIN_SERVICE}-{key}",
+            "state": APP_DIR / f"state-{key}.bin", "status": APP_DIR / f"status-{key}.json",
+        })
+    return out
+
+
+def get_profile(cfg: dict, key: str, create: bool = False) -> dict | None:
+    key = key.lower()
+    for p in profiles(cfg):
+        if p["key"] == key:
+            return p
+    if create and key in KNOWN_BANKS:
+        cfg.setdefault("banks", {})[key] = {"user_id": "", "account_ibans": []}
+        return get_profile(cfg, key)
+    return None
+
+
+def save_profile(cfg: dict, p: dict) -> None:
+    if p["key"] == "sparkasse":
+        cfg["user_id"], cfg["account_ibans"] = p["user_id"], p["account_ibans"]
+    else:
+        entry = cfg.setdefault("banks", {}).setdefault(p["key"], {})
+        entry.update({"user_id": p["user_id"], "account_ibans": p["account_ibans"]})
+    save_json(CONFIG_PATH, cfg)
+
+
+def load_status(p: dict) -> dict:
+    return load_json(p["status"], {"needs_tan": False, "last_success_date": None})
+
+
+def save_status(p: dict, st: dict) -> None:
+    save_json(p["status"], st)
+
+
+def mark_success(p: dict) -> None:
+    st = load_status(p)
+    st.update({
+        "needs_tan": False,
+        "auth_failed": False,
+        "last_success_date": dt.date.today().isoformat(),
+        "last_success_at": dt.datetime.now().isoformat(timespec="seconds"),
+        "last_error": None,
+    })
+    save_status(p, st)
 
 
 def notify(title: str, text: str) -> None:
@@ -164,22 +250,22 @@ def notify(title: str, text: str) -> None:
     subprocess.run(["osascript", "-e", script], capture_output=True)
 
 
-def keychain_get_pin(user_id: str) -> str | None:
+def keychain_get_pin(p: dict) -> str | None:
     r = subprocess.run(
-        ["/usr/bin/security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", user_id, "-w"],
+        ["/usr/bin/security", "find-generic-password", "-s", p["keychain"], "-a", p["user_id"], "-w"],
         capture_output=True, text=True,
     )
     return r.stdout.rstrip("\n") if r.returncode == 0 and r.stdout.strip() else None
 
 
-def keychain_store_pin_interactive(user_id: str) -> bool:
+def keychain_store_pin_interactive(p: dict) -> bool:
     """`security` fragt die PIN selbst ab — sie taucht weder in argv noch im Log auf."""
     print("\nGleich fragt macOS zweimal nach dem Passwort für den Schlüsselbund-Eintrag.")
-    print("→ Dort deine Online-Banking-PIN der Sparkasse eingeben (Eingabe bleibt unsichtbar).\n")
+    print(f"→ Dort deine Online-Banking-PIN der {p['name']} eingeben (Eingabe bleibt unsichtbar).\n")
     r = subprocess.run([
         "/usr/bin/security", "add-generic-password", "-U",
-        "-s", KEYCHAIN_SERVICE, "-a", user_id,
-        "-l", "Hairvenly FinTS (Sparkasse)",
+        "-s", p["keychain"], "-a", p["user_id"],
+        "-l", f"Hairvenly FinTS ({p['name']})",
         "-T", "/usr/bin/security",
         "-w",
     ])
@@ -219,10 +305,6 @@ def post_dashboard(cfg: dict, payload: dict) -> dict | None:
     except Exception as e:  # Netzwerk weg etc.
         log.error("Dashboard nicht erreichbar: %s", e)
     return None
-
-
-def report_status(cfg: dict, ok: bool, code: str, message: str = "") -> None:
-    post_dashboard(cfg, {"status": {"ok": ok, "code": code, "message": message}, "transactions": []})
 
 
 # ── Umsätze → Dashboard-Format ───────────────────────────────────────────────
@@ -350,7 +432,7 @@ def make_connection(url: str):
     return Connection(url)
 
 
-def make_client(cfg: dict, pin: str, with_state: bool = True):
+def make_client(cfg: dict, p: dict, pin: str, with_state: bool = True):
     from fints.client import FinTS3PinTanClient
 
     class Client(FinTS3PinTanClient):
@@ -358,23 +440,25 @@ def make_client(cfg: dict, pin: str, with_state: bool = True):
             BANK.add(response.code, response.text)
             return super()._process_response(dialog, segment, response)
 
-    state = STATE_PATH.read_bytes() if with_state and STATE_PATH.exists() else None
+    state_path: Path = p["state"]
+    state = state_path.read_bytes() if with_state and state_path.exists() else None
     client = Client(
-        cfg["blz"], cfg["user_id"], pin, cfg["server"],
+        p["blz"], p["user_id"], pin, p["server"],
         product_id=cfg["product_id"], product_version=PRODUCT_VERSION,
         from_data=state,
     )
-    client.connection = make_connection(cfg["server"])
+    client.connection = make_connection(p["server"])
     return client
 
 
-def save_state(client) -> None:
+def save_state(client, p: dict) -> None:
     data = client.deconstruct(including_private=True)
     APP_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = STATE_PATH.with_suffix(".tmp")
+    state_path: Path = p["state"]
+    tmp = state_path.with_suffix(".tmp")
     tmp.write_bytes(data)
     os.chmod(tmp, 0o600)
-    tmp.replace(STATE_PATH)
+    tmp.replace(state_path)
 
 
 def resolve_tan(client, res, interactive: bool):
@@ -386,7 +470,7 @@ def resolve_tan(client, res, interactive: bool):
         raise NeedsTan()
     while isinstance(res, NeedTANResponse):
         if res.decoupled:
-            print("\n📱 Bitte jetzt in der S-pushTAN-App freigeben …")
+            print("\n📱 Bitte jetzt in der Banking-App freigeben …")
             if res.challenge:
                 print(f"   Sparkasse: {res.challenge}")
             deadline = time.time() + 300
@@ -397,59 +481,116 @@ def resolve_tan(client, res, interactive: bool):
                 raise RuntimeError("Freigabe nicht innerhalb von 5 Minuten erfolgt.")
             print("✓ Freigabe erhalten.")
         else:
+            matrix = getattr(res, "challenge_matrix", None)
+            if matrix:
+                # photoTAN/QR-TAN: Grafik anzeigen, mit der Banking-App scannen
+                mime, data = matrix
+                path = APP_DIR / ("tan-grafik.png" if "png" in str(mime) else "tan-grafik.jpg")
+                path.write_bytes(data)
+                os.chmod(path, 0o600)
+                subprocess.run(["open", str(path)], capture_output=True)
+                print(f"\n🖼  TAN-Grafik geöffnet ({path.name}) – mit der Banking-App scannen.")
+            elif getattr(res, "challenge_hhduc", None):
+                print("\n⚠️  Die Bank verlangt chipTAN mit Flickercode – das unterstützt der Worker nicht.")
+                print("   Bitte im Online-Banking ein App-Verfahren (z.B. Banking-App/pushTAN) aktivieren.")
             print(f"\nTAN erforderlich: {res.challenge}")
             tan = input("TAN: ").strip()
             res = client.send_tan(res, tan)
+            if matrix:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
     return res
 
 
-def select_accounts(cfg: dict, accounts: list, interactive: bool) -> list:
-    if cfg["account_ibans"]:
-        chosen = [a for a in accounts if a.iban in cfg["account_ibans"]]
+def select_accounts(cfg: dict, p: dict, accounts: list, interactive: bool) -> list:
+    if p["account_ibans"]:
+        chosen = [a for a in accounts if a.iban in p["account_ibans"]]
         if chosen:
             return chosen
-        log.warning("Konfigurierte IBAN(s) nicht im Zugang gefunden — nehme alle.")
+        log.warning("%s: konfigurierte IBAN(s) nicht im Zugang gefunden — nehme alle.", p["name"])
     if interactive and len(accounts) > 1:
-        print("\nWelche Konten sollen abgeglichen werden?")
+        print(f"\nWelche Konten der {p['name']} sollen abgerufen werden?")
         for i, a in enumerate(accounts):
             print(f"  {i}  {a.iban}")
         raw = input("Nummern mit Komma (Enter = alle): ").strip()
         if raw:
             idx = [int(x) for x in raw.split(",") if x.strip().isdigit()]
             accounts = [accounts[i] for i in idx if 0 <= i < len(accounts)]
-        cfg["account_ibans"] = [a.iban for a in accounts]
-        save_json(CONFIG_PATH, cfg)
+    if interactive:
+        p["account_ibans"] = [a.iban for a in accounts]
+        save_profile(cfg, p)
     return accounts
 
 
-def fetch(cfg: dict, interactive: bool, fresh: bool = False) -> list[dict]:
-    pin = keychain_get_pin(cfg["user_id"])
+def choose_tan_mechanism(client, p: dict, interactive: bool) -> None:
+    client.fetch_tan_mechanisms()
+    mech = client.get_tan_mechanisms()
+    candidates = [k for k in mech if k != "999"]
+    # App-Freigabe (decoupled) bevorzugen: Sparkasse pushTAN 2.0, sonst Banking-App
+    preferred = next((k for k in candidates if "push" in (mech[k].name or "").lower()), None) \
+        or next((k for k in candidates if any(w in (mech[k].name or "").lower() for w in ("app", "secure", "decoupled"))), None)
+    pick = preferred
+    if not pick and len(candidates) > 1 and interactive:
+        print("\nWelches TAN-Verfahren?")
+        for i, k in enumerate(candidates):
+            print(f"  {i}  {mech[k].name} ({k})")
+        raw = input("Nummer [0]: ").strip()
+        pick = candidates[int(raw)] if raw.isdigit() and int(raw) < len(candidates) else candidates[0]
+    pick = pick or (candidates[0] if candidates else None)
+    if pick:
+        client.set_tan_mechanism(pick)
+        print(f"TAN-Verfahren: {mech[pick].name}")
+
+
+def choose_tan_medium(client, p: dict, interactive: bool) -> None:
+    if client.selected_tan_medium is not None or not client.is_tan_media_required():
+        return
+    if p["key"] == "sparkasse":
+        # KEIN get_tan_media() in eigenem Dialog: die Sparkasse fordert schon
+        # bei dessen Init die pushTAN an (3955) und legt beim Beenden mit
+        # offener Freigabe auf (RemoteDisconnected, gemessen 15.10.2026).
+        # python-fints liefert in genau diesem Fall ohnehin [] → Medium "".
+        # pushTAN 2.0 (decoupled) braucht bei der Sparkasse keinen Gerätenamen.
+        client.selected_tan_medium = ""
+        return
+    try:
+        media = list(client.get_tan_media()[1] or [])
+    except Exception as e:  # Bank verweigert die Abfrage → ohne Gerätenamen versuchen
+        log.warning("%s: TAN-Medien nicht abrufbar (%s)", p["name"], e)
+        media = []
+    if not media:
+        client.selected_tan_medium = ""
+        return
+    if len(media) > 1 and interactive:
+        print("\nWelches TAN-Gerät?")
+        for i, m in enumerate(media):
+            print(f"  {i}  {getattr(m, 'tan_medium_name', None) or m}")
+        raw = input("Nummer [0]: ").strip()
+        client.set_tan_medium(media[int(raw)] if raw.isdigit() and int(raw) < len(media) else media[0])
+    else:
+        client.set_tan_medium(media[0])
+
+
+def fetch(cfg: dict, p: dict, interactive: bool, fresh: bool = False, since: dt.date | None = None) -> list[dict]:
+    pin = keychain_get_pin(p)
     if not pin:
-        raise RuntimeError("PIN nicht im Schlüsselbund — bitte `fints setup` ausführen.")
-    client = make_client(cfg, pin, with_state=not fresh)
+        raise RuntimeError(f"PIN nicht im Schlüsselbund — bitte `fints setup {p['key']}` ausführen.")
+    client = make_client(cfg, p, pin, with_state=not fresh)
 
     if interactive and not client.get_current_tan_mechanism():
-        client.fetch_tan_mechanisms()
-        mech = client.get_tan_mechanisms()
-        # pushTAN 2.0 (decoupled) bevorzugen, sonst erstes Zwei-Schritt-Verfahren
-        pick = next((k for k, m in mech.items() if "push" in (m.name or "").lower()), None) \
-            or next((k for k in mech if k != "999"), None)
-        if pick:
-            client.set_tan_mechanism(pick)
-            print(f"TAN-Verfahren: {mech[pick].name}")
-        if client.selected_tan_medium is None and client.is_tan_media_required():
-            # KEIN get_tan_media() in eigenem Dialog: die Sparkasse fordert schon
-            # bei dessen Init die pushTAN an (3955) und legt beim Beenden mit
-            # offener Freigabe auf (RemoteDisconnected, gemessen 15.10.2026).
-            # python-fints liefert in genau diesem Fall ohnehin [] → Medium "".
-            # pushTAN 2.0 (decoupled) braucht bei der Sparkasse keinen Gerätenamen.
-            client.selected_tan_medium = ""
+        choose_tan_mechanism(client, p, interactive)
+        choose_tan_medium(client, p, interactive)
     elif not client.get_current_tan_mechanism():
-        raise RuntimeError("Kein gespeicherter Zugang — bitte `fints setup` ausführen.")
+        raise RuntimeError(f"Kein gespeicherter Zugang — bitte `fints setup {p['key']}` ausführen.")
 
-    status = load_status()
+    status = load_status(p)
     today = dt.date.today()
-    if status.get("last_success_date") and not fresh:
+    if since is not None:
+        # Historie (backfill): älter als 90 Tage verlangt die Bank eine TAN (PSD2)
+        start = since
+    elif status.get("last_success_date") and not fresh:
         last = dt.date.fromisoformat(status["last_success_date"])
         start = max(today - dt.timedelta(days=89), last - dt.timedelta(days=cfg["overlap_days"]))
     else:
@@ -462,10 +603,11 @@ def fetch(cfg: dict, interactive: bool, fresh: bool = False) -> list[dict]:
             if client.init_tan_response:
                 resolve_tan(client, client.init_tan_response, interactive)
             accounts = resolve_tan(client, client.get_sepa_accounts(), interactive)
-            for acc in select_accounts(cfg, list(accounts), interactive):
+            for acc in select_accounts(cfg, p, list(accounts), interactive):
                 res = resolve_tan(client, client.get_transactions(acc, start, today), interactive)
                 mapped = [m for m in (map_transaction(t, acc.iban) for t in (res or [])) if m]
-                log.info("Konto …%s: %d Umsätze seit %s", acc.iban[-4:], len(mapped), start.isoformat())
+                first = min((m["booking_date"] for m in mapped), default="—")
+                log.info("%s …%s: %d Umsätze seit %s (frühester %s)", p["name"], acc.iban[-4:], len(mapped), start.isoformat(), first)
                 rows.extend(mapped)
     except Exception as e:
         # Beendet die Bank den Dialog mit offener Freigabe, wirft das __exit__
@@ -479,171 +621,303 @@ def fetch(cfg: dict, interactive: bool, fresh: bool = False) -> list[dict]:
         # Zustand (System-ID, BPD/UPD) immer sichern — sonst gilt der Mac
         # beim nächsten Lauf als neues Gerät und die Bank verlangt eine TAN.
         try:
-            save_state(client)
+            save_state(client, p)
         except Exception as e:
             log.warning("Zustand nicht gespeichert: %s", e)
     return rows
 
 
-def deliver(cfg: dict, rows: list[dict]) -> dict | None:
-    res = post_dashboard(cfg, {"status": {"ok": True, "code": "ok", "message": f"{len(rows)} Umsätze"}, "transactions": rows})
-    if res is not None:
-        status = load_status()
-        status.update({
-            "needs_tan": False,
-            "auth_failed": False,
-            "last_success_date": dt.date.today().isoformat(),
-            "last_success_at": dt.datetime.now().isoformat(timespec="seconds"),
-            "last_error": None,
-        })
-        save_json(STATUS_PATH, status)
-        m = dict(res.get("matching") or {})
-        # Abgleich hat ein Zeitbudget pro Aufruf — Rest in Folgeaufrufen nachholen.
-        for _ in range(10):
-            if not m.get("remaining"):
-                break
-            more = post_dashboard(cfg, {"action": "match"})
-            mm = (more or {}).get("matching") or {}
-            if not more or not mm.get("processed"):
-                break
-            for k in ("processed", "autoPaid", "shadow", "review", "ignored"):
-                m[k] = (m.get(k) or 0) + (mm.get(k) or 0)
-            m["remaining"] = mm.get("remaining", 0)
-        res["matching"] = m
-        log.info("Dashboard: %s neu von %s · Abgleich: %s automatisch, %s Shadow, %s zu prüfen, %s offen (Modus %s)",
-                 res.get("inserted"), res.get("received"), m.get("autoPaid"), m.get("shadow"), m.get("review"),
-                 m.get("remaining"), m.get("mode"))
+def drain(cfg: dict, res: dict, rounds: int = 10) -> dict:
+    """Abgleich + Kategorisierung haben pro Aufruf ein Zeitbudget (Vercel: 60 s) —
+    den Rest in Folgeaufrufen nachholen."""
+    m = dict(res.get("matching") or {})
+    k = dict(m.get("kategorien") or {})
+    for _ in range(rounds):
+        if not m.get("remaining") and not k.get("remaining"):
+            break
+        more = post_dashboard(cfg, {"action": "match"})
+        mm = (more or {}).get("matching") or {}
+        kk = mm.get("kategorien") or {}
+        if not more or (not mm.get("processed") and not kk.get("geprueft")):
+            break
+        for key in ("processed", "autoPaid", "shadow", "review", "ignored"):
+            m[key] = (m.get(key) or 0) + (mm.get(key) or 0)
+        m["remaining"] = mm.get("remaining", 0)
+        k["remaining"] = kk.get("remaining", 0)
+    m["kategorien"] = k
+    return m
+
+
+def send(cfg: dict, rows: list[dict], status: dict, rounds: int = 10) -> dict | None:
+    """Umsätze + Status ans Dashboard; danach Abgleich/Kategorisierung zu Ende bringen."""
+    res = post_dashboard(cfg, {"status": status, "transactions": rows})
+    if res is None:
+        return None
+    res["matching"] = drain(cfg, res, rounds)
+    m = res["matching"]
+    log.info("Dashboard: %s neu von %s · Abgleich: %s automatisch, %s Shadow, %s zu prüfen, %s offen (Modus %s)",
+             res.get("inserted"), res.get("received"), m.get("autoPaid"), m.get("shadow"), m.get("review"),
+             m.get("remaining"), m.get("mode"))
     return res
+
+
+def fetch_error(p: dict, e: Exception) -> tuple[str, str]:
+    """(code, Meldung) für einen fehlgeschlagenen Abruf; vermerkt den Zustand der Bank."""
+    st = load_status(p)
+    bank = BANK.summary()
+    msg = (f"Bank: {bank}" if bank else f"{type(e).__name__}: {e}")[:300]
+    st["last_error"] = msg
+    code = "error"
+    if BANK.auth_failed():
+        st["auth_failed"] = True
+        code = "auth_failed"
+    save_status(p, st)
+    return code, msg
 
 
 # ── Befehle ──────────────────────────────────────────────────────────────────
 
-def cmd_run() -> int:
+def configured_profiles(cfg: dict) -> list[dict]:
+    return [p for p in profiles(cfg) if p["user_id"]]
+
+
+def cmd_run(args: list[str]) -> int:
+    """Stündlicher Lauf (launchd): alle Banken ohne TAN, ein gemeinsamer Bericht."""
     cfg = load_config()
-    status = load_status()
-    if not cfg["user_id"] or not cfg["product_id"]:
+    banks = configured_profiles(cfg)
+    if not banks or not cfg["product_id"]:
         log.info("Nicht eingerichtet — `fints setup` ausführen.")
         return 0
-    if status.get("auth_failed"):
-        # Bewusst KEIN Bankkontakt: ein weiterer Fehlversuch kann den Zugang sperren.
-        log.info("Anmeldung zuletzt abgelehnt — kein Abruf bis `fints setup`.")
-        return 0
-    if status.get("needs_tan"):
-        # Bewusst KEIN Bankkontakt: jeder Versuch würde eine pushTAN aufs Handy schicken.
-        log.info("Wartet auf Freigabe (`fints renew`) — kein Abruf.")
-        return 0
-    try:
-        rows = fetch(cfg, interactive=False)
-    except NeedsTan:
-        status.update({"needs_tan": True, "last_error": "needs_tan"})
-        save_json(STATUS_PATH, status)
-        log.warning("Bank verlangt pushTAN-Freigabe — automatischer Abruf pausiert.")
-        report_status(cfg, False, "needs_tan", "Sparkasse verlangt eine neue pushTAN-Freigabe (fints renew).")
-        notify("Hairvenly Bank-Abgleich", "Sparkasse verlangt eine neue Freigabe – pushTAN-Anfrage ignorieren, im Terminal: fints renew")
-        return 0
-    except Exception as e:
-        bank = BANK.summary()
-        msg = (f"Bank: {bank}" if bank else f"{type(e).__name__}: {e}")[:300]
-        status["last_error"] = msg
-        if BANK.auth_failed():
-            status["auth_failed"] = True
-            save_json(STATUS_PATH, status)
-            log.error("Anmeldung abgelehnt (%s) — automatischer Abruf gestoppt.", msg)
-            report_status(cfg, False, "auth_failed", f"Anmeldung abgelehnt – bitte `fints setup` ausführen. {msg}")
-            notify("Hairvenly Bank-Abgleich", "Sparkasse lehnt die Anmeldung ab. Abruf gestoppt – Terminal: fints setup")
-            return 1
-        save_json(STATUS_PATH, status)
-        log.error("Abruf fehlgeschlagen: %s", msg)
-        report_status(cfg, False, "error", msg)
-        return 1
-    return 0 if deliver(cfg, rows) is not None else 1
+    rows: list[dict] = []
+    ok_banks: list[dict] = []
+    parts: list[str] = []
+    codes: set[str] = set()
+    for p in banks:
+        st = load_status(p)
+        if st.get("auth_failed"):
+            # Bewusst KEIN Bankkontakt: ein weiterer Fehlversuch kann den Zugang sperren.
+            log.info("%s: Anmeldung zuletzt abgelehnt — kein Abruf bis `fints setup %s`.", p["name"], p["key"])
+            parts.append(f"{p['name']}: Anmeldung abgelehnt (fints setup {p['key']})")
+            codes.add("auth_failed")
+            continue
+        if st.get("needs_tan"):
+            # Bewusst KEIN Bankkontakt: jeder Versuch würde eine TAN-Anfrage aufs Handy schicken.
+            log.info("%s: wartet auf Freigabe (`fints renew %s`) — kein Abruf.", p["name"], p["key"])
+            parts.append(f"{p['name']}: wartet auf TAN-Freigabe (fints renew {p['key']})")
+            codes.add("needs_tan")
+            continue
+        reset_bank_responses()
+        try:
+            got = fetch(cfg, p, interactive=False)
+        except NeedsTan:
+            st.update({"needs_tan": True, "last_error": "needs_tan"})
+            save_status(p, st)
+            log.warning("%s verlangt eine TAN-Freigabe — automatischer Abruf pausiert.", p["name"])
+            notify("Hairvenly Bank-Abgleich",
+                   f"{p['name']} verlangt eine neue Freigabe – Anfrage am Handy ignorieren, im Terminal: fints renew {p['key']}")
+            parts.append(f"{p['name']}: verlangt neue TAN-Freigabe (fints renew {p['key']})")
+            codes.add("needs_tan")
+            continue
+        except Exception as e:
+            code, msg = fetch_error(p, e)
+            if code == "auth_failed":
+                log.error("%s: Anmeldung abgelehnt (%s) — automatischer Abruf gestoppt.", p["name"], msg)
+                notify("Hairvenly Bank-Abgleich", f"{p['name']} lehnt die Anmeldung ab. Abruf gestoppt – Terminal: fints setup {p['key']}")
+                parts.append(f"{p['name']}: Anmeldung abgelehnt – {msg}")
+            else:
+                log.error("%s: Abruf fehlgeschlagen: %s", p["name"], msg)
+                parts.append(f"{p['name']}: {msg}")
+            codes.add(code)
+            continue
+        rows.extend(got)
+        ok_banks.append(p)
+        parts.append(f"{p['name']}: {len(got)} Umsätze")
+
+    # Schlimmster Zustand bestimmt den Code; "success" = mindestens eine Bank hat geliefert.
+    code = next((c for c in ("auth_failed", "needs_tan", "error") if c in codes), "ok")
+    status = {"ok": code == "ok", "code": code, "message": " · ".join(parts), "success": bool(ok_banks)}
+    res = send(cfg, rows, status)
+    if res is not None:
+        for p in ok_banks:
+            mark_success(p)
+    return 0 if res is not None and code in ("ok", "needs_tan") else 1
 
 
-def cmd_renew(fresh: bool = False) -> int:
-    cfg = load_config()
-    if not cfg["user_id"]:
-        print("Noch nicht eingerichtet — bitte `fints setup` ausführen.")
-        return 1
-    print("Verbinde mit der Sparkasse …")
+def renew_one(cfg: dict, p: dict, fresh: bool = False) -> int:
+    print(f"Verbinde mit der {p['name']} …")
+    reset_bank_responses()
     try:
-        rows = fetch(cfg, interactive=True, fresh=fresh)
+        rows = fetch(cfg, p, interactive=True, fresh=fresh)
     except Exception as e:
         bank = BANK.summary()
-        log.error("renew fehlgeschlagen: %s: %s | Bank: %s", type(e).__name__, e, bank or "—")
+        log.error("renew %s fehlgeschlagen: %s: %s | Bank: %s", p["key"], type(e).__name__, e, bank or "—")
         print("\n✗ Fehlgeschlagen.")
-        if bank:
-            print(f"  Antwort der Sparkasse: {bank}")
-        else:
-            print(f"  {type(e).__name__}: {e}")
-        status = load_status()
-        status["last_error"] = f"Bank: {bank}" if bank else str(e)[:300]
-        if BANK.auth_failed():
-            status["auth_failed"] = True
+        print(f"  Antwort der {p['name']}: {bank}" if bank else f"  {type(e).__name__}: {e}")
+        code, _ = fetch_error(p, e)
+        if code == "auth_failed":
             if "3938" in {c for c, _ in BANK.items}:
                 print("\n  ⛔ Der Online-Banking-Zugang ist vorläufig GESPERRT.")
-                print("     Sperre im Online-Banking/bei der Sparkasse aufheben, erst dann erneut einrichten.")
-            print("\n  ⚠️  Die Sparkasse lehnt die Anmeldung ab. NICHT einfach wiederholen –")
+                print("     Sperre im Online-Banking/bei der Bank aufheben, erst dann erneut einrichten.")
+            print(f"\n  ⚠️  Die {p['name']} lehnt die Anmeldung ab. NICHT einfach wiederholen –")
             print("     nach 3 Fehlversuchen wird der Online-Banking-Zugang gesperrt.")
             print("     Erst im Browser/in der App mit demselben Anmeldenamen + PIN anmelden.")
-            print("     Klappt das: in `fints setup` statt des Anmeldenamens die Legitimations-ID")
-            print("     probieren und die PIN neu speichern (Frage „Neu setzen?“ mit j beantworten).")
-        save_json(STATUS_PATH, status)
+            print(f"     Klappt das: in `fints setup {p['key']}` ggf. die Legitimations-ID statt des")
+            print("     Anmeldenamens probieren und die PIN neu speichern („Neu setzen?“ mit j beantworten).")
         return 1
     print(f"✓ {len(rows)} Umsätze abgerufen ({sum(1 for r in rows if r['amount'] > 0)} Eingänge). Sende ans Dashboard …")
-    res = deliver(cfg, rows)
+    res = send(cfg, rows, {"ok": True, "code": "ok", "message": f"{p['name']}: {len(rows)} Umsätze", "success": True})
     if res is None:
         print("✗ Dashboard nicht erreichbar — Details: fints status")
         return 1
+    mark_success(p)
     m = res.get("matching") or {}
     print(f"✓ {res.get('inserted')} neu gespeichert. Abgleich ({m.get('mode')}): "
           f"{m.get('autoPaid', 0)} automatisch bezahlt, {m.get('shadow', 0)} sichere Treffer (Shadow), {m.get('review', 0)} zu prüfen.")
-    print(f"  → {cfg['dashboard_url'].rstrip('/')}/finances/payments")
+    print(f"  → {cfg['dashboard_url'].rstrip('/')}/finances/bank")
     return 0
 
 
-def cmd_setup() -> int:
+def cmd_renew(args: list[str]) -> int:
     cfg = load_config()
-    if not cfg["product_id"]:
-        cfg["product_id"] = input("FinTS-Produkt-Registrierungsnummer: ").strip()
-    print("Hairvenly FinTS-Einrichtung (Sparkasse Bremen)\n")
-    current = cfg["user_id"]
-    uid = input(f"Online-Banking-Anmeldename{f' [{current}]' if current else ''}: ").strip() or current
-    if not uid:
-        print("Anmeldename fehlt.")
+    banks = configured_profiles(cfg)
+    if not banks:
+        print("Noch nicht eingerichtet — bitte `fints setup` ausführen.")
         return 1
-    cfg["user_id"] = uid
-    save_json(CONFIG_PATH, cfg)
-    if keychain_get_pin(uid) and input("PIN ist schon im Schlüsselbund. Neu setzen? [j/N] ").strip().lower() != "j":
-        pass
-    elif not keychain_store_pin_interactive(uid):
-        print("PIN konnte nicht gespeichert werden.")
-        return 1
-    if STATE_PATH.exists():
-        STATE_PATH.unlink()
-    save_json(STATUS_PATH, {"needs_tan": False, "last_success_date": None})
-    rc = cmd_renew(fresh=True)
-    if rc == 0 and not LAUNCHD_PLIST.exists():
-        if input("\nStündlichen Abruf (7–21 Uhr) jetzt aktivieren? [J/n] ").strip().lower() in ("", "j", "y"):
-            return cmd_install()
+    if args:
+        p = get_profile(cfg, args[0])
+        if not p or not p["user_id"]:
+            print(f"Bank „{args[0]}“ ist nicht eingerichtet — `fints setup {args[0]}`.")
+            return 1
+        targets = [p]
+    else:
+        # Ohne Angabe: alle, die auf eine Freigabe warten — sonst alle
+        targets = [p for p in banks if load_status(p).get("needs_tan")] or banks
+    rc = 0
+    for p in targets:
+        rc |= renew_one(cfg, p)
     return rc
 
 
-def cmd_status() -> int:
-    cfg, st = load_config(), load_status()
-    print(f"Anmeldename:      {cfg['user_id'] or '—'}")
-    print(f"Konten:           {', '.join('…' + i[-4:] for i in cfg['account_ibans']) or 'alle'}")
-    print(f"PIN im Keychain:  {'ja' if cfg['user_id'] and keychain_get_pin(cfg['user_id']) else 'nein'}")
-    print(f"Zugang gesichert: {'ja' if STATE_PATH.exists() else 'nein'}")
-    print(f"Anmeldung abgel.: {'JA → fints setup' if st.get('auth_failed') else 'nein'}")
-    print(f"Wartet auf TAN:   {'JA → fints renew' if st.get('needs_tan') else 'nein'}")
-    print(f"Letzter Erfolg:   {st.get('last_success_at') or '—'}")
-    print(f"Letzter Fehler:   {st.get('last_error') or '—'}")
+def cmd_setup(args: list[str]) -> int:
+    key = (args[0] if args else "sparkasse").lower()
+    cfg = load_config()
+    p = get_profile(cfg, key, create=True)
+    if not p:
+        print(f"Unbekannte Bank „{key}“. Möglich: sparkasse, {', '.join(KNOWN_BANKS)}")
+        return 1
+    if not cfg["product_id"]:
+        cfg["product_id"] = input("FinTS-Produkt-Registrierungsnummer: ").strip()
+    print(f"Hairvenly FinTS-Einrichtung ({p['name']}, BLZ {p['blz']})\n")
+    current = p["user_id"]
+    uid = input(f"Online-Banking-Anmeldename / Kundennummer{f' [{current}]' if current else ''}: ").strip() or current
+    if not uid:
+        print("Anmeldename fehlt.")
+        return 1
+    p["user_id"] = uid
+    save_profile(cfg, p)
+    if keychain_get_pin(p) and input("PIN ist schon im Schlüsselbund. Neu setzen? [j/N] ").strip().lower() != "j":
+        pass
+    elif not keychain_store_pin_interactive(p):
+        print("PIN konnte nicht gespeichert werden.")
+        return 1
+    state_path: Path = p["state"]
+    if state_path.exists():
+        state_path.unlink()
+    save_status(p, {"needs_tan": False, "last_success_date": None})
+    rc = renew_one(cfg, p, fresh=True)
+    if rc == 0 and not LAUNCHD_PLIST.exists():
+        if input("\nStündlichen Abruf (7–21 Uhr) jetzt aktivieren? [J/n] ").strip().lower() in ("", "j", "y"):
+            return cmd_install([])
+    return rc
+
+
+def cmd_backfill(args: list[str]) -> int:
+    """Historie holen. Älter als 90 Tage = TAN-pflichtig (PSD2) → nur interaktiv."""
+    since_raw = DEFAULT_BACKFILL_SINCE
+    keys: list[str] = []
+    it = iter(args)
+    for a in it:
+        if a == "--since":
+            since_raw = next(it, since_raw)
+        elif a.startswith("--since="):
+            since_raw = a.split("=", 1)[1]
+        else:
+            keys.append(a.lower())
+    try:
+        since = dt.date.fromisoformat(since_raw)
+    except ValueError:
+        print(f"Ungültiges Datum: {since_raw} (Format JJJJ-MM-TT)")
+        return 1
+    cfg = load_config()
+    banks = configured_profiles(cfg)
+    if keys:
+        banks = [p for p in banks if p["key"] in keys]
+    if not banks:
+        print("Keine eingerichtete Bank gefunden — erst `fints setup [bank]`.")
+        return 1
+    rc = 0
+    for p in banks:
+        print(f"\n━━ {p['name']}: Umsätze seit {since.strftime('%d.%m.%Y')} ━━")
+        reset_bank_responses()
+        try:
+            rows = fetch(cfg, p, interactive=True, since=since)
+        except Exception as e:
+            bank = BANK.summary()
+            log.error("backfill %s fehlgeschlagen: %s: %s | Bank: %s", p["key"], type(e).__name__, e, bank or "—")
+            print(f"✗ Fehlgeschlagen. {('Antwort der ' + p['name'] + ': ' + bank) if bank else f'{type(e).__name__}: {e}'}")
+            print("  Manche Banken liefern nur eine begrenzte Historie — ggf. mit späterem --since erneut versuchen.")
+            fetch_error(p, e)
+            rc = 1
+            continue
+        mark_success(p)
+        by_acc: dict[str, list[str]] = {}
+        for r in rows:
+            by_acc.setdefault(r["account_iban"] or "?", []).append(r["booking_date"])
+        for iban, dates in by_acc.items():
+            print(f"  Konto …{iban[-4:]}: {len(dates)} Umsätze, frühester {min(dates)}")
+        if not rows:
+            continue
+        # In Paketen senden: Import + Abgleich + Kategorisierung müssen je Aufruf in 60 s passen.
+        rows.sort(key=lambda r: r["booking_date"])
+        inserted = 0
+        for i in range(0, len(rows), 600):
+            chunk = rows[i:i + 600]
+            res = send(cfg, chunk, {"ok": True, "code": "ok", "message": f"Historie {p['name']}: {len(rows)} Umsätze", "success": True}, rounds=40)
+            if res is None:
+                print("✗ Dashboard nicht erreichbar — Rest später erneut mit `fints backfill` (doppelte werden verworfen).")
+                return 1
+            inserted += int(res.get("inserted") or 0)
+            print(f"  … {min(i + 600, len(rows))}/{len(rows)} übertragen")
+        print(f"✓ {inserted} neu gespeichert (bereits vorhandene werden automatisch verworfen).")
+    print(f"\n→ {cfg['dashboard_url'].rstrip('/')}/finances/bank")
+    return rc
+
+
+def cmd_status(args: list[str]) -> int:
+    cfg = load_config()
     print(f"launchd-Job:      {'installiert' if LAUNCHD_PLIST.exists() else 'nicht installiert'}")
     print(f"Log:              {LOG_PATH}")
+    for p in profiles(cfg):
+        st = load_status(p)
+        print(f"\n── {p['name']} ({p['key']}) ──")
+        if not p["user_id"]:
+            print(f"Nicht eingerichtet → fints setup {p['key']}")
+            continue
+        print(f"Anmeldename:      {p['user_id']}")
+        print(f"Konten:           {', '.join('…' + i[-4:] for i in p['account_ibans']) or 'alle'}")
+        print(f"PIN im Keychain:  {'ja' if keychain_get_pin(p) else 'nein'}")
+        print(f"Zugang gesichert: {'ja' if Path(p['state']).exists() else 'nein'}")
+        print(f"Anmeldung abgel.: {'JA → fints setup ' + p['key'] if st.get('auth_failed') else 'nein'}")
+        print(f"Wartet auf TAN:   {'JA → fints renew ' + p['key'] if st.get('needs_tan') else 'nein'}")
+        print(f"Letzter Erfolg:   {st.get('last_success_at') or '—'}")
+        print(f"Letzter Fehler:   {st.get('last_error') or '—'}")
+    for key in KNOWN_BANKS:
+        if not get_profile(cfg, key):
+            print(f"\n── {KNOWN_BANKS[key]['name']} ({key}) ──\nNicht eingerichtet → fints setup {key}")
     return 0
 
 
-def cmd_install() -> int:
+def cmd_install(args: list[str] | None = None) -> int:
     python = SCRIPT_DIR / ".venv" / "bin" / "python"
     plist = {
         "Label": LAUNCHD_LABEL,
@@ -667,7 +941,7 @@ def cmd_install() -> int:
     return 0
 
 
-def cmd_uninstall() -> int:
+def cmd_uninstall(args: list[str] | None = None) -> int:
     subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}", str(LAUNCHD_PLIST)], capture_output=True)
     if LAUNCHD_PLIST.exists():
         LAUNCHD_PLIST.unlink()
@@ -680,12 +954,12 @@ def main() -> int:
     setup_logging(verbose=cmd != "run")
     commands = {
         "run": cmd_run, "renew": cmd_renew, "setup": cmd_setup, "status": cmd_status,
-        "install": cmd_install, "uninstall": cmd_uninstall,
+        "backfill": cmd_backfill, "install": cmd_install, "uninstall": cmd_uninstall,
     }
     if cmd not in commands:
         print(__doc__)
         return 2
-    return commands[cmd]()
+    return commands[cmd](sys.argv[2:])
 
 
 if __name__ == "__main__":

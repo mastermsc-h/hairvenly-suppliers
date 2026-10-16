@@ -55,15 +55,17 @@ export async function GET(request: Request) {
     .filter((u) => u.email && !(u.denied_features ?? []).includes("finances"))
     .map((u) => u.email as string);
 
+  // last_fetch_message nennt die betroffene Bank (Worker mit mehreren Banken: Sparkasse, Targobank)
+  const detail = state.last_fetch_message ? ` (${state.last_fetch_message})` : "";
   const reason = authFailed
-    ? "Die Sparkasse hat die Anmeldung abgelehnt (PIN oder Anmeldename). Der automatische Abruf ist gestoppt, damit der Zugang nicht gesperrt wird. Erst im Online-Banking anmelden, dann am Mac <code>fints setup</code> ausführen."
+    ? `Die Bank hat die Anmeldung abgelehnt (PIN oder Anmeldename)${detail}. Der automatische Abruf dieser Bank ist gestoppt, damit der Zugang nicht gesperrt wird. Erst im Online-Banking anmelden, dann am Mac <code>fints setup &lt;bank&gt;</code> ausführen.`
     : needsTan
-    ? "Die Sparkasse verlangt eine neue pushTAN-Freigabe für den Umsatzabruf."
+    ? `Eine Bank verlangt eine neue TAN-Freigabe für den Umsatzabruf${detail}.`
     : `Der Bank-Abruf hat seit ${state.last_success_at ? new Date(state.last_success_at).toLocaleString("de-DE", { timeZone: "Europe/Berlin" }) : "Beginn"} keine Umsätze geliefert${state.last_fetch_message ? ` (${state.last_fetch_message})` : ""}.`;
   const html = `
     <p>${reason}</p>
     <p>Solange das so ist, werden Vorkasse-Zahlungen nicht automatisch erkannt.</p>
-    <p><b>Lösung:</b> Am Mac im Terminal ausführen und die Freigabe in der S-pushTAN-App bestätigen:</p>
+    <p><b>Lösung:</b> Am Mac im Terminal ausführen und die Freigabe in der Banking-App bestätigen:</p>
     <pre>~/hairvenly-inventory/dashboard/scripts/fints-worker/fints renew</pre>
     <p><a href="https://suppliers.hairvenly.de/finances/payments">Zahlungseingänge im Dashboard</a></p>`;
 

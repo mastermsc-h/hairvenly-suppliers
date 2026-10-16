@@ -131,7 +131,7 @@ export interface RunSummary {
   remaining: number;
   errors: string[];
   /** Kategorisierung der Kontoumsätze (nach dem Abgleich). */
-  kategorien?: { geprueft: number; geaendert: number };
+  kategorien?: { geprueft: number; geaendert: number; remaining: number };
 }
 
 /**
@@ -151,7 +151,7 @@ export async function runBankMatching(opts: { budgetMs?: number } = {}): Promise
   // Läuft nach dem Abgleich, weil Kunden-Überweisungen erst dann als Vorkasse erkennbar sind.
   // Ein Fehler hier darf den Zahlungsabgleich nie scheitern lassen.
   try {
-    summary.kategorien = await runKategorisierung({ scope: "neu" });
+    summary.kategorien = await runKategorisierung({ scope: "neu", maxRows: 500 });
   } catch (e) {
     summary.errors.push(`Kategorisierung: ${e instanceof Error ? e.message : String(e)}`);
   }
