@@ -669,6 +669,12 @@ export interface SteuerPosten {
   bezahlt_am: string | null;
   bescheid_ref: string | null;
   notiz: string | null;
+  /** Herkunft des Ist: von Hand oder aus den Kontoumsätzen (Bank überschreibt "manuell" nie). */
+  ist_quelle: "manuell" | "bank";
+  /** Summe laut Kontoumsätzen (+ gezahlt, − erstattet), null = keine Buchung gefunden. */
+  bank_betrag: number | null;
+  bank_anzahl: number | null;
+  bank_letzte_buchung: string | null;
   created_at: string;
   updated_at: string;
 }

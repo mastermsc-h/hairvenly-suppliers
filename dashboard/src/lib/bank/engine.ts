@@ -3,6 +3,7 @@
 // (nach requireFeature-Check) aufgerufen wird.
 import { createServiceClient } from "@/lib/supabase/server";
 import { dedupeKeys, type BankRow } from "./rows";
+import { runKategorisierung } from "./kategorien-engine";
 import {
   matchTransaction,
   plausibleClosedNumbers,
@@ -129,6 +130,8 @@ export interface RunSummary {
   /** Noch offen (Zeitbudget erschöpft) — Aufrufer kann erneut anstoßen. */
   remaining: number;
   errors: string[];
+  /** Kategorisierung der Kontoumsätze (nach dem Abgleich). */
+  kategorien?: { geprueft: number; geaendert: number };
 }
 
 /**
@@ -143,6 +146,19 @@ export interface RunSummary {
  *  - hängengebliebene Claims (>10 Min) gibt der nächste Lauf frei.
  */
 export async function runBankMatching(opts: { budgetMs?: number } = {}): Promise<RunSummary> {
+  const summary = await abgleichLauf(opts);
+  // Kategorien (Reiter Kontoumsätze) + Steuer-Ledger nachziehen — auch im Modus "off".
+  // Läuft nach dem Abgleich, weil Kunden-Überweisungen erst dann als Vorkasse erkennbar sind.
+  // Ein Fehler hier darf den Zahlungsabgleich nie scheitern lassen.
+  try {
+    summary.kategorien = await runKategorisierung({ scope: "neu" });
+  } catch (e) {
+    summary.errors.push(`Kategorisierung: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return summary;
+}
+
+async function abgleichLauf(opts: { budgetMs?: number }): Promise<RunSummary> {
   const started = Date.now();
   const budget = opts.budgetMs ?? 40_000;
   const sb = createServiceClient();

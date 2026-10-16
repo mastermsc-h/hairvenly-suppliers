@@ -224,8 +224,18 @@ export default function SteuerLedger({
                             </td>
                             <td className="py-2 px-3 text-right tabular-nums">{sollN ? fmt(sollN) : "—"}</td>
                             <td className="py-2 px-3 text-right tabular-nums text-neutral-600">
+                              {p.ist_quelle === "bank" && istN !== 0 && (
+                                <span className="mr-1 text-[10px] font-medium rounded px-1.5 py-0.5 bg-blue-50 text-blue-700" title="Aus den Kontoumsätzen übernommen">
+                                  Bank
+                                </span>
+                              )}
                               {istN ? fmt(istN) : "—"}
                               {p.bezahlt_am && <span className="block text-xs text-neutral-400">{fmtDate(p.bezahlt_am)}</span>}
+                              {p.ist_quelle === "manuell" && p.bank_betrag !== null && Math.abs(Math.abs(Number(p.bank_betrag)) - istN) > 0.01 && (
+                                <span className="block text-xs text-amber-600" title="Von Hand eingetragen — die Kontoumsätze zeigen einen anderen Betrag">
+                                  Konto: {fmt(Math.abs(Number(p.bank_betrag)))}
+                                </span>
+                              )}
                             </td>
                             <td className="py-2 px-3 text-right tabular-nums font-medium">
                               {rest > 0 ? fmt(rest) : "—"}

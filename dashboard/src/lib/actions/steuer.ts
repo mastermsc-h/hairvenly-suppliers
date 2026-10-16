@@ -70,7 +70,13 @@ export async function updateSteuerPosten(id: string, formData: FormData) {
   await requireFeature("finances");
   const supabase = await createClient();
   const fields = fieldsFromForm(formData);
-  const { error } = await supabase.from("steuer_posten").update(fields).eq("id", id);
+  // Ist von Hand geändert → ab jetzt manuell (der Bankabgleich überschreibt es nicht mehr)
+  const { data: before } = await supabase.from("steuer_posten").select("ist_betrag").eq("id", id).single();
+  const istChanged = Number(before?.ist_betrag ?? 0) !== fields.ist_betrag;
+  const { error } = await supabase
+    .from("steuer_posten")
+    .update(istChanged ? { ...fields, ist_quelle: "manuell" } : fields)
+    .eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath(PATH);
   return { ok: true };
@@ -82,7 +88,7 @@ export async function markSteuerBezahlt(id: string, soll: number, bezahltAm: str
   const supabase = await createClient();
   const { error } = await supabase
     .from("steuer_posten")
-    .update({ ist_betrag: soll, bezahlt_am: bezahltAm })
+    .update({ ist_betrag: soll, bezahlt_am: bezahltAm, ist_quelle: "manuell" })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath(PATH);
@@ -108,7 +114,10 @@ export async function upsertSteuerIst(opts: {
 
   if (opts.id) {
     const { data: row } = await supabase.from("steuer_posten").select("bezahlt_am").eq("id", opts.id).single();
-    const patch: { ist_betrag: number; bezahlt_am?: string | null } = { ist_betrag: opts.ist_betrag };
+    const patch: { ist_betrag: number; bezahlt_am?: string | null; ist_quelle: "manuell" } = {
+      ist_betrag: opts.ist_betrag,
+      ist_quelle: "manuell",
+    };
     // bezahlt_am nur setzen, wenn noch keins existiert; bei Ist=0 wieder leeren
     if (opts.ist_betrag > 0 && !row?.bezahlt_am) patch.bezahlt_am = today;
     if (opts.ist_betrag <= 0) patch.bezahlt_am = null;

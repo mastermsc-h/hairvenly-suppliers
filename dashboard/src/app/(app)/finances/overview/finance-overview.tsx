@@ -1378,6 +1378,13 @@ function FinanzamtAbgleich({
 
   for (const p of [ustRow, eustRow, lstRow, ...dueRows]) {
     if (!p) continue;
+    // Von Hand eingetragen, aber das Konto sagt etwas anderes
+    if (p.bank_betrag !== null && p.ist_quelle === "manuell" && Math.abs(Math.abs(Number(p.bank_betrag)) - (Number(p.ist_betrag) || 0)) > 0.01) {
+      hints.push({
+        tone: "warn",
+        text: `${artLabel(p.art)} ${p.zeitraum}: eingetragen ${fmt(Number(p.ist_betrag) || 0)}, laut Kontoumsätzen ${fmt(Math.abs(Number(p.bank_betrag)))}${Number(p.bank_betrag) < 0 ? " (Erstattung)" : ""} — bitte prüfen.`,
+      });
+    }
     if (p.bezahlt_am && p.faellig_am) {
       const late = (new Date(p.bezahlt_am).getTime() - new Date(p.faellig_am).getTime()) / 86_400_000;
       if (late > 14) {
@@ -1440,7 +1447,12 @@ function FinanzamtAbgleich({
                 <td className="py-1.5 text-right tabular-nums text-neutral-500">
                   {row && Number(row.soll_betrag) !== 0 ? fmt(Number(row.soll_betrag)) : "—"}
                 </td>
-                <td className="py-1.5 text-right">
+                <td className="py-1.5 text-right whitespace-nowrap">
+                  {row?.ist_quelle === "bank" && (
+                    <span className="mr-1 text-[10px] font-medium rounded px-1.5 py-0.5 bg-blue-50 text-blue-700" title="Aus den Kontoumsätzen übernommen">
+                      Bank
+                    </span>
+                  )}
                   <IstField
                     row={row}
                     art={art}
