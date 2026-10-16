@@ -39,7 +39,7 @@ export const KATEGORIEN: KategorieDef[] = [
   { key: "aus_wareneinkauf", label: "Wareneinkauf Haare (Lieferanten)", gruppe: "ausgaben" },
   { key: "aus_material", label: "Material / Friseurbedarf", gruppe: "ausgaben" },
   { key: "aus_versand", label: "Versand (DHL Paket / Post)", gruppe: "ausgaben" },
-  { key: "aus_personal", label: "Personal / Übertrag Gehaltskonto", gruppe: "ausgaben" },
+  { key: "aus_personal", label: "Personal (Löhne)", gruppe: "ausgaben" },
   { key: "aus_sozialversicherung", label: "Sozialversicherung (Krankenkassen)", gruppe: "ausgaben" },
   { key: "aus_miete", label: "Miete", gruppe: "ausgaben" },
   { key: "aus_energie", label: "Strom / Energie", gruppe: "ausgaben" },
@@ -57,6 +57,9 @@ export const KATEGORIEN: KategorieDef[] = [
   { key: "aus_sonstige", label: "Sonstige Ausgaben", gruppe: "ausgaben" },
   // Neutral (kein Aufwand/Ertrag)
   { key: "umbuchung", label: "Umbuchung eigene Konten", gruppe: "neutral" },
+  // Gehälter, Miete, Lagermiete, Krankenkassen und Versicherungen laufen über das
+  // Targobank-Gehaltskonto — der Übertrag dorthin ist selbst kein Aufwand.
+  { key: "umbuchung_gehalt", label: "Übertrag Gehaltskonto (Targobank)", gruppe: "neutral" },
   { key: "privat", label: "Privatentnahme / -einlage", gruppe: "neutral" },
   { key: "unklar", label: "Noch nicht zugeordnet", gruppe: "neutral" },
 ];
