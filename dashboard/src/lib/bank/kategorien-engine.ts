@@ -2,6 +2,7 @@
 // (Ingest-Endpoint ohne User-Session und Server Actions nach requireFeature-Check).
 import { createServiceClient } from "@/lib/supabase/server";
 import {
+  gleicheSplits,
   kategorisiere,
   ledgerUpdate,
   sortRegeln,
@@ -53,8 +54,6 @@ export async function loadRegeln(sb: Sb): Promise<KategorieRegel[]> {
   return sortRegeln((data ?? []) as KategorieRegel[]);
 }
 
-const sameSplit = (a: SteuerSplit[] | null, b: SteuerSplit[]) => JSON.stringify(a ?? []) === JSON.stringify(b);
-
 /**
  * Kategorisiert Umsätze neu. Manuell gesetzte Kategorien bleiben immer unberührt.
  * scope "neu": nur noch nicht kategorisierte + automatisch "unklar" gebliebene
@@ -79,7 +78,7 @@ export async function runKategorisierung(opts: { scope: "neu" | "alle"; sb?: Sb 
       tx.kategorie === r.kategorie &&
       tx.kategorie_quelle === r.quelle &&
       tx.kategorie_regel_id === r.regel_id &&
-      sameSplit(tx.steuer_split, r.steuer_split)
+      gleicheSplits(tx.steuer_split, r.steuer_split)
     ) continue;
     updates.push({
       id: tx.id,

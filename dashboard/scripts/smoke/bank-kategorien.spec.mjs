@@ -111,6 +111,13 @@ check("Netto 0, manuell leer → nichts", K.ledgerUpdate({ ist_betrag: 0, soll_b
 check("Netto 0, Bank-Ist → zurücksetzen", K.ledgerUpdate({ ist_betrag: 310, soll_betrag: 0, richtung: "zahlung", ist_quelle: "bank" }, s(0)),
   { ist_betrag: 0, bezahlt_am: null, ist_quelle: "bank" });
 
+// ── gleicheSplits: jsonb sortiert Schlüssel um (art,jahr,betrag,zeitraum) ──
+check("Gleich trotz anderer Schlüsselreihenfolge",
+  K.gleicheSplits([{ art: "ust_va", jahr: 2026, betrag: 14091.52, zeitraum: "2026-07" }], [{ art: "ust_va", zeitraum: "2026-07", jahr: 2026, betrag: 14091.52 }]), true);
+check("Ungleich bei anderem Betrag",
+  K.gleicheSplits([{ art: "ust_va", zeitraum: "2026-07", jahr: 2026, betrag: 1 }], [{ art: "ust_va", zeitraum: "2026-07", jahr: 2026, betrag: 2 }]), false);
+check("null = leer", K.gleicheSplits(null, []), true);
+
 // ── Kategorien-Liste konsistent ─────────────────────────────────────────────
 check("Kategorie-Keys eindeutig", new Set(K.KATEGORIEN.map((k) => k.key)).size, K.KATEGORIEN.length);
 check("unklar existiert", !!K.KATEGORIE_BY_KEY.unklar, true);

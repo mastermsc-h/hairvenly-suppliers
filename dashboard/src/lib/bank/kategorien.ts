@@ -157,6 +157,16 @@ export function parseSteuerZweck(purpose: string | null, amount: number): Steuer
   return [...merged.values()];
 }
 
+/**
+ * Inhaltlicher Vergleich zweier Split-Listen. Postgres-jsonb sortiert Objekt-Schlüssel
+ * um — ein Vergleich per JSON.stringify hielte identische Daten für verschieden.
+ */
+export function gleicheSplits(a: SteuerSplit[] | null | undefined, b: SteuerSplit[] | null | undefined): boolean {
+  const norm = (x: SteuerSplit[] | null | undefined) =>
+    (x ?? []).map((s) => `${s.art}|${s.zeitraum}|${s.jahr}|${Math.round(Number(s.betrag) * 100)}`).join(";");
+  return norm(a) === norm(b);
+}
+
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
