@@ -442,7 +442,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-06-15.eta-from-db-not-sheet.v1";
+const RESPOND_CODE_VERSION = "2026-10-17.eta-future-only-date-guard.v1";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
@@ -2549,6 +2549,28 @@ KEINE Farbnamen nennen — die MA macht das.`;
       console.warn(`[respond] AVAILABILITY-HALLUCINATION session=${sessionId.slice(0,8)} — Snippet: "${availCheck.matchedSnippet}"`);
       needsManualReview = true;
       manualReviewReason = "Bot behauptet Sofort-Verfügbarkeit, aber KEIN get_stock_eta-Ergebnis mit In-Stock-Status liegt vor (Bug 02.06 Mocha Melt: Bot verwechselte Katalog-Existenz mit Lagerbestand → 'verfügbar' frei erfunden). Antwort als Draft gespeichert. MA bitte echte Verfügbarkeit prüfen, oder Bot neu generieren lassen.";
+    }
+  }
+
+  // ── ETA-DATUMS-HALLUZINATIONS-GUARD ─────────────────────────────────
+  // Bug 16.10.2026 (Sarah, Latte Balayage/Butter Cream Clip 225g): Bot nannte
+  // ein überfälliges Datum als Ankunft, bestätigte dann "nächstes Jahr" und
+  // erfand "20.08.2027". Invariante: jedes Ankunftsdatum muss durch ein
+  // ETA-Feld eines Tool-Ergebnisses / den Stock-Hinweis belegt sein und darf
+  // nicht in der Vergangenheit liegen; "nächstes Jahr" nur mit Beleg.
+  // Getestet: scripts/smoke/eta-date-hallucination.spec.mjs.
+  if (!needsManualReview) {
+    const { detectEtaDateHallucination } = await import("./detect-eta-date-hallucination");
+    const { berlinTodayIso } = await import("./eta-pick");
+    const etaCheck = detectEtaDateHallucination(
+      finalText,
+      [...allToolResults.map(r => r.content), colorCodeDynamicHint],
+      berlinTodayIso(),
+    );
+    if (etaCheck.suspicious) {
+      console.warn(`[respond] ETA-DATE-HALLUCINATION session=${sessionId.slice(0,8)} — ${etaCheck.reason} — Snippet: "${etaCheck.matchedSnippet ?? ""}"`);
+      needsManualReview = true;
+      manualReviewReason = `Bot nennt einen Liefertermin, der nicht belegt ist oder in der Vergangenheit liegt (${etaCheck.reason}). Antwort als Draft gespeichert — MA bitte echten Termin in der Bestellung prüfen.`;
     }
   }
 

@@ -111,6 +111,25 @@ const NAME = "#DUBAI STANDARD RUSSISCHE TAPE EXTENSIONS GLATT ♡";
   void NAME2;
 }
 
+// ── 7) todayIso-Option (Bot): künftige Positions-ETA statt überfälliger ──
+//     Echter Fall Butter Cream Clip 225g (Amanda 25.08.2026): zwei Positionen,
+//     06.10. (überfällig) und 06.11. — der Bot muss 06.11. bekommen.
+{
+  const BC = "#Butter Cream Cremiges Hellblond | Echthaar Invisible Clip Extensions ♡  [225g]";
+  const map = { "Amanda 25.08.2026": meta({ itemEtas: { [BC]: ["2026-10-06", "2026-11-06"] } }) };
+  const ap = () => [alert(BC, "Amanda 25.08.2026", "ETA überfällig: 06.10.2026")];
+  const bot = filterArchivedFromStock(ap(), map, { todayIso: "2026-10-16" });
+  check("todayIso: künftige Position 06.11. gewinnt", bot[0].perOrder[0].ankunft, "ca. Ankunft: 06.11.2026");
+  check("todayIso: bleibt DB-bestätigt", bot[0].perOrder[0].etaConfirmed, true);
+  // ZERO-REGRESSION: Team-Ansichten rufen OHNE Option auf → Verhalten wie bisher
+  const team = filterArchivedFromStock(ap(), map);
+  check("ohne Option (Team-Ansicht): unverändert früheste Position", team[0].perOrder[0].ankunft, "ca. Ankunft: 06.10.2026");
+  // alle Positionen überfällig → überfällige bleibt (pickEta macht daraus overdue)
+  const map2 = { "Amanda 25.08.2026": meta({ itemEtas: { [BC]: ["2026-09-01", "2026-10-06"] } }) };
+  const allPast = filterArchivedFromStock(ap(), map2, { todayIso: "2026-10-16" });
+  check("todayIso: alle überfällig → früheste (wird im Bot zu overdue)", allPast[0].perOrder[0].ankunft, "ca. Ankunft: 01.09.2026");
+}
+
 console.log("=== ETA-CONFIRMED SMOKE-TEST ===");
 console.log(`PASS: ${pass} / ${pass + fail}`);
 if (fail > 0) { fails.forEach(f => console.log(f)); process.exit(1); }

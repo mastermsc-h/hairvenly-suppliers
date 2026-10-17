@@ -394,6 +394,22 @@ export function renderContactResponse(intent: ContactIntent): string {
  * KEINE Enumeration von Straßen-Endungen, Festnetz-Vorwahlen, Email-Aliassen.
  * Pattern auf Struktur-Ebene — nicht auf String-Ebene.
  */
+/**
+ * Erkennt Datums-/Uhrzeit-Fragmente, die das Telefon-Pattern sonst als
+ * 8-14-stellige Nummer missdeuten würde:
+ *   20.08.2027 · 20.08.26 · 20.08.-25.08. · 2026-08-20 · 20/08/2027 · 10.00-18.00
+ * Telefonnummern mit Punkten haben eine ≥3-stellige Vorwahl ("0421.123456")
+ * und fallen daher nicht unter das DD.MM.-Muster.
+ */
+export function looksLikeDateOrTime(fragment: string): boolean {
+  const m = fragment.trim();
+  if (/(?:^|[^\d])\d{1,2}\.\d{1,2}\.(?:\d{2}|\d{4})?(?!\d)/.test(m)) return true; // DD.MM.(YY|YYYY)
+  if (/\b\d{4}-\d{2}-\d{2}\b/.test(m)) return true;                                   // ISO
+  if (/(?:^|[^\d])\d{1,2}\/\d{1,2}\/\d{2,4}(?!\d)/.test(m)) return true;           // DD/MM/YYYY
+  if (/(?:^|[^\d])\d{1,2}[.:]\d{2}\s*[-–]\s*\d{1,2}[.:]\d{2}(?!\d)/.test(m)) return true; // 10.00-18.00
+  return false;
+}
+
 export function enforceBusinessFacts(text: string): { text: string; changed: boolean } {
   const c = BUSINESS_CONFIG;
   let changed = false;
@@ -446,6 +462,10 @@ export function enforceBusinessFacts(text: string): { text: string; changed: boo
   const anyPhonePattern = /\b\+?[\d\s\/\-.()]{8,20}\b/g;
   const ourDigits = c.whatsapp_number.replace(/\D/g, "");
   out = out.replace(anyPhonePattern, (match) => {
+    // Datum/Uhrzeit ist KEINE Telefonnummer (Bug 16.10.2026: "20.08.2027" =
+    // 8 Ziffern → als fremde Nummer ersetzt und danach weggestrippt → Kundin
+    // las "kommt ca. um denherum").
+    if (looksLikeDateOrTime(match)) return match;
     const digits = match.replace(/\D/g, "");
     if (digits.length < 8 || digits.length > 14) return match; // keine Phone-Nummer
     // Akzeptiere wenn Ziffern exakt unsere sind (mit/ohne Länderpräfix 49)

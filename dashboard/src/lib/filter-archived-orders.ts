@@ -89,7 +89,26 @@ function fuzzyMatchProductKey(sheetName: string, dbKey: string): boolean {
   return overlap >= required;
 }
 
-function buildAnkunftFromMeta(meta: OrderMeta, productName?: string): string | null {
+/**
+ * Optionen für die ETA-Auswahl. `todayIso` gesetzt → aus mehreren Positions-/
+ * Teillieferungs-ETAs wird die früheste ZUKÜNFTIGE gewählt statt der
+ * frühesten überhaupt (sonst gewinnt ein überfälliges Datum, Bug 16.10.2026).
+ * Nur der Chatbot setzt das; die Lager-Ansichten fürs Team bleiben unverändert.
+ */
+export interface EtaPickOptions {
+  todayIso?: string;
+}
+
+/** Aus aufsteigend sortierten ISO-ETAs die relevante wählen. */
+function chooseEta(sortedAsc: string[], opts?: EtaPickOptions): string {
+  if (opts?.todayIso) {
+    const next = sortedAsc.find((e) => e >= opts.todayIso!);
+    if (next) return next;
+  }
+  return sortedAsc[0];
+}
+
+function buildAnkunftFromMeta(meta: OrderMeta, productName?: string, opts?: EtaPickOptions): string | null {
   // 1) Per-position ETA: look up by Shopify product name (AlertProduct.product).
   //    If multiple ETAs exist for this product in this order (split delivery),
   //    show the EARLIEST one — that's the precise next-arrival date for at least
@@ -98,23 +117,21 @@ function buildAnkunftFromMeta(meta: OrderMeta, productName?: string): string | n
     // (a) exact name_shopify match
     const positionEtas = meta.itemEtasByShopify.get(productName);
     if (positionEtas && positionEtas.length > 0) {
-      return `ca. Ankunft: ${formatDeDate(positionEtas[0])}`;
+      return `ca. Ankunft: ${formatDeDate(chooseEta(positionEtas, opts))}`;
     }
     // (b) Bug 2026-05-30: Sheet-AlertProduct-Namen sind oft NICHT
     //     identisch zu DB-name_shopify ("Pearl White Russische Bondings 60cm"
     //     vs "#PEARL WHITE RUSSISCHE BONDINGS GLATT 1G"). Fuzzy-match per
     //     normalisierten Tokens (Color-Name + optional Length/Variant).
     //     Wenn mehrere Keys matchen, nehmen wir das früheste ETA aller Treffer.
-    let earliestFuzzy: string | null = null;
+    const fuzzyEtas: string[] = [];
     for (const [dbKey, etas] of meta.itemEtasByShopify.entries()) {
       if (etas.length === 0) continue;
-      if (fuzzyMatchProductKey(productName, dbKey)) {
-        const candidate = etas[0]; // etas already sorted asc
-        if (!earliestFuzzy || candidate < earliestFuzzy) earliestFuzzy = candidate;
-      }
+      if (fuzzyMatchProductKey(productName, dbKey)) fuzzyEtas.push(...etas);
     }
-    if (earliestFuzzy) {
-      return `ca. Ankunft: ${formatDeDate(earliestFuzzy)}`;
+    if (fuzzyEtas.length > 0) {
+      fuzzyEtas.sort();
+      return `ca. Ankunft: ${formatDeDate(chooseEta(fuzzyEtas, opts))}`;
     }
 
     // (c) Wenn KEINE per-Position-ETA gefunden ABER der Shopify-Name in
@@ -132,7 +149,7 @@ function buildAnkunftFromMeta(meta: OrderMeta, productName?: string): string | n
   }
   // 2) Partial shipments — use earliest un-arrived ETA
   if (meta.shipmentEtas.length > 0) {
-    return `ca. Ankunft: ${formatDeDate(meta.shipmentEtas[0])}`;
+    return `ca. Ankunft: ${formatDeDate(chooseEta(meta.shipmentEtas, opts))}`;
   }
   // 3) Order-level ETA — aber NUR wenn diese in der Zukunft liegt.
   //    Bug 2026-05-30: orders.eta wird beim Order-Anlegen einmal gesetzt
@@ -256,6 +273,7 @@ export function overrideEtaFromDb(
 export function filterArchivedFromStock(
   items: AlertProduct[],
   orderIdByName?: Record<string, OrderMeta>,
+  opts?: EtaPickOptions,
 ): AlertProduct[] {
   if (!orderIdByName) return items;
   return items.map((item) => {
@@ -274,7 +292,7 @@ export function filterArchivedFromStock(
     //    So kann der Bot ein unbestätigtes Sheet-Datum nie als fixen Termin ausgeben.
     const withEta = kept.map((o) => {
       const meta = orderIdByName[o.name];
-      const dbAnkunft = meta ? buildAnkunftFromMeta(meta, item.product) : null;
+      const dbAnkunft = meta ? buildAnkunftFromMeta(meta, item.product, opts) : null;
       if (dbAnkunft) {
         if (o.ankunft === dbAnkunft && o.etaConfirmed === true) return o;
         return { ...o, ankunft: dbAnkunft, etaConfirmed: true };

@@ -45,6 +45,7 @@
 import { readDashboardAlerts, type AlertProduct } from "@/lib/stock-sheets";
 import { fetchOrderIdByName } from "@/lib/order-name-map";
 import { filterArchivedFromStock } from "@/lib/filter-archived-orders";
+import { pickEta, berlinTodayIso } from "@/lib/chatbot/eta-pick";
 import type { ColorCodeMatch } from "./intent-color-codes";
 
 // ── In-Memory-Cache für Dashboard-Daten ─────────────────────────────
@@ -74,9 +75,9 @@ async function getCachedDashboard(): Promise<DashboardSnapshot | null> {
       fetchOrderIdByName(),
     ]);
     dashboardCache = {
-      nullbestand: filterArchivedFromStock(result.nullbestand, orderIdByName),
-      kritisch: filterArchivedFromStock(result.kritisch, orderIdByName),
-      unterwegs: filterArchivedFromStock(result.unterwegs, orderIdByName).filter(
+      nullbestand: filterArchivedFromStock(result.nullbestand, orderIdByName, { todayIso: berlinTodayIso() }),
+      kritisch: filterArchivedFromStock(result.kritisch, orderIdByName, { todayIso: berlinTodayIso() }),
+      unterwegs: filterArchivedFromStock(result.unterwegs, orderIdByName, { todayIso: berlinTodayIso() }).filter(
         (d) => d.unterwegsG > 0,
       ),
       lastUpdated: result.lastUpdated,
@@ -108,6 +109,7 @@ type VariantStatus = {
     | "in_stock"           // Lager > 0, kein Engpass
     | "in_stock_low"       // Lager > 0 aber niedrig (kritisch)
     | "out_of_stock_eta"   // Lager = 0 ABER Unterwegs mit ETA
+    | "out_of_stock_overdue" // Lager = 0, nachbestellt, aber alle ETAs überfällig
     | "out_of_stock_no_eta" // Lager = 0 UND kein Unterwegs
     | "unknown";            // Variant nicht im Dashboard gefunden
   /** Frühestes ETA-Datum (DE-Format dd.mm.yyyy) wenn unterwegs */
@@ -182,19 +184,10 @@ function variantMatchesAlertProduct(
  * Extrahiert das früheste perOrder-ETA-Datum eines AlertProduct als
  * deutsches Datum dd.mm.yyyy (oder null wenn keins).
  */
-function earliestEtaOf(ap: AlertProduct): string | null {
-  if (!ap.perOrder || ap.perOrder.length === 0) return null;
-  const dated = ap.perOrder.map(o => {
-    const m = (o.ankunft || "").match(/(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/);
-    if (!m) return { iso: null as string | null, text: o.ankunft || "" };
-    const [, d, mo, y] = m;
-    const yy = y.length === 2 ? `20${y}` : y;
-    const iso = `${yy}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
-    const text = `${d.padStart(2, "0")}.${mo.padStart(2, "0")}.${yy}`;
-    return { iso, text };
-  });
-  dated.sort((a, b) => (a.iso || "9999").localeCompare(b.iso || "9999"));
-  return dated[0]?.text || null;
+function earliestEtaOf(ap: AlertProduct): { text: string | null; overdue: boolean } {
+  // Frühester ZUKÜNFTIGER Termin; alle überfällig → overdue (Bug 16.10.2026).
+  const e = pickEta(ap.perOrder, berlinTodayIso());
+  return { text: e.overdue ? null : e.text, overdue: e.overdue };
 }
 
 /**
@@ -235,8 +228,9 @@ export async function enrichVariantsWithStock(
       //   3. Kritisch → in_stock_low
       //   4. Unterwegs mit lagerG>0 → in_stock (mit Nachschub-Hinweis)
       if (inNullbestand && inUnterwegs) {
-        status = "out_of_stock_eta";
-        earliest = earliestEtaOf(inUnterwegs) || undefined;
+        const e = earliestEtaOf(inUnterwegs);
+        status = e.overdue ? "out_of_stock_overdue" : "out_of_stock_eta";
+        earliest = e.text || undefined;
         matchedProduct = inNullbestand.product;
       } else if (inNullbestand) {
         status = "out_of_stock_no_eta";
@@ -249,8 +243,9 @@ export async function enrichVariantsWithStock(
         if (inUnterwegs.lagerG > 0) {
           status = "in_stock";
         } else {
-          status = "out_of_stock_eta";
-          earliest = earliestEtaOf(inUnterwegs) || undefined;
+          const e = earliestEtaOf(inUnterwegs);
+          status = e.overdue ? "out_of_stock_overdue" : "out_of_stock_eta";
+          earliest = e.text || undefined;
         }
         matchedProduct = inUnterwegs.product;
       }
@@ -301,6 +296,9 @@ export function buildStockEtaHint(
           break;
         case "out_of_stock_eta":
           lines.push(`  - ${s.line} ${s.label}: AUSVERKAUFT, Nachschub kommt ca. ${s.earliest_eta || "bald"}${marker}`);
+          break;
+        case "out_of_stock_overdue":
+          lines.push(`  - ${s.line} ${s.label}: AUSVERKAUFT, nachbestellt — Liefertermin ÜBERFÄLLIG, neues Datum noch offen (KEIN Datum nennen!)${marker}`);
           break;
         case "out_of_stock_no_eta":
           lines.push(`  - ${s.line} ${s.label}: AUSVERKAUFT, kein bestätigtes Lieferdatum${marker}`);

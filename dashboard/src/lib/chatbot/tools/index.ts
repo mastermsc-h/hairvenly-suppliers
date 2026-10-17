@@ -13,6 +13,26 @@ import { calcPacks, type Method, type PriceRow } from "@/lib/chatbot/pricing";
 import { readDashboardAlerts, readInventorySheet } from "@/lib/stock-sheets";
 import { fetchOrderIdByName } from "@/lib/order-name-map";
 import { filterArchivedFromStock } from "@/lib/filter-archived-orders";
+import { pickEta, berlinTodayIso } from "@/lib/chatbot/eta-pick";
+
+/**
+ * Gemeinsame ETA-Regeln für alle Tool-Outputs (Bug 16.10.2026: Bot nannte ein
+ * ÜBERFÄLLIGES Datum als Ankunft und bestätigte danach "nächstes Jahr").
+ * Enthält das heutige Datum, damit das Modell Termine korrekt einordnet.
+ */
+function etaRules(): string {
+  const [y, m, d] = berlinTodayIso().split("-");
+  return (
+    ` HEUTE ist der ${d}.${m}.${y}. ` +
+    "⚠️ eta_overdue=true heißt: der geplante Liefertermin ist bereits ÜBERSCHRITTEN (Lieferung verzögert) " +
+    "und es gibt KEIN neues Datum → sag ehrlich 'ist nachbestellt, die Lieferung hat sich leider etwas verzögert — " +
+    "ein genaues neues Datum haben wir gerade noch nicht' und biete an, Bescheid zu geben. " +
+    "NIEMALS ein Datum, einen Monat oder ein Jahr erfinden; nenne NIE ein Datum, das vor heute liegt; " +
+    "bestätige 'nächstes Jahr' o.ä. NUR, wenn das Datum hier tatsächlich im nächsten Jahr liegt. " +
+    "eta_confirmed=false (ohne overdue) = grobe Schätzung → z.B. 'voraussichtlich um den 21.10. herum, " +
+    "aber noch nicht fix bestätigt' (Beispiel — nimm das echte Datum aus den Daten)."
+  );
+}
 import { BUSINESS_CONFIG } from "@/lib/chatbot/business-config";
 
 export interface ToolContext {
@@ -294,7 +314,11 @@ const getStockEta: ToolDef = {
       // obwohl die Kundin nur „TAUPE" suchte).
       const buildMatcher = (toks: string[]) => (text: string) => {
         const hay = text.toLowerCase();
-        return toks.every(t => hay.includes(t));
+        // Zusammengeschriebene Farbnamen ("buttercream" ↔ "BUTTER CREAM",
+        // "lattebalayage") — Bug 16.10.2026: Suche "buttercream" lieferte
+        // not_in_catalog. Zweiter Heuhaufen ohne Leer-/Bindestriche.
+        const hayCompact = hay.replace(/[\s\-_]+/g, "");
+        return toks.every(t => hay.includes(t) || hayCompact.includes(t));
       };
       const matchTokens = buildMatcher(tokens);
       const looseTokens = tokens.filter(t => !NUMERIC_LENGTH_GRAM.test(t));
@@ -342,10 +366,10 @@ const getStockEta: ToolDef = {
         readDashboardAlerts(),
         fetchOrderIdByName(),
       ]);
-      const unterwegs = filterArchivedFromStock(dashRes.unterwegs, orderIdByName).filter(
+      const unterwegs = filterArchivedFromStock(dashRes.unterwegs, orderIdByName, { todayIso: berlinTodayIso() }).filter(
         (d) => d.unterwegsG > 0,
       );
-      const nullbestand = filterArchivedFromStock(dashRes.nullbestand, orderIdByName);
+      const nullbestand = filterArchivedFromStock(dashRes.nullbestand, orderIdByName, { todayIso: berlinTodayIso() });
       const lastUpdated = dashRes.lastUpdated;
 
       // 2) Lade beide Inventory-Sheets (Russisch + Usbekisch) — für "vorrätig"-Check
@@ -507,27 +531,13 @@ const getStockEta: ToolDef = {
           // Frühestes ETA-Datum statt erstes perOrder-Item (User-Bug
           // 2026-05-28: vorher kam "Anfang Juni" statt "25.06.2026" weil
           // die perOrder-Reihenfolge zufällig war).
-          const earliestDe = (m: { perOrder?: { ankunft?: string; etaConfirmed?: boolean }[] }): { text: string; confirmed: boolean } => {
-            if (!m.perOrder || m.perOrder.length === 0) return { text: "bald", confirmed: false };
-            const dated = m.perOrder.map(o => {
-              const confirmed = o.etaConfirmed === true;
-              const dm = (o.ankunft || "").match(/(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/);
-              if (!dm) return { iso: null as string | null, text: o.ankunft || "", confirmed };
-              const [, d, mo, y] = dm;
-              const yy = y.length === 2 ? `20${y}` : y;
-              return {
-                iso: `${yy}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`,
-                text: `${d.padStart(2, "0")}.${mo.padStart(2, "0")}.${yy}`,
-                confirmed,
-              };
-            });
-            dated.sort((a, b) => (a.iso || "9999").localeCompare(b.iso || "9999"));
-            const first = dated[0];
-            return { text: first?.text || first?.iso || "bald", confirmed: !!first?.confirmed };
-          };
+          // Frühester ZUKÜNFTIGER Termin (überfällige zählen nicht — Bug 16.10.2026).
+          const todayIsoML = berlinTodayIso();
+          const earliestDe = (m: { perOrder?: { ankunft?: string; etaConfirmed?: boolean }[] }) =>
+            pickEta(m.perOrder, todayIsoML);
           type PerLengthBucket = {
             in_stock: { product: string; shopify_url: string | null }[];
-            unterwegs: { product: string; eta: string; eta_confirmed: boolean; shopify_url: string | null }[];
+            unterwegs: { product: string; eta: string | null; eta_confirmed: boolean; eta_overdue: boolean; shopify_url: string | null }[];
             oos: { product: string; shopify_url: string | null }[];
           };
           const perLength: Record<string, PerLengthBucket> = {};
@@ -546,8 +556,9 @@ const getStockEta: ToolDef = {
             const e = earliestDe(m);
             ensure(len).unterwegs.push({
               product: m.product,
-              eta: e.text,
+              eta: e.overdue ? null : (e.text || "bald"),
               eta_confirmed: e.confirmed,
+              eta_overdue: e.overdue,
               shopify_url: urlFor(m.product),
             });
           }
@@ -568,8 +579,7 @@ const getStockEta: ToolDef = {
                 "   Beispiel: per_length['55cm'] hat .in_stock / .unterwegs[].eta / .oos. " +
                 "   Wenn .unterwegs nicht leer ist, nenne das konkrete ETA-Datum (z.B. 'kommt ca. 25.06.2026 wieder'). " +
                 "   NIEMALS schwammig '2-8 Wochen' sagen wenn ein konkretes ETA in den Daten steht.\n" +
-                "   ⚠️ Wenn unterwegs[].eta_confirmed=false ist, ist das Datum nur eine grobe Schätzung (noch kein bestätigter " +
-                "   Liefertermin) — sag dann 'voraussichtlich um den [Datum] herum, aber noch nicht fix bestätigt' statt eines harten Termins.\n" +
+                "   " + etaRules() + "\n" +
                 "2. Wenn KEINE Länge erkennbar ist: frag die Kundin kurz 'in welcher Länge?'. " +
                 "   Zähle die anderen Längen NICHT proaktiv auf — die Kundin sucht eine bestimmte.\n" +
                 "3. URL: nimm AUSSCHLIESSLICH die shopify_url aus diesem Output für die konkrete Länge. " +
@@ -604,22 +614,15 @@ const getStockEta: ToolDef = {
       // Vorher: B (unterwegs) feuerte zuerst → Bot hat nie erfahren dass es 65cm sofort gibt.
       const withStockEarly = inventoryMatches.filter(r => r.quantity > 0);
       if (withStockEarly.length > 0 && inUnterwegs.length > 0) {
-        const extractDate = (s: string): { iso: string | null; text: string } => {
-          const m = s.match(/(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/);
-          if (!m) return { iso: null, text: s };
-          const [, d, mo, y] = m;
-          const yy = y.length === 2 ? `20${y}` : y;
-          const iso = `${yy}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
-          return { iso, text: `${d.padStart(2, "0")}.${mo.padStart(2, "0")}.${yy.slice(-2)}` };
-        };
+        const todayIsoPU = berlinTodayIso();
         const comingSoon = inUnterwegs.slice(0, 3).map(m => {
-          const dated = m.perOrder.map(o => ({ ...extractDate(o.ankunft || ""), raw: o.ankunft, confirmed: o.etaConfirmed === true }));
-          dated.sort((a, b) => (a.iso || "9999").localeCompare(b.iso || "9999"));
+          const e = pickEta(m.perOrder, todayIsoPU);
           return {
             product: m.product,
             collection: m.collection,
-            earliest_eta: dated[0]?.text || dated[0]?.raw || "bald",
-            eta_confirmed: !!dated[0]?.confirmed,
+            earliest_eta: e.overdue ? null : (e.text || "bald"),
+            eta_confirmed: e.confirmed,
+            eta_overdue: e.overdue,
             shopify_url: urlFor(m.product),
           };
         });
@@ -641,8 +644,7 @@ const getStockEta: ToolDef = {
               "Beispiel: 'Soft Blond Balayage hätten wir in 65cm sofort verfügbar 💕 " +
               "In 55cm/85cm ist die Farbe gerade unterwegs (ca. Anfang Juni). " +
               "Magst du die 65cm nehmen oder lieber auf die andere Länge warten?' " +
-              "⚠️ Wenn coming_soon[].eta_confirmed=false ist, ist das Datum nur eine grobe Schätzung — " +
-              "formuliere dann 'voraussichtlich um den [Datum] herum, aber noch nicht fix bestätigt'. " +
+              etaRules() + " " +
               "URL-REGEL: Wenn du einen Produkt-Link postest, nimm AUSSCHLIESSLICH die " +
               "shopify_url aus diesem Tool-Output. NIEMALS selbst URLs bauen oder raten.",
             available_now: withStockEarly.slice(0, 5).map(r => ({
@@ -658,40 +660,34 @@ const getStockEta: ToolDef = {
 
       // B) Produkt unterwegs → NUR DAS FRÜHESTE ETA zurückgeben (kein "erste Lieferung" Leak)
       if (inUnterwegs.length > 0) {
-        // Hilfsfunktion: extrahiere Datum aus "ca. Ankunft: 30.05.2026" → "30.05.2026"
-        const extractDate = (s: string): { iso: string | null; text: string } => {
-          const m = s.match(/(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/);
-          if (!m) return { iso: null, text: s };
-          const [, d, mo, y] = m;
-          const yy = y.length === 2 ? `20${y}` : y;
-          const iso = `${yy}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
-          return { iso, text: `${d.padStart(2, "0")}.${mo.padStart(2, "0")}.${yy.slice(-2)}` };
-        };
-        // Pro Produkt das früheste Datum finden
+        // Pro Produkt der früheste ZUKÜNFTIGE Termin (überfällige zählen nicht).
+        const todayIsoUW = berlinTodayIso();
         const products = inUnterwegs.slice(0, 3).map(m => {
-          const dated = m.perOrder.map(o => ({ ...extractDate(o.ankunft || ""), raw: o.ankunft, confirmed: o.etaConfirmed === true }));
-          dated.sort((a, b) => (a.iso || "9999").localeCompare(b.iso || "9999"));
-          const earliest = dated[0];
+          const e = pickEta(m.perOrder, todayIsoUW);
           return {
             product: m.product,
             collection: m.collection,
             // KEINE konkreten Mengen!
-            earliest_eta: earliest?.text || earliest?.raw || "bald",
-            earliest_eta_iso: earliest?.iso || null,
-            eta_confirmed: !!earliest?.confirmed,
+            earliest_eta: e.overdue ? null : (e.text || "bald"),
+            earliest_eta_iso: e.overdue ? null : e.iso,
+            eta_confirmed: e.confirmed,
+            eta_overdue: e.overdue,
             shopify_url: urlFor(m.product),
           };
         });
+        const allOverdue = products.length > 0 && products.every(p => p.eta_overdue);
         return {
           output: JSON.stringify({
             status: "unterwegs",
+            all_overdue: allOverdue,
             message:
               "Produkt ist unterwegs. Verwende NUR 'earliest_eta' für die Antwort und formuliere weich: " +
               "z.B. 'ca. Ende Mai, also etwa 30.05.' — NIEMALS sagen 'erste Lieferung' oder 'zweite Lieferung'! " +
               "EIN Datum reicht. " +
-              "⚠️ Wenn products[].eta_confirmed=false ist, ist das Datum nur eine grobe Schätzung (KEIN bestätigter " +
-              "Liefertermin) — sag dann z.B. 'voraussichtlich um den [Datum] herum, aber noch nicht fix bestätigt' " +
-              "statt eines harten Termins. Bei eta_confirmed=true darfst du das Datum als verlässlich nennen. " +
+              (allOverdue
+                ? "🚨 ALLE bekannten Liefertermine sind ÜBERSCHRITTEN — es gibt KEIN Datum, das du nennen darfst. "
+                : "") +
+              etaRules() + " Bei eta_confirmed=true darfst du das Datum als verlässlich nennen. " +
               "URL-REGEL: Wenn du einen Produkt-Link postest, nimm AUSSCHLIESSLICH die " +
               "shopify_url aus diesem Tool-Output. NIEMALS selbst URLs bauen oder raten.",
             sheet_last_updated: lastUpdated,
@@ -1104,7 +1100,9 @@ const getAvailableColors: ToolDef = {
     if (searchTerms) {
       rows = rows.filter(r => {
         const hay = `${r.name_hairvenly} ${r.name_shopify || ""} ${r.description || ""}`.toLowerCase();
-        return searchTerms.some(t => hay.includes(t));
+        // auch zusammengeschrieben ("buttercream" ↔ "butter cream")
+        const hayCompact = hay.replace(/[\s\-_]+/g, "");
+        return searchTerms.some(t => hay.includes(t) || hayCompact.includes(t.replace(/[\s\-_]+/g, "")));
       });
     }
 
@@ -1115,10 +1113,10 @@ const getAvailableColors: ToolDef = {
       readDashboardAlerts(),
       fetchOrderIdByName(),
     ]);
-    const unterwegs = filterArchivedFromStock(dashRes2.unterwegs, orderIdByName2).filter(
+    const unterwegs = filterArchivedFromStock(dashRes2.unterwegs, orderIdByName2, { todayIso: berlinTodayIso() }).filter(
       (d) => d.unterwegsG > 0,
     );
-    const nullbestand = filterArchivedFromStock(dashRes2.nullbestand, orderIdByName2);
+    const nullbestand = filterArchivedFromStock(dashRes2.nullbestand, orderIdByName2, { todayIso: berlinTodayIso() });
     // Auch reine Inventory-Sheets für "in_stock" Status
     const sheets: Array<"Russisch - GLATT" | "Usbekisch - WELLIG"> = [];
     if (supplierLine === "russisch")       sheets.push("Russisch - GLATT");
@@ -1133,23 +1131,17 @@ const getAvailableColors: ToolDef = {
     for (const sr of stockRows) {
       stockByName.set(normN(sr.product), { quantity: sr.quantity, totalWeight: sr.totalWeight });
     }
-    // FRÜHESTES datiertes ETA (nicht perOrder[0] — Reihenfolge ist zufällig) +
-    // dessen Quelle: etaConfirmed=true → DB-gepflegt, false → Sheet-Schätzung.
+    // Frühester ZUKÜNFTIGER Termin via pickEta (nicht perOrder[0], keine überfälligen)
+    // + Quelle: etaConfirmed=true → DB-gepflegt, false → Sheet-Schätzung.
     const unterwegsByName = new Map<string, { etaText: string; etaConfirmed: boolean }>();
+    const todayIsoAC = berlinTodayIso();
     for (const u of unterwegs) {
-      let best: { iso: string; text: string; confirmed: boolean } | null = null;
-      let fallback: { text: string; confirmed: boolean } | null = null;
-      for (const o of u.perOrder) {
-        const confirmed = o.etaConfirmed === true;
-        const dm = (o.ankunft || "").match(/(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/);
-        if (!dm) { if (!fallback) fallback = { text: o.ankunft || "bald", confirmed }; continue; }
-        const [, d, mo, y] = dm;
-        const yy = y.length === 2 ? `20${y}` : y;
-        const iso = `${yy}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
-        if (!best || iso < best.iso) best = { iso, text: `${d.padStart(2, "0")}.${mo.padStart(2, "0")}.${yy}`, confirmed };
-      }
-      const picked = best || fallback || { text: "bald", confirmed: false };
-      unterwegsByName.set(normN(u.product), { etaText: picked.text, etaConfirmed: picked.confirmed });
+      const e = pickEta(u.perOrder, todayIsoAC);
+      unterwegsByName.set(normN(u.product), {
+        // überfällig → kein Datum, sondern ehrlicher Hinweis (Bug 16.10.2026)
+        etaText: e.overdue ? "nachbestellt, Liefertermin überfällig — neues Datum noch offen" : (e.text || "bald"),
+        etaConfirmed: e.confirmed && !e.overdue,
+      });
     }
     const nullbestandSet = new Set(nullbestand.map(p => normN(p.product)));
 
