@@ -11,6 +11,9 @@ import TrackingCell from "../tracking-cell";
 import NotesCell from "../notes-cell";
 import StatusDropdown from "./[id]/status-dropdown";
 import DocIndicators from "./[id]/doc-indicators";
+import LiquiditaetBadge from "./liquiditaet-badge";
+import { ladePrognose } from "@/lib/liquiditaet/daten";
+import type { BestellPrognose } from "@/lib/liquiditaet/rechnung";
 
 export default async function OrdersPage() {
   const profile = await requireProfile();
@@ -41,6 +44,16 @@ export default async function OrdersPage() {
       .select("*")
       .in("kind", ["supplier_invoice", "payment_proof", "customs_document", "waybill", "order_overview", "packing_details"]),
   ]);
+
+  // Liquiditäts-Ampel (Finanzen): nie für Lieferanten; ein Fehler darf die Liste nicht brechen
+  const liq = new Map<string, BestellPrognose>();
+  if (hasFeature(profile, "finances") && !isSupplierRole) {
+    try {
+      for (const b of (await ladePrognose()).ergebnis.bestellungen) liq.set(b.orderId, b);
+    } catch (e) {
+      console.error("[orders] Liquiditätsvorschau", e);
+    }
+  }
 
   const list = (orders ?? []) as OrderWithTotals[];
   const supplierList = (suppliers ?? []) as Supplier[];
@@ -192,6 +205,11 @@ export default async function OrdersPage() {
                         ) : (
                           <StatusBadge status={o.status} locale={locale} />
                         )}
+                        {liq.get(o.id) && (
+                          <div className="mt-1">
+                            <LiquiditaetBadge p={liq.get(o.id) as BestellPrognose} />
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-neutral-700 align-top">
                         {date(o.eta)}
@@ -263,6 +281,7 @@ export default async function OrdersPage() {
                               {Number(o.weight_kg)} kg
                             </span>
                           )}
+                          {liq.get(o.id) && <LiquiditaetBadge p={liq.get(o.id) as BestellPrognose} alsLink={false} />}
                         </div>
                         <TrackingCell
                           orderId={o.id}

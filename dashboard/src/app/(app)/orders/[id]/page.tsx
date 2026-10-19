@@ -29,6 +29,9 @@ import ShipmentsSection from "./shipments-section";
 import SyncEtaButton from "./sync-eta-button";
 import PropagateEtaButton from "./propagate-eta-button";
 import PushToShopifyButton from "./push-to-shopify-button";
+import LiquiditaetBadge from "../liquiditaet-badge";
+import { ladePrognose } from "@/lib/liquiditaet/daten";
+import type { BestellPrognose } from "@/lib/liquiditaet/rechnung";
 
 export default async function OrderDetailPage({
   params,
@@ -99,6 +102,16 @@ export default async function OrderDetailPage({
   const canSeeFinance = hasFeature(profile, "invoices") || isSupplier;
   const canSeeAllDocs = hasFeature(profile, "documents") || isSupplier;
   const canSeePackingLists = hasFeature(profile, "packing_lists") || canSeeAllDocs;
+
+  // Liquiditäts-Ampel (Finanzen): nie für Lieferanten; ein Fehler darf die Seite nicht brechen
+  let liq: BestellPrognose | null = null;
+  if (hasFeature(profile, "finances") && !isSupplier) {
+    try {
+      liq = (await ladePrognose()).ergebnis.bestellungen.find((b) => b.orderId === o.id) ?? null;
+    } catch (e) {
+      console.error("[order] Liquiditätsvorschau", e);
+    }
+  }
   const canEditShipments = profile.is_admin || isSupplier;
   // Documents section is shown if user can see at least one kind of document
   const canSeeDocs = canSeeAllDocs || canSeePackingLists;
@@ -159,6 +172,18 @@ export default async function OrderDetailPage({
             </span>
           )}
         </div>
+        {liq && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-neutral-600">
+            <LiquiditaetBadge p={liq} groß />
+            <span>
+              {liq.bezahlt
+                ? "Lieferant bezahlt"
+                : `${liq.sofort ? "Zahlung sofort fällig" : `Zahlung bei Versandbereitschaft ca. ${date(liq.zahlDatum)}`}: ${Math.round(liq.betragEur).toLocaleString("de-DE")} € · Konto danach ca. ${Math.round(liq.saldoNachZahlung).toLocaleString("de-DE")} €`}
+              {liq.einfuhr &&
+                ` · Einfuhrabgaben ${Math.round(liq.einfuhr.eust + liq.einfuhr.zoll).toLocaleString("de-DE")} € am ${date(liq.einfuhr.datum)} (Konto danach ${Math.round(liq.einfuhr.saldoDanach).toLocaleString("de-DE")} €)`}
+            </span>
+          </div>
+        )}
         {canSeeFinance && (
           <div className="mt-4">
             <QuickDocs documents={docs} paidTotal={o.paid_total} remainingBalance={o.remaining_balance} locale={locale} hideFinancials={!canSeeFinance} />

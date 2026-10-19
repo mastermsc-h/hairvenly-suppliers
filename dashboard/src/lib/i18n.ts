@@ -790,6 +790,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     // ---- Zahlungsabgleich (Finanzen / Zahlungseingänge) ----
     "nav.finances.payments": "Zahlungseingänge",
     "nav.finances.bank": "Kontoumsätze",
+    "nav.finances.liquiditaet": "Liquidität",
     "bank.title": "Zahlungseingänge",
     "bank.subtitle": "Vorkasse-Überweisungen automatisch mit offenen Shopify-Bestellungen abgleichen",
     "bank.worker.title": "Bankverbindung (Sparkasse)",
