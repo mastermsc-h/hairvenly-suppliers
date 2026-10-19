@@ -132,6 +132,14 @@ check("Kredit fällt weg", L.prognose(rk, { ...E0, ausgeblendeteKategorien: ["au
 check("Nachbestellungen erzeugen Zahlungen", pn.ereignisse.some((x) => x.art === "nachbestellung"), true);
 check("Erste Nachbestellung: Mo 19.10. + 35 Tage", pn.ereignisse.find((x) => x.art === "nachbestellung").datum, "2026-11-23");
 
+// Verkaufsaktion (Black Friday)
+const akt = { aktiv: true, label: "BF", von: "2026-11-15", bis: "2026-11-16", mehrumsatzBrutto: 11900, profil: [1, 3], verzugTage: 3, auszahlungProzent: 100, quelle: "test" };
+const pa2 = L.prognose(roh({ steuern: { ustHistorie: [{ monat: "2026-08", ust: 10000, eust: 0 }], ustErledigtBis: "2026-10", eustBezahlt: {}, lstLetzte: [], lstErledigtBis: null, estLetzte: null, gewstLetzte: null, quartaleErledigt: [] } }), { ...E0, horizontTage: 100, aktion: akt });
+check("Aktion: Eingänge nach Profil + Verzug", pa2.ereignisse.filter((x) => x.art === "aktion").map((x) => [x.datum, x.betrag]), [["2026-11-18", 2975], ["2026-11-19", 8925]]);
+check("Aktion: USt Nov = Basis + 19/119 vom Mehrumsatz", pa2.ereignisse.find((x) => x.label === "USt-VA 2026-11").betrag, -11900);
+check("Aktion aus = nichts", L.prognose(roh(), { ...E0, aktion: { ...akt, aktiv: false } }).ereignisse.length, 0);
+check("Falsches Profil → gleichmäßig", L.prognose(roh(), { ...E0, aktion: { ...akt, profil: [1, 2, 3] } }).ereignisse.filter((x) => x.art === "aktion").map((x) => x.betrag), [5950, 5950]);
+
 // Defaults
 check("Defaults vollständig", Object.keys(L.mitDefaults({})).length, Object.keys(L.LIQ_DEFAULTS).length);
 

@@ -74,6 +74,24 @@ export interface LiqEinstellungen {
   usdProKg: number | null; // null = Ø der letzten Bestellungen
   /** Laufende Abgänge, die ab jetzt wegfallen (z.B. "aus_kredit" — Shopify Capital abbezahlt 19.10.2026). */
   ausgeblendeteKategorien: string[];
+  /** Verkaufsaktion mit Mehrumsatz (Black Friday) — null = keine. */
+  aktion: LiqAktion | null;
+}
+
+export interface LiqAktion {
+  aktiv: boolean;
+  label: string;
+  von: string; // YYYY-MM-DD
+  bis: string;
+  /** Mehrumsatz brutto inkl. USt über den ganzen Zeitraum (über dem normalen Niveau). */
+  mehrumsatzBrutto: number;
+  /** Verteilung auf die Tage (Anteile, Summe beliebig) — z.B. Tagesprofil des Vorjahres. */
+  profil: number[];
+  /** Tage bis das Geld auf dem Konto ist (Stripe/PayPal-Auszahlung). */
+  verzugTage: number;
+  /** Anteil, der nach Zahlungsgebühren ankommt (%). */
+  auszahlungProzent: number;
+  quelle: string;
 }
 
 export const LIQ_DEFAULTS: LiqEinstellungen = {
@@ -90,6 +108,7 @@ export const LIQ_DEFAULTS: LiqEinstellungen = {
   nachbestellKgMonat: null,
   usdProKg: null,
   ausgeblendeteKategorien: [],
+  aktion: null,
 };
 
 export function mitDefaults(e: Partial<LiqEinstellungen> | null | undefined): LiqEinstellungen {
@@ -153,7 +172,7 @@ export interface LiqRohdaten {
 
 // ── Ereignisse + Prognose ───────────────────────────────────────────────────
 
-export type EreignisArt = "lieferant" | "einfuhr" | "steuer" | "nachbestellung";
+export type EreignisArt = "lieferant" | "einfuhr" | "steuer" | "nachbestellung" | "aktion";
 
 export interface Ereignis {
   datum: string;
@@ -283,6 +302,26 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     }
   }
 
+  // 2b) Verkaufsaktion (Black Friday): Mehrumsatz nach Tagesprofil, Gutschrift nach Auszahlungsverzug.
+  //     Die USt auf den Mehrumsatz erhöht die USt-VA des Aktionsmonats.
+  const ustZusatz: Record<string, number> = {};
+  const a = e.aktion;
+  if (a && a.aktiv && a.mehrumsatzBrutto > 0 && a.von <= a.bis) {
+    const tage = tageZwischen(a.von, a.bis) + 1;
+    const profil = a.profil.length === tage && a.profil.some((x) => x > 0) ? a.profil.map((x) => Math.max(0, x)) : Array(tage).fill(1);
+    const summe = profil.reduce((s, x) => s + x, 0);
+    for (let i = 0; i < tage; i++) {
+      const tag = plusTage(a.von, i);
+      const brutto = (a.mehrumsatzBrutto * profil[i]) / summe;
+      if (brutto <= 0) continue;
+      const eingang = plusTage(tag, a.verzugTage);
+      if (eingang >= start && eingang <= ende) {
+        ereignisse.push({ datum: eingang, betrag: r2((brutto * a.auszahlungProzent) / 100), art: "aktion", label: `${a.label} Mehrumsatz ${tag.slice(8, 10)}.${tag.slice(5, 7)}.` });
+      }
+      ustZusatz[monatVon(tag)] = (ustZusatz[monatVon(tag)] ?? 0) + (brutto * 19) / 119;
+    }
+  }
+
   // 3) Umsatzsteuer: Zahllast = Basis − im Monat gezahlte EUSt (wird als Vorsteuer verrechnet).
   //    Mit Dauerfristverlängerung fällig am 10. des übernächsten Monats; Erstattungen kommen ~3 Wochen später.
   const hist = roh.steuern.ustHistorie.filter((h) => Number.isFinite(h.ust));
@@ -293,7 +332,7 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     for (let i = 0; i < 24; i++, m = naechsterMonat(m)) {
       const faellig = faelligkeit("ust_va", m);
       if (!faellig || faellig > ende) break;
-      const betrag = r2(ustBasis - (eustProMonat[m] ?? 0));
+      const betrag = r2(ustBasis + (ustZusatz[m] ?? 0) - (eustProMonat[m] ?? 0));
       const datum = betrag < 0 ? plusTage(faellig, 21) : faellig;
       if (datum > ende) continue;
       ereignisse.push({

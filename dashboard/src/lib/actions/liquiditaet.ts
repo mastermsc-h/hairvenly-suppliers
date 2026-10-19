@@ -37,6 +37,22 @@ export async function saveLiquiditaetEinstellungen(input: Partial<LiqEinstellung
     out[k] = v === null || !Number.isFinite(v) ? null : Math.min(max, Math.max(min, v));
   }
   for (const k of SCHALTER) out[k] = input[k] === true;
+  const a = input.aktion;
+  const datum = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+  out.aktion =
+    a && typeof a === "object" && datum(a.von) && datum(a.bis)
+      ? {
+          aktiv: a.aktiv === true,
+          label: String(a.label ?? "Aktion").slice(0, 40),
+          von: datum(a.von),
+          bis: datum(a.bis),
+          mehrumsatzBrutto: Math.min(10_000_000, Math.max(0, Number(a.mehrumsatzBrutto) || 0)),
+          profil: (Array.isArray(a.profil) ? a.profil : []).slice(0, 62).map((x) => Math.max(0, Number(x) || 0)),
+          verzugTage: Math.min(30, Math.max(0, Math.round(Number(a.verzugTage) || 0))),
+          auszahlungProzent: Math.min(100, Math.max(50, Number(a.auszahlungProzent) || 100)),
+          quelle: String(a.quelle ?? "").slice(0, 120),
+        }
+      : null;
   out.ausgeblendeteKategorien = Array.isArray(input.ausgeblendeteKategorien)
     ? [...new Set(input.ausgeblendeteKategorien.filter((k) => typeof k === "string" && KATEGORIE_BY_KEY[k]))]
     : [];

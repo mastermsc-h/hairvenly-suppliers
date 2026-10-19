@@ -59,7 +59,16 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
     for (const ev of p.ereignisse) byDay.set(ev.datum, [...(byDay.get(ev.datum) ?? []), `${ev.betrag < 0 ? "−" : "+"}${eur(Math.abs(ev.betrag))} ${ev.label}`]);
     return p.tage.map((t) => ({ ...t, ev: byDay.get(t.datum) ?? [] }));
   }, [p]);
-  const termine = p.ereignisse.filter((x) => x.art !== "lieferant");
+  // Aktions-Eingänge (ein Eintrag pro Tag) im Terminkalender zu einer Zeile zusammenfassen
+  const aktionEv = p.ereignisse.filter((x) => x.art === "aktion");
+  const termine = [
+    ...p.ereignisse.filter((x) => x.art !== "lieferant" && x.art !== "aktion"),
+    ...(aktionEv.length
+      ? [{ datum: aktionEv[0].datum, betrag: aktionEv.reduce((s, x) => s + x.betrag, 0), art: "aktion" as const, label: `${e.aktion?.label ?? "Aktion"}: Mehrumsatz-Eingänge bis ${deDate(aktionEv.at(-1)!.datum)}` }]
+      : []),
+  ].sort((a, b) => a.datum.localeCompare(b.datum));
+  const setAktion = (patch: Partial<NonNullable<LiqEinstellungen["aktion"]>>) =>
+    e.aktion && set("aktion", { ...e.aktion, ...patch });
   const offenAmanda = p.bestellungen.filter((b) => !b.bezahlt).reduce((s, b) => s + b.betragEur, 0);
   const einfuhrSumme = p.bestellungen.reduce((s, b) => s + (b.einfuhr ? b.einfuhr.eust + b.einfuhr.zoll : 0), 0);
 
@@ -311,6 +320,25 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
         </Card>
       </div>
 
+      {/* Verkaufsaktion */}
+      {e.aktion && (
+        <Card title={`${e.aktion.label} ${deDate(e.aktion.von)}–${deDate(e.aktion.bis)}`} accent="border-l-emerald-500">
+          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="pt-5">
+              <Schalter label="Mehrumsatz einrechnen" checked={e.aktion.aktiv} onChange={(v) => setAktion({ aktiv: v })} />
+            </div>
+            <Feld label="Mehrumsatz gesamt brutto (€)" value={e.aktion.mehrumsatzBrutto} onChange={(v) => setAktion({ mehrumsatzBrutto: v ?? 0 })} />
+            <Feld label="Tage bis Geld auf dem Konto" value={e.aktion.verzugTage} onChange={(v) => setAktion({ verzugTage: v ?? 0 })} />
+            <Feld label="Ankommender Anteil nach Gebühren (%)" value={e.aktion.auszahlungProzent} step={0.5} onChange={(v) => setAktion({ auszahlungProzent: v ?? 100 })} />
+          </div>
+          <p className="mt-3 text-xs text-neutral-500">
+            {e.aktion.quelle}. Verteilt nach dem Tagesverlauf des Vorjahres (Spitzen rund um Black Friday). Eingang auf dem Konto {e.aktion.verzugTage} Tage
+            später (Stripe/PayPal-Auszahlung), abzüglich Gebühren. Die Umsatzsteuer auf den Mehrumsatz ({eur((e.aktion.mehrumsatzBrutto * 19) / 119)}) ist in der
+            USt-Voranmeldung des Aktionsmonats eingerechnet.
+          </p>
+        </Card>
+      )}
+
       {/* Einstellungen */}
       <Card title="Annahmen (anpassbar)" accent="border-l-neutral-400">
         <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
@@ -347,7 +375,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
             {saving ? <Loader2 size={14} className="animate-spin" /> : msg?.ok ? <Check size={14} /> : null}
             Speichern
           </button>
-          <button onClick={() => setE(LIQ_DEFAULTS)} className="text-sm text-neutral-500 hover:text-neutral-900">Standardwerte</button>
+          <button onClick={() => setE({ ...LIQ_DEFAULTS, aktion: e.aktion })} className="text-sm text-neutral-500 hover:text-neutral-900">Standardwerte</button>
           {geaendert && !saving && <span className="text-xs text-amber-700">Vorschau zeigt ungespeicherte Annahmen</span>}
           {msg && <span className={`text-xs ${msg.ok ? "text-emerald-700" : "text-red-700"}`}>{msg.text}</span>}
         </div>
