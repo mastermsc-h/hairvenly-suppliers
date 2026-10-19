@@ -101,12 +101,29 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
 
       {/* Kennzahlen */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Kachel label="Kontostand heute" value={eur(roh.startSaldo)} sub={roh.konten.map((k) => `…${k.iban.slice(-4)} ${eur(k.saldo)}`).join(" · ")} />
+        <Kachel
+          label="Kontostand Sparkasse"
+          value={eur(roh.startSaldo)}
+          sub={roh.konten
+            .map((k) => {
+              const bank = roh.bankSalden.find((b) => b.iban === k.iban);
+              return `…${k.iban.slice(-4)} ${eur(k.saldo)}${bank && Math.abs(bank.saldo - k.saldo) > 1 ? ` (Bank ${eur(bank.saldo)})` : ""}`;
+            })
+            .join(" · ")}
+        />
         <Kachel label="Ø Einnahmen / Tag" value={eur(p.einnahmenProTag)} sub={`${eur((p.einnahmenProTag * 365) / 12)} / Monat`} tone="green" />
         <Kachel label="Ø laufende Abgänge" value={eur(-laufendMonat)} sub="pro Monat (ohne Ware & Steuern)" />
         <Kachel label="Frei pro Tag" value={eur(freiProTag)} sub="vor Lieferanten & Steuern" tone={freiProTag >= 0 ? "green" : "red"} />
         <Kachel label="Tiefpunkt" value={eur(p.tiefpunkt.saldo)} sub={deDate(p.tiefpunkt.datum)} tone={p.tiefpunkt.saldo < 0 ? "red" : p.tiefpunkt.saldo < e.puffer ? "amber" : "green"} />
       </div>
+      {roh.bankSalden.filter((b) => b.iban.slice(4, 12) === "30020900").map((b) => (
+        <div key={b.iban} className="flex flex-wrap items-baseline justify-between gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-2 text-sm">
+          <span className="text-neutral-600">
+            Gehaltskonto Targobank …{b.iban.slice(-4)} <span className="text-xs text-neutral-400">(nicht in der Vorschau — Gehälter, Miete, Krankenkassen laufen dort über die Überträge von der Sparkasse)</span>
+          </span>
+          <span className="font-semibold tabular-nums">{eur(b.saldo)} <span className="text-xs font-normal text-neutral-400">Stand {deDate(b.stand)}</span></span>
+        </div>
+      ))}
 
       {/* Verlauf */}
       <Card title="Kontostand-Verlauf (Vorschau)" accent="border-l-blue-500">

@@ -128,6 +128,19 @@ check("ESt Q3 → 10.09.", K.faelligkeit("est_vz", "Q3 2026"), "2026-09-10");
 check("GewSt Q3 → 15.08. ist Samstag → 17.08.", K.faelligkeit("gewst_vz", "Q3 2026"), "2026-08-17");
 check("Nachzahlung → unbekannt", K.faelligkeit("est_nachzahlung", "2024"), null);
 
+// ── Targobank: Name + IBAN nur im Verwendungszweck ─────────────────────────
+const tz = "ECHTZEITÜBERWEISUNG INLAND  TBOL MEHMET CAKMAK AUGUST GEHALT   IBAN DE93290501010015124738 BIC SBREDE22XXX AM 02.09.2026";
+check("IBAN aus Zweck", K.ibanAusZweck(tz), "DE93290501010015124738");
+check("IBAN mit Doppelpunkt", K.ibanAusZweck("DAUERAUFTRAG IBAN:DE38290501010000123456 BIC"), "DE38290501010000123456");
+check("Feld-IBAN hat Vorrang", K.effektiveIban({ counterparty_iban: "DE11", purpose: tz }), "DE11");
+check("Übertrag von Sparkasse auf Targobank = Umbuchung (IBAN im Zweck)",
+  K.kategorisiere(tx({ amount: 7500, purpose: "LOHN / GEHALT / RENTE IBRAHIM CAN IBAN DE56290501010084626001 BIC SBREDE22XXX" }), regeln).kategorie, "umbuchung");
+const rAok = K.sortRegeln([{ id: "a", prioritaet: 20, feld: "counterparty_name", muster: "AOK", richtung: "aus", kategorie: "aus_sozialversicherung" }]);
+check("Name-Regel greift im Zweck, wenn Name fehlt",
+  K.kategorisiere(tx({ amount: -2464.46, purpose: "ECHTZEITÜBERWEISUNG INLAND TBOL AOK BREMEN/BREMERHAVEN D028779660 IBAN DE12" }), rAok).kategorie, "aus_sozialversicherung");
+check("Name vorhanden → Zweck wird NICHT für Name-Regeln genutzt",
+  K.kategorisiere(tx({ amount: -10, counterparty_name: "Max Muster", purpose: "Erstattung AOK-Beitrag" }), rAok).kategorie, "unklar");
+
 // ── Kategorien-Liste konsistent ─────────────────────────────────────────────
 check("Kategorie-Keys eindeutig", new Set(K.KATEGORIEN.map((k) => k.key)).size, K.KATEGORIEN.length);
 check("unklar existiert", !!K.KATEGORIE_BY_KEY.unklar, true);

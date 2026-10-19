@@ -115,6 +115,8 @@ export interface LiqRohdaten {
   startSaldo: number;
   saldoStand: string;
   konten: Array<{ iban: string; saldo: number; anker: string }>;
+  /** Kontostände direkt von der Bank (FinTS) — Sparkasse als Gegenprobe, Targobank separat. Nicht Teil der Rechnung. */
+  bankSalden: Array<{ iban: string; saldo: number; stand: string; abgerufenAm: string }>;
   basis: {
     monate: string[];
     tage: number;

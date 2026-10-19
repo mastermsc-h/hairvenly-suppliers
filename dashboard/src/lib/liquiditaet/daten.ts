@@ -88,7 +88,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
   const { data: lieferant } = await sb.from("suppliers").select("id, default_lead_weeks").eq("name", "Amanda").maybeSingle();
   const amandaId = lieferant?.id ?? "00000000-0000-0000-0000-000000000000";
 
-  const [alleTx, posten, { data: orders }, { data: amanda }, kgVerbrauchMonat] = await Promise.all([
+  const [alleTx, posten, { data: orders }, { data: amanda }, kgVerbrauchMonat, { data: salden }] = await Promise.all([
     selectAll<Tx>((from, to) =>
       sb.from("bank_transactions")
         .select("account_iban, booking_date, amount, kategorie, counterparty_name, purpose")
@@ -110,6 +110,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
       .gte("order_date", plusTage(heute, -180))
       .gt("weight_kg", 1),
     verbrauchGlattKgMonat(),
+    sb.from("bank_salden").select("account_iban, saldo, stand, abgerufen_am"),
   ]);
 
   const tx = alleTx.map((t) => ({ ...t, amount: Number(t.amount) })).filter((t) => istGeschaeftskonto(t.account_iban));
@@ -223,6 +224,12 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     startSaldo,
     saldoStand,
     konten,
+    bankSalden: ((salden ?? []) as Array<{ account_iban: string; saldo: number; stand: string; abgerufen_am: string }>).map((b) => ({
+      iban: b.account_iban,
+      saldo: Number(b.saldo),
+      stand: b.stand,
+      abgerufenAm: b.abgerufen_am,
+    })),
     basis: {
       monate,
       tage: tageZwischen(basisVon, basisBis) + 1,

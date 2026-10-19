@@ -4,6 +4,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { dedupeKeys, type BankRow } from "./rows";
 import { runKategorisierung } from "./kategorien-engine";
+import { effektiveIban } from "./kategorien";
 import {
   matchTransaction,
   plausibleClosedNumbers,
@@ -86,6 +87,29 @@ export async function recordFetchStatus(s: { ok: boolean; code: string; message?
   };
   if (s.success) patch.last_success_at = now;
   await sb.from("bank_sync_state").upsert(patch);
+}
+
+/**
+ * Kontostände von der Bank (FinTS HKSAL) speichern — je Konto der neueste Stand.
+ * Ungültige Einträge werden verworfen (Worker-Daten nie ungeprüft übernehmen).
+ */
+export async function recordBalances(list: unknown[]): Promise<number> {
+  const rows = list
+    .map((b) => (b && typeof b === "object" ? (b as Record<string, unknown>) : null))
+    .filter((b): b is Record<string, unknown> => !!b)
+    .map((b) => ({
+      account_iban: String(b.account_iban ?? "").replace(/\s/g, "").toUpperCase(),
+      saldo: Number(b.saldo),
+      stand: String(b.stand ?? ""),
+    }))
+    .filter((b) => /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(b.account_iban) && Number.isFinite(b.saldo) && Math.abs(b.saldo) < 1e9 && /^\d{4}-\d{2}-\d{2}$/.test(b.stand))
+    .slice(0, 20);
+  if (!rows.length) return 0;
+  const sb = createServiceClient();
+  const now = new Date().toISOString();
+  const { error } = await sb.from("bank_salden").upsert(rows.map((r) => ({ ...r, abgerufen_am: now })), { onConflict: "account_iban" });
+  if (error) throw new Error(error.message);
+  return rows.length;
 }
 
 // ── Import ──────────────────────────────────────────────────────────────────
@@ -231,7 +255,9 @@ async function abgleichLauf(opts: { budgetMs?: number }): Promise<RunSummary> {
     summary.processed++;
     let patch: Record<string, unknown>;
     try {
-      const r = matchTransaction({ ...tx, amount: Number(tx.amount) }, openOrders, closed, ownIbans);
+      // Targobank: IBAN steht nur im Verwendungszweck → sonst würden Überträge zwischen
+      // eigenen Konten als Kundenzahlung geprüft
+      const r = matchTransaction({ ...tx, amount: Number(tx.amount), counterparty_iban: effektiveIban(tx) }, openOrders, closed, ownIbans);
       if (r.kind === "debit") {
         patch = { match_status: "debit" };
       } else if (r.kind === "ignored") {

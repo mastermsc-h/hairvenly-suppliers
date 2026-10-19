@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { sanitizeRow, type BankRow } from "@/lib/bank/rows";
-import { ingestBankRows, recordFetchStatus, runBankMatching } from "@/lib/bank/engine";
+import { ingestBankRows, recordBalances, recordFetchStatus, runBankMatching } from "@/lib/bank/engine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +17,8 @@ export const maxDuration = 60;
  * Body:
  *   { status: { ok: boolean, code: string, message?: string },
  *     transactions?: [{ booking_date, value_date, amount, currency, counterparty_name,
- *                       counterparty_iban, purpose, posting_text, end_to_end_ref, account_iban }] }
+ *                       counterparty_iban, purpose, posting_text, end_to_end_ref, account_iban }],
+ *     balances?: [{ account_iban, saldo, stand }] }   ← Kontostände per FinTS (HKSAL)
  *
  * Nach dem Import läuft sofort der Abgleich (Modus off/shadow/live aus bank_sync_state).
  */
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
   if (auth === null) return NextResponse.json({ error: "Ingest secret not configured" }, { status: 503 });
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  let body: { action?: string; status?: { ok?: boolean; code?: string; message?: string; success?: boolean }; transactions?: unknown[] };
+  let body: { action?: string; status?: { ok?: boolean; code?: string; message?: string; success?: boolean }; transactions?: unknown[]; balances?: unknown[] };
   try {
     body = await req.json();
   } catch {
@@ -66,6 +67,11 @@ export async function POST(req: NextRequest) {
   const code = body.status?.code ?? (ok ? "ok" : "error");
   try {
     const imported = await ingestBankRows(rows, "fints");
+    // Kontostände (optional, ältere Worker schicken keine) — Fehler hier stoppt den Import nicht
+    const balances = Array.isArray(body.balances) ? await recordBalances(body.balances).catch((e) => {
+      console.error("[bank/ingest] Salden", e instanceof Error ? e.message : e);
+      return 0;
+    }) : 0;
     // Mehrere Banken: "success" = mindestens eine Bank hat geliefert (Worker setzt das Feld);
     // ältere Worker ohne das Feld → wie bisher nur bei ok + code "ok".
     const success = typeof body.status?.success === "boolean" ? body.status.success : ok && code === "ok";
@@ -73,7 +79,7 @@ export async function POST(req: NextRequest) {
     // Import ist schnell; der Abgleich hat ein Zeitbudget unter dem 60-s-Limit.
     // Rest (matching.remaining > 0) holt der Worker per action "match" nach.
     const matching = await runBankMatching({ budgetMs: 35_000 });
-    return NextResponse.json({ ok: true, ...imported, rejected, matching });
+    return NextResponse.json({ ok: true, ...imported, rejected, balances, matching });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[bank/ingest]", msg);

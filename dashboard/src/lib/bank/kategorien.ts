@@ -190,6 +190,23 @@ export function istFinanzamt(tx: { counterparty_name: string | null; counterpart
   return /\bSTEUERNR\b/i.test(tx.purpose ?? "");
 }
 
+// ── Gegenpartei aus dem Verwendungszweck (Targobank) ────────────────────────
+
+/**
+ * Die Targobank liefert Gegenpartei und IBAN NICHT in eigenen Feldern, sondern nur im
+ * Verwendungszweck: "ECHTZEITÜBERWEISUNG INLAND  TBOL MEHMET CAKMAK AUGUST GEHALT   IBAN
+ * DE93290501010015124738 BIC SBREDE22XXX AM 02.09.2026". Fehlt counterparty_iban, wird die
+ * IBAN von dort gelesen (eigene Konten, Regeln, Vorkasse-Abgleich).
+ */
+export function ibanAusZweck(purpose: string | null): string | null {
+  const m = (purpose ?? "").match(/\bIBAN:?\s?([A-Z]{2}\d{2}[A-Z0-9]{10,30})\b/);
+  return m ? m[1] : null;
+}
+
+export function effektiveIban(tx: { counterparty_iban?: string | null; purpose: string | null }): string | null {
+  return tx.counterparty_iban || ibanAusZweck(tx.purpose);
+}
+
 // ── Regeln ──────────────────────────────────────────────────────────────────
 
 export interface KategorieRegel {
@@ -245,7 +262,13 @@ export function kategorisiere(tx: KategorieTx, regelnSortiert: KategorieRegel[])
     if (r.richtung !== "alle" && r.richtung !== richtung) continue;
     const muster = normFeld(r.muster);
     if (!muster) continue;
-    const wert = r.feld === "counterparty_iban" ? (tx.counterparty_iban ?? "").replace(/\s/g, "").toLowerCase() : normFeld(tx[r.feld]);
+    // Ohne eigenes Namens-/IBAN-Feld (Targobank) steht beides im Verwendungszweck
+    const wert =
+      r.feld === "counterparty_iban"
+        ? (effektiveIban(tx) ?? "").replace(/\s/g, "").toLowerCase()
+        : r.feld === "counterparty_name" && !tx.counterparty_name
+          ? normFeld(tx.purpose)
+          : normFeld(tx[r.feld]);
     if (!wert.includes(r.feld === "counterparty_iban" ? muster.replace(/\s/g, "") : muster)) continue;
     return { kategorie: r.kategorie, quelle: "regel", regel_id: r.id, steuer_split: steuerSplitFuer(r.kategorie, tx) };
   }

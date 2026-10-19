@@ -52,6 +52,7 @@ const roh = (o = {}) => ({
   startSaldo: 100000,
   saldoStand: "2026-10-16",
   konten: [],
+  bankSalden: [],
   basis: { monate: ["2026-09"], tage: 30, einnahmen: 30000, laufend: [{ kategorie: "aus_x", summe: -15000 }], andereLieferanten: -6000, monatsWerte: [] },
   fxAuto: { kurs: 1.25, datum: "2026-10-09" },
   bestellungen: [],

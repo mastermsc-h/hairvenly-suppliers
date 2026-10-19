@@ -472,7 +472,7 @@ def resolve_tan(client, res, interactive: bool):
         if res.decoupled:
             print("\n📱 Bitte jetzt in der Banking-App freigeben …")
             if res.challenge:
-                print(f"   Sparkasse: {res.challenge}")
+                print(f"   Bank: {res.challenge}")
             deadline = time.time() + 300
             while isinstance(res, NeedTANResponse) and time.time() < deadline:
                 time.sleep(3)
@@ -573,7 +573,7 @@ def choose_tan_medium(client, p: dict, interactive: bool) -> None:
         client.set_tan_medium(media[0])
 
 
-def fetch(cfg: dict, p: dict, interactive: bool, fresh: bool = False, since: dt.date | None = None) -> list[dict]:
+def fetch(cfg: dict, p: dict, interactive: bool, fresh: bool = False, since: dt.date | None = None) -> tuple[list[dict], list[dict]]:
     pin = keychain_get_pin(p)
     if not pin:
         raise RuntimeError(f"PIN nicht im Schlüsselbund — bitte `fints setup {p['key']}` ausführen.")
@@ -597,19 +597,28 @@ def fetch(cfg: dict, p: dict, interactive: bool, fresh: bool = False, since: dt.
         start = today - dt.timedelta(days=min(int(cfg["initial_days"]), 89))
 
     rows: list[dict] = []
+    balances: list[dict] = []
+    umsaetze_fertig = False
     try:
-        # Ein einziger Dialog: Init (ggf. pushTAN) → Freigabe → Konten → Umsätze.
+        # Ein einziger Dialog: Init (ggf. pushTAN) → Freigabe → Konten → Umsätze → Salden.
         with client:
             if client.init_tan_response:
                 resolve_tan(client, client.init_tan_response, interactive)
             accounts = resolve_tan(client, client.get_sepa_accounts(), interactive)
-            for acc in select_accounts(cfg, p, list(accounts), interactive):
+            chosen = select_accounts(cfg, p, list(accounts), interactive)
+            for acc in chosen:
                 res = resolve_tan(client, client.get_transactions(acc, start, today), interactive)
                 mapped = [m for m in (map_transaction(t, acc.iban) for t in (res or [])) if m]
                 first = min((m["booking_date"] for m in mapped), default="—")
                 log.info("%s …%s: %d Umsätze seit %s (frühester %s)", p["name"], acc.iban[-4:], len(mapped), start.isoformat(), first)
                 rows.extend(mapped)
+            umsaetze_fertig = True
+            balances = fetch_balances(client, p, chosen)
     except Exception as e:
+        # Fehler NACH den Umsätzen (z.B. beim Kontostand oder Dialogende): Umsätze trotzdem liefern
+        if umsaetze_fertig and not (isinstance(e, NeedsTan) or isinstance(e.__context__, NeedsTan)):
+            log.warning("%s: Fehler nach dem Umsatzabruf ignoriert (%s: %s)", p["name"], type(e).__name__, e)
+            return rows, balances
         # Beendet die Bank den Dialog mit offener Freigabe, wirft das __exit__
         # (HKEND) einen Verbindungsfehler, der NeedsTan überdeckt. Dann trotzdem
         # als "wartet auf TAN" behandeln — sonst versucht der stündliche Lauf es
@@ -624,7 +633,30 @@ def fetch(cfg: dict, p: dict, interactive: bool, fresh: bool = False, since: dt.
             save_state(client, p)
         except Exception as e:
             log.warning("Zustand nicht gespeichert: %s", e)
-    return rows
+    return rows, balances
+
+
+def fetch_balances(client, p: dict, accounts: list) -> list[dict]:
+    """Kontostand je Konto (HKSAL) im selben Dialog. Verlangt die Bank dafür eine TAN,
+    wird NICHTS bestätigt und abgebrochen — Salden sind nur eine Zugabe."""
+    from fints.client import NeedTANResponse
+    out: list[dict] = []
+    for acc in accounts:
+        try:
+            bal = client.get_balance(acc)
+        except Exception as e:
+            log.warning("%s …%s: Kontostand nicht abrufbar (%s)", p["name"], acc.iban[-4:], e)
+            break
+        if isinstance(bal, NeedTANResponse) or bal is None:
+            log.info("%s: Kontostand verlangt TAN — übersprungen", p["name"])
+            break
+        try:
+            amount = getattr(bal.amount, "amount", bal.amount)
+            out.append({"account_iban": acc.iban, "saldo": float(amount), "stand": bal.date.isoformat()[:10]})
+            log.info("%s …%s: Kontostand %.2f (%s)", p["name"], acc.iban[-4:], float(amount), bal.date.isoformat()[:10])
+        except Exception as e:
+            log.warning("%s …%s: Kontostand unlesbar (%s)", p["name"], acc.iban[-4:], e)
+    return out
 
 
 def drain(cfg: dict, res: dict, rounds: int = 10) -> dict:
@@ -648,9 +680,9 @@ def drain(cfg: dict, res: dict, rounds: int = 10) -> dict:
     return m
 
 
-def send(cfg: dict, rows: list[dict], status: dict, rounds: int = 10) -> dict | None:
-    """Umsätze + Status ans Dashboard; danach Abgleich/Kategorisierung zu Ende bringen."""
-    res = post_dashboard(cfg, {"status": status, "transactions": rows})
+def send(cfg: dict, rows: list[dict], status: dict, rounds: int = 10, balances: list[dict] | None = None) -> dict | None:
+    """Umsätze (+ Kontostände) + Status ans Dashboard; danach Abgleich/Kategorisierung zu Ende bringen."""
+    res = post_dashboard(cfg, {"status": status, "transactions": rows, "balances": balances or []})
     if res is None:
         return None
     res["matching"] = drain(cfg, res, rounds)
@@ -689,6 +721,7 @@ def cmd_run(args: list[str]) -> int:
         log.info("Nicht eingerichtet — `fints setup` ausführen.")
         return 0
     rows: list[dict] = []
+    balances: list[dict] = []
     ok_banks: list[dict] = []
     parts: list[str] = []
     codes: set[str] = set()
@@ -708,7 +741,7 @@ def cmd_run(args: list[str]) -> int:
             continue
         reset_bank_responses()
         try:
-            got = fetch(cfg, p, interactive=False)
+            got, bal = fetch(cfg, p, interactive=False)
         except NeedsTan:
             st.update({"needs_tan": True, "last_error": "needs_tan"})
             save_status(p, st)
@@ -730,13 +763,14 @@ def cmd_run(args: list[str]) -> int:
             codes.add(code)
             continue
         rows.extend(got)
+        balances.extend(bal)
         ok_banks.append(p)
         parts.append(f"{p['name']}: {len(got)} Umsätze")
 
     # Schlimmster Zustand bestimmt den Code; "success" = mindestens eine Bank hat geliefert.
     code = next((c for c in ("auth_failed", "needs_tan", "error") if c in codes), "ok")
     status = {"ok": code == "ok", "code": code, "message": " · ".join(parts), "success": bool(ok_banks)}
-    res = send(cfg, rows, status)
+    res = send(cfg, rows, status, balances=balances)
     if res is not None:
         for p in ok_banks:
             mark_success(p)
@@ -747,7 +781,7 @@ def renew_one(cfg: dict, p: dict, fresh: bool = False) -> int:
     print(f"Verbinde mit der {p['name']} …")
     reset_bank_responses()
     try:
-        rows = fetch(cfg, p, interactive=True, fresh=fresh)
+        rows, balances = fetch(cfg, p, interactive=True, fresh=fresh)
     except Exception as e:
         bank = BANK.summary()
         log.error("renew %s fehlgeschlagen: %s: %s | Bank: %s", p["key"], type(e).__name__, e, bank or "—")
@@ -765,7 +799,7 @@ def renew_one(cfg: dict, p: dict, fresh: bool = False) -> int:
             print("     Anmeldenamens probieren und die PIN neu speichern („Neu setzen?“ mit j beantworten).")
         return 1
     print(f"✓ {len(rows)} Umsätze abgerufen ({sum(1 for r in rows if r['amount'] > 0)} Eingänge). Sende ans Dashboard …")
-    res = send(cfg, rows, {"ok": True, "code": "ok", "message": f"{p['name']}: {len(rows)} Umsätze", "success": True})
+    res = send(cfg, rows, {"ok": True, "code": "ok", "message": f"{p['name']}: {len(rows)} Umsätze", "success": True}, balances=balances)
     if res is None:
         print("✗ Dashboard nicht erreichbar — Details: fints status")
         return 1
@@ -860,7 +894,7 @@ def cmd_backfill(args: list[str]) -> int:
         print(f"\n━━ {p['name']}: Umsätze seit {since.strftime('%d.%m.%Y')} ━━")
         reset_bank_responses()
         try:
-            rows = fetch(cfg, p, interactive=True, since=since)
+            rows, balances = fetch(cfg, p, interactive=True, since=since)
         except Exception as e:
             bank = BANK.summary()
             log.error("backfill %s fehlgeschlagen: %s: %s | Bank: %s", p["key"], type(e).__name__, e, bank or "—")
@@ -882,7 +916,7 @@ def cmd_backfill(args: list[str]) -> int:
         inserted = 0
         for i in range(0, len(rows), 600):
             chunk = rows[i:i + 600]
-            res = send(cfg, chunk, {"ok": True, "code": "ok", "message": f"Historie {p['name']}: {len(rows)} Umsätze", "success": True}, rounds=40)
+            res = send(cfg, chunk, {"ok": True, "code": "ok", "message": f"Historie {p['name']}: {len(rows)} Umsätze", "success": True}, rounds=40, balances=balances if i == 0 else None)
             if res is None:
                 print("✗ Dashboard nicht erreichbar — Rest später erneut mit `fints backfill` (doppelte werden verworfen).")
                 return 1
