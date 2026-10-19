@@ -159,6 +159,9 @@ export interface LiqRohdaten {
     gewstLetzte: number | null;
     /** Bereits bezahlte Quartale, z.B. "est_vz|Q3 2026". */
     quartaleErledigt: string[];
+    /** Rechnungsbeträge (USD) der Amanda-Lieferungen je Ankunftsmonat (Vergangenheit) — um die
+     *  EUSt der übrigen Lieferanten (Ebru …) aus der Historie herauszurechnen. */
+    amandaImportUsd?: Record<string, number>;
   };
   nachbestellung: {
     /** Ø bestellte kg/Monat (letzte 3 Monate) — war zuletzt Black-Friday-Vorrat, nicht Verbrauch. */
@@ -210,6 +213,10 @@ export interface PrognoseErgebnis {
   laufendProTag: number; // negativ
   andereLieferantenProTag: number; // negativ (nur wenn eingerechnet)
   ustBasis: number;
+  /** Ø EUSt pro Monat aus Importen anderer Lieferanten (Ebru …), aus der Historie. */
+  eustAndereMonat: number;
+  /** Ø tatsächliche USt-Zahllast (nach Vorsteuer und EUSt) der Historienmonate. */
+  ustIstSchnitt: number | null;
   /** Für die Nachbestell-Schätzung verwendete kg/Monat. */
   nachbestellKgMonat: number;
   tage: Array<{ datum: string; saldo: number }>;
@@ -238,6 +245,8 @@ interface Plan {
   bestellInfo: Map<string, { zahlDatum: string; sofort: boolean; usd: number; eur: number; einfuhr: { datum: string; eust: number; zoll: number } | null }>;
   hinweise: string[];
   nachbestellKgMonat: number;
+  eustAndereMonat: number;
+  ustIstSchnitt: number | null;
 }
 
 export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
@@ -322,17 +331,28 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     }
   }
 
-  // 3) Umsatzsteuer: Zahllast = Basis − im Monat gezahlte EUSt (wird als Vorsteuer verrechnet).
-  //    Mit Dauerfristverlängerung fällig am 10. des übernächsten Monats; Erstattungen kommen ~3 Wochen später.
+  // 3) Umsatzsteuer: Zahllast = Basis (USt auf Umsätze − Inlands-Vorsteuer) − EUSt des Monats.
+  //    EUSt eines vergangenen Monats = tatsächlich gezahlt (alle Lieferanten). Laufender/künftiger
+  //    Monat = gezahlt + Amanda-Ankünfte (einzeln) + Ø EUSt der übrigen Lieferanten (Ebru …) aus der
+  //    Historie — so landet ein Normalmonat bei der tatsächlichen Ø Zahllast (2026: ~18,4k).
+  //    Mit Dauerfristverlängerung fällig am 10. des übernächsten Monats; Erstattungen ~3 Wochen später.
   const hist = roh.steuern.ustHistorie.filter((h) => Number.isFinite(h.ust));
   const ustBasis = e.ustBasisMonat ?? (hist.length ? r2(hist.reduce((s, h) => s + h.ust + h.eust, 0) / hist.length) : 0);
+  const amandaEustHist = (m: string) => {
+    const usd = roh.steuern.amandaImportUsd?.[m] ?? 0;
+    return usd > 0 ? einfuhrFuer(usd, null).eust : 0;
+  };
+  const eustAndereMonat = hist.length ? r2(hist.reduce((s, h) => s + Math.max(0, h.eust - amandaEustHist(h.monat)), 0) / hist.length) : 0;
+  const ustIstSchnitt = hist.length ? r2(hist.reduce((s, h) => s + h.ust, 0) / hist.length) : null;
+  const aktMonat = monatVon(roh.heute);
   if (!e.ustBasisMonat && !hist.length) hinweise.push("Keine USt-Historie — Umsatzsteuer nicht eingerechnet (Basis in den Einstellungen setzen).");
   if (ustBasis !== 0) {
     let m = roh.steuern.ustErledigtBis ? naechsterMonat(roh.steuern.ustErledigtBis) : monatVon(start);
     for (let i = 0; i < 24; i++, m = naechsterMonat(m)) {
       const faellig = faelligkeit("ust_va", m);
       if (!faellig || faellig > ende) break;
-      const betrag = r2(ustBasis + (ustZusatz[m] ?? 0) - (eustProMonat[m] ?? 0));
+      const eustAndere = m >= aktMonat ? eustAndereMonat : 0;
+      const betrag = r2(ustBasis + (ustZusatz[m] ?? 0) - (eustProMonat[m] ?? 0) - eustAndere);
       const datum = betrag < 0 ? plusTage(faellig, 21) : faellig;
       if (datum > ende) continue;
       ereignisse.push({
@@ -375,7 +395,7 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
 
   // Innerhalb eines Tages: Eingänge vor Ausgängen, sonst stabil
   ereignisse.sort((a, b) => a.datum.localeCompare(b.datum) || Math.sign(b.betrag) - Math.sign(a.betrag));
-  return { start, ende, fx, fxQuelle, ereignisse, ustBasis, bestellInfo, hinweise, nachbestellKgMonat };
+  return { start, ende, fx, fxQuelle, ereignisse, ustBasis, eustAndereMonat, ustIstSchnitt, bestellInfo, hinweise, nachbestellKgMonat };
 }
 
 function simuliere(
@@ -412,12 +432,14 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
   const aus = new Set(e.ausgeblendeteKategorien);
   const laufendProTag = r2(roh.basis.laufend.filter((x) => !aus.has(x.kategorie)).reduce((s, x) => s + x.summe, 0) / tage);
   const andereProTag = r2(roh.basis.andereLieferanten / tage);
-  const proTag = einnahmenProTag + laufendProTag + (e.andereLieferantenEinrechnen ? andereProTag : 0);
+  // Andere Lieferanten (Ebru …): Ware UND deren Einfuhrabgaben — die EUSt-Rückholung steckt schon in der USt
+  const andereGesamtProTag = andereProTag - (plan.eustAndereMonat * 12) / 365;
+  const proTag = einnahmenProTag + laufendProTag + (e.andereLieferantenEinrechnen ? andereGesamtProTag : 0);
 
   const sim = simuliere(roh.startSaldo, plan.start, plan.ende, proTag, plan.ereignisse);
   const simAndere = e.andereLieferantenEinrechnen
     ? sim
-    : simuliere(roh.startSaldo, plan.start, plan.ende, proTag + andereProTag, plan.ereignisse);
+    : simuliere(roh.startSaldo, plan.start, plan.ende, proTag + andereGesamtProTag, plan.ereignisse);
 
   const bestellungen: BestellPrognose[] = [];
   for (const b of roh.bestellungen) {
@@ -453,8 +475,10 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
     fxQuelle: plan.fxQuelle,
     einnahmenProTag,
     laufendProTag,
-    andereLieferantenProTag: andereProTag,
+    andereLieferantenProTag: r2(andereGesamtProTag),
     ustBasis: plan.ustBasis,
+    eustAndereMonat: plan.eustAndereMonat,
+    ustIstSchnitt: plan.ustIstSchnitt,
     nachbestellKgMonat: plan.nachbestellKgMonat,
     tage: sim.tage,
     ereignisse: plan.ereignisse,

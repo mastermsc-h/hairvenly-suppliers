@@ -244,8 +244,9 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
           </table>
         </div>
         <p className="mt-3 text-xs text-neutral-500">
-          Umsatzsteuer: Ø {eur(p.ustBasis)} pro Monat vor EUSt-Verrechnung (aus {roh.steuern.ustHistorie.map((h) => monatLabel(h.monat)).join(", ") || "Einstellung"}),
-          minus die im Monat gezahlte EUSt; mit Dauerfristverlängerung fällig am 10. des übernächsten Monats, Erstattungen ca. 3 Wochen später.
+          Umsatzsteuer: tatsächlich gezahlt Ø {p.ustIstSchnitt != null ? eur(p.ustIstSchnitt) : "—"} pro Monat ({roh.steuern.ustHistorie.map((h) => monatLabel(h.monat)).join(", ") || "keine Historie"}).
+          Vorschau: {eur(p.ustBasis)} vor EUSt-Verrechnung, minus EUSt des Monats — Amanda-Lieferungen einzeln, übrige Lieferanten (Ebru …) Ø {eur(p.eustAndereMonat)};
+          mit Dauerfristverlängerung fällig am 10. des übernächsten Monats, Erstattungen ca. 3 Wochen später.
           Lohnsteuer = Ø der letzten Anmeldungen. ESt/GewSt = letzte Vorauszahlung.
         </p>
       </Card>

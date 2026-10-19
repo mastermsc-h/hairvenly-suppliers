@@ -88,7 +88,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
   const { data: lieferant } = await sb.from("suppliers").select("id, default_lead_weeks").eq("name", "Amanda").maybeSingle();
   const amandaId = lieferant?.id ?? "00000000-0000-0000-0000-000000000000";
 
-  const [alleTx, posten, { data: orders }, { data: amanda }, kgVerbrauchMonat, { data: salden }] = await Promise.all([
+  const [alleTx, posten, { data: orders }, { data: amanda }, kgVerbrauchMonat, { data: salden }, { data: amandaAnkuenfte }] = await Promise.all([
     selectAll<Tx>((from, to) =>
       sb.from("bank_transactions")
         .select("account_iban, booking_date, amount, kategorie, counterparty_name, purpose")
@@ -111,6 +111,13 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
       .gt("weight_kg", 1),
     verbrauchGlattKgMonat(),
     sb.from("bank_salden").select("account_iban, saldo, stand, abgerufen_am"),
+    // Amanda-Ankünfte der letzten 13 Monate (für den Amanda-Anteil an der historischen EUSt)
+    sb.from("orders")
+      .select("eta, invoice_total")
+      .eq("supplier_id", amandaId)
+      .not("status", "in", "(cancelled,draft)")
+      .gte("eta", plusTage(heute, -400))
+      .lt("eta", heute),
   ]);
 
   const tx = alleTx.map((t) => ({ ...t, amount: Number(t.amount) })).filter((t) => istGeschaeftskonto(t.account_iban));
@@ -186,10 +193,15 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
   const istSigned = (p: { richtung: string; ist_betrag: number }) => (p.richtung === "erstattung" ? -1 : 1) * Number(p.ist_betrag || 0);
   const erledigt = posten.filter((p) => Number(p.ist_betrag) !== 0);
   const ustPosten = erledigt.filter((p) => p.art === "ust_va" && /^\d{4}-\d{2}$/.test(p.zeitraum)).sort((a, b) => a.zeitraum.localeCompare(b.zeitraum));
+  // Alle Monats-Voranmeldungen der letzten 12 Monate mit vollständigen Kontodaten (2025 war quartalsweise)
   const ustHistorie = ustPosten
-    .filter((p) => p.zeitraum >= datenAb.slice(0, 7))
-    .slice(-3)
+    .filter((p) => p.zeitraum >= datenAb.slice(0, 7) && p.zeitraum >= plusTage(heute, -366).slice(0, 7))
     .map((p) => ({ monat: p.zeitraum, ust: istSigned(p), eust: eustBezahlt[p.zeitraum] ?? 0 }));
+  const amandaImportUsd: Record<string, number> = {};
+  for (const o of (amandaAnkuenfte ?? []) as Array<{ eta: string | null; invoice_total: number | null }>) {
+    if (!o.eta || !(Number(o.invoice_total) > 0)) continue;
+    amandaImportUsd[o.eta.slice(0, 7)] = (amandaImportUsd[o.eta.slice(0, 7)] ?? 0) + Number(o.invoice_total);
+  }
   const lst = erledigt.filter((p) => p.art === "lst_anmeldung" && /^\d{4}-\d{2}$/.test(p.zeitraum)).sort((a, b) => a.zeitraum.localeCompare(b.zeitraum));
   const letzte = (art: string) => {
     const r = erledigt.filter((p) => p.art === art).sort((a, b) => a.zeitraum.localeCompare(b.zeitraum)).at(-1);
@@ -249,6 +261,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
       estLetzte: letzte("est_vz"),
       gewstLetzte: letzte("gewst_vz"),
       quartaleErledigt: erledigt.filter((p) => p.art === "est_vz" || p.art === "gewst_vz").map((p) => `${p.art}|${p.zeitraum}`),
+      amandaImportUsd,
     },
     nachbestellung: {
       kgProMonatAuto: Math.round((kg90 / 3) * 10) / 10,

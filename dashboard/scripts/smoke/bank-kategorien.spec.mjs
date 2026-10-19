@@ -61,6 +61,20 @@ check("Mehrere Anteile, Summe geht NICHT auf → nicht raten",
 check("Kein Steuer-Token", K.parseSteuerZweck("Rechnungsnr. 2026/1758", -475.41), []);
 check("Leerer Zweck", K.parseSteuerZweck(null, -1), []);
 
+// Echte Formate aus der Historie (Backfill 19.10.2026)
+check("MAI ohne Punkt",
+  K.parseSteuerZweck("STEUERNR 060/212/27747     LOHNST  MAI 26  3.470,37EUR", -3470.37),
+  [{ art: "lst_anmeldung", zeitraum: "2026-05", jahr: 2026, betrag: 3470.37 }]);
+check("UMS.ST MAI ohne Punkt",
+  K.parseSteuerZweck("STEUERNR 060/212/27747     UMS.ST  MAI 26  31.590,61EUR", -31590.61),
+  [{ art: "ust_va", zeitraum: "2026-05", jahr: 2026, betrag: 31590.61 }]);
+check("Quartal 2025",
+  K.parseSteuerZweck("STEUERNR 060/212/27747     UMS.ST  3VJ.25  6.483,36EUR", -6483.36),
+  [{ art: "ust_va", zeitraum: "Q3 2025", jahr: 2025, betrag: 6483.36 }]);
+check("Sammelabbuchung drei Steuern",
+  K.parseSteuerZweck("STEUERNR 060/212/27747 LOHNST APR.26 3.156,86EUR GEW.ST 2VJ.26 1.025,00EUR UMS.ST MRZ.26 32.121,85EUR", -36303.71).map((x) => [x.art, x.zeitraum, x.betrag]),
+  [["lst_anmeldung", "2026-04", 3156.86], ["gewst_vz", "Q2 2026", 1025], ["ust_va", "2026-03", 32121.85]]);
+
 // ── kategorisiere ───────────────────────────────────────────────────────────
 const regeln = K.sortRegeln([
   { id: "r1", prioritaet: 10, feld: "purpose", muster: "DHL EXPRESS", richtung: "aus", kategorie: "st_eust" },
@@ -74,6 +88,10 @@ const tx = (o) => ({ amount: -1, booking_date: "2026-09-15", counterparty_name: 
 const fa = K.kategorisiere(tx({ amount: -4215.25, counterparty_name: "Finanzkasse in LHK Bremen", counterparty_iban: "DE59250000000025001532", purpose: "STEUERNR 060/212/27747 LOHNST AUG.26 4.215,25EUR" }), regeln);
 check("Finanzamt Lohnsteuer → Kategorie", [fa.kategorie, fa.quelle, fa.steuer_split.length], ["st_lohnsteuer", "auto", 1]);
 const faUnlesbar = K.kategorisiere(tx({ amount: -50, counterparty_name: "Finanzkasse in LHK Bremen", purpose: "SAEUMNISZUSCHLAG" }), regeln);
+const rLohn = K.sortRegeln([{ id: "l", prioritaet: 40, feld: "purpose", muster: "lohn", richtung: "aus", kategorie: "aus_personal" }]);
+check("Finanzamt nie über allgemeine Regeln", K.kategorisiere(tx({ amount: -99, counterparty_name: "Finanzkasse in LHK Bremen", purpose: "STEUERNR 1 LOHNST XYZ" }), rLohn).kategorie, "st_sonstige");
+check("Sammelabbuchung → Kategorie des größten Anteils",
+  K.kategorisiere(tx({ amount: -36303.71, counterparty_name: "Finanzkasse in LHK Bremen", purpose: "STEUERNR 060/212/27747 LOHNST APR.26 3.156,86EUR GEW.ST 2VJ.26 1.025,00EUR UMS.ST MRZ.26 32.121,85EUR" }), regeln).kategorie, "st_ust");
 check("Finanzamt unlesbar → sonstige Steuern", faUnlesbar.kategorie, "st_sonstige");
 const express = K.kategorisiere(tx({ amount: -1015.05, counterparty_name: "DHL GROUP - DEUTSCHE POST AG", purpose: "/OBO/DHL EXPRESS GERMANY GMBH/INV/ZIT7817554" }), regeln);
 check("DHL Express → EUSt (vor DHL-Versand-Regel)", [express.kategorie, express.steuer_split], ["st_eust", [{ art: "eust", zeitraum: "2026-09", jahr: 2026, betrag: 1015.05 }]]);

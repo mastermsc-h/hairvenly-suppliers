@@ -106,8 +106,10 @@ p = L.prognose(roh({
 }), { ...E0, horizontTage: 120 });
 const st = p.ereignisse.filter((x) => x.art === "steuer").map((x) => [x.datum, x.label, x.betrag]);
 check("USt-Basis = Ø(ust+eust)", p.ustBasis, 22000);
+check("Ø EUSt andere = Historie ohne Amanda", p.eustAndereMonat, 2000);
+check("Ø tatsächliche Zahllast", p.ustIstSchnitt, 20000);
 check("USt Sep = 22000 − 17000, fällig 10.11.", st.find((s) => s[1] === "USt-VA 2026-09"), ["2026-11-10", "USt-VA 2026-09", -5000]);
-check("USt Nov: EUSt 38000 > Basis → Erstattung 21 Tage nach 11.01.", st.find((s) => s[1].startsWith("USt") && s[1].includes("2026-11")), ["2027-02-01", "USt-Erstattung 2026-11 (EUSt-Verrechnung)", 16000]);
+check("USt Nov: EUSt 38000 > Basis → Erstattung 21 Tage nach 11.01.", st.find((s) => s[1].startsWith("USt") && s[1].includes("2026-11")), ["2027-02-01", "USt-Erstattung 2026-11 (EUSt-Verrechnung)", 18000]);
 check("Lohnsteuer Okt Ø 4100 am 10.11.", st.find((s) => s[1] === "Lohnsteuer 2026-10"), ["2026-11-10", "Lohnsteuer 2026-10", -4100]);
 check("GewSt Q4 am 16.11.", st.find((s) => s[1].startsWith("GewSt")), ["2026-11-16", "GewSt-Vorauszahlung Q4 2026", -1025]);
 check("ESt Q4 am 10.12.", st.find((s) => s[1].startsWith("ESt")), ["2026-12-10", "ESt-Vorauszahlung Q4 2026", -1735]);
@@ -118,6 +120,11 @@ p = L.prognose(roh(), E0);
 check("Andere Lieferanten nur im Warn-Tiefpunkt", p.tage.at(-1).saldo > p.tiefpunktMitAnderen.saldo || p.tiefpunktMitAnderen.saldo <= p.tiefpunkt.saldo, true);
 const pMit = L.prognose(roh(), { ...E0, andereLieferantenEinrechnen: true });
 check("Eingerechnet: 300/Tag weniger", pMit.tage[0].saldo, 100300);
+// Amanda-Anteil der historischen EUSt wird herausgerechnet: 12.500 USD / 1,25 = 10.000 € → EUSt 1.900
+const pAm = L.prognose(roh({ steuern: { ustHistorie: [{ monat: "2026-08", ust: 15000, eust: 5000 }], ustErledigtBis: "2026-08", eustBezahlt: {}, lstLetzte: [], lstErledigtBis: null, estLetzte: null, gewstLetzte: null, quartaleErledigt: [], amandaImportUsd: { "2026-08": 12500 } } }), { ...E0, horizontTage: 60 });
+check("EUSt andere = 5000 − Amanda 1900", pAm.eustAndereMonat, 3100);
+check("Laufender Monat Okt: Basis 20000 − andere 3100", pAm.ereignisse.find((x) => x.label === "USt-VA 2026-10").betrag, -16900);
+check("Vergangener Monat Sep: nur tatsächliche EUSt (0)", pAm.ereignisse.find((x) => x.label === "USt-VA 2026-09").betrag, -20000);
 
 // Nachbestellungen
 const pn = L.prognose(roh({ nachbestellung: { kgProMonatAuto: 52, kgVerbrauchMonat: null, usdProKgAuto: 1250, leadWochen: 6 } }), { ...E0, nachbestellungenEinrechnen: true, horizontTage: 60 });

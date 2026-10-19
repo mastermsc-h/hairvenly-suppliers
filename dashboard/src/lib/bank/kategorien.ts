@@ -106,7 +106,7 @@ function parseDeBetrag(s: string): number {
 }
 
 const STEUER_TOKEN =
-  /(UMS\.?\s?ST|LOHNST|EINK\.?\s?ST|GEW\.?\s?ST|SOLZ|SOLI|KI\.?\s?ST|KIST)\.?\s+(\dVJ\.?\d{2}|(?:JAN|FEB|MRZ|MAR|MÄR|MAE|MA\.R|APR|MAI|JUN|JUL|AUG|SEP|OKT|NOV|DEZ)\.?\d{2}|20\d{2})(?:\s+[A-ZÄÖÜ.]+Z\b)?(?:\s+(\d{1,3}(?:\.\d{3})*,\d{2})\s*EUR)?/gi;
+  /(UMS\.?\s?ST|LOHNST|EINK\.?\s?ST|GEW\.?\s?ST|SOLZ|SOLI|KI\.?\s?ST|KIST)\.?\s+(\dVJ\.?\d{2}|(?:JAN|FEB|MRZ|MAR|MÄR|MAE|MA\.R|APR|MAI|JUN|JUL|AUG|SEP|OKT|NOV|DEZ)[.\s]?\d{2}(?!\d)|20\d{2})(?:\s+[A-ZÄÖÜ.]+Z\b)?(?:\s+(\d{1,3}(?:\.\d{3})*,\d{2})\s*EUR)?/gi;
 
 function artFor(steuer: string, p: Periode): SteuerSplit["art"] {
   const s = steuer.toUpperCase().replace(/[\s.]/g, "");
@@ -251,9 +251,13 @@ export function kategorisiere(tx: KategorieTx, regelnSortiert: KategorieRegel[])
   if (istFinanzamt(tx)) {
     const split = parseSteuerZweck(tx.purpose, tx.amount);
     if (split.length > 0) {
-      const kategorie = ART_ZU_KATEGORIE[split[0].art];
+      const groesster = split.reduce((a, b) => (Math.abs(b.betrag) > Math.abs(a.betrag) ? b : a));
+      const kategorie = ART_ZU_KATEGORIE[groesster.art];
       return { kategorie, quelle: "auto", regel_id: null, steuer_split: split };
     }
+    // Finanzamt, aber Zweck nicht lesbar (Säumniszuschlag, Kassenzeichen …) — keine allgemeinen
+    // Regeln anwenden: "LOHNST MAI 26" landete sonst per "lohn"-Regel bei Personal (gefunden 19.10.2026)
+    return { kategorie: "st_sonstige", quelle: "auto", regel_id: null, steuer_split: [] };
   }
 
   // 2) Regeln
@@ -272,9 +276,6 @@ export function kategorisiere(tx: KategorieTx, regelnSortiert: KategorieRegel[])
     if (!wert.includes(r.feld === "counterparty_iban" ? muster.replace(/\s/g, "") : muster)) continue;
     return { kategorie: r.kategorie, quelle: "regel", regel_id: r.id, steuer_split: steuerSplitFuer(r.kategorie, tx) };
   }
-
-  // 3) Finanzamt ohne lesbaren Zweck
-  if (istFinanzamt(tx)) return { kategorie: "st_sonstige", quelle: "auto", regel_id: null, steuer_split: [] };
 
   // 4) Übrige Eingänge = Kundenüberweisungen (Vorkasse/Rechnung). Auch die vor dem Start
   //    des Vorkasse-Abgleichs (match_status "ignored") — sonst stünden 90 Tage Altlasten
