@@ -56,7 +56,7 @@ const roh = (o = {}) => ({
   fxAuto: { kurs: 1.25, datum: "2026-10-09" },
   bestellungen: [],
   steuern: { ustHistorie: [], ustErledigtBis: null, eustBezahlt: {}, lstLetzte: [], lstErledigtBis: null, estLetzte: null, gewstLetzte: null, quartaleErledigt: [] },
-  nachbestellung: { kgProMonatAuto: 0, usdProKgAuto: 0, leadWochen: 6 },
+  nachbestellung: { kgProMonatAuto: 0, kgVerbrauchMonat: null, usdProKgAuto: 0, leadWochen: 6 },
   ...o,
 });
 const best = (o) => ({ id: "x", label: "B", status: "in_production", eta: "2026-11-10", invoiceUsd: 50000, restUsd: 50000, importVatEur: null, kg: 40, ...o });
@@ -119,7 +119,15 @@ const pMit = L.prognose(roh(), { ...E0, andereLieferantenEinrechnen: true });
 check("Eingerechnet: 300/Tag weniger", pMit.tage[0].saldo, 100300);
 
 // Nachbestellungen
-const pn = L.prognose(roh({ nachbestellung: { kgProMonatAuto: 52, usdProKgAuto: 1250, leadWochen: 6 } }), { ...E0, nachbestellungenEinrechnen: true, horizontTage: 60 });
+const pn = L.prognose(roh({ nachbestellung: { kgProMonatAuto: 52, kgVerbrauchMonat: null, usdProKgAuto: 1250, leadWochen: 6 } }), { ...E0, nachbestellungenEinrechnen: true, horizontTage: 60 });
+check("Ohne Verbrauch: Bestellrhythmus", pn.nachbestellKgMonat, 52);
+const pv = L.prognose(roh({ nachbestellung: { kgProMonatAuto: 52, kgVerbrauchMonat: 24.3, usdProKgAuto: 1250, leadWochen: 6 } }), { ...E0, nachbestellungenEinrechnen: true });
+check("Verbrauch hat Vorrang vor Bestellrhythmus", pv.nachbestellKgMonat, 24.3);
+check("Manuell hat Vorrang vor Verbrauch", L.prognose(roh({ nachbestellung: { kgProMonatAuto: 52, kgVerbrauchMonat: 24.3, usdProKgAuto: 1250, leadWochen: 6 } }), { ...E0, nachbestellKgMonat: 30 }).nachbestellKgMonat, 30);
+// Ausgeblendete Kategorie (Kredit abbezahlt)
+const rk = roh({ basis: { monate: ["2026-09"], tage: 30, einnahmen: 30000, laufend: [{ kategorie: "aus_kredit", summe: -9000 }, { kategorie: "aus_x", summe: -6000 }], andereLieferanten: 0, monatsWerte: [] } });
+check("Mit Kredit", L.prognose(rk, E0).laufendProTag, -500);
+check("Kredit fällt weg", L.prognose(rk, { ...E0, ausgeblendeteKategorien: ["aus_kredit"] }).laufendProTag, -200);
 check("Nachbestellungen erzeugen Zahlungen", pn.ereignisse.some((x) => x.art === "nachbestellung"), true);
 check("Erste Nachbestellung: Mo 19.10. + 35 Tage", pn.ereignisse.find((x) => x.art === "nachbestellung").datum, "2026-11-23");
 

@@ -234,13 +234,33 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
               <span className="tabular-nums">{eur(m.einnahmen / m.tage)} <span className="text-xs text-neutral-400">· {eur(m.einnahmen)}</span></span>
             </div>
           ))}
-          <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mt-4 mb-1">Laufende Abgänge Ø pro Monat</div>
-          {roh.basis.laufend.map((l) => (
-            <div key={l.kategorie} className="flex justify-between text-sm py-0.5">
-              <span className="text-neutral-700">{KATEGORIE_BY_KEY[l.kategorie]?.label ?? l.kategorie}</span>
-              <span className="tabular-nums">{eur((-l.summe / roh.basis.tage) * (365 / 12))}</span>
-            </div>
-          ))}
+          <div className="flex items-baseline justify-between mt-4 mb-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Laufende Abgänge Ø pro Monat</span>
+            <span className="text-[10px] text-neutral-400">fällt weg</span>
+          </div>
+          {roh.basis.laufend.map((l) => {
+            const weg = e.ausgeblendeteKategorien.includes(l.kategorie);
+            return (
+              <label key={l.kategorie} className="flex items-center justify-between gap-2 text-sm py-0.5 cursor-pointer">
+                <span className={weg ? "text-neutral-400 line-through" : "text-neutral-700"}>{KATEGORIE_BY_KEY[l.kategorie]?.label ?? l.kategorie}</span>
+                <span className="flex items-center gap-2">
+                  <span className={`tabular-nums ${weg ? "text-neutral-400 line-through" : ""}`}>{eur((-l.summe / roh.basis.tage) * (365 / 12))}</span>
+                  <input
+                    type="checkbox"
+                    checked={weg}
+                    onChange={(ev) =>
+                      set(
+                        "ausgeblendeteKategorien",
+                        ev.target.checked ? [...e.ausgeblendeteKategorien, l.kategorie] : e.ausgeblendeteKategorien.filter((k) => k !== l.kategorie)
+                      )
+                    }
+                    className="h-3.5 w-3.5 rounded border-neutral-300"
+                    title="Fällt ab jetzt weg (z.B. Kredit abbezahlt) — wird nicht mehr eingerechnet"
+                  />
+                </span>
+              </label>
+            );
+          })}
           <p className="mt-3 text-xs text-neutral-500">
             Aus den <Link href="/finances/bank" className="underline">Kontoumsätzen</Link> (Sparkasse). Der Übertrag aufs Targobank-Gehaltskonto deckt Gehälter, Miete,
             Krankenkassen und Versicherungen ab. Wareneinkauf und Steuern laufen oben einzeln.
@@ -266,7 +286,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
             </>
           )}
           <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mt-3 mb-1">Amanda-Bestellungen</div>
-          <Zeile l="Bestellt Ø letzte 3 Monate" r={`${roh.nachbestellung.kgProMonatAuto.toLocaleString("de-DE")} kg / Monat`} />
+          <Zeile l="Bestellt Ø letzte 3 Monate (inkl. Black-Friday-Vorrat)" r={`${roh.nachbestellung.kgProMonatAuto.toLocaleString("de-DE")} kg / Monat`} />
+          <Zeile l="Für Nachbestellungen gerechnet" r={`${p.nachbestellKgMonat.toLocaleString("de-DE", { maximumFractionDigits: 1 })} kg / Monat${e.nachbestellKgMonat ? " (manuell)" : roh.nachbestellung.kgVerbrauchMonat ? " (= Verbrauch)" : ""}`} />
           <Zeile l="Ø Einkaufspreis" r={`${usd(roh.nachbestellung.usdProKgAuto)} / kg`} />
           <Zeile l="Lieferzeit" r={`${roh.nachbestellung.leadWochen} Wochen`} />
           {verbrauch?.stand && <p className="mt-2 text-xs text-neutral-400">Verkaufsanalyse: {verbrauch.stand}</p>}
@@ -290,7 +311,12 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
           </div>
           {e.nachbestellungenEinrechnen && (
             <>
-              <Feld label={`Nachbestellung kg/Monat (leer = ${roh.nachbestellung.kgProMonatAuto})`} value={e.nachbestellKgMonat} optional onChange={(v) => set("nachbestellKgMonat", v)} />
+              <Feld
+                label={`Nachbestellung kg/Monat (leer = ${roh.nachbestellung.kgVerbrauchMonat != null ? `Verbrauch ${roh.nachbestellung.kgVerbrauchMonat}` : `Ø Bestellungen ${roh.nachbestellung.kgProMonatAuto}`})`}
+                value={e.nachbestellKgMonat}
+                optional
+                onChange={(v) => set("nachbestellKgMonat", v)}
+              />
               <Feld label={`USD pro kg (leer = ${roh.nachbestellung.usdProKgAuto})`} value={e.usdProKg} optional onChange={(v) => set("usdProKg", v)} />
             </>
           )}

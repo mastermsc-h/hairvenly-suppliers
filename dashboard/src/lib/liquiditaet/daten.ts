@@ -1,6 +1,8 @@
 // Liquiditätsvorschau — Rohdaten sammeln (server-only, service_role).
 // Aufrufer prüfen vorher requireFeature("finances") und role !== "supplier".
 import { cache } from "react";
+import { unstable_cache } from "next/cache";
+import { readVerkaufsanalyse } from "@/lib/stock-sheets";
 import { createServiceClient } from "@/lib/supabase/server";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import {
@@ -17,6 +19,24 @@ import {
 } from "./rechnung";
 
 type Sb = ReturnType<typeof createServiceClient>;
+
+/**
+ * Verkauf Russisch glatt (= Amanda-Ware) laut Verkaufsanalyse, Ø 3 Monate in kg/Monat.
+ * 1 h zwischengespeichert — die Bestellliste soll nicht bei jedem Aufruf das Sheet lesen.
+ */
+const verbrauchGlattKgMonat = unstable_cache(
+  async (): Promise<number | null> => {
+    try {
+      const { rows } = await readVerkaufsanalyse();
+      const r = rows.find((x) => x.quality === "Russisch Glatt" && x.isSummary);
+      return r && r.avg3mKg > 0 ? Math.round(r.avg3mKg * 10) / 10 : null;
+    } catch {
+      return null;
+    }
+  },
+  ["liquiditaet-verbrauch-glatt"],
+  { revalidate: 3600 }
+);
 
 /** Targobank = Gehaltskonto: dessen Ausgaben stecken schon im Übertrag von der Sparkasse. */
 const GEHALTSKONTO_BLZ = "30020900";
@@ -68,7 +88,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
   const { data: lieferant } = await sb.from("suppliers").select("id, default_lead_weeks").eq("name", "Amanda").maybeSingle();
   const amandaId = lieferant?.id ?? "00000000-0000-0000-0000-000000000000";
 
-  const [alleTx, posten, { data: orders }, { data: amanda }] = await Promise.all([
+  const [alleTx, posten, { data: orders }, { data: amanda }, kgVerbrauchMonat] = await Promise.all([
     selectAll<Tx>((from, to) =>
       sb.from("bank_transactions")
         .select("account_iban, booking_date, amount, kategorie, counterparty_name, purpose")
@@ -89,6 +109,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
       .eq("supplier_id", amandaId)
       .gte("order_date", plusTage(heute, -180))
       .gt("weight_kg", 1),
+    verbrauchGlattKgMonat(),
   ]);
 
   const tx = alleTx.map((t) => ({ ...t, amount: Number(t.amount) })).filter((t) => istGeschaeftskonto(t.account_iban));
@@ -224,6 +245,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     },
     nachbestellung: {
       kgProMonatAuto: Math.round((kg90 / 3) * 10) / 10,
+      kgVerbrauchMonat,
       usdProKgAuto: kgPreis > 0 ? Math.round(mitPreis.reduce((s, h) => s + Number(h.invoice_total), 0) / kgPreis) : 0,
       leadWochen,
     },

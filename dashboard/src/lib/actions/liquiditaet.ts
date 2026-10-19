@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireFeature } from "@/lib/auth";
 import { LIQ_DEFAULTS, type LiqEinstellungen } from "@/lib/liquiditaet/rechnung";
+import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 
 const ZAHLEN: Array<[keyof LiqEinstellungen, number, number]> = [
   ["zahlungVorAnkunftTage", 0, 60],
@@ -36,6 +37,9 @@ export async function saveLiquiditaetEinstellungen(input: Partial<LiqEinstellung
     out[k] = v === null || !Number.isFinite(v) ? null : Math.min(max, Math.max(min, v));
   }
   for (const k of SCHALTER) out[k] = input[k] === true;
+  out.ausgeblendeteKategorien = Array.isArray(input.ausgeblendeteKategorien)
+    ? [...new Set(input.ausgeblendeteKategorien.filter((k) => typeof k === "string" && KATEGORIE_BY_KEY[k]))]
+    : [];
   const sb = createServiceClient();
   const { error } = await sb.from("liquiditaet_einstellungen").upsert({ id: 1, daten: out, updated_at: new Date().toISOString() });
   if (error) return { ok: false, error: error.message };

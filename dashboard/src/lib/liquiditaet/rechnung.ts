@@ -70,8 +70,10 @@ export interface LiqEinstellungen {
   andereLieferantenEinrechnen: boolean;
   /** Künftige Amanda-Nachbestellungen (wöchentlich) als Schätzung einrechnen. */
   nachbestellungenEinrechnen: boolean;
-  nachbestellKgMonat: number | null; // null = Ø der letzten Bestellungen
+  nachbestellKgMonat: number | null; // null = Verbrauch laut Verkaufsanalyse (sonst Ø Bestellungen)
   usdProKg: number | null; // null = Ø der letzten Bestellungen
+  /** Laufende Abgänge, die ab jetzt wegfallen (z.B. "aus_kredit" — Shopify Capital abbezahlt 19.10.2026). */
+  ausgeblendeteKategorien: string[];
 }
 
 export const LIQ_DEFAULTS: LiqEinstellungen = {
@@ -87,6 +89,7 @@ export const LIQ_DEFAULTS: LiqEinstellungen = {
   nachbestellungenEinrechnen: false,
   nachbestellKgMonat: null,
   usdProKg: null,
+  ausgeblendeteKategorien: [],
 };
 
 export function mitDefaults(e: Partial<LiqEinstellungen> | null | undefined): LiqEinstellungen {
@@ -136,7 +139,14 @@ export interface LiqRohdaten {
     /** Bereits bezahlte Quartale, z.B. "est_vz|Q3 2026". */
     quartaleErledigt: string[];
   };
-  nachbestellung: { kgProMonatAuto: number; usdProKgAuto: number; leadWochen: number };
+  nachbestellung: {
+    /** Ø bestellte kg/Monat (letzte 3 Monate) — war zuletzt Black-Friday-Vorrat, nicht Verbrauch. */
+    kgProMonatAuto: number;
+    /** Verkauf Russisch glatt laut Verkaufsanalyse (Ø 3 Monate); null = Sheet nicht erreichbar. */
+    kgVerbrauchMonat: number | null;
+    usdProKgAuto: number;
+    leadWochen: number;
+  };
 }
 
 // ── Ereignisse + Prognose ───────────────────────────────────────────────────
@@ -179,6 +189,8 @@ export interface PrognoseErgebnis {
   laufendProTag: number; // negativ
   andereLieferantenProTag: number; // negativ (nur wenn eingerechnet)
   ustBasis: number;
+  /** Für die Nachbestell-Schätzung verwendete kg/Monat. */
+  nachbestellKgMonat: number;
   tage: Array<{ datum: string; saldo: number }>;
   ereignisse: Ereignis[];
   bestellungen: BestellPrognose[];
@@ -204,6 +216,7 @@ interface Plan {
   ustBasis: number;
   bestellInfo: Map<string, { zahlDatum: string; sofort: boolean; usd: number; eur: number; einfuhr: { datum: string; eust: number; zoll: number } | null }>;
   hinweise: string[];
+  nachbestellKgMonat: number;
 }
 
 export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
@@ -247,8 +260,9 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
   }
 
   // 2) Künftige Nachbestellungen (Schätzung): wöchentlich ab nächstem Montag
+  const nachbestellKgMonat = e.nachbestellKgMonat ?? roh.nachbestellung.kgVerbrauchMonat ?? roh.nachbestellung.kgProMonatAuto;
   if (e.nachbestellungenEinrechnen) {
-    const kgMonat = e.nachbestellKgMonat ?? roh.nachbestellung.kgProMonatAuto;
+    const kgMonat = nachbestellKgMonat;
     const usdKg = e.usdProKg ?? roh.nachbestellung.usdProKgAuto;
     const leadTage = roh.nachbestellung.leadWochen * 7;
     const kgWoche = (kgMonat * 12) / 52;
@@ -320,7 +334,7 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
 
   // Innerhalb eines Tages: Eingänge vor Ausgängen, sonst stabil
   ereignisse.sort((a, b) => a.datum.localeCompare(b.datum) || Math.sign(b.betrag) - Math.sign(a.betrag));
-  return { start, ende, fx, fxQuelle, ereignisse, ustBasis, bestellInfo, hinweise };
+  return { start, ende, fx, fxQuelle, ereignisse, ustBasis, bestellInfo, hinweise, nachbestellKgMonat };
 }
 
 function simuliere(
@@ -354,7 +368,8 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
   const plan = erstellePlan(roh, e);
   const tage = Math.max(1, roh.basis.tage);
   const einnahmenProTag = r2(roh.basis.einnahmen / tage);
-  const laufendProTag = r2(roh.basis.laufend.reduce((s, x) => s + x.summe, 0) / tage);
+  const aus = new Set(e.ausgeblendeteKategorien);
+  const laufendProTag = r2(roh.basis.laufend.filter((x) => !aus.has(x.kategorie)).reduce((s, x) => s + x.summe, 0) / tage);
   const andereProTag = r2(roh.basis.andereLieferanten / tage);
   const proTag = einnahmenProTag + laufendProTag + (e.andereLieferantenEinrechnen ? andereProTag : 0);
 
@@ -399,6 +414,7 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
     laufendProTag,
     andereLieferantenProTag: andereProTag,
     ustBasis: plan.ustBasis,
+    nachbestellKgMonat: plan.nachbestellKgMonat,
     tage: sim.tage,
     ereignisse: plan.ereignisse,
     bestellungen,
