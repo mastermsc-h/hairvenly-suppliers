@@ -203,8 +203,13 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     amandaImportUsd[o.eta.slice(0, 7)] = (amandaImportUsd[o.eta.slice(0, 7)] ?? 0) + Number(o.invoice_total);
   }
   const lst = erledigt.filter((p) => p.art === "lst_anmeldung" && /^\d{4}-\d{2}$/.test(p.zeitraum)).sort((a, b) => a.zeitraum.localeCompare(b.zeitraum));
+  // "Q4 2025" sortiert als Text HINTER "Q3 2026" → chronologischer Schlüssel nötig
+  const zeitKey = (z: string) => {
+    const q = z.match(/^Q([1-4]) (\d{4})$/);
+    return q ? `${q[2]}-${String(Number(q[1]) * 3).padStart(2, "0")}` : z;
+  };
   const letzte = (art: string) => {
-    const r = erledigt.filter((p) => p.art === art).sort((a, b) => a.zeitraum.localeCompare(b.zeitraum)).at(-1);
+    const r = erledigt.filter((p) => p.art === art).sort((a, b) => zeitKey(a.zeitraum).localeCompare(zeitKey(b.zeitraum))).at(-1);
     return r ? istSigned(r) : null;
   };
 
