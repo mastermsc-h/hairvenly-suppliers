@@ -168,6 +168,9 @@ const pz = L.prognose(roh({ ratenPositionen: [mp({ datum: "2026-10-01", restUsd:
 check("Andere Lieferanten: allgemeine Regel (Frist 28), Ebru eigene (14)", pz.map((x) => x.datum).sort(), ["2026-10-17", "2026-10-29"]);
 check("Alte Rohdaten (manuellePositionen) gehen weiter", L.prognose(roh({ manuellePositionen: [mp({ restUsd: 1000 })] }), E0).ereignisse.filter((x) => x.art === "manuell").length, 1);
 
+const rp = L.ratenplan([mp({ id: "a", label: "A", restUsd: 50000 }), mp({ id: "b", label: "B", datum: "2026-10-11", restUsd: 30000 })], { "Ebru (CN + TR)": "2026-10-19" }, L.mitDefaults({}), "2026-10-20");
+check("ratenplan: Anteile je Rechnung", rp.map((r) => [r.datum, r.positionen.map((x) => `${x.id}:${x.usd}`)]), [["2026-11-02", ["a:40000"]], ["2026-11-16", ["a:10000", "b:30000"]]]);
+
 // Defaults
 check("Defaults vollständig", Object.keys(L.mitDefaults({})).length, Object.keys(L.LIQ_DEFAULTS).length);
 

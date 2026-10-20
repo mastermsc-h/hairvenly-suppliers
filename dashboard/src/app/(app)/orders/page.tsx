@@ -6,8 +6,6 @@ import { usd, date } from "@/lib/format";
 import { type OrderWithTotals, type OrderDocument, type Supplier } from "@/lib/types";
 import OpenAmount from "../open-amount";
 import { sumOpen } from "@/lib/order-debt";
-import { ladeEinstellungen } from "@/lib/liquiditaet/daten";
-import { LIQ_DEFAULTS } from "@/lib/liquiditaet/rechnung";
 import { t, type Locale } from "@/lib/i18n";
 import QuickDocs from "./[id]/quick-docs";
 import TrackingLink from "../tracking-link";
@@ -16,7 +14,7 @@ import NotesCell from "../notes-cell";
 import StatusDropdown from "./[id]/status-dropdown";
 import DocIndicators from "./[id]/doc-indicators";
 import LiquiditaetBadge from "./liquiditaet-badge";
-import { ladePrognose } from "@/lib/liquiditaet/daten";
+import { ladePrognose, ladeRatenTermine } from "@/lib/liquiditaet/daten";
 import type { BestellPrognose } from "@/lib/liquiditaet/rechnung";
 
 export default async function OrdersPage() {
@@ -30,10 +28,8 @@ export default async function OrdersPage() {
   const showPackingLists = hasFeature(profile, "packing_lists") || showAllDocs;
   const showDocs = showAllDocs || showPackingLists;
   const showInvoices = hasFeature(profile, "invoices") || isSupplierRole;
-  // Zahlungsfrist manueller Positionen = Einstellung der Liquiditätsvorschau
-  const manualFristTage = showInvoices
-    ? (await ladeEinstellungen().catch(() => LIQ_DEFAULTS)).manuellFristTage
-    : LIQ_DEFAULTS.manuellFristTage;
+  // Geplante Ratentermine (Ebru/manuelle Positionen) — gleicher Plan wie die Liquiditätsvorschau
+  const ratenTermine: Record<string, string[]> = !isSupplierRole && hasFeature(profile, "finances") ? await ladeRatenTermine().catch(() => ({})) : {};
   const canEditOrder = profile.is_admin || isSupplierRole;
 
   // Scope queries to own supplier for supplier role
@@ -254,7 +250,7 @@ export default async function OrdersPage() {
                       )}
                       {showInvoices && (
                         <td className="px-4 py-3 text-right font-medium text-neutral-900">
-                          <OpenAmount order={o} locale={locale} manualFristTage={manualFristTage} />
+                          <OpenAmount order={o} locale={locale} raten={ratenTermine[o.id]} />
                         </td>
                       )}
                       <td className="px-4 py-3 align-top">
@@ -305,7 +301,7 @@ export default async function OrdersPage() {
                       </div>
                       {showInvoices && (
                         <div className="text-right shrink-0">
-                          <div className="text-sm font-semibold text-neutral-900"><OpenAmount order={o} locale={locale} manualFristTage={manualFristTage} /></div>
+                          <div className="text-sm font-semibold text-neutral-900"><OpenAmount order={o} locale={locale} raten={ratenTermine[o.id]} /></div>
                           <div className="text-[10px] text-neutral-500">{o.invoice_is_estimated ? <span className="italic text-neutral-500" title={t(locale, "order.invoice_estimated_hint")}>≈ {usd(o.invoice_effective)}</span> : usd(o.invoice_total)}</div>
                         </div>
                       )}

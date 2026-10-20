@@ -18,6 +18,7 @@ import {
   type LiqRohdaten,
   type PrognoseErgebnis,
   ratenRegelFuer,
+  ratenplan,
 } from "./rechnung";
 import { debtBucket } from "@/lib/order-debt";
 import type { OrderStatus } from "@/lib/types";
@@ -234,43 +235,8 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     .filter((b) => !(b.status === "delivered" && b.restUsd <= 0.01))
     .sort((a, b) => (a.eta ?? "").localeCompare(b.eta ?? ""));
 
-  // ── Ratenzahlung: Ebru (Regel in den Einstellungen) komplett, sonst nur manuelle Positionen ──
-  //    Nur echte Schulden (abgeschickt/Rechnung da) — Ware in Produktion hat noch keine Rechnung.
-  const einstellungen = await ladeEinstellungen(sb);
-  const [{ data: offeneRows }, { data: alleSup }] = await Promise.all([
-    sb.from("orders_with_totals")
-      .select("id, label, status, tracking_number, order_date, created_at, remaining_balance, supplier_id")
-      .not("status", "in", "(draft,cancelled,hidden)")
-      .gt("remaining_balance", 0.01),
-    sb.from("suppliers").select("id, name"),
-  ]);
-  const supName = new Map((alleSup ?? []).map((x) => [x.id as string, String(x.name)]));
-  const ratenPositionen: LiqManuellePosition[] = [];
-  for (const m of (offeneRows ?? []) as Array<Record<string, unknown>>) {
-    const lieferantName = supName.get(m.supplier_id as string) ?? "Lieferant";
-    const hatRegel = einstellungen.ratenLieferanten.some((r) => r.name && lieferantName.toLowerCase().includes(r.name.toLowerCase()));
-    const bucket = debtBucket({ status: m.status as OrderStatus, tracking_number: (m.tracking_number as string | null) ?? null });
-    if (!(m.status === "manual" || (hatRegel && bucket === "due"))) continue;
-    ratenPositionen.push({
-      id: String(m.id),
-      label: String(m.label ?? ""),
-      lieferant: lieferantName,
-      datum: String(m.order_date ?? String(m.created_at).slice(0, 10)),
-      restUsd: Number(m.remaining_balance ?? 0),
-    });
-  }
-  // Letzte tatsächliche Zahlung je Lieferant (Empfängername in den Kontoumsätzen)
-  const letzteZahlung: Record<string, string> = {};
-  for (const lieferantName of new Set(ratenPositionen.map((x) => x.lieferant))) {
-    const muster = ratenRegelFuer(lieferantName, einstellungen).bankMuster.toLowerCase();
-    if (!muster) continue;
-    const letzte = alleTx
-      .filter((t) => Number(t.amount) < 0 && String(t.counterparty_name ?? "").toLowerCase().includes(muster))
-      .map((t) => String(t.booking_date).slice(0, 10))
-      .sort()
-      .at(-1);
-    if (letzte) letzteZahlung[lieferantName] = letzte;
-  }
+  // ── Ratenzahlung: Ebru komplett, sonst nur manuelle Positionen ──
+  const { ratenPositionen, letzteZahlung } = await ladeRatenDaten(sb, await ladeEinstellungen(sb));
 
   // ── Nachbestellung (Schätzung aus dem eigenen Bestellrhythmus) ──
   const hist = (amanda ?? []) as Array<{ order_date: string | null; invoice_total: number | null; weight_kg: number | null }>;
@@ -321,6 +287,69 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     },
   };
 }
+
+/**
+ * Offene Rechnungen mit Ratenzahlung + letzte echte Zahlung je Lieferant.
+ * Ebru (Regel in den Einstellungen): alle offenen Rechnungen mit echter Schuld; andere Lieferanten:
+ * nur manuelle Positionen. Ware in Produktion hat noch keine Rechnung → nicht im Plan.
+ */
+export async function ladeRatenDaten(
+  sb: Sb,
+  einstellungen: LiqEinstellungen,
+): Promise<{ ratenPositionen: LiqManuellePosition[]; letzteZahlung: Record<string, string> }> {
+  const [{ data: offeneRows }, { data: alleSup }] = await Promise.all([
+    sb.from("orders_with_totals")
+      .select("id, label, status, tracking_number, order_date, created_at, remaining_balance, supplier_id")
+      .not("status", "in", "(draft,cancelled,hidden)")
+      .gt("remaining_balance", 0.01),
+    sb.from("suppliers").select("id, name"),
+  ]);
+  const supName = new Map((alleSup ?? []).map((x) => [x.id as string, String(x.name)]));
+  const ratenPositionen: LiqManuellePosition[] = [];
+  for (const m of (offeneRows ?? []) as Array<Record<string, unknown>>) {
+    const lieferantName = supName.get(m.supplier_id as string) ?? "Lieferant";
+    const hatRegel = einstellungen.ratenLieferanten.some((r) => r.name && lieferantName.toLowerCase().includes(r.name.toLowerCase()));
+    const bucket = debtBucket({ status: m.status as OrderStatus });
+    if (!(m.status === "manual" || (hatRegel && bucket === "due"))) continue;
+    ratenPositionen.push({
+      id: String(m.id),
+      label: String(m.label ?? ""),
+      lieferant: lieferantName,
+      datum: String(m.order_date ?? String(m.created_at).slice(0, 10)),
+      restUsd: Number(m.remaining_balance ?? 0),
+    });
+  }
+  // Letzte echte Zahlung je Lieferant: jüngste Abbuchung an den Empfänger laut Kontoumsätzen
+  const letzteZahlung: Record<string, string> = {};
+  await Promise.all(
+    [...new Set(ratenPositionen.map((x) => x.lieferant))].map(async (lieferantName) => {
+      const muster = ratenRegelFuer(lieferantName, einstellungen).bankMuster.trim();
+      if (!muster) return;
+      const { data } = await sb
+        .from("bank_transactions")
+        .select("booking_date")
+        .lt("amount", 0)
+        .ilike("counterparty_name", `%${muster}%`)
+        .order("booking_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (data?.booking_date) letzteZahlung[lieferantName] = String(data.booking_date).slice(0, 10);
+    }),
+  );
+  return { ratenPositionen, letzteZahlung };
+}
+
+/** Geplante Ratentermine je Bestellung (für "nächste Rate" in Übersicht/Bestellliste). */
+export const ladeRatenTermine = cache(async (): Promise<Record<string, string[]>> => {
+  const sb = createServiceClient();
+  const e = await ladeEinstellungen(sb);
+  const { ratenPositionen, letzteZahlung } = await ladeRatenDaten(sb, e);
+  const termine: Record<string, string[]> = {};
+  for (const r of ratenplan(ratenPositionen, letzteZahlung, e, heuteBerlin())) {
+    for (const p of r.positionen) (termine[p.id] ??= []).push(r.datum);
+  }
+  return termine;
+});
 
 /** Einmal pro Request (Bestellliste + Detailseite rufen es ggf. mehrfach). */
 export const ladePrognose = cache(async (): Promise<{ roh: LiqRohdaten; einstellungen: LiqEinstellungen; ergebnis: PrognoseErgebnis }> => {

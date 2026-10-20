@@ -1,24 +1,25 @@
-import { usd, date } from "@/lib/format";
+import { usd } from "@/lib/format";
 import { t, type Locale } from "@/lib/i18n";
 import { debtBucket } from "@/lib/order-debt";
-import { plusTage } from "@/lib/liquiditaet/rechnung";
 import type { OrderWithTotals } from "@/lib/types";
 
+const kurz = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.`;
+
 /**
- * "Offen"-Betrag einer Bestellung: echte Schuld normal, kommende (noch nicht versendet) gedämpft,
- * manuelle Position mit Zahlungsfrist (gleiche Frist wie der Ratenplan der Liquiditätsvorschau).
+ * "Offen"-Betrag einer Bestellung: echte Schuld normal (bei Ratenzahlung mit den geplanten
+ * Ratenterminen aus der Liquiditätsvorschau), kommende (noch nicht versendet) gedämpft.
  */
-export default function OpenAmount({ order: o, locale, manualFristTage }: { order: OrderWithTotals; locale: Locale; manualFristTage: number }) {
+export default function OpenAmount({ order: o, locale, raten }: { order: OrderWithTotals; locale: Locale; raten?: string[] }) {
   const amount = `${o.invoice_is_estimated ? "≈ " : ""}${usd(o.remaining_balance)}`;
   const offen = Number(o.remaining_balance ?? 0) > 0.009;
-  if (o.status === "manual" && offen) {
-    const basis = o.order_date ?? o.created_at.slice(0, 10);
+  if (raten?.length && offen) {
+    const text = raten.length === 1
+      ? `${t(locale, "order.rate_on")} ${kurz(raten[0])}`
+      : `${raten.length} ${t(locale, "order.rates")} ${kurz(raten[0])}–${kurz(raten[raten.length - 1])}`;
     return (
-      <span>
+      <span title={raten.map(kurz).join(", ")}>
         {amount}
-        <span className="block text-[9px] font-normal text-amber-700">
-          {t(locale, "order.manual_due_by")} {date(plusTage(basis, manualFristTage))}
-        </span>
+        <span className="block text-[9px] font-normal text-amber-700">{text}</span>
       </span>
     );
   }

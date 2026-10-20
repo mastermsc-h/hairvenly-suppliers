@@ -238,6 +238,8 @@ export interface Ereignis {
   art: EreignisArt;
   label: string;
   orderId?: string;
+  /** Ratenzahlung: welche Rechnungen diese Rate (anteilig) bezahlt. */
+  orderIds?: string[];
   sofort?: boolean; // eigentlich schon fällig
 }
 
@@ -304,6 +306,59 @@ interface Plan {
   ustIstSchnitt: number | null;
 }
 
+export interface Rate {
+  lieferant: string;
+  nr: number;
+  von: number;
+  datum: string;
+  usd: number;
+  positionen: Array<{ id: string; label: string; usd: number }>;
+}
+
+/**
+ * Ratenplan pro Lieferant, älteste Rechnung zuerst. Rate = rateUsd (letzte = Rest).
+ * Termin = max(Rechnungsdatum + Frist, vorige Zahlung + Abstand, start) — "vorige Zahlung" ist
+ * zuerst die letzte echte Bankzahlung, danach die jeweils vorige geplante Rate.
+ * Eine Rate kann den Rest der einen und den Anfang der nächsten Rechnung abdecken.
+ */
+export function ratenplan(
+  positionen: LiqManuellePosition[],
+  letzteZahlung: Record<string, string>,
+  e: LiqEinstellungen,
+  start: string,
+): Rate[] {
+  const out: Rate[] = [];
+  const offenAlle = positionen.filter((p) => p.restUsd > 0.01);
+  for (const lieferant of [...new Set(offenAlle.map((p) => p.lieferant))]) {
+    const cfg = ratenRegelFuer(lieferant, e);
+    const offen = offenAlle
+      .filter((p) => p.lieferant === lieferant)
+      .sort((a, b) => a.datum.localeCompare(b.datum) || a.label.localeCompare(b.label))
+      .map((p) => ({ ...p, rest: p.restUsd, faellig: plusTage(p.datum, cfg.fristTage) }));
+    const rate = Math.max(1, cfg.rateUsd);
+    const raten: Rate[] = [];
+    let letzte: string | null = letzteZahlung[lieferant] ?? null;
+    for (let kopf = 0; kopf < offen.length && raten.length < 200; ) {
+      const frueh: string = letzte ? plusTage(letzte, cfg.abstandTage) : offen[kopf].faellig;
+      let datum: string = frueh > offen[kopf].faellig ? frueh : offen[kopf].faellig;
+      if (datum < start) datum = start;
+      let usd = 0;
+      const pos: Rate["positionen"] = [];
+      while (kopf < offen.length && usd < rate - 0.005) {
+        const teil = Math.min(offen[kopf].rest, rate - usd);
+        usd += teil;
+        offen[kopf].rest -= teil;
+        pos.push({ id: offen[kopf].id, label: offen[kopf].label, usd: r2(teil) });
+        if (offen[kopf].rest <= 0.005) kopf++;
+      }
+      raten.push({ lieferant, nr: raten.length + 1, von: 0, datum, usd: r2(usd), positionen: pos });
+      letzte = datum;
+    }
+    for (const r of raten) out.push({ ...r, von: raten.length });
+  }
+  return out;
+}
+
 export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
   const start = plusTage(roh.saldoStand, 1) > roh.heute ? roh.heute : plusTage(roh.saldoStand, 1);
   const ende = plusTage(start, e.horizontTage);
@@ -344,44 +399,16 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     bestellInfo.set(b.id, { zahlDatum, sofort, usd: b.restUsd, eur, einfuhr });
   }
 
-  // 1b) Ratenzahlung (Ebru: alle offenen Rechnungen; andere Lieferanten: nur manuelle Positionen).
-  //     Pro Lieferant ein gemeinsamer Plan, älteste Rechnung zuerst. Rate = rateUsd (letzte = Rest).
-  //     Termin = max(Rechnungsdatum + Frist, letzte Zahlung + Abstand) — die letzte Zahlung kommt
-  //     aus den Kontoumsätzen, so läuft der 2-Wochen-Rhythmus nahtlos weiter.
-  //     Keine Einfuhrabgaben: die Ware ist da (EUSt wurde bei Ankunft gezahlt).
+  // 1b) Ratenzahlung (Ebru: alle offenen Rechnungen; andere Lieferanten: nur manuelle Positionen)
   const ratenPos = (roh.ratenPositionen ?? roh.manuellePositionen ?? []).filter((p) => p.restUsd > 0.01);
-  for (const lieferant of [...new Set(ratenPos.map((p) => p.lieferant))]) {
-    const cfg = ratenRegelFuer(lieferant, e);
-    const offen = ratenPos
-      .filter((p) => p.lieferant === lieferant)
-      .sort((a, b) => a.datum.localeCompare(b.datum) || a.label.localeCompare(b.label))
-      .map((p) => ({ ...p, rest: p.restUsd, faellig: plusTage(p.datum, cfg.fristTage) }));
-    const rate = Math.max(1, cfg.rateUsd);
-    const raten: Array<{ datum: string; usd: number; positionen: string[] }> = [];
-    let letzte: string | null = roh.letzteZahlung?.[lieferant] ?? null;
-    for (let kopf = 0; kopf < offen.length && raten.length < 200; ) {
-      const frueh = letzte ? plusTage(letzte, cfg.abstandTage) : offen[kopf].faellig;
-      const datum = amStart(frueh > offen[kopf].faellig ? frueh : offen[kopf].faellig);
-      let usd = 0;
-      const positionen: string[] = [];
-      while (kopf < offen.length && usd < rate - 0.005) {
-        const teil = Math.min(offen[kopf].rest, rate - usd);
-        usd += teil;
-        offen[kopf].rest -= teil;
-        if (!positionen.includes(offen[kopf].label)) positionen.push(offen[kopf].label);
-        if (offen[kopf].rest <= 0.005) kopf++;
-      }
-      raten.push({ datum, usd: r2(usd), positionen });
-      letzte = datum;
-    }
-    raten.forEach((r, i) => {
-      ereignisse.push({
-        datum: r.datum,
-        betrag: -r2(r.usd / fx),
-        art: "manuell",
-        label: `${lieferant} Rate ${i + 1}/${raten.length} · ${r.usd.toLocaleString("de-DE", { maximumFractionDigits: 0 })} $ (${r.positionen.join(", ")})`,
-        sofort: r.datum <= start,
-      });
+  for (const r of ratenplan(ratenPos, roh.letzteZahlung ?? {}, e, start)) {
+    ereignisse.push({
+      datum: r.datum,
+      betrag: -r2(r.usd / fx),
+      art: "manuell",
+      label: `${r.lieferant} Rate ${r.nr}/${r.von} · ${r.usd.toLocaleString("de-DE", { maximumFractionDigits: 0 })} $ (${r.positionen.map((x) => x.label).join(", ")})`,
+      orderIds: r.positionen.map((x) => x.id),
+      sofort: r.datum <= start,
     });
   }
   if (ratenPos.length && e.andereLieferantenEinrechnen) {

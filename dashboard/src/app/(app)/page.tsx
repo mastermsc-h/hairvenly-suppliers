@@ -23,8 +23,7 @@ import SupplierProfile from "./supplier-profile";
 import StatusDropdown from "./orders/[id]/status-dropdown";
 import OpenAmount from "./open-amount";
 import { sumOpen } from "@/lib/order-debt";
-import { ladeEinstellungen } from "@/lib/liquiditaet/daten";
-import { LIQ_DEFAULTS } from "@/lib/liquiditaet/rechnung";
+import { ladeRatenTermine } from "@/lib/liquiditaet/daten";
 import { VolumeChart, DebtChart } from "./charts";
 import SupplierKgBars, { type SupplierKgRow } from "./supplier-kg-bars";
 import { publicAvatarUrl, publicOverviewUrl } from "@/lib/storage";
@@ -138,10 +137,8 @@ export default async function DashboardPage() {
 
   // Suppliers always see their own financial data and documents
   const showInvoices = hasFeature(profile, "invoices") || isSupplierRole;
-  // Zahlungsfrist manueller Positionen = Einstellung der Liquiditätsvorschau
-  const manualFristTage = showInvoices
-    ? (await ladeEinstellungen().catch(() => LIQ_DEFAULTS)).manuellFristTage
-    : LIQ_DEFAULTS.manuellFristTage;
+  // Geplante Ratentermine (Ebru/manuelle Positionen) — gleicher Plan wie die Liquiditätsvorschau
+  const ratenTermine: Record<string, string[]> = !isSupplierRole && hasFeature(profile, "finances") ? await ladeRatenTermine().catch(() => ({})) : {};
   const showAllDocs = hasFeature(profile, "documents") || isSupplierRole;
   const showPackingLists = hasFeature(profile, "packing_lists") || showAllDocs;
   // Documents column is visible if user can see at least one kind
@@ -407,7 +404,7 @@ export default async function DashboardPage() {
                           )}
                           {showInvoices && (
                             <td className="px-5 py-2.5 text-right font-medium text-neutral-900">
-                              <OpenAmount order={o} locale={locale} manualFristTage={manualFristTage} />
+                              <OpenAmount order={o} locale={locale} raten={ratenTermine[o.id]} />
                             </td>
                           )}
                           <td className="px-5 py-2.5 align-top">
@@ -491,7 +488,7 @@ export default async function DashboardPage() {
                           </div>
                           {showInvoices && (
                             <div className="text-right shrink-0">
-                              <div className="text-sm font-semibold text-neutral-900"><OpenAmount order={o} locale={locale} manualFristTage={manualFristTage} /></div>
+                              <div className="text-sm font-semibold text-neutral-900"><OpenAmount order={o} locale={locale} raten={ratenTermine[o.id]} /></div>
                               <div className="text-[10px] text-neutral-500">{o.invoice_is_estimated ? <span className="italic text-neutral-500" title={t(locale, "order.invoice_estimated_hint")}>≈ {usd(o.invoice_effective)}</span> : usd(o.invoice_total)}</div>
                             </div>
                           )}
