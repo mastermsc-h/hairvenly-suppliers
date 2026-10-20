@@ -383,6 +383,10 @@ class NeedsTan(Exception):
     pass
 
 
+class TanTimeout(RuntimeError):
+    """Freigabe wurde nicht rechtzeitig in der Banking-App bestätigt (kein Bankfehler)."""
+
+
 def make_connection(url: str):
     """FinTS-HTTPS-Verbindung, robust gegen abgebrochene Keep-Alive-Verbindungen.
 
@@ -478,7 +482,7 @@ def resolve_tan(client, res, interactive: bool):
                 time.sleep(3)
                 res = client.send_tan(res, "")
             if isinstance(res, NeedTANResponse):
-                raise RuntimeError("Freigabe nicht innerhalb von 5 Minuten erfolgt.")
+                raise TanTimeout("Freigabe nicht innerhalb von 5 Minuten erfolgt.")
             print("✓ Freigabe erhalten.")
         else:
             matrix = getattr(res, "challenge_matrix", None)
@@ -616,7 +620,7 @@ def fetch(cfg: dict, p: dict, interactive: bool, fresh: bool = False, since: dt.
             balances = fetch_balances(client, p, chosen)
     except Exception as e:
         # Fehler NACH den Umsätzen (z.B. beim Kontostand oder Dialogende): Umsätze trotzdem liefern
-        if umsaetze_fertig and not (isinstance(e, NeedsTan) or isinstance(e.__context__, NeedsTan)):
+        if umsaetze_fertig and not any(isinstance(x, (NeedsTan, TanTimeout)) for x in (e, e.__context__)):
             log.warning("%s: Fehler nach dem Umsatzabruf ignoriert (%s: %s)", p["name"], type(e).__name__, e)
             return rows, balances
         # Beendet die Bank den Dialog mit offener Freigabe, wirft das __exit__
@@ -625,6 +629,8 @@ def fetch(cfg: dict, p: dict, interactive: bool, fresh: bool = False, since: dt.
         # erneut und schickt jedes Mal eine pushTAN aufs Handy.
         if isinstance(e, NeedsTan) or isinstance(e.__context__, NeedsTan):
             raise NeedsTan() from None
+        if isinstance(e, TanTimeout) or isinstance(e.__context__, TanTimeout):
+            raise TanTimeout("Freigabe nicht innerhalb von 5 Minuten erfolgt.") from None
         raise
     finally:
         # Zustand (System-ID, BPD/UPD) immer sichern — sonst gilt der Mac
@@ -782,6 +788,11 @@ def renew_one(cfg: dict, p: dict, fresh: bool = False) -> int:
     reset_bank_responses()
     try:
         rows, balances = fetch(cfg, p, interactive=True, fresh=fresh)
+    except TanTimeout:
+        log.warning("renew %s: Freigabe nicht rechtzeitig bestätigt", p["key"])
+        print(f"\n✗ Die Freigabe wurde nicht innerhalb von 5 Minuten in der {p['name']}-App bestätigt.")
+        print(f"  Nichts passiert — einfach erneut starten: fints renew {p['key']}")
+        return 1
     except Exception as e:
         bank = BANK.summary()
         log.error("renew %s fehlgeschlagen: %s: %s | Bank: %s", p["key"], type(e).__name__, e, bank or "—")
@@ -895,6 +906,12 @@ def cmd_backfill(args: list[str]) -> int:
         reset_bank_responses()
         try:
             rows, balances = fetch(cfg, p, interactive=True, since=since)
+        except TanTimeout:
+            log.warning("backfill %s: Freigabe nicht rechtzeitig bestätigt", p["key"])
+            print(f"✗ Die Freigabe wurde nicht innerhalb von 5 Minuten in der {p['name']}-App bestätigt.")
+            print(f"  Nichts passiert — einfach erneut starten und die Anfrage in der App bestätigen: fints backfill {p['key']}")
+            rc = 1
+            continue
         except Exception as e:
             bank = BANK.summary()
             log.error("backfill %s fehlgeschlagen: %s: %s | Bank: %s", p["key"], type(e).__name__, e, bank or "—")
