@@ -159,6 +159,15 @@ check("Name-Regel greift im Zweck, wenn Name fehlt",
 check("Name vorhanden → Zweck wird NICHT für Name-Regeln genutzt",
   K.kategorisiere(tx({ amount: -10, counterparty_name: "Max Muster", purpose: "Erstattung AOK-Beitrag" }), rAok).kategorie, "unklar");
 
+// Targobank-Historie (Backfill 20.10.2026)
+check("IBAN ohne Schlüsselwort", K.ibanAusZweck("TBOL IBRAHIM CAN UEBERTRAG AUF GESCHAEFTSKONTO DE56290501010084626001 SBREDE22XXX"), "DE56290501010084626001");
+check("Kein Fehlgriff auf Referenznummern", K.ibanAusZweck("Kundenreferenz: 3000537155 OB-D028779660 Gläubiger-ID : DE16ZZZ00000018499"), null);
+check("Rückübertrag aufs Geschäftskonto = Umbuchung",
+  K.kategorisiere(tx({ amount: -10000, purpose: "ECHTZEITÜBERWEISUNG INLAND TBOL IBRAHIM CAN UEBERTRAG AUF GESCHAEFTSKONTO DE56290501010084626001 BRLADE" }), regeln).kategorie, "umbuchung");
+check("Hinweis ohne Betrag → info", K.kategorisiere(tx({ amount: 0, purpose: "KARTENSPERRE Kartennr. (416327XXXXXX191X)" }), regeln).kategorie, "info");
+const rEntgelt = K.sortRegeln([{ id: "e", prioritaet: 30, feld: "posting_text", muster: "ENTGELTABSCHLUSS", richtung: "alle", kategorie: "aus_bank" }]);
+check("0-Betrag mit Regel → Regel gewinnt", K.kategorisiere(tx({ amount: 0, posting_text: "ENTGELTABSCHLUSS" }), rEntgelt).kategorie, "aus_bank");
+
 // ── Kategorien-Liste konsistent ─────────────────────────────────────────────
 check("Kategorie-Keys eindeutig", new Set(K.KATEGORIEN.map((k) => k.key)).size, K.KATEGORIEN.length);
 check("unklar existiert", !!K.KATEGORIE_BY_KEY.unklar, true);

@@ -61,6 +61,7 @@ export const KATEGORIEN: KategorieDef[] = [
   // Targobank-Gehaltskonto — der Übertrag dorthin ist selbst kein Aufwand.
   { key: "umbuchung_gehalt", label: "Übertrag Gehaltskonto (Targobank)", gruppe: "neutral" },
   { key: "privat", label: "Privatentnahme / -einlage", gruppe: "neutral" },
+  { key: "info", label: "Hinweise ohne Betrag", gruppe: "neutral" },
   { key: "unklar", label: "Noch nicht zugeordnet", gruppe: "neutral" },
 ];
 
@@ -199,8 +200,13 @@ export function istFinanzamt(tx: { counterparty_name: string | null; counterpart
  * IBAN von dort gelesen (eigene Konten, Regeln, Vorkasse-Abgleich).
  */
 export function ibanAusZweck(purpose: string | null): string | null {
-  const m = (purpose ?? "").match(/\bIBAN:?\s?([A-Z]{2}\d{2}[A-Z0-9]{10,30})\b/);
-  return m ? m[1] : null;
+  const text = purpose ?? "";
+  const m = text.match(/\bIBAN:?\s?([A-Z]{2}\d{2}[A-Z0-9]{10,30})\b/);
+  if (m) return m[1];
+  // Ohne das Wort "IBAN": "UEBERTRAG AUF GESCHAEFTSKONTO DE56290501010084626001" — nur deutsche
+  // IBAN (fest 22 Zeichen), damit Referenz- oder Rechnungsnummern nicht als IBAN gelten
+  const de = text.match(/\b(DE\d{20})\b/);
+  return de ? de[1] : null;
 }
 
 export function effektiveIban(tx: { counterparty_iban?: string | null; purpose: string | null }): string | null {
@@ -277,7 +283,10 @@ export function kategorisiere(tx: KategorieTx, regelnSortiert: KategorieRegel[])
     return { kategorie: r.kategorie, quelle: "regel", regel_id: r.id, steuer_split: steuerSplitFuer(r.kategorie, tx) };
   }
 
-  // 4) Übrige Eingänge = Kundenüberweisungen (Vorkasse/Rechnung). Auch die vor dem Start
+  // 4) Bank-Hinweise ohne Betrag (Kartensperre, Dauerauftrag eröffnet, Zinssätze …)
+  if (tx.amount === 0) return { kategorie: "info", quelle: "auto", regel_id: null, steuer_split: [] };
+
+  // 5) Übrige Eingänge = Kundenüberweisungen (Vorkasse/Rechnung). Auch die vor dem Start
   //    des Vorkasse-Abgleichs (match_status "ignored") — sonst stünden 90 Tage Altlasten
   //    als "unklar" da. Ausnahme: Rückzahlungen/Rücküberweisungen → Mensch entscheidet.
   if (tx.amount > 0) {
