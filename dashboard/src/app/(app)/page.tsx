@@ -88,7 +88,10 @@ export default async function DashboardPage() {
     if (!it.shipment_id) unassignedByOrder.add(it.order_id);
   }
 
-  const totalOpen = list.reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
+  // Ausgeblendete Bestellungen zählen nicht zu Schulden/Rechnungssummen: ihr Betrag wird
+  // über eine eigene (Sammel-)Position erfasst, sonst wäre er doppelt drin.
+  const isCounted = (o: OrderWithTotals) => o.status !== "hidden";
+  const totalOpen = list.filter(isCounted).reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
   // Archive rules:
   //   - cancelled → immer archivierbar (Rechnung wird i.d.R. nicht erwartet)
   //   - hidden → immer archivierbar (bewusst ausgeblendet, z.B. Sammelrechnung)
@@ -122,7 +125,7 @@ export default async function DashboardPage() {
     .filter((r) => r.total > 0);
 
   const monthly = buildMonthlyStats(
-    list.map((o) => ({ created_at: o.created_at, invoice_total: o.invoice_total })),
+    list.filter(isCounted).map((o) => ({ created_at: o.created_at, invoice_total: o.invoice_total })),
     (payments ?? []) as { paid_at: string; amount: number | null }[],
     12,
   );
@@ -216,8 +219,8 @@ export default async function DashboardPage() {
                 const db = b.order_date ?? b.created_at;
                 return db.localeCompare(da);
               });
-            const open = sOrders.reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
-            const invoiced = sOrders.reduce((sum, o) => sum + Number(o.invoice_total ?? 0), 0);
+            const open = sOrders.filter(isCounted).reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
+            const invoiced = sOrders.filter(isCounted).reduce((sum, o) => sum + Number(o.invoice_total ?? 0), 0);
 
             const avatarUrl = publicAvatarUrl(s.avatar_path);
             const overviewUrl = publicOverviewUrl(s.overview_doc_path);

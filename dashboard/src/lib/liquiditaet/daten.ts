@@ -108,6 +108,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
       .select("order_date, invoice_total, weight_kg")
       .eq("supplier_id", amandaId)
       .gte("order_date", plusTage(heute, -180))
+      .neq("status", "hidden")
       .gt("weight_kg", 1),
     verbrauchGlattKgMonat(),
     sb.from("bank_salden").select("account_iban, saldo, stand, abgerufen_am"),
@@ -115,7 +116,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     sb.from("orders")
       .select("eta, invoice_total")
       .eq("supplier_id", amandaId)
-      .not("status", "in", "(cancelled,draft)")
+      .not("status", "in", "(cancelled,hidden,draft)")
       .gte("eta", plusTage(heute, -400))
       .lt("eta", heute),
   ]);
