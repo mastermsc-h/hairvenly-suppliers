@@ -62,6 +62,9 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
   // Aktions-Eingänge (ein Eintrag pro Tag) im Terminkalender zu einer Zeile zusammenfassen
   const aktionEv = p.ereignisse.filter((x) => x.art === "aktion");
   const manuellRaten = p.ereignisse.filter((x) => x.art === "manuell");
+  const ebruRegel = e.ratenLieferanten[0] ?? null;
+  const setEbru = (patch: Partial<NonNullable<typeof ebruRegel>>) =>
+    ebruRegel && set("ratenLieferanten", [{ ...ebruRegel, ...patch }, ...e.ratenLieferanten.slice(1)]);
   const termine = [
     ...p.ereignisse.filter((x) => x.art !== "lieferant" && x.art !== "aktion"),
     ...(aktionEv.length
@@ -342,11 +345,20 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
       )}
 
       {manuellRaten.length > 0 && (
-        <Card title="Manuelle Positionen — Ratenplan" accent="border-l-amber-400">
-          <p className="text-xs text-neutral-500 mb-3">
-            Sofort fällig, bezahlt in Raten à {usd(e.manuellRateUsd)}: erste Rate {e.manuellFristTage} Tage nach Datum der Position, danach alle{" "}
-            {e.manuellAbstandTage} Tage. Pro Lieferant ein gemeinsamer Plan, älteste Position zuerst.
-          </p>
+        <Card title="Ratenplan offene Rechnungen" accent="border-l-amber-400">
+          <div className="text-xs text-neutral-500 mb-3 space-y-1">
+            {ebruRegel && (
+              <p>
+                <b>{ebruRegel.name}:</b> alle offenen Rechnungen in Raten à {usd(ebruRegel.rateUsd)} — erste Rate {ebruRegel.fristTage} Tage nach
+                Rechnungseingang (= Datum der Position), danach alle {ebruRegel.abstandTage} Tage ab der letzten Zahlung
+                {Object.entries(roh.letzteZahlung ?? {}).filter(([l]) => l.toLowerCase().includes(ebruRegel.name.toLowerCase())).map(([, d]) => ` (letzte laut Bank: ${deDate(d)})`)}.
+              </p>
+            )}
+            <p>
+              Manuelle Positionen anderer Lieferanten: Raten à {usd(e.manuellRateUsd)}, erste {e.manuellFristTage} Tage nach Datum, dann alle {e.manuellAbstandTage} Tage.
+              Älteste Rechnung zuerst; eine Rate kann den Rest der einen und den Anfang der nächsten abdecken.
+            </p>
+          </div>
           <div className="divide-y divide-neutral-100">
             {manuellRaten.map((r, i) => (
               <div key={i} className="flex items-center justify-between gap-3 py-1.5 text-sm">
@@ -364,6 +376,13 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
         <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
           <Feld label="Zahlung an Amanda (Tage vor Ankunft)" value={e.zahlungVorAnkunftTage} onChange={(v) => set("zahlungVorAnkunftTage", v ?? LIQ_DEFAULTS.zahlungVorAnkunftTage)} />
           <Feld label="Reserve / Puffer (€)" value={e.puffer} onChange={(v) => set("puffer", v ?? 0)} />
+          {ebruRegel && (
+            <>
+              <Feld label={`${ebruRegel.name}: Rate (USD)`} value={ebruRegel.rateUsd} step={1000} onChange={(v) => setEbru({ rateUsd: Math.max(1000, v ?? 40_000) })} />
+              <Feld label={`${ebruRegel.name}: erste Rate nach Rechnungseingang (Tage)`} value={ebruRegel.fristTage} onChange={(v) => setEbru({ fristTage: Math.max(0, v ?? 14) })} />
+              <Feld label={`${ebruRegel.name}: Abstand der Raten (Tage)`} value={ebruRegel.abstandTage} onChange={(v) => setEbru({ abstandTage: Math.max(1, v ?? 14) })} />
+            </>
+          )}
           <Feld label="Manuelle Positionen: Rate (USD)" value={e.manuellRateUsd} step={1000} onChange={(v) => set("manuellRateUsd", Math.max(1000, v ?? LIQ_DEFAULTS.manuellRateUsd))} />
           <Feld label="Manuelle Positionen: Zahlungsfrist (Tage)" value={e.manuellFristTage} onChange={(v) => set("manuellFristTage", Math.max(0, v ?? LIQ_DEFAULTS.manuellFristTage))} />
           <Feld label="Manuelle Positionen: Abstand der Raten (Tage)" value={e.manuellAbstandTage} onChange={(v) => set("manuellAbstandTage", Math.max(1, v ?? LIQ_DEFAULTS.manuellAbstandTage))} />

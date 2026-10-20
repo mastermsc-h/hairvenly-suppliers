@@ -17,7 +17,10 @@ import {
   type LiqManuellePosition,
   type LiqRohdaten,
   type PrognoseErgebnis,
+  ratenRegelFuer,
 } from "./rechnung";
+import { debtBucket } from "@/lib/order-debt";
+import type { OrderStatus } from "@/lib/types";
 
 type Sb = ReturnType<typeof createServiceClient>;
 
@@ -231,24 +234,43 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     .filter((b) => !(b.status === "delivered" && b.restUsd <= 0.01))
     .sort((a, b) => (a.eta ?? "").localeCompare(b.eta ?? ""));
 
-  // ── Manuelle Positionen (alle Lieferanten): Ratenplan rechnet erstellePlan ──
-  const { data: manuellRows } = await sb
-    .from("orders_with_totals")
-    .select("id, label, order_date, created_at, remaining_balance, supplier_id")
-    .eq("status", "manual")
-    .gt("remaining_balance", 0.01);
-  const supIds = [...new Set((manuellRows ?? []).map((m) => m.supplier_id as string))];
-  const { data: supNamen } = supIds.length
-    ? await sb.from("suppliers").select("id, name").in("id", supIds)
-    : { data: [] as Array<{ id: string; name: string }> };
-  const supName = new Map((supNamen ?? []).map((s) => [s.id as string, String(s.name)]));
-  const manuellePositionen: LiqManuellePosition[] = (manuellRows ?? []).map((m) => ({
-    id: String(m.id),
-    label: String(m.label ?? ""),
-    lieferant: supName.get(m.supplier_id as string) ?? "Lieferant",
-    datum: String(m.order_date ?? String(m.created_at).slice(0, 10)),
-    restUsd: Number(m.remaining_balance ?? 0),
-  }));
+  // ── Ratenzahlung: Ebru (Regel in den Einstellungen) komplett, sonst nur manuelle Positionen ──
+  //    Nur echte Schulden (abgeschickt/Rechnung da) — Ware in Produktion hat noch keine Rechnung.
+  const einstellungen = await ladeEinstellungen(sb);
+  const [{ data: offeneRows }, { data: alleSup }] = await Promise.all([
+    sb.from("orders_with_totals")
+      .select("id, label, status, tracking_number, order_date, created_at, remaining_balance, supplier_id")
+      .not("status", "in", "(draft,cancelled,hidden)")
+      .gt("remaining_balance", 0.01),
+    sb.from("suppliers").select("id, name"),
+  ]);
+  const supName = new Map((alleSup ?? []).map((x) => [x.id as string, String(x.name)]));
+  const ratenPositionen: LiqManuellePosition[] = [];
+  for (const m of (offeneRows ?? []) as Array<Record<string, unknown>>) {
+    const lieferantName = supName.get(m.supplier_id as string) ?? "Lieferant";
+    const hatRegel = einstellungen.ratenLieferanten.some((r) => r.name && lieferantName.toLowerCase().includes(r.name.toLowerCase()));
+    const bucket = debtBucket({ status: m.status as OrderStatus, tracking_number: (m.tracking_number as string | null) ?? null });
+    if (!(m.status === "manual" || (hatRegel && bucket === "due"))) continue;
+    ratenPositionen.push({
+      id: String(m.id),
+      label: String(m.label ?? ""),
+      lieferant: lieferantName,
+      datum: String(m.order_date ?? String(m.created_at).slice(0, 10)),
+      restUsd: Number(m.remaining_balance ?? 0),
+    });
+  }
+  // Letzte tatsächliche Zahlung je Lieferant (Empfängername in den Kontoumsätzen)
+  const letzteZahlung: Record<string, string> = {};
+  for (const lieferantName of new Set(ratenPositionen.map((x) => x.lieferant))) {
+    const muster = ratenRegelFuer(lieferantName, einstellungen).bankMuster.toLowerCase();
+    if (!muster) continue;
+    const letzte = alleTx
+      .filter((t) => Number(t.amount) < 0 && String(t.counterparty_name ?? "").toLowerCase().includes(muster))
+      .map((t) => String(t.booking_date).slice(0, 10))
+      .sort()
+      .at(-1);
+    if (letzte) letzteZahlung[lieferantName] = letzte;
+  }
 
   // ── Nachbestellung (Schätzung aus dem eigenen Bestellrhythmus) ──
   const hist = (amanda ?? []) as Array<{ order_date: string | null; invoice_total: number | null; weight_kg: number | null }>;
@@ -278,7 +300,8 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     },
     fxAuto,
     bestellungen,
-    manuellePositionen,
+    ratenPositionen,
+    letzteZahlung,
     steuern: {
       ustHistorie,
       ustErledigtBis: ustPosten.at(-1)?.zeitraum ?? null,

@@ -82,6 +82,34 @@ export interface LiqEinstellungen {
   manuellFristTage: number;
   /** Abstand zwischen zwei Raten an denselben Lieferanten (Tage). */
   manuellAbstandTage: number;
+  /** Lieferanten, deren GESAMTE offene Rechnungen in Raten bezahlt werden (Ebru). */
+  ratenLieferanten: LiqRatenRegel[];
+}
+
+export interface LiqRatenRegel {
+  /** Teil des Lieferantennamens, z.B. "Ebru". */
+  name: string;
+  rateUsd: number;
+  /** Erste Rate frühestens so viele Tage nach Rechnungseingang (= Datum der Position). */
+  fristTage: number;
+  /** Abstand zwischen zwei Raten (Tage), gerechnet ab der letzten tatsächlichen Zahlung. */
+  abstandTage: number;
+  /** Empfängername in den Kontoumsätzen (für "letzte Zahlung"). */
+  bankMuster: string;
+}
+
+/** Regel für einen Lieferanten: eigene Ratenregel oder die allgemeine für manuelle Positionen. */
+export function ratenRegelFuer(lieferant: string, e: LiqEinstellungen): LiqRatenRegel {
+  const l = lieferant.toLowerCase();
+  return (
+    e.ratenLieferanten.find((r) => r.name && l.includes(r.name.toLowerCase())) ?? {
+      name: lieferant,
+      rateUsd: e.manuellRateUsd,
+      fristTage: e.manuellFristTage,
+      abstandTage: e.manuellAbstandTage,
+      bankMuster: "",
+    }
+  );
 }
 
 export interface LiqAktion {
@@ -116,8 +144,10 @@ export const LIQ_DEFAULTS: LiqEinstellungen = {
   ausgeblendeteKategorien: [],
   aktion: null,
   manuellRateUsd: 40_000,
-  manuellFristTage: 28,
+  manuellFristTage: 14,
   manuellAbstandTage: 14,
+  // User 20.10.2026: Ebru — 2 Wochen nach Rechnungseingang erste Rate à 40k $, dann alle 2 Wochen
+  ratenLieferanten: [{ name: "Ebru", rateUsd: 40_000, fristTage: 14, abstandTage: 14, bankMuster: "JUANCHENG" }],
 };
 
 export function mitDefaults(e: Partial<LiqEinstellungen> | null | undefined): LiqEinstellungen {
@@ -165,7 +195,12 @@ export interface LiqRohdaten {
   };
   fxAuto: { kurs: number; datum: string } | null;
   bestellungen: LiqBestellung[];
+  /** @deprecated → ratenPositionen */
   manuellePositionen?: LiqManuellePosition[];
+  /** Offene Rechnungen, die in Raten bezahlt werden (Ebru komplett + manuelle Positionen aller Lieferanten). */
+  ratenPositionen?: LiqManuellePosition[];
+  /** Letzte tatsächliche Zahlung je Lieferant (aus den Kontoumsätzen), YYYY-MM-DD. */
+  letzteZahlung?: Record<string, string>;
   steuern: {
     /** Vergangene Monate: gezahlte USt-VA (+) bzw. Erstattung (−) und im Monat gezahlte EUSt. */
     ustHistorie: Array<{ monat: string; ust: number; eust: number }>;
@@ -309,20 +344,23 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     bestellInfo.set(b.id, { zahlDatum, sofort, usd: b.restUsd, eur, einfuhr });
   }
 
-  // 1b) Manuelle Positionen: pro Lieferant ein gemeinsamer Ratenplan, älteste Position zuerst.
-  //     Rate = manuellRateUsd (letzte = Rest), frühestens Datum + Frist, danach im Abstand.
-  //     Keine Einfuhrabgaben: die Ware ist längst da (EUSt wurde bei Ankunft gezahlt).
-  const manuell = (roh.manuellePositionen ?? []).filter((p) => p.restUsd > 0.01);
-  for (const lieferant of [...new Set(manuell.map((p) => p.lieferant))]) {
-    const offen = manuell
+  // 1b) Ratenzahlung (Ebru: alle offenen Rechnungen; andere Lieferanten: nur manuelle Positionen).
+  //     Pro Lieferant ein gemeinsamer Plan, älteste Rechnung zuerst. Rate = rateUsd (letzte = Rest).
+  //     Termin = max(Rechnungsdatum + Frist, letzte Zahlung + Abstand) — die letzte Zahlung kommt
+  //     aus den Kontoumsätzen, so läuft der 2-Wochen-Rhythmus nahtlos weiter.
+  //     Keine Einfuhrabgaben: die Ware ist da (EUSt wurde bei Ankunft gezahlt).
+  const ratenPos = (roh.ratenPositionen ?? roh.manuellePositionen ?? []).filter((p) => p.restUsd > 0.01);
+  for (const lieferant of [...new Set(ratenPos.map((p) => p.lieferant))]) {
+    const cfg = ratenRegelFuer(lieferant, e);
+    const offen = ratenPos
       .filter((p) => p.lieferant === lieferant)
-      .sort((a, b) => a.datum.localeCompare(b.datum))
-      .map((p) => ({ ...p, rest: p.restUsd, faellig: plusTage(p.datum, e.manuellFristTage) }));
-    const rate = Math.max(1, e.manuellRateUsd);
+      .sort((a, b) => a.datum.localeCompare(b.datum) || a.label.localeCompare(b.label))
+      .map((p) => ({ ...p, rest: p.restUsd, faellig: plusTage(p.datum, cfg.fristTage) }));
+    const rate = Math.max(1, cfg.rateUsd);
     const raten: Array<{ datum: string; usd: number; positionen: string[] }> = [];
-    let letzte: string | null = null;
+    let letzte: string | null = roh.letzteZahlung?.[lieferant] ?? null;
     for (let kopf = 0; kopf < offen.length && raten.length < 200; ) {
-      const frueh = letzte ? plusTage(letzte, e.manuellAbstandTage) : offen[kopf].faellig;
+      const frueh = letzte ? plusTage(letzte, cfg.abstandTage) : offen[kopf].faellig;
       const datum = amStart(frueh > offen[kopf].faellig ? frueh : offen[kopf].faellig);
       let usd = 0;
       const positionen: string[] = [];
@@ -346,8 +384,8 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       });
     });
   }
-  if (manuell.length && e.andereLieferantenEinrechnen) {
-    hinweise.push("Manuelle Positionen sind als Raten eingeplant UND andere Lieferanten als Ø eingerechnet — Ebru-Zahlungen können dadurch doppelt zählen.");
+  if (ratenPos.length && e.andereLieferantenEinrechnen) {
+    hinweise.push("Ebru-Raten sind eingeplant UND andere Lieferanten als Ø eingerechnet — Ebru-Zahlungen zählen dadurch doppelt.");
   }
 
   // 2) Künftige Nachbestellungen (Schätzung): wöchentlich ab nächstem Montag
