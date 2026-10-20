@@ -188,6 +188,9 @@ export interface OrderWithTotals extends Order {
   landed_cost: number;
   paid_total: number;
   remaining_balance: number;
+  /** invoice_total oder – solange keine Rechnung da ist – weight_kg × Lieferanten-Kilopreis */
+  invoice_effective: number | null;
+  invoice_is_estimated: boolean;
 }
 
 export interface Payment {

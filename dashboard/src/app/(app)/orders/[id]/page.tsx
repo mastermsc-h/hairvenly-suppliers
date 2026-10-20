@@ -14,6 +14,7 @@ import {
   type OrderItem,
   type OrderShipment,
 } from "@/lib/types";
+import { debtBucket } from "@/lib/order-debt";
 import { t, type Locale } from "@/lib/i18n";
 import { loadCatalog } from "@/lib/actions/catalog";
 import EditPanel from "./edit-panel";
@@ -415,7 +416,7 @@ export default async function OrderDetailPage({
                 {t(locale, "order.finance")}
               </h2>
               <dl className="space-y-2 text-sm">
-                <Row label={t(locale, "order.invoice_amount")} value={usd(o.invoice_total)} />
+                <Row label={t(locale, "order.invoice_amount")} value={o.invoice_is_estimated ? `≈ ${usd(o.invoice_effective)} (${t(locale, "order.invoice_estimated")})` : usd(o.invoice_total)} />
                 <Row label={t(locale, "order.goods")} value={usd(o.goods_value)} />
                 <Row label={t(locale, "order.shipping")} value={usd(o.shipping_cost)} />
                 <Row label={t(locale, "order.customs")} value={usd(o.customs_duty)} />
@@ -423,7 +424,7 @@ export default async function OrderDetailPage({
                 <div className="pt-2 mt-2 border-t border-neutral-100" />
                 <Row label={t(locale, "order.landed_cost")} value={usd(o.landed_cost)} bold />
                 <Row label={t(locale, "order.paid")} value={usd(o.paid_total)} />
-                <Row label={t(locale, "order.remaining")} value={usd(o.remaining_balance)} bold />
+                <Row label={t(locale, "order.remaining")} value={`${o.invoice_is_estimated ? "≈ " : ""}${usd(o.remaining_balance)}${debtBucket(o) === "upcoming" && Number(o.remaining_balance) > 0 ? ` (${t(locale, "dashboard.upcoming_short")})` : ""}`} bold />
               </dl>
             </section>
 

@@ -21,6 +21,8 @@ import ShipmentsCell, { ShipmentProgress } from "./shipments-cell";
 import NotesCell from "./notes-cell";
 import SupplierProfile from "./supplier-profile";
 import StatusDropdown from "./orders/[id]/status-dropdown";
+import OpenAmount from "./open-amount";
+import { sumOpen } from "@/lib/order-debt";
 import { VolumeChart, DebtChart } from "./charts";
 import SupplierKgBars, { type SupplierKgRow } from "./supplier-kg-bars";
 import { publicAvatarUrl, publicOverviewUrl } from "@/lib/storage";
@@ -91,7 +93,9 @@ export default async function DashboardPage() {
   // Ausgeblendete Bestellungen zählen nicht zu Schulden/Rechnungssummen: ihr Betrag wird
   // über eine eigene (Sammel-)Position erfasst, sonst wäre er doppelt drin.
   const isCounted = (o: OrderWithTotals) => o.status !== "hidden";
-  const totalOpen = list.filter(isCounted).reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
+  // Echte Schulden nur für abgeschickte Ware; bestellte/produzierte Ware = kommende Zahlungen
+  const totalOpen = sumOpen(list, "due");
+  const totalUpcoming = sumOpen(list, "upcoming");
   // Archive rules:
   //   - cancelled → immer archivierbar (Rechnung wird i.d.R. nicht erwartet)
   //   - hidden → immer archivierbar (bewusst ausgeblendet, z.B. Sammelrechnung)
@@ -178,6 +182,7 @@ export default async function DashboardPage() {
           <Stat
             label={profile.is_admin ? t(locale, "dashboard.open_debt") : t(locale, "dashboard.open_amount")}
             value={usd(totalOpen)}
+            sub={totalUpcoming > 0 ? `+ ${usd(totalUpcoming)} ${t(locale, "dashboard.upcoming_payments")}` : undefined}
             icon={<Wallet size={18} />}
             color="rose"
           />
@@ -219,8 +224,9 @@ export default async function DashboardPage() {
                 const db = b.order_date ?? b.created_at;
                 return db.localeCompare(da);
               });
-            const open = sOrders.filter(isCounted).reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
-            const invoiced = sOrders.filter(isCounted).reduce((sum, o) => sum + Number(o.invoice_total ?? 0), 0);
+            const open = sumOpen(sOrders, "due");
+            const upcoming = sumOpen(sOrders, "upcoming");
+            const invoiced = sOrders.filter(isCounted).reduce((sum, o) => sum + Number(o.invoice_effective ?? 0), 0);
 
             const avatarUrl = publicAvatarUrl(s.avatar_path);
             const overviewUrl = publicOverviewUrl(s.overview_doc_path);
@@ -263,6 +269,11 @@ export default async function DashboardPage() {
                       <div className={`text-xl font-semibold ${open > 0 ? "text-rose-600" : "text-neutral-900"}`}>
                         {usd(open)}
                       </div>
+                      {upcoming > 0 && (
+                        <div className="text-[10px] text-neutral-400" title={t(locale, "dashboard.upcoming_hint")}>
+                          + {usd(upcoming)} {t(locale, "dashboard.upcoming_short")}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -385,12 +396,12 @@ export default async function DashboardPage() {
                           )}
                           {showInvoices && (
                             <td className="px-5 py-2.5 text-right text-neutral-700">
-                              {usd(o.invoice_total)}
+                              {o.invoice_is_estimated ? <span className="italic text-neutral-500" title={t(locale, "order.invoice_estimated_hint")}>≈ {usd(o.invoice_effective)}</span> : usd(o.invoice_total)}
                             </td>
                           )}
                           {showInvoices && (
                             <td className="px-5 py-2.5 text-right font-medium text-neutral-900">
-                              {usd(o.remaining_balance)}
+                              <OpenAmount order={o} locale={locale} />
                             </td>
                           )}
                           <td className="px-5 py-2.5 align-top">
@@ -474,8 +485,8 @@ export default async function DashboardPage() {
                           </div>
                           {showInvoices && (
                             <div className="text-right shrink-0">
-                              <div className="text-sm font-semibold text-neutral-900">{usd(o.remaining_balance)}</div>
-                              <div className="text-[10px] text-neutral-500">{usd(o.invoice_total)}</div>
+                              <div className="text-sm font-semibold text-neutral-900"><OpenAmount order={o} locale={locale} /></div>
+                              <div className="text-[10px] text-neutral-500">{o.invoice_is_estimated ? <span className="italic text-neutral-500" title={t(locale, "order.invoice_estimated_hint")}>≈ {usd(o.invoice_effective)}</span> : usd(o.invoice_total)}</div>
                             </div>
                           )}
                         </div>
@@ -560,11 +571,13 @@ export default async function DashboardPage() {
 function Stat({
   label,
   value,
+  sub,
   icon,
   color,
 }: {
   label: string;
   value: string;
+  sub?: string;
   icon: React.ReactNode;
   color: "indigo" | "rose" | "emerald" | "amber";
 }) {
@@ -583,6 +596,7 @@ function Stat({
         </div>
       </div>
       <div className="mt-2 text-2xl font-semibold text-neutral-900">{value}</div>
+      {sub && <div className="mt-1 text-xs text-neutral-400">{sub}</div>}
     </div>
   );
 }

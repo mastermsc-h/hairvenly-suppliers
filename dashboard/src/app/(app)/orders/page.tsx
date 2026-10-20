@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { usd, date } from "@/lib/format";
 import { type OrderWithTotals, type OrderDocument, type Supplier } from "@/lib/types";
+import OpenAmount from "../open-amount";
+import { sumOpen } from "@/lib/order-debt";
 import { t, type Locale } from "@/lib/i18n";
 import QuickDocs from "./[id]/quick-docs";
 import TrackingLink from "../tracking-link";
@@ -137,8 +139,9 @@ export default async function OrdersPage() {
       )}
 
       {grouped.map(({ supplier, orders: sOrders }) => {
-        const open = sOrders.reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
-        const invoiced = sOrders.reduce((sum, o) => sum + Number(o.invoice_total ?? 0), 0);
+        const open = sumOpen(sOrders, "due");
+        const upcoming = sumOpen(sOrders, "upcoming");
+        const invoiced = sOrders.reduce((sum, o) => sum + Number(o.invoice_effective ?? 0), 0);
         return (
           <section key={supplier.id} className="space-y-3">
             <div className="flex items-end justify-between">
@@ -146,6 +149,7 @@ export default async function OrdersPage() {
                 <h2 className="text-lg font-semibold text-neutral-900">{supplier.name}</h2>
                 <p className="text-xs text-neutral-500">
                   {sOrders.length} {t(locale, "dashboard.orders_count")} · {t(locale, "dashboard.invoice_label")} {usd(invoiced)} · {t(locale, "dashboard.open_label")} {usd(open)}
+                  {upcoming > 0 && <span className="text-neutral-400"> · + {usd(upcoming)} {t(locale, "dashboard.upcoming_short")}</span>}
                 </p>
               </div>
               {supplier.price_list_url && (
@@ -239,12 +243,12 @@ export default async function OrdersPage() {
                       )}
                       {showInvoices && (
                         <td className="px-4 py-3 text-right text-neutral-700">
-                          {usd(o.invoice_total)}
+                          {o.invoice_is_estimated ? <span className="italic text-neutral-500" title={t(locale, "order.invoice_estimated_hint")}>≈ {usd(o.invoice_effective)}</span> : usd(o.invoice_total)}
                         </td>
                       )}
                       {showInvoices && (
                         <td className="px-4 py-3 text-right font-medium text-neutral-900">
-                          {usd(o.remaining_balance)}
+                          <OpenAmount order={o} locale={locale} />
                         </td>
                       )}
                       <td className="px-4 py-3 align-top">
@@ -295,8 +299,8 @@ export default async function OrdersPage() {
                       </div>
                       {showInvoices && (
                         <div className="text-right shrink-0">
-                          <div className="text-sm font-semibold text-neutral-900">{usd(o.remaining_balance)}</div>
-                          <div className="text-[10px] text-neutral-500">{usd(o.invoice_total)}</div>
+                          <div className="text-sm font-semibold text-neutral-900"><OpenAmount order={o} locale={locale} /></div>
+                          <div className="text-[10px] text-neutral-500">{o.invoice_is_estimated ? <span className="italic text-neutral-500" title={t(locale, "order.invoice_estimated_hint")}>≈ {usd(o.invoice_effective)}</span> : usd(o.invoice_total)}</div>
                         </div>
                       )}
                     </div>

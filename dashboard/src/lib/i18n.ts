@@ -123,6 +123,11 @@ export const messages: Record<Locale, Record<string, string>> = {
     "order.status.stocked": "Ins Lager eingepflegt",
     "order.status.cancelled": "Storniert",
     "order.status.hidden": "Ausgeblendet",
+    "order.invoice_estimated": "geschätzt: kg × Kilopreis",
+    "dashboard.upcoming_payments": "kommend (noch nicht versendet)",
+    "dashboard.upcoming_short": "kommend",
+    "dashboard.upcoming_hint": "Noch nicht versendet – wird erst mit dem Versand zur echten Schuld",
+    "order.invoice_estimated_hint": "Geschätzt aus Gewicht × Kilopreis des Lieferanten – wird durch die echte Rechnung ersetzt",
 
     // Payment form
     "payment.amount_placeholder": "Betrag USD",
@@ -967,6 +972,11 @@ export const messages: Record<Locale, Record<string, string>> = {
     "order.status.stocked": "Stocked",
     "order.status.cancelled": "Cancelled",
     "order.status.hidden": "Hidden",
+    "order.invoice_estimated": "estimated: kg × price per kg",
+    "dashboard.upcoming_payments": "upcoming (not shipped yet)",
+    "dashboard.upcoming_short": "upcoming",
+    "dashboard.upcoming_hint": "Not shipped yet – becomes actual debt once shipped",
+    "order.invoice_estimated_hint": "Estimated from weight × supplier price per kg – replaced by the actual invoice",
 
     // Payment form
     "payment.amount_placeholder": "Amount USD",
@@ -1807,6 +1817,11 @@ export const messages: Record<Locale, Record<string, string>> = {
     "order.status.stocked": "Stoğa eklendi",
     "order.status.cancelled": "İptal edildi",
     "order.status.hidden": "Gizlendi",
+    "order.invoice_estimated": "tahmini: kg × kg fiyatı",
+    "dashboard.upcoming_payments": "yaklaşan (henüz gönderilmedi)",
+    "dashboard.upcoming_short": "yaklaşan",
+    "dashboard.upcoming_hint": "Henüz gönderilmedi – gönderimle gerçek borç olur",
+    "order.invoice_estimated_hint": "Ağırlık × tedarikçi kg fiyatından tahmin edildi – gerçek faturayla değiştirilir",
 
     // Payment form
     "payment.amount_placeholder": "Tutar USD",
