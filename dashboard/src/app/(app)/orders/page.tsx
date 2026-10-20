@@ -74,8 +74,9 @@ export default async function OrdersPage() {
   // Hide archived (stocked / cancelled with no open balance) — those live in /orders/archive
   // Orders we still owe money on stay visible even if their status moved past delivered.
   const isArchivable = (o: OrderWithTotals) =>
-    (o.status === "stocked" || o.status === "cancelled") &&
-    Number(o.remaining_balance ?? 0) <= 0.009;
+    o.status === "hidden" ||
+    ((o.status === "stocked" || o.status === "cancelled") &&
+      Number(o.remaining_balance ?? 0) <= 0.009);
   const active = list.filter((o) => !isArchivable(o));
 
   // Sort by order_date desc, then created_at desc
@@ -335,6 +336,7 @@ const STATUS_COLORS: Record<string, string> = {
   delivered: "bg-emerald-50 text-emerald-700",
   stocked: "bg-teal-50 text-teal-700",
   cancelled: "bg-red-50 text-red-700",
+  hidden: "bg-neutral-100 text-neutral-500",
 };
 
 function StatusBadge({ status, locale }: { status: string; locale: Locale }) {

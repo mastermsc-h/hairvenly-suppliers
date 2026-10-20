@@ -124,7 +124,7 @@ export async function exportOrderToSheet(
       draft: "Entwurf", sent_to_supplier: "An Lieferant gesendet", confirmed: "Bestätigt",
       in_production: "In Produktion", ready_to_ship: "Versandbereit", shipped: "Versendet",
       in_customs: "Im Zoll", delivered: "Angekommen", stocked: "Ins Lager eingepflegt",
-      cancelled: "Storniert",
+      cancelled: "Storniert", hidden: "Ausgeblendet",
     };
 
     // Build rows grouped by method + length, tracking row indices for coloring
@@ -388,7 +388,7 @@ const STATUS_DE: Record<string, string> = {
   draft: "Entwurf", sent_to_supplier: "An Lieferant gesendet", confirmed: "Bestätigt",
   in_production: "In Produktion", ready_to_ship: "Versandbereit", shipped: "Versendet",
   in_customs: "Im Zoll", delivered: "Angekommen", stocked: "Ins Lager eingepflegt",
-  cancelled: "Storniert",
+  cancelled: "Storniert", hidden: "Ausgeblendet",
 };
 
 /**

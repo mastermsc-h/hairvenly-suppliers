@@ -20,6 +20,7 @@ const STATUS_COLORS: Record<string, string> = {
   delivered: "bg-emerald-50 text-emerald-700",
   stocked: "bg-teal-50 text-teal-700",
   cancelled: "bg-red-50 text-red-700",
+  hidden: "bg-neutral-100 text-neutral-500",
 };
 
 function StatusBadge({ status, locale }: { status: string; locale: Locale }) {
@@ -45,7 +46,7 @@ export default async function OrdersArchivePage() {
   const showInvoices = hasFeature(profile, "invoices") || isSupplierRole;
 
   // Archiv-Logik (synchron zur Dashboard-Logik):
-  //   - cancelled → immer im Archiv (auch ohne Rechnung)
+  //   - cancelled / hidden → immer im Archiv (auch ohne Rechnung)
   //   - stocked → nur wenn invoice_total > 0 UND remaining_balance ≈ 0
   //
   // Wir machen das mit zwei OR-verknüpften Bedingungen via PostgREST .or():
@@ -54,7 +55,7 @@ export default async function OrdersArchivePage() {
     .from("orders_with_totals")
     .select("*")
     .or(
-      "status.eq.cancelled," +
+      "status.eq.cancelled,status.eq.hidden," +
         "and(status.eq.stocked,invoice_total.gt.0,remaining_balance.lte.0.009)",
     );
   if (isSupplierRole && mySupplierId) {
@@ -122,6 +123,7 @@ export default async function OrdersArchivePage() {
       {grouped.map(({ supplier, orders: sOrders }) => {
         const stockedCount = sOrders.filter((o) => o.status === "stocked").length;
         const cancelledCount = sOrders.filter((o) => o.status === "cancelled").length;
+        const hiddenCount = sOrders.filter((o) => o.status === "hidden").length;
         return (
           <section key={supplier.id} className="space-y-3">
             <div>
@@ -130,6 +132,7 @@ export default async function OrdersArchivePage() {
                 {sOrders.length} {t(locale, "dashboard.orders_count")}
                 {stockedCount > 0 && ` · ${stockedCount} ${t(locale, "order.status.stocked")}`}
                 {cancelledCount > 0 && ` · ${cancelledCount} ${t(locale, "order.status.cancelled")}`}
+                {hiddenCount > 0 && ` · ${hiddenCount} ${t(locale, "order.status.hidden")}`}
               </p>
             </div>
 

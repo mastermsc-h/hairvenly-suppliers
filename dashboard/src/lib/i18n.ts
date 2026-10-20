@@ -122,6 +122,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "order.status.delivered": "Angekommen",
     "order.status.stocked": "Ins Lager eingepflegt",
     "order.status.cancelled": "Storniert",
+    "order.status.hidden": "Ausgeblendet",
 
     // Payment form
     "payment.amount_placeholder": "Betrag USD",
@@ -965,6 +966,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "order.status.delivered": "Arrived",
     "order.status.stocked": "Stocked",
     "order.status.cancelled": "Cancelled",
+    "order.status.hidden": "Hidden",
 
     // Payment form
     "payment.amount_placeholder": "Amount USD",
@@ -1804,6 +1806,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "order.status.delivered": "Ulaştı",
     "order.status.stocked": "Stoğa eklendi",
     "order.status.cancelled": "İptal edildi",
+    "order.status.hidden": "Gizlendi",
 
     // Payment form
     "payment.amount_placeholder": "Tutar USD",

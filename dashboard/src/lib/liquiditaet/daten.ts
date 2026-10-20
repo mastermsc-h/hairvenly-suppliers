@@ -103,7 +103,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     sb.from("orders_with_totals")
       .select("id, label, status, eta, invoice_total, remaining_balance, import_vat, weight_kg")
       .eq("supplier_id", amandaId)
-      .not("status", "in", "(stocked,cancelled,draft)"),
+      .not("status", "in", "(stocked,cancelled,hidden,draft)"),
     sb.from("orders")
       .select("order_date, invoice_total, weight_kg")
       .eq("supplier_id", amandaId)

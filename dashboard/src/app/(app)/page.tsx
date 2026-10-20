@@ -91,11 +91,12 @@ export default async function DashboardPage() {
   const totalOpen = list.reduce((sum, o) => sum + Number(o.remaining_balance ?? 0), 0);
   // Archive rules:
   //   - cancelled → immer archivierbar (Rechnung wird i.d.R. nicht erwartet)
+  //   - hidden → immer archivierbar (bewusst ausgeblendet, z.B. Sammelrechnung)
   //   - stocked → nur wenn Rechnungssumme erfasst UND vollständig bezahlt
   //     (sonst weiß man nicht ob noch was offen ist — Bestellung bleibt sichtbar)
   // Suppliers wir noch Geld schulden bleiben damit aktiv sichtbar.
   const isArchivable = (o: OrderWithTotals) => {
-    if (o.status === "cancelled") return true;
+    if (o.status === "cancelled" || o.status === "hidden") return true;
     if (o.status !== "stocked") return false;
     if (o.invoice_total == null || Number(o.invoice_total) <= 0) return false;
     return Number(o.remaining_balance ?? 0) <= 0.009;
@@ -613,6 +614,7 @@ const STATUS_COLORS: Record<string, string> = {
   in_customs: "bg-orange-50 text-orange-700",
   delivered: "bg-emerald-50 text-emerald-700",
   cancelled: "bg-red-50 text-red-700",
+  hidden: "bg-neutral-100 text-neutral-500",
 };
 
 function StatusBadge({ status, locale }: { status: string; locale: Locale }) {
