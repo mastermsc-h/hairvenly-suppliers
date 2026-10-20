@@ -168,6 +168,11 @@ check("Hinweis ohne Betrag → info", K.kategorisiere(tx({ amount: 0, purpose: "
 const rEntgelt = K.sortRegeln([{ id: "e", prioritaet: 30, feld: "posting_text", muster: "ENTGELTABSCHLUSS", richtung: "alle", kategorie: "aus_bank" }]);
 check("0-Betrag mit Regel → Regel gewinnt", K.kategorisiere(tx({ amount: 0, posting_text: "ENTGELTABSCHLUSS" }), rEntgelt).kategorie, "aus_bank");
 
+check("Kredit-Auszahlung ist keine Einnahme", K.KATEGORIE_BY_KEY.kredit_auszahlung.gruppe, "neutral");
+const rCap = K.sortRegeln([{ id: "c", prioritaet: 5, feld: "purpose", muster: "Shopify Capital", richtung: "ein", kategorie: "kredit_auszahlung" }]);
+check("Shopify-Capital-Auszahlung über Banking Circle",
+  K.kategorisiere(tx({ amount: 280000, counterparty_name: "Banking Circle", purpose: "YL60363758FND//Shopify Capital 60363758//leaveEmpty", match_status: "ignored" }), rCap).kategorie, "kredit_auszahlung");
+
 // ── Kategorien-Liste konsistent ─────────────────────────────────────────────
 check("Kategorie-Keys eindeutig", new Set(K.KATEGORIEN.map((k) => k.key)).size, K.KATEGORIEN.length);
 check("unklar existiert", !!K.KATEGORIE_BY_KEY.unklar, true);

@@ -57,6 +57,8 @@ export const KATEGORIEN: KategorieDef[] = [
   { key: "aus_sonstige", label: "Sonstige Ausgaben", gruppe: "ausgaben" },
   // Neutral (kein Aufwand/Ertrag)
   { key: "umbuchung", label: "Umbuchung eigene Konten", gruppe: "neutral" },
+  // Darlehen sind keine Einnahme (Shopify Capital zahlte 200k/280k über "Banking Circle" aus)
+  { key: "kredit_auszahlung", label: "Kredit-Auszahlung (Darlehen)", gruppe: "neutral" },
   // Gehälter, Miete, Lagermiete, Krankenkassen und Versicherungen laufen über das
   // Targobank-Gehaltskonto — der Übertrag dorthin ist selbst kein Aufwand.
   { key: "umbuchung_gehalt", label: "Übertrag Gehaltskonto (Targobank)", gruppe: "neutral" },
