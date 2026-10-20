@@ -62,6 +62,16 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
   // Aktions-Eingänge (ein Eintrag pro Tag) im Terminkalender zu einer Zeile zusammenfassen
   const aktionEv = p.ereignisse.filter((x) => x.art === "aktion");
   const manuellRaten = p.ereignisse.filter((x) => x.art === "manuell");
+  // Größte Abgänge bis zum Tiefpunkt (für den Warnhinweis)
+  const ursachen = useMemo(() => {
+    const NAMEN: Record<string, string> = { lieferant: "Amanda", manuell: "Ebru-Raten", einfuhr: "Einfuhrabgaben", steuer: "Steuern", nachbestellung: "Amanda-Nachbestellungen" };
+    const sum = new Map<string, number>();
+    for (const x of p.ereignisse) {
+      if (x.datum > p.tiefpunkt.datum || x.betrag >= 0 || !NAMEN[x.art]) continue;
+      sum.set(NAMEN[x.art], (sum.get(NAMEN[x.art]) ?? 0) - x.betrag);
+    }
+    return [...sum.entries()].sort((a, b) => b[1] - a[1]);
+  }, [p]);
   const ebruRegel = e.ratenLieferanten[0] ?? null;
   const setEbru = (patch: Partial<NonNullable<typeof ebruRegel>>) =>
     ebruRegel && set("ratenLieferanten", [{ ...ebruRegel, ...patch }, ...e.ratenLieferanten.slice(1)]);
@@ -96,15 +106,38 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
                 ? `Am ${deDate(p.tiefpunkt.datum)} fehlen voraussichtlich ${eur(-p.tiefpunkt.saldo)} auf dem Konto.`
                 : `Am ${deDate(p.tiefpunkt.datum)} sinkt das Konto auf ${eur(p.tiefpunkt.saldo)} — unter der Reserve von ${eur(e.puffer)}.`}
             </div>
-            <div className="mt-0.5 opacity-90">Ursache sind die Amanda-Zahlungen bei Versandbereitschaft plus Einfuhrabgaben bei Ankunft (Details unten).</div>
+            {ursachen.length > 0 && (
+              <div className="mt-0.5 opacity-90">
+                Bis dahin: {ursachen.map(([name, betrag]) => `${name} ${eur(betrag)}`).join(" · ")} (Details unten).
+              </div>
+            )}
           </div>
         </div>
       )}
-      {!e.andereLieferantenEinrechnen && p.andereLieferantenProTag < 0 && (
+      {manuellRaten.length > 0 ? (
         <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <AlertTriangle size={18} className="shrink-0 mt-0.5" />
           <div>
-            <b>Ebru/China und andere Lieferanten sind nicht eingerechnet</b> (Ebru-Liste noch nicht gepflegt). Laut Kontoumsätzen gingen an sie Ø{" "}
+            <b>Ebru ist über den Ratenplan eingerechnet:</b> {manuellRaten.length} Raten ({eur(-manuellRaten.reduce((s, x) => s + x.betrag, 0))}) vom{" "}
+            {deDate(manuellRaten[0].datum)} bis {deDate(manuellRaten[manuellRaten.length - 1].datum)} für alle offenen Rechnungen.
+            {Object.entries(roh.ratenKommendUsd ?? {}).filter(([, v]) => v > 0).map(([l, v]) => (
+              <span key={l}>
+                {" "}Noch nicht enthalten: {l.split(" ")[0]}-Ware in Produktion ≈ {usd(v)} — die Rechnung kommt erst beim Versand, dann reiht sie sich automatisch hinten ein.
+              </span>
+            ))}
+            {e.andereLieferantenEinrechnen && (
+              <>
+                {" "}<b>Achtung:</b> zusätzlich ist der Lieferanten-Ø aus der Bank eingerechnet — Ebru zählt dadurch doppelt.{" "}
+                <button onClick={() => set("andereLieferantenEinrechnen", false)} className="underline font-medium">Ø ausschalten</button>
+              </>
+            )}
+          </div>
+        </div>
+      ) : !e.andereLieferantenEinrechnen && p.andereLieferantenProTag < 0 && (
+        <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+          <div>
+            <b>Ebru/China und andere Lieferanten sind nicht eingerechnet</b> (keine offenen Rechnungen erfasst). Laut Kontoumsätzen gingen an sie Ø{" "}
             {eur((-p.andereLieferantenProTag * 365) / 12)} pro Monat. Mit diesem Durchschnitt läge der Tiefpunkt bei{" "}
             <b>{eur(p.tiefpunktMitAnderen.saldo)} am {deDate(p.tiefpunktMitAnderen.datum)}</b>.{" "}
             <button onClick={() => set("andereLieferantenEinrechnen", true)} className="underline font-medium">Einrechnen</button>

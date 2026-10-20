@@ -236,7 +236,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     .sort((a, b) => (a.eta ?? "").localeCompare(b.eta ?? ""));
 
   // ── Ratenzahlung: Ebru komplett, sonst nur manuelle Positionen ──
-  const { ratenPositionen, letzteZahlung } = await ladeRatenDaten(sb, await ladeEinstellungen(sb));
+  const { ratenPositionen, letzteZahlung, ratenKommendUsd } = await ladeRatenDaten(sb, await ladeEinstellungen(sb));
 
   // ── Nachbestellung (Schätzung aus dem eigenen Bestellrhythmus) ──
   const hist = (amanda ?? []) as Array<{ order_date: string | null; invoice_total: number | null; weight_kg: number | null }>;
@@ -268,6 +268,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     bestellungen,
     ratenPositionen,
     letzteZahlung,
+    ratenKommendUsd,
     steuern: {
       ustHistorie,
       ustErledigtBis: ustPosten.at(-1)?.zeitraum ?? null,
@@ -296,7 +297,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
 export async function ladeRatenDaten(
   sb: Sb,
   einstellungen: LiqEinstellungen,
-): Promise<{ ratenPositionen: LiqManuellePosition[]; letzteZahlung: Record<string, string> }> {
+): Promise<{ ratenPositionen: LiqManuellePosition[]; letzteZahlung: Record<string, string>; ratenKommendUsd: Record<string, number> }> {
   const [{ data: offeneRows }, { data: alleSup }] = await Promise.all([
     sb.from("orders_with_totals")
       .select("id, label, status, tracking_number, order_date, created_at, remaining_balance, supplier_id")
@@ -306,10 +307,14 @@ export async function ladeRatenDaten(
   ]);
   const supName = new Map((alleSup ?? []).map((x) => [x.id as string, String(x.name)]));
   const ratenPositionen: LiqManuellePosition[] = [];
+  const ratenKommendUsd: Record<string, number> = {};
   for (const m of (offeneRows ?? []) as Array<Record<string, unknown>>) {
     const lieferantName = supName.get(m.supplier_id as string) ?? "Lieferant";
     const hatRegel = einstellungen.ratenLieferanten.some((r) => r.name && lieferantName.toLowerCase().includes(r.name.toLowerCase()));
     const bucket = debtBucket({ status: m.status as OrderStatus });
+    if (hatRegel && bucket === "upcoming") {
+      ratenKommendUsd[lieferantName] = (ratenKommendUsd[lieferantName] ?? 0) + Number(m.remaining_balance ?? 0);
+    }
     if (!(m.status === "manual" || (hatRegel && bucket === "due"))) continue;
     ratenPositionen.push({
       id: String(m.id),
@@ -336,7 +341,7 @@ export async function ladeRatenDaten(
       if (data?.booking_date) letzteZahlung[lieferantName] = String(data.booking_date).slice(0, 10);
     }),
   );
-  return { ratenPositionen, letzteZahlung };
+  return { ratenPositionen, letzteZahlung, ratenKommendUsd };
 }
 
 /** Geplante Ratentermine je Bestellung (für "nächste Rate" in Übersicht/Bestellliste). */

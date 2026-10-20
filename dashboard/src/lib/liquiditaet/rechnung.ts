@@ -201,6 +201,8 @@ export interface LiqRohdaten {
   ratenPositionen?: LiqManuellePosition[];
   /** Letzte tatsächliche Zahlung je Lieferant (aus den Kontoumsätzen), YYYY-MM-DD. */
   letzteZahlung?: Record<string, string>;
+  /** Ratenlieferanten: Ware in Produktion ohne Rechnung (geschätzt, USD) — noch nicht im Plan. */
+  ratenKommendUsd?: Record<string, number>;
   steuern: {
     /** Vergangene Monate: gezahlte USt-VA (+) bzw. Erstattung (−) und im Monat gezahlte EUSt. */
     ustHistorie: Array<{ monat: string; ust: number; eust: number }>;
