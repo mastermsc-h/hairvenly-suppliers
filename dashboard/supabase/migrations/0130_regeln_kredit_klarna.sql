@@ -4,3 +4,7 @@ insert into bank_kategorie_regeln (prioritaet, feld, muster, richtung, kategorie
   (5,  'purpose',           'Shopify Capital', 'ein', 'kredit_auszahlung', 'Kreditauszahlung über Banking Circle'),
   (30, 'counterparty_name', 'Klarna',          'ein', 'ein_shop',          'Klarna-Auszahlungen (Shop-Zahlart)')
 on conflict (feld, muster, richtung) do nothing;
+-- Schreibweise der Auszahlung 08/2025: "ShopifyCapital" ohne Leerzeichen
+insert into bank_kategorie_regeln (prioritaet, feld, muster, richtung, kategorie, notiz) values
+  (5, 'purpose', 'ShopifyCapital', 'ein', 'kredit_auszahlung', 'Kreditauszahlung (ohne Leerzeichen)')
+on conflict (feld, muster, richtung) do nothing;
