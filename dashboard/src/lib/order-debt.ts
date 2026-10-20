@@ -2,13 +2,14 @@ import type { OrderWithTotals } from "@/lib/types";
 
 /**
  * Schulden-Einordnung einer Bestellung:
- *   due      → Ware ist abgeschickt (Status ab "Versandt" oder Tracking vorhanden) = echte Schuld
+ *   due      → Ware ist abgeschickt (Status ab "Versandt" oder Tracking vorhanden) oder manuelle
+ *              Position (Sammelrechnung, sofort fällig) = echte Schuld
  *   upcoming → bestellt/in Produktion, Betrag kommt erst noch auf uns zu
  *   none     → Entwurf, storniert, ausgeblendet (zählt nirgends)
  */
 export type DebtBucket = "due" | "upcoming" | "none";
 
-const SHIPPED_STATUSES = new Set(["shipped", "in_customs", "delivered", "stocked"]);
+const SHIPPED_STATUSES = new Set(["shipped", "in_customs", "delivered", "stocked", "manual"]);
 const NOT_COUNTED_STATUSES = new Set(["draft", "cancelled", "hidden"]);
 
 export function debtBucket(o: Pick<OrderWithTotals, "status" | "tracking_number">): DebtBucket {

@@ -61,6 +61,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
   }, [p]);
   // Aktions-Eingänge (ein Eintrag pro Tag) im Terminkalender zu einer Zeile zusammenfassen
   const aktionEv = p.ereignisse.filter((x) => x.art === "aktion");
+  const manuellRaten = p.ereignisse.filter((x) => x.art === "manuell");
   const termine = [
     ...p.ereignisse.filter((x) => x.art !== "lieferant" && x.art !== "aktion"),
     ...(aktionEv.length
@@ -340,11 +341,32 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
         </Card>
       )}
 
+      {manuellRaten.length > 0 && (
+        <Card title="Manuelle Positionen — Ratenplan" accent="border-l-amber-400">
+          <p className="text-xs text-neutral-500 mb-3">
+            Sofort fällig, bezahlt in Raten à {usd(e.manuellRateUsd)}: erste Rate {e.manuellFristTage} Tage nach Datum der Position, danach alle{" "}
+            {e.manuellAbstandTage} Tage. Pro Lieferant ein gemeinsamer Plan, älteste Position zuerst.
+          </p>
+          <div className="divide-y divide-neutral-100">
+            {manuellRaten.map((r, i) => (
+              <div key={i} className="flex items-center justify-between gap-3 py-1.5 text-sm">
+                <span className="text-neutral-500 w-24 shrink-0">{deDate(r.datum)}</span>
+                <span className="flex-1 min-w-0 truncate text-neutral-800">{r.label}</span>
+                <span className="font-medium text-neutral-900">{eur(-r.betrag)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {/* Einstellungen */}
       <Card title="Annahmen (anpassbar)" accent="border-l-neutral-400">
         <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
           <Feld label="Zahlung an Amanda (Tage vor Ankunft)" value={e.zahlungVorAnkunftTage} onChange={(v) => set("zahlungVorAnkunftTage", v ?? LIQ_DEFAULTS.zahlungVorAnkunftTage)} />
           <Feld label="Reserve / Puffer (€)" value={e.puffer} onChange={(v) => set("puffer", v ?? 0)} />
+          <Feld label="Manuelle Positionen: Rate (USD)" value={e.manuellRateUsd} step={1000} onChange={(v) => set("manuellRateUsd", Math.max(1000, v ?? LIQ_DEFAULTS.manuellRateUsd))} />
+          <Feld label="Manuelle Positionen: Zahlungsfrist (Tage)" value={e.manuellFristTage} onChange={(v) => set("manuellFristTage", Math.max(0, v ?? LIQ_DEFAULTS.manuellFristTage))} />
+          <Feld label="Manuelle Positionen: Abstand der Raten (Tage)" value={e.manuellAbstandTage} onChange={(v) => set("manuellAbstandTage", Math.max(1, v ?? LIQ_DEFAULTS.manuellAbstandTage))} />
           <Feld label="Vorschau (Tage)" value={e.horizontTage} onChange={(v) => set("horizontTage", Math.max(14, Math.min(365, v ?? 90)))} />
           <Feld label={`Wechselkurs USD/€ (leer = aus Bank: ${roh.fxAuto?.kurs ?? "—"})`} value={e.fxUsdProEur} step={0.0001} optional onChange={(v) => set("fxUsdProEur", v)} />
           <Feld label="EUSt-Satz (%)" value={e.eustSatz} step={0.1} onChange={(v) => set("eustSatz", v ?? 19)} />

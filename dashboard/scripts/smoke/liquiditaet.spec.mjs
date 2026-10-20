@@ -147,6 +147,19 @@ check("Aktion: USt Nov = Basis + 19/119 vom Mehrumsatz", pa2.ereignisse.find((x)
 check("Aktion aus = nichts", L.prognose(roh(), { ...E0, aktion: { ...akt, aktiv: false } }).ereignisse.length, 0);
 check("Falsches Profil → gleichmäßig", L.prognose(roh(), { ...E0, aktion: { ...akt, profil: [1, 2, 3] } }).ereignisse.filter((x) => x.art === "aktion").map((x) => x.betrag), [5950, 5950]);
 
+// Manuelle Positionen (Sammelrechnungen): Raten à 40k, Frist 28 T, Abstand 14 T, älteste zuerst
+const mp = (o) => ({ id: "m", label: "M", lieferant: "Ebru", datum: "2026-10-01", restUsd: 0, ...o });
+const pm = L.prognose(roh({ manuellePositionen: [mp({ id: "a", label: "A", restUsd: 68625 }), mp({ id: "b", label: "B", datum: "2026-10-10", restUsd: 30000 })] }), E0);
+const raten = pm.ereignisse.filter((x) => x.art === "manuell");
+check("Manuell: Raten-Daten (Frist, dann Abstand)", raten.map((x) => x.datum), ["2026-10-29", "2026-11-12", "2026-11-26"]);
+check("Manuell: Raten in EUR (40k/40k/Rest, Kurs 1,25)", raten.map((x) => x.betrag), [-32000, -32000, -14900]);
+check("Manuell: Rate 2 bedient A-Rest + B", raten[1].label.includes("(A, B)"), true);
+const pu = L.prognose(roh({ manuellePositionen: [mp({ datum: "2026-08-01", restUsd: 50000 })] }), E0).ereignisse.filter((x) => x.art === "manuell");
+check("Manuell überfällig: erste Rate sofort, dann Abstand", pu.map((x) => [x.datum, !!x.sofort]), [["2026-10-17", true], ["2026-10-31", false]]);
+check("Manuell bezahlt = keine Rate", L.prognose(roh({ manuellePositionen: [mp({ restUsd: 0 })] }), E0).ereignisse.length, 0);
+const pz = L.prognose(roh({ manuellePositionen: [mp({ lieferant: "Ebru", restUsd: 40000 }), mp({ id: "z", lieferant: "Amanda", restUsd: 40000 })] }), E0).ereignisse.filter((x) => x.art === "manuell");
+check("Manuell: getrennter Plan pro Lieferant (gleicher Tag)", pz.map((x) => x.datum), ["2026-10-29", "2026-10-29"]);
+
 // Defaults
 check("Defaults vollständig", Object.keys(L.mitDefaults({})).length, Object.keys(L.LIQ_DEFAULTS).length);
 

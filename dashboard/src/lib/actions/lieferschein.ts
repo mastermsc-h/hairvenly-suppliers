@@ -230,7 +230,7 @@ export async function analyzeLieferschein(formData: FormData): Promise<AnalyzeRe
       .from("orders")
       .select("id, label, created_at, status")
       .eq("supplier_id", supplier_id)
-      .not("status", "in", '("stocked","cancelled","hidden","delivered")')
+      .not("status", "in", '("stocked","cancelled","hidden","manual","delivered")')
       .order("created_at", { ascending: true });
 
     if (openOrders && openOrders.length > 0) {

@@ -20,6 +20,7 @@ const STATUS_COLORS: Record<string, string> = {
   delivered: "bg-emerald-50 text-emerald-700",
   stocked: "bg-teal-50 text-teal-700",
   cancelled: "bg-red-50 text-red-700",
+  manual: "bg-amber-50 text-amber-800",
   hidden: "bg-neutral-100 text-neutral-500",
 };
 
@@ -56,7 +57,8 @@ export default async function OrdersArchivePage() {
     .select("*")
     .or(
       "status.eq.cancelled,status.eq.hidden," +
-        "and(status.eq.stocked,invoice_total.gt.0,remaining_balance.lte.0.009)",
+        "and(status.eq.stocked,invoice_total.gt.0,remaining_balance.lte.0.009)," +
+        "and(status.eq.manual,invoice_total.gt.0,remaining_balance.lte.0.009)",
     );
   if (isSupplierRole && mySupplierId) {
     ordersQuery = ordersQuery.eq("supplier_id", mySupplierId);

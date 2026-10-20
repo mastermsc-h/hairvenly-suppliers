@@ -14,6 +14,7 @@ import {
   tageZwischen,
   type LiqBestellung,
   type LiqEinstellungen,
+  type LiqManuellePosition,
   type LiqRohdaten,
   type PrognoseErgebnis,
 } from "./rechnung";
@@ -103,12 +104,12 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     sb.from("orders_with_totals")
       .select("id, label, status, eta, invoice_total, remaining_balance, import_vat, weight_kg")
       .eq("supplier_id", amandaId)
-      .not("status", "in", "(stocked,cancelled,hidden,draft)"),
+      .not("status", "in", "(stocked,cancelled,hidden,manual,draft)"),
     sb.from("orders")
       .select("order_date, invoice_total, weight_kg")
       .eq("supplier_id", amandaId)
       .gte("order_date", plusTage(heute, -180))
-      .neq("status", "hidden")
+      .not("status", "in", "(hidden,manual)")
       .gt("weight_kg", 1),
     verbrauchGlattKgMonat(),
     sb.from("bank_salden").select("account_iban, saldo, stand, abgerufen_am"),
@@ -116,7 +117,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     sb.from("orders")
       .select("eta, invoice_total")
       .eq("supplier_id", amandaId)
-      .not("status", "in", "(cancelled,hidden,draft)")
+      .not("status", "in", "(cancelled,hidden,manual,draft)")
       .gte("eta", plusTage(heute, -400))
       .lt("eta", heute),
   ]);
@@ -230,6 +231,25 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     .filter((b) => !(b.status === "delivered" && b.restUsd <= 0.01))
     .sort((a, b) => (a.eta ?? "").localeCompare(b.eta ?? ""));
 
+  // ── Manuelle Positionen (alle Lieferanten): Ratenplan rechnet erstellePlan ──
+  const { data: manuellRows } = await sb
+    .from("orders_with_totals")
+    .select("id, label, order_date, created_at, remaining_balance, supplier_id")
+    .eq("status", "manual")
+    .gt("remaining_balance", 0.01);
+  const supIds = [...new Set((manuellRows ?? []).map((m) => m.supplier_id as string))];
+  const { data: supNamen } = supIds.length
+    ? await sb.from("suppliers").select("id, name").in("id", supIds)
+    : { data: [] as Array<{ id: string; name: string }> };
+  const supName = new Map((supNamen ?? []).map((s) => [s.id as string, String(s.name)]));
+  const manuellePositionen: LiqManuellePosition[] = (manuellRows ?? []).map((m) => ({
+    id: String(m.id),
+    label: String(m.label ?? ""),
+    lieferant: supName.get(m.supplier_id as string) ?? "Lieferant",
+    datum: String(m.order_date ?? String(m.created_at).slice(0, 10)),
+    restUsd: Number(m.remaining_balance ?? 0),
+  }));
+
   // ── Nachbestellung (Schätzung aus dem eigenen Bestellrhythmus) ──
   const hist = (amanda ?? []) as Array<{ order_date: string | null; invoice_total: number | null; weight_kg: number | null }>;
   const kg90 = hist.filter((h) => (h.order_date ?? "") >= plusTage(heute, -90)).reduce((s, h) => s + Number(h.weight_kg ?? 0), 0);
@@ -258,6 +278,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     },
     fxAuto,
     bestellungen,
+    manuellePositionen,
     steuern: {
       ustHistorie,
       ustErledigtBis: ustPosten.at(-1)?.zeitraum ?? null,

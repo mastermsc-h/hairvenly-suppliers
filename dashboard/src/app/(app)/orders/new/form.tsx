@@ -49,6 +49,16 @@ export default function NewOrderForm({
 
   return (
     <form action={action} className="space-y-5 bg-white border border-neutral-200 rounded-2xl p-6">
+      <Field label={t(locale, "new_order.kind")}>
+        <select
+          name="kind"
+          defaultValue="order"
+          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+        >
+          <option value="order">{t(locale, "new_order.kind_order")}</option>
+          <option value="manual">{t(locale, "new_order.kind_manual")}</option>
+        </select>
+      </Field>
       <Field label={t(locale, "nav.supplier")} required>
         <select
           name="supplier_id"

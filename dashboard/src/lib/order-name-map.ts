@@ -31,7 +31,7 @@ export interface OrderMeta {
 }
 
 /** Statuses where the order is considered archived and should be hidden everywhere. */
-export const ARCHIVED_STATUS = new Set(["stocked", "cancelled", "hidden"]);
+export const ARCHIVED_STATUS = new Set(["stocked", "cancelled", "hidden", "manual"]);
 
 export function isArchived(meta: OrderMeta | undefined | null): boolean {
   return !!meta && !!meta.status && ARCHIVED_STATUS.has(meta.status);

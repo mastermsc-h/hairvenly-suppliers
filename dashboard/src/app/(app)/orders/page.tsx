@@ -6,6 +6,8 @@ import { usd, date } from "@/lib/format";
 import { type OrderWithTotals, type OrderDocument, type Supplier } from "@/lib/types";
 import OpenAmount from "../open-amount";
 import { sumOpen } from "@/lib/order-debt";
+import { ladeEinstellungen } from "@/lib/liquiditaet/daten";
+import { LIQ_DEFAULTS } from "@/lib/liquiditaet/rechnung";
 import { t, type Locale } from "@/lib/i18n";
 import QuickDocs from "./[id]/quick-docs";
 import TrackingLink from "../tracking-link";
@@ -28,6 +30,10 @@ export default async function OrdersPage() {
   const showPackingLists = hasFeature(profile, "packing_lists") || showAllDocs;
   const showDocs = showAllDocs || showPackingLists;
   const showInvoices = hasFeature(profile, "invoices") || isSupplierRole;
+  // Zahlungsfrist manueller Positionen = Einstellung der Liquiditätsvorschau
+  const manualFristTage = showInvoices
+    ? (await ladeEinstellungen().catch(() => LIQ_DEFAULTS)).manuellFristTage
+    : LIQ_DEFAULTS.manuellFristTage;
   const canEditOrder = profile.is_admin || isSupplierRole;
 
   // Scope queries to own supplier for supplier role
@@ -77,7 +83,7 @@ export default async function OrdersPage() {
   // Orders we still owe money on stay visible even if their status moved past delivered.
   const isArchivable = (o: OrderWithTotals) =>
     o.status === "hidden" ||
-    ((o.status === "stocked" || o.status === "cancelled") &&
+    ((o.status === "stocked" || o.status === "cancelled" || o.status === "manual") &&
       Number(o.remaining_balance ?? 0) <= 0.009);
   const active = list.filter((o) => !isArchivable(o));
 
@@ -248,7 +254,7 @@ export default async function OrdersPage() {
                       )}
                       {showInvoices && (
                         <td className="px-4 py-3 text-right font-medium text-neutral-900">
-                          <OpenAmount order={o} locale={locale} />
+                          <OpenAmount order={o} locale={locale} manualFristTage={manualFristTage} />
                         </td>
                       )}
                       <td className="px-4 py-3 align-top">
@@ -299,7 +305,7 @@ export default async function OrdersPage() {
                       </div>
                       {showInvoices && (
                         <div className="text-right shrink-0">
-                          <div className="text-sm font-semibold text-neutral-900"><OpenAmount order={o} locale={locale} /></div>
+                          <div className="text-sm font-semibold text-neutral-900"><OpenAmount order={o} locale={locale} manualFristTage={manualFristTage} /></div>
                           <div className="text-[10px] text-neutral-500">{o.invoice_is_estimated ? <span className="italic text-neutral-500" title={t(locale, "order.invoice_estimated_hint")}>≈ {usd(o.invoice_effective)}</span> : usd(o.invoice_total)}</div>
                         </div>
                       )}
@@ -340,6 +346,7 @@ const STATUS_COLORS: Record<string, string> = {
   delivered: "bg-emerald-50 text-emerald-700",
   stocked: "bg-teal-50 text-teal-700",
   cancelled: "bg-red-50 text-red-700",
+  manual: "bg-amber-50 text-amber-800",
   hidden: "bg-neutral-100 text-neutral-500",
 };
 

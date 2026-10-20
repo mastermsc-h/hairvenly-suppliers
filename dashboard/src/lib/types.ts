@@ -11,6 +11,7 @@ export type OrderStatus =
   | "delivered"
   | "stocked"
   | "cancelled"
+  | "manual"
   | "hidden";
 
 export const ORDER_STATUSES: OrderStatus[] = [
@@ -24,6 +25,7 @@ export const ORDER_STATUSES: OrderStatus[] = [
   "delivered",
   "stocked",
   "cancelled",
+  "manual",
   "hidden",
 ];
 
@@ -41,6 +43,7 @@ export const STATUS_LABELS: Record<OrderStatus, string> = {
   delivered: "Angekommen",
   stocked: "Ins Lager eingepflegt",
   cancelled: "Storniert",
+  manual: "Manuell",
   hidden: "Ausgeblendet",
 };
 

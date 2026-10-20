@@ -17,6 +17,7 @@ const STATUSES = [
   "delivered",
   "stocked",
   "cancelled",
+  "manual",
   "hidden",
 ] as const;
 
@@ -31,6 +32,7 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> =
   delivered:        { bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-400" },
   stocked:          { bg: "bg-teal-50",    text: "text-teal-700",    dot: "bg-teal-500" },
   cancelled:        { bg: "bg-red-50",     text: "text-red-700",     dot: "bg-red-400" },
+  manual:           { bg: "bg-amber-50",   text: "text-amber-800",   dot: "bg-amber-500" },
   hidden:           { bg: "bg-neutral-100", text: "text-neutral-500", dot: "bg-neutral-300" },
 };
 

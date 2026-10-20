@@ -67,7 +67,7 @@ export async function createOrder(_prev: unknown, formData: FormData) {
     order_date: orderDate,
     region: region || null,
     notes: str(formData.get("notes")),
-    status: "draft" as const,
+    status: (formData.get("kind") === "manual" ? "manual" : "draft") as "manual" | "draft",
   };
 
   if (!payload.supplier_id) {

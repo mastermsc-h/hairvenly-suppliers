@@ -76,6 +76,12 @@ export interface LiqEinstellungen {
   ausgeblendeteKategorien: string[];
   /** Verkaufsaktion mit Mehrumsatz (Black Friday) — null = keine. */
   aktion: LiqAktion | null;
+  /** Manuelle Positionen (Sammelrechnungen): sofort fällig, bezahlt in festen Raten. */
+  manuellRateUsd: number;
+  /** Zahlungsfrist ab Datum der Position (Tage) — erste Rate frühestens dann. */
+  manuellFristTage: number;
+  /** Abstand zwischen zwei Raten an denselben Lieferanten (Tage). */
+  manuellAbstandTage: number;
 }
 
 export interface LiqAktion {
@@ -109,6 +115,9 @@ export const LIQ_DEFAULTS: LiqEinstellungen = {
   usdProKg: null,
   ausgeblendeteKategorien: [],
   aktion: null,
+  manuellRateUsd: 40_000,
+  manuellFristTage: 28,
+  manuellAbstandTage: 14,
 };
 
 export function mitDefaults(e: Partial<LiqEinstellungen> | null | undefined): LiqEinstellungen {
@@ -126,6 +135,16 @@ export interface LiqBestellung {
   restUsd: number;
   importVatEur: number | null;
   kg: number | null;
+}
+
+/** Manuelle Position (Status "manual"): Rechnung ohne Warenbewegung, z.B. Sammelrechnung. */
+export interface LiqManuellePosition {
+  id: string;
+  label: string;
+  lieferant: string;
+  /** Datum der Position (Bestell-/Rechnungsdatum) — Frist läuft ab hier. */
+  datum: string;
+  restUsd: number;
 }
 
 export interface LiqRohdaten {
@@ -146,6 +165,7 @@ export interface LiqRohdaten {
   };
   fxAuto: { kurs: number; datum: string } | null;
   bestellungen: LiqBestellung[];
+  manuellePositionen?: LiqManuellePosition[];
   steuern: {
     /** Vergangene Monate: gezahlte USt-VA (+) bzw. Erstattung (−) und im Monat gezahlte EUSt. */
     ustHistorie: Array<{ monat: string; ust: number; eust: number }>;
@@ -175,7 +195,7 @@ export interface LiqRohdaten {
 
 // ── Ereignisse + Prognose ───────────────────────────────────────────────────
 
-export type EreignisArt = "lieferant" | "einfuhr" | "steuer" | "nachbestellung" | "aktion";
+export type EreignisArt = "lieferant" | "manuell" | "einfuhr" | "steuer" | "nachbestellung" | "aktion";
 
 export interface Ereignis {
   datum: string;
@@ -287,6 +307,47 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       eustProMonat[monatVon(datum)] = (eustProMonat[monatVon(datum)] ?? 0) + ab.eust;
     }
     bestellInfo.set(b.id, { zahlDatum, sofort, usd: b.restUsd, eur, einfuhr });
+  }
+
+  // 1b) Manuelle Positionen: pro Lieferant ein gemeinsamer Ratenplan, älteste Position zuerst.
+  //     Rate = manuellRateUsd (letzte = Rest), frühestens Datum + Frist, danach im Abstand.
+  //     Keine Einfuhrabgaben: die Ware ist längst da (EUSt wurde bei Ankunft gezahlt).
+  const manuell = (roh.manuellePositionen ?? []).filter((p) => p.restUsd > 0.01);
+  for (const lieferant of [...new Set(manuell.map((p) => p.lieferant))]) {
+    const offen = manuell
+      .filter((p) => p.lieferant === lieferant)
+      .sort((a, b) => a.datum.localeCompare(b.datum))
+      .map((p) => ({ ...p, rest: p.restUsd, faellig: plusTage(p.datum, e.manuellFristTage) }));
+    const rate = Math.max(1, e.manuellRateUsd);
+    const raten: Array<{ datum: string; usd: number; positionen: string[] }> = [];
+    let letzte: string | null = null;
+    for (let kopf = 0; kopf < offen.length && raten.length < 200; ) {
+      const frueh = letzte ? plusTage(letzte, e.manuellAbstandTage) : offen[kopf].faellig;
+      const datum = amStart(frueh > offen[kopf].faellig ? frueh : offen[kopf].faellig);
+      let usd = 0;
+      const positionen: string[] = [];
+      while (kopf < offen.length && usd < rate - 0.005) {
+        const teil = Math.min(offen[kopf].rest, rate - usd);
+        usd += teil;
+        offen[kopf].rest -= teil;
+        if (!positionen.includes(offen[kopf].label)) positionen.push(offen[kopf].label);
+        if (offen[kopf].rest <= 0.005) kopf++;
+      }
+      raten.push({ datum, usd: r2(usd), positionen });
+      letzte = datum;
+    }
+    raten.forEach((r, i) => {
+      ereignisse.push({
+        datum: r.datum,
+        betrag: -r2(r.usd / fx),
+        art: "manuell",
+        label: `${lieferant} Rate ${i + 1}/${raten.length} · ${r.usd.toLocaleString("de-DE", { maximumFractionDigits: 0 })} $ (${r.positionen.join(", ")})`,
+        sofort: r.datum <= start,
+      });
+    });
+  }
+  if (manuell.length && e.andereLieferantenEinrechnen) {
+    hinweise.push("Manuelle Positionen sind als Raten eingeplant UND andere Lieferanten als Ø eingerechnet — Ebru-Zahlungen können dadurch doppelt zählen.");
   }
 
   // 2) Künftige Nachbestellungen (Schätzung): wöchentlich ab nächstem Montag
