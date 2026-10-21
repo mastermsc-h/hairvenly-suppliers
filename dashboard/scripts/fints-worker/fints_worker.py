@@ -745,7 +745,16 @@ def paypal_balance(cfg: dict) -> dict | None:
             headers={"Authorization": f"Basic {auth}", "Content-Type": "application/x-www-form-urlencoded"},
         )
         with urllib.request.urlopen(req, timeout=30) as resp:
-            token = json.loads(resp.read().decode())["access_token"]
+            tok = json.loads(resp.read().decode())
+        token = tok["access_token"]
+        scopes = str(tok.get("scope") or "")
+        hat_salden = "reporting/balances" in scopes or "reporting/search" in scopes
+        if not hat_salden:
+            # PayPal gibt bis zum Ablauf denselben Token zurück — eine gerade freigeschaltete
+            # Berechtigung fehlt dann noch (Token läuft in expires_in Sekunden ab).
+            log.warning("PayPal: Token ohne Salden-Berechtigung (läuft ab in %s min) — "
+                        "„Transaction search“ in der LIVE-App aktivieren, danach ggf. Ablauf abwarten",
+                        int(tok.get("expires_in", 0)) // 60)
         req = urllib.request.Request(
             PAYPAL_API + "/v1/reporting/balances?currency_code=EUR",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
