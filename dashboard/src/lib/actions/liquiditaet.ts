@@ -20,7 +20,7 @@ const OPTIONAL: Array<[keyof LiqEinstellungen, number, number]> = [
   ["nachbestellKgMonat", 0, 10_000],
   ["usdProKg", 0, 100_000],
 ];
-const SCHALTER: Array<keyof LiqEinstellungen> = ["andereLieferantenEinrechnen", "nachbestellungenEinrechnen"];
+const SCHALTER: Array<keyof LiqEinstellungen> = ["andereLieferantenEinrechnen", "nachbestellungenEinrechnen", "paypalEinrechnen"];
 
 /** Speichert nur bekannte Felder mit plausiblen Werten (kein fremdes jsonb durchreichen). */
 export async function saveLiquiditaetEinstellungen(input: Partial<LiqEinstellungen>): Promise<{ ok: boolean; error?: string }> {

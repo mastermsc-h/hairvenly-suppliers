@@ -102,7 +102,8 @@ export async function recordBalances(list: unknown[]): Promise<number> {
       saldo: Number(b.saldo),
       stand: String(b.stand ?? ""),
     }))
-    .filter((b) => /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(b.account_iban) && Number.isFinite(b.saldo) && Math.abs(b.saldo) < 1e9 && /^\d{4}-\d{2}-\d{2}$/.test(b.stand))
+    // "PAYPAL" = PayPal-Guthaben (Worker, REST API) — kein IBAN, aber gleiches Format
+    .filter((b) => (/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(b.account_iban) || b.account_iban === "PAYPAL") && Number.isFinite(b.saldo) && Math.abs(b.saldo) < 1e9 && /^\d{4}-\d{2}-\d{2}$/.test(b.stand))
     .slice(0, 20);
   if (!rows.length) return 0;
   const sb = createServiceClient();

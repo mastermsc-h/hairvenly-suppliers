@@ -148,8 +148,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
       {/* Kennzahlen */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <Kachel
-          label="Kontostand Sparkasse"
-          value={eur(roh.startSaldo)}
+          label={p.paypal?.eingerechnet ? "Sparkasse + PayPal" : "Kontostand Sparkasse"}
+          value={eur(p.startSaldoGesamt)}
           sub={roh.konten
             .map((k) => {
               const bank = roh.bankSalden.find((b) => b.iban === k.iban);
@@ -162,6 +162,22 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
         <Kachel label="Frei pro Tag" value={eur(freiProTag)} sub="vor Lieferanten & Steuern" tone={freiProTag >= 0 ? "green" : "red"} />
         <Kachel label="Tiefpunkt" value={eur(p.tiefpunkt.saldo)} sub={deDate(p.tiefpunkt.datum)} tone={p.tiefpunkt.saldo < 0 ? "red" : p.tiefpunkt.saldo < e.puffer ? "amber" : "green"} />
       </div>
+      {p.paypal && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-2 text-sm">
+          <span className="text-neutral-600">
+            PayPal-Guthaben (noch nicht aufs Konto überwiesen){" "}
+            <span className="text-xs text-neutral-400">
+              {p.paypal.eingerechnet ? "— als verfügbares Geld im Startstand" : "— nicht eingerechnet"} · PayPal meldet mit bis zu 3 h Verzögerung
+            </span>
+          </span>
+          <span className="flex items-center gap-3">
+            <span className="font-semibold tabular-nums">
+              {eur(p.paypal.saldo)} <span className="text-xs font-normal text-neutral-400">abgerufen {deDate(p.paypal.abgerufenAm.slice(0, 10))}</span>
+            </span>
+            <Schalter label="einrechnen" checked={e.paypalEinrechnen} onChange={(v) => set("paypalEinrechnen", v)} />
+          </span>
+        </div>
+      )}
       {roh.bankSalden.filter((b) => b.iban.slice(4, 12) === "30020900").map((b) => (
         <div key={b.iban} className="flex flex-wrap items-baseline justify-between gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-2 text-sm">
           <span className="text-neutral-600">

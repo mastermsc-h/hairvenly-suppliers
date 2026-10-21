@@ -36,6 +36,18 @@ Gleicher Ablauf: Anmeldename/Kundennummer, PIN in den Schlüsselbund (eigener
 Eintrag `hairvenly-fints-targobank`), Freigabe in der Banking-App. photoTAN/QR-
 Grafiken öffnet der Worker als Bild; chipTAN mit Flickercode geht nicht.
 
+## PayPal-Guthaben (optional)
+
+```bash
+~/hairvenly-inventory/dashboard/scripts/fints-worker/fints setup paypal
+```
+
+Liest nur das verfügbare EUR-Guthaben (`GET /v1/reporting/balances`) und schickt es mit
+dem stündlichen Abruf ans Dashboard (Liquidität: zählt als verfügbares Geld). Vorher bei
+developer.paypal.com → Apps & Credentials → **Live** eine App anlegen, unter Features
+**„Transaction search“** aktivieren, Client-ID + Secret kopieren. Secret liegt im
+Schlüsselbund (`hairvenly-fints-paypal`). PayPal meldet Salden mit bis zu 3 h Verzögerung.
+
 ## Alltag
 
 | Befehl | Wann |

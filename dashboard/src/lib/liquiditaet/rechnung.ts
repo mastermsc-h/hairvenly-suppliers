@@ -84,6 +84,8 @@ export interface LiqEinstellungen {
   manuellAbstandTage: number;
   /** Lieferanten, deren GESAMTE offene Rechnungen in Raten bezahlt werden (Ebru). */
   ratenLieferanten: LiqRatenRegel[];
+  /** PayPal-Guthaben (noch nicht aufs Konto überwiesen) als verfügbares Geld mitzählen. */
+  paypalEinrechnen: boolean;
 }
 
 export interface LiqRatenRegel {
@@ -148,6 +150,7 @@ export const LIQ_DEFAULTS: LiqEinstellungen = {
   manuellAbstandTage: 14,
   // User 20.10.2026: Ebru — 2 Wochen nach Rechnungseingang erste Rate à 40k $, dann alle 2 Wochen
   ratenLieferanten: [{ name: "Ebru", rateUsd: 40_000, fristTage: 14, abstandTage: 14, bankMuster: "JUANCHENG" }],
+  paypalEinrechnen: true,
 };
 
 export function mitDefaults(e: Partial<LiqEinstellungen> | null | undefined): LiqEinstellungen {
@@ -276,6 +279,10 @@ export interface PrognoseErgebnis {
   eustAndereMonat: number;
   /** Ø tatsächliche USt-Zahllast (nach Vorsteuer und EUSt) der Historienmonate. */
   ustIstSchnitt: number | null;
+  /** PayPal-Guthaben laut API; eingerechnet = Teil des Startstands. */
+  paypal: { saldo: number; stand: string; abgerufenAm: string; eingerechnet: boolean } | null;
+  /** Startstand der Rechnung = Sparkasse + ggf. PayPal. */
+  startSaldoGesamt: number;
   /** Für die Nachbestell-Schätzung verwendete kg/Monat. */
   nachbestellKgMonat: number;
   tage: Array<{ datum: string; saldo: number }>;
@@ -564,10 +571,18 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
   const andereGesamtProTag = andereProTag - (plan.eustAndereMonat * 12) / 365;
   const proTag = einnahmenProTag + laufendProTag + (e.andereLieferantenEinrechnen ? andereGesamtProTag : 0);
 
-  const sim = simuliere(roh.startSaldo, plan.start, plan.ende, proTag, plan.ereignisse);
+  // PayPal-Guthaben = verkaufte, noch nicht überwiesene Ware → verfügbar. Nur mit frischem Stand
+  // (≤ 2 Tage), sonst würde ein veralteter Wert die Vorschau schönrechnen.
+  const pp = (roh.bankSalden ?? []).find((b) => b.iban === "PAYPAL") ?? null;
+  const ppFrisch = !!pp && tageZwischen(pp.abgerufenAm.slice(0, 10), roh.heute) <= 2;
+  const ppEin = !!pp && ppFrisch && e.paypalEinrechnen;
+  if (pp && !ppFrisch) plan.hinweise.push(`PayPal-Stand ist vom ${pp.abgerufenAm.slice(0, 10)} — nicht eingerechnet (Worker/PayPal-API prüfen).`);
+  const startSaldo = roh.startSaldo + (ppEin && pp ? pp.saldo : 0);
+
+  const sim = simuliere(startSaldo, plan.start, plan.ende, proTag, plan.ereignisse);
   const simAndere = e.andereLieferantenEinrechnen
     ? sim
-    : simuliere(roh.startSaldo, plan.start, plan.ende, proTag + andereGesamtProTag, plan.ereignisse);
+    : simuliere(startSaldo, plan.start, plan.ende, proTag + andereGesamtProTag, plan.ereignisse);
 
   const bestellungen: BestellPrognose[] = [];
   for (const b of roh.bestellungen) {
@@ -575,7 +590,7 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
     if (!info) continue;
     const zahlEv = plan.ereignisse.find((x) => x.orderId === b.id && x.art === "lieferant");
     const einfEv = plan.ereignisse.find((x) => x.orderId === b.id && x.art === "einfuhr");
-    const saldoNach = zahlEv ? sim.nachEreignis.get(zahlEv) ?? roh.startSaldo : roh.startSaldo;
+    const saldoNach = zahlEv ? sim.nachEreignis.get(zahlEv) ?? startSaldo : startSaldo;
     const ampel = zahlEv ? ampelFuer(saldoNach, e.puffer) : "ok";
     const einfSaldo = einfEv ? sim.nachEreignis.get(einfEv) ?? saldoNach : null;
     bestellungen.push({
@@ -607,6 +622,8 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
     ustBasis: plan.ustBasis,
     eustAndereMonat: plan.eustAndereMonat,
     ustIstSchnitt: plan.ustIstSchnitt,
+    paypal: pp ? { saldo: pp.saldo, stand: pp.stand, abgerufenAm: pp.abgerufenAm, eingerechnet: ppEin } : null,
+    startSaldoGesamt: r2(startSaldo),
     nachbestellKgMonat: plan.nachbestellKgMonat,
     tage: sim.tage,
     ereignisse: plan.ereignisse,

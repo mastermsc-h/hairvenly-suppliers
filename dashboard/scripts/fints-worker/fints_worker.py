@@ -23,6 +23,7 @@ Jede Bank ist unabhängig: braucht eine Bank eine TAN, läuft die andere weiter.
 
 Befehle:
   fints setup [bank]       Ersteinrichtung (Anmeldename, PIN, Konto) + erste Freigabe
+  fints setup paypal       PayPal-Guthaben per API (Client-ID + Secret der PayPal-App)
   fints renew [bank]       TAN-Freigabe erneuern + Abruf (ohne bank: alle, die warten)
   fints backfill [bank] [--since JJJJ-MM-TT]
                            Historie holen (Standard ab 2025-07-01, braucht TAN)
@@ -83,6 +84,9 @@ KNOWN_BANKS = {
     },
 }
 DEFAULT_BACKFILL_SINCE = "2025-07-01"
+
+PAYPAL_API = "https://api-m.paypal.com"
+PAYPAL_KEYCHAIN = f"{KEYCHAIN_SERVICE}-paypal"
 
 log = logging.getLogger("fints-worker")
 
@@ -713,6 +717,97 @@ def fetch_error(p: dict, e: Exception) -> tuple[str, str]:
     return code, msg
 
 
+# ── PayPal-Guthaben (REST API, nur lesend) ───────────────────────────────────
+
+def paypal_secret(client_id: str) -> str | None:
+    r = subprocess.run(
+        ["/usr/bin/security", "find-generic-password", "-s", PAYPAL_KEYCHAIN, "-a", client_id, "-w"],
+        capture_output=True, text=True,
+    )
+    return r.stdout.rstrip("\n") if r.returncode == 0 and r.stdout.strip() else None
+
+
+def paypal_balance(cfg: dict) -> dict | None:
+    """Verfügbares EUR-Guthaben (GET /v1/reporting/balances). None = nicht eingerichtet/Fehler.
+    Ein Fehler hier stört den Bankabruf nie."""
+    import base64
+    client_id = (cfg.get("paypal") or {}).get("client_id")
+    if not client_id:
+        return None
+    secret = paypal_secret(client_id)
+    if not secret:
+        log.warning("PayPal: Secret nicht im Schlüsselbund — `fints setup paypal`")
+        return None
+    try:
+        auth = base64.b64encode(f"{client_id}:{secret}".encode()).decode()
+        req = urllib.request.Request(
+            PAYPAL_API + "/v1/oauth2/token", data=b"grant_type=client_credentials", method="POST",
+            headers={"Authorization": f"Basic {auth}", "Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            token = json.loads(resp.read().decode())["access_token"]
+        req = urllib.request.Request(
+            PAYPAL_API + "/v1/reporting/balances?currency_code=EUR",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", "replace")[:300]
+        log.warning("PayPal antwortet %s: %s", e.code, body)
+        if e.code == 403:
+            log.warning("PayPal: der App fehlt die Berechtigung — in der PayPal-App 'Transaction search' aktivieren")
+        return None
+    except Exception as e:
+        log.warning("PayPal nicht erreichbar: %s", e)
+        return None
+    eur = next((b for b in data.get("balances", []) if b.get("currency") == "EUR"), None)
+    if not eur:
+        log.warning("PayPal: kein EUR-Guthaben in der Antwort")
+        return None
+    betrag = (eur.get("available_balance") or eur.get("total_balance") or {}).get("value")
+    if betrag is None:
+        return None
+    stand = str(data.get("as_of_time") or dt.date.today().isoformat())[:10]
+    log.info("PayPal: verfügbar %.2f EUR (Stand %s)", float(betrag), stand)
+    return {"account_iban": "PAYPAL", "saldo": float(betrag), "stand": stand}
+
+
+def cmd_setup_paypal(cfg: dict) -> int:
+    print("PayPal-Guthaben per API einrichten (nur lesend)\n")
+    print("Vorher bei developer.paypal.com → Apps & Credentials → Live: App anlegen,")
+    print("unter Features „Transaction search“ aktivieren, Client-ID + Secret bereithalten.\n")
+    current = (cfg.get("paypal") or {}).get("client_id", "")
+    client_id = input(f"Client-ID{f' [{current[:8]}…]' if current else ''}: ").strip() or current
+    if not client_id:
+        print("Client-ID fehlt.")
+        return 1
+    cfg["paypal"] = {"client_id": client_id}
+    save_json(CONFIG_PATH, cfg)
+    if paypal_secret(client_id) and input("Secret ist schon im Schlüsselbund. Neu setzen? [j/N] ").strip().lower() != "j":
+        pass
+    else:
+        print("\nGleich fragt macOS zweimal nach dem Passwort für den Schlüsselbund-Eintrag.")
+        print("→ Dort das PayPal-Secret einfügen (Eingabe bleibt unsichtbar).\n")
+        r = subprocess.run([
+            "/usr/bin/security", "add-generic-password", "-U",
+            "-s", PAYPAL_KEYCHAIN, "-a", client_id, "-l", "Hairvenly PayPal-API",
+            "-T", "/usr/bin/security", "-w",
+        ])
+        if r.returncode != 0:
+            print("Secret konnte nicht gespeichert werden.")
+            return 1
+    bal = paypal_balance(cfg)
+    if not bal:
+        print(f"✗ Abruf fehlgeschlagen — Details im Log: {LOG_PATH}")
+        print("  Häufigste Ursache: in der PayPal-App ist „Transaction search“ nicht aktiviert (Fehler 403).")
+        return 1
+    res = post_dashboard(cfg, {"status": {"ok": True, "code": "ok", "message": "PayPal eingerichtet", "success": True}, "transactions": [], "balances": [bal]})
+    print(f"✓ PayPal verfügbar: {bal['saldo']:.2f} € (Stand {bal['stand']}){' — ans Dashboard gesendet' if res else ''}")
+    print("  Ab jetzt holt der stündliche Abruf den PayPal-Stand automatisch mit.")
+    return 0
+
+
 # ── Befehle ──────────────────────────────────────────────────────────────────
 
 def configured_profiles(cfg: dict) -> list[dict]:
@@ -772,6 +867,10 @@ def cmd_run(args: list[str]) -> int:
         balances.extend(bal)
         ok_banks.append(p)
         parts.append(f"{p['name']}: {len(got)} Umsätze")
+
+    pp = paypal_balance(cfg)
+    if pp:
+        balances.append(pp)
 
     # Schlimmster Zustand bestimmt den Code; "success" = mindestens eine Bank hat geliefert.
     code = next((c for c in ("auth_failed", "needs_tan", "error") if c in codes), "ok")
@@ -846,9 +945,11 @@ def cmd_renew(args: list[str]) -> int:
 def cmd_setup(args: list[str]) -> int:
     key = (args[0] if args else "sparkasse").lower()
     cfg = load_config()
+    if key == "paypal":
+        return cmd_setup_paypal(cfg)
     p = get_profile(cfg, key, create=True)
     if not p:
-        print(f"Unbekannte Bank „{key}“. Möglich: sparkasse, {', '.join(KNOWN_BANKS)}")
+        print(f"Unbekannte Bank „{key}“. Möglich: sparkasse, {', '.join(KNOWN_BANKS)}, paypal")
         return 1
     if not cfg["product_id"]:
         cfg["product_id"] = input("FinTS-Produkt-Registrierungsnummer: ").strip()
@@ -965,6 +1066,11 @@ def cmd_status(args: list[str]) -> int:
     for key in KNOWN_BANKS:
         if not get_profile(cfg, key):
             print(f"\n── {KNOWN_BANKS[key]['name']} ({key}) ──\nNicht eingerichtet → fints setup {key}")
+    pp_id = (cfg.get("paypal") or {}).get("client_id")
+    print("\n── PayPal (paypal) ──")
+    print(f"Client-ID:        {pp_id[:8] + '…' if pp_id else 'nicht eingerichtet → fints setup paypal'}")
+    if pp_id:
+        print(f"Secret im Keychain: {'ja' if paypal_secret(pp_id) else 'nein'}")
     return 0
 
 
