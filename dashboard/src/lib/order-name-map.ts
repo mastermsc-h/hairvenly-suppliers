@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { loadShopifyTitleIndex, type ShopifyTitleIndex } from "@/lib/shopify-product-link";
 
 /**
  * Meta info we expose per order for sheet-mapped lookups.
@@ -28,6 +29,22 @@ export interface OrderMeta {
    * fälschlich 'kommt am Order-ETA' für längst angekommene Ware).
    */
   arrivedShopifyNames: Set<string>;
+  /**
+   * ID-Pfad (stabil gegen Shopify-Umbenennungen): dieselben Daten wie
+   * itemEtasByShopify / arrivedShopifyNames, aber keyed by Shopify-Produkt-ID
+   * (product_colors.shopify_product_id). `titleIndex` löst einen Sheet-Namen
+   * (auch einen veralteten Titel) zur ID auf. Leer/null → alter Namenspfad.
+   */
+  itemEtasByProductId: Map<string, string[]>;
+  arrivedProductIds: Set<string>;
+  titleIndex: ShopifyTitleIndex | null;
+  /**
+   * true = jede Position dieser Bestellung mit ETA/Ankunft ist per Produkt-ID
+   * verknüpft. Dann ist "ID nicht in der Bestellung" eine sichere Aussage und
+   * der unscharfe Namens-Match (der sonst gleichnamige ANDERE Produkte trifft,
+   * z.B. Latte Brown ↔ Latte Balayage) wird übersprungen.
+   */
+  positionsAllLinked: boolean;
 }
 
 /** Statuses where the order is considered archived and should be hidden everywhere. */
@@ -54,18 +71,27 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
 
   // Include ALL orders (not just active) — sheet transit data may lag behind
   // DB status changes. We want to link badges even for delivered/cancelled orders.
-  const [{ data: orders }, { data: suppliers }, { data: shipmentRows }, { data: itemRows }] = await Promise.all([
+  const [{ data: orders }, { data: suppliers }, { data: shipmentRows }, { data: itemRows }, titleIndex] = await Promise.all([
     supabase
       .from("orders")
       .select("id, label, supplier_id, order_date, tracking_number, tracking_url, status, eta")
       .order("order_date", { ascending: false }),
     supabase.from("suppliers").select("id, name, regions"),
-    supabase.from("order_shipments").select("id, order_id, eta, arrived_at"),
+    fetchAllRows((from, to) =>
+      supabase.from("order_shipments").select("id, order_id, eta, arrived_at").order("id").range(from, to),
+    ),
     // Items + shipment_id, damit wir per-Item das ETA aus dem zugehörigen
     // Shipment ableiten können wenn item.eta selbst null ist.
-    supabase
-      .from("order_items")
-      .select("order_id, eta, shipment_id, product_colors!color_id(name_shopify)"),
+    // Paginiert: >1000 Positionen (Stand 22.10.2026: 1350) — ohne range()
+    // kappte Supabase still bei 1000 und ~350 Positionen fehlten im ETA-Index.
+    fetchAllRows((from, to) =>
+      supabase
+        .from("order_items")
+        .select("order_id, eta, shipment_id, product_colors!color_id(name_shopify, shopify_product_id)")
+        .order("id")
+        .range(from, to),
+    ),
+    loadShopifyTitleIndex(),
   ]);
 
   // Map: shipment_id → eta (nur nicht-angekommene Shipments)
@@ -99,14 +125,37 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
     order_id: string;
     eta: string | null;
     shipment_id: string | null;
-    product_colors: { name_shopify: string | null } | { name_shopify: string | null }[] | null;
+    product_colors:
+      | { name_shopify: string | null; shopify_product_id: string | null }
+      | { name_shopify: string | null; shopify_product_id: string | null }[]
+      | null;
   };
   const itemEtasByOrder = new Map<string, Map<string, Set<string>>>();
   // Pro Order: Set der Shopify-Namen deren Items in einer angekommenen
   // Teillieferung lagen — Marker für "ist da" (siehe buildAnkunftFromMeta).
   const arrivedShopifyByOrder = new Map<string, Set<string>>();
+  // Dasselbe keyed by Shopify-Produkt-ID (unabhängig von name_shopify).
+  const itemEtasByOrderPid = new Map<string, Map<string, Set<string>>>();
+  const arrivedPidsByOrder = new Map<string, Set<string>>();
+  const ordersWithUnlinkedPositions = new Set<string>();
   for (const it of (itemRows ?? []) as ItemRow[]) {
     const pc = Array.isArray(it.product_colors) ? it.product_colors[0] : it.product_colors;
+    const pid = pc?.shopify_product_id ?? null;
+    if (!pid) ordersWithUnlinkedPositions.add(it.order_id);
+    if (pid) {
+      if (it.shipment_id && arrivedShipmentIds.has(it.shipment_id)) {
+        if (!arrivedPidsByOrder.has(it.order_id)) arrivedPidsByOrder.set(it.order_id, new Set());
+        arrivedPidsByOrder.get(it.order_id)!.add(pid);
+      } else {
+        const eta = it.eta ?? (it.shipment_id ? shipmentEtaById.get(it.shipment_id) ?? null : null);
+        if (eta) {
+          if (!itemEtasByOrderPid.has(it.order_id)) itemEtasByOrderPid.set(it.order_id, new Map());
+          const mp = itemEtasByOrderPid.get(it.order_id)!;
+          if (!mp.has(pid)) mp.set(pid, new Set());
+          mp.get(pid)!.add(eta);
+        }
+      }
+    }
     const shopify = pc?.name_shopify;
     if (!shopify) continue;
     // KRITISCH: Items aus angekommenen Shipments NICHT in den Unterwegs-Index
@@ -165,6 +214,13 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
     eta: string | null;
   };
 
+  // Zwei Bestellungen unter demselben Namen/Datum (z.B. 2× "Amanda 25.08.2026"):
+  // das Sheet zeigt nur EINE davon → "ID nicht positioniert" ist dann keine
+  // sichere Aussage mehr → für diesen Schlüssel alter Namens-Fallback.
+  const markAmbiguous = (winner: OrderMeta, other: OrderMeta) => {
+    if (winner.id !== other.id) winner.positionsAllLinked = false;
+  };
+
   // Build keys: "family|YYYY-MM-DD" → OrderMeta (canonical date = ISO).
   // Orders are sorted DESC, so first occurrence of a key wins (= newest order).
   for (const o of orders as Row[]) {
@@ -178,6 +234,11 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
       }
     }
 
+    const itemEtasByProductId = new Map<string, string[]>();
+    for (const [pid, etaSet] of itemEtasByOrderPid.get(o.id)?.entries() ?? []) {
+      itemEtasByProductId.set(pid, Array.from(etaSet).sort());
+    }
+
     const meta: OrderMeta = {
       id: o.id,
       trackingNumber: o.tracking_number,
@@ -187,6 +248,10 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
       shipmentEtas: shipmentsByOrder.get(o.id) ?? [],
       itemEtasByShopify,
       arrivedShopifyNames: arrivedShopifyByOrder.get(o.id) ?? new Set<string>(),
+      itemEtasByProductId,
+      arrivedProductIds: arrivedPidsByOrder.get(o.id) ?? new Set<string>(),
+      titleIndex,
+      positionsAllLinked: !ordersWithUnlinkedPositions.has(o.id),
     };
 
     const iso = toIsoDate(o.order_date);
@@ -195,6 +260,7 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
       for (const fam of families) {
         const kFull = `${fam}|${iso}`;
         if (!map[kFull]) map[kFull] = meta;
+        else markAmbiguous(map[kFull], meta);
         // Also short key (no year) for abbreviated sheet names
         const [, mm, dd] = iso.split("-");
         const kShort = `${fam}|${mm}-${dd}`;
@@ -204,6 +270,7 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
 
     if (o.label) {
       if (!map[o.label]) map[o.label] = meta;
+      else markAmbiguous(map[o.label], meta);
       const nkey = normalize(o.label);
       if (!map[nkey]) map[nkey] = meta;
     }
@@ -302,6 +369,20 @@ export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
       return undefined;
     },
   }) as Record<string, OrderMeta>;
+}
+
+/** Alle Zeilen einer Abfrage seitenweise laden (Supabase kappt sonst bei 1000). */
+async function fetchAllRows<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<{ data: T[] }> {
+  const all: T[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await page(from, from + 999);
+    if (error) console.warn("[order-name-map] Abfrage fehlgeschlagen:", error);
+    all.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  return { data: all };
 }
 
 /** Shift ISO date by N days (positive or negative). Returns ISO string. */

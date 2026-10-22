@@ -114,36 +114,54 @@ function buildAnkunftFromMeta(meta: OrderMeta, productName?: string, opts?: EtaP
   //    show the EARLIEST one — that's the precise next-arrival date for at least
   //    some of the stock.
   if (productName) {
-    // (a) exact name_shopify match
-    const positionEtas = meta.itemEtasByShopify.get(productName);
-    if (positionEtas && positionEtas.length > 0) {
-      return `ca. Ankunft: ${formatDeDate(chooseEta(positionEtas, opts))}`;
+    // (0) ID-Pfad: Sheet-Name → Shopify-Produkt-ID (auch veraltete Titel über
+    //     die Titel-Historie) → Positionen genau dieses Produkts. Stabil gegen
+    //     Umbenennungen; nur wenn die ID hier nichts weiß → alter Namenspfad.
+    const pid = meta.titleIndex?.resolve(productName) ?? null;
+    if (pid) {
+      const idEtas = meta.itemEtasByProductId.get(pid);
+      if (idEtas && idEtas.length > 0) {
+        return `ca. Ankunft: ${formatDeDate(chooseEta(idEtas, opts))}`;
+      }
+      // Alle Positionen dieses Produkts in angekommenen Teillieferungen → ist da.
+      if (meta.arrivedProductIds.has(pid)) return null;
     }
-    // (b) Bug 2026-05-30: Sheet-AlertProduct-Namen sind oft NICHT
-    //     identisch zu DB-name_shopify ("Pearl White Russische Bondings 60cm"
-    //     vs "#PEARL WHITE RUSSISCHE BONDINGS GLATT 1G"). Fuzzy-match per
-    //     normalisierten Tokens (Color-Name + optional Length/Variant).
-    //     Wenn mehrere Keys matchen, nehmen wir das früheste ETA aller Treffer.
-    const fuzzyEtas: string[] = [];
-    for (const [dbKey, etas] of meta.itemEtasByShopify.entries()) {
-      if (etas.length === 0) continue;
-      if (fuzzyMatchProductKey(productName, dbKey)) fuzzyEtas.push(...etas);
-    }
-    if (fuzzyEtas.length > 0) {
-      fuzzyEtas.sort();
-      return `ca. Ankunft: ${formatDeDate(chooseEta(fuzzyEtas, opts))}`;
-    }
+    // Produkt sicher NICHT positioniert (alle Positionen ID-verknüpft, diese ID
+    // nicht dabei) → kein unscharfer Namens-Match auf andere Produkte, direkt
+    // zu Teillieferungs-/Bestell-ETA.
+    const skipNameMatch = !!pid && meta.positionsAllLinked;
+    if (!skipNameMatch) {
+      // (a) exact name_shopify match
+      const positionEtas = meta.itemEtasByShopify.get(productName);
+      if (positionEtas && positionEtas.length > 0) {
+        return `ca. Ankunft: ${formatDeDate(chooseEta(positionEtas, opts))}`;
+      }
+      // (b) Bug 2026-05-30: Sheet-AlertProduct-Namen sind oft NICHT
+      //     identisch zu DB-name_shopify ("Pearl White Russische Bondings 60cm"
+      //     vs "#PEARL WHITE RUSSISCHE BONDINGS GLATT 1G"). Fuzzy-match per
+      //     normalisierten Tokens (Color-Name + optional Length/Variant).
+      //     Wenn mehrere Keys matchen, nehmen wir das früheste ETA aller Treffer.
+      const fuzzyEtas: string[] = [];
+      for (const [dbKey, etas] of meta.itemEtasByShopify.entries()) {
+        if (etas.length === 0) continue;
+        if (fuzzyMatchProductKey(productName, dbKey)) fuzzyEtas.push(...etas);
+      }
+      if (fuzzyEtas.length > 0) {
+        fuzzyEtas.sort();
+        return `ca. Ankunft: ${formatDeDate(chooseEta(fuzzyEtas, opts))}`;
+      }
 
-    // (c) Wenn KEINE per-Position-ETA gefunden ABER der Shopify-Name in
-    //     arrivedShopifyNames steht → alle Items dieses Produkts waren in
-    //     einer angekommenen Teillieferung. Bot soll NICHT auf order.eta
-    //     zurückfallen — das Produkt ist physisch da.
-    //     Fuzzy-Variante: auch wenn nur ein arrivedShopify-Eintrag fuzzy
-    //     matched, gilt das als "ist da" für diese Bestellung.
-    if (meta.arrivedShopifyNames && meta.arrivedShopifyNames.size > 0) {
-      if (meta.arrivedShopifyNames.has(productName)) return null;
-      for (const arrivedName of meta.arrivedShopifyNames) {
-        if (strictFuzzyMatch(productName, arrivedName)) return null;
+      // (c) Wenn KEINE per-Position-ETA gefunden ABER der Shopify-Name in
+      //     arrivedShopifyNames steht → alle Items dieses Produkts waren in
+      //     einer angekommenen Teillieferung. Bot soll NICHT auf order.eta
+      //     zurückfallen — das Produkt ist physisch da.
+      //     Fuzzy-Variante: auch wenn nur ein arrivedShopify-Eintrag fuzzy
+      //     matched, gilt das als "ist da" für diese Bestellung.
+      if (meta.arrivedShopifyNames && meta.arrivedShopifyNames.size > 0) {
+        if (meta.arrivedShopifyNames.has(productName)) return null;
+        for (const arrivedName of meta.arrivedShopifyNames) {
+          if (strictFuzzyMatch(productName, arrivedName)) return null;
+        }
       }
     }
   }
@@ -212,6 +230,13 @@ function strictFuzzyMatch(a: string, b: string): boolean {
  * Std-Tape-Position fälschlich als 'noch unterwegs'.
  */
 function isProductArrivedInOrder(meta: OrderMeta, productName: string): boolean {
+  // ID-Pfad zuerst (siehe buildAnkunftFromMeta (0)).
+  const pid = meta.titleIndex?.resolve(productName) ?? null;
+  if (pid) {
+    if (meta.itemEtasByProductId.has(pid)) return false;
+    if (meta.arrivedProductIds.has(pid)) return true;
+    if (meta.positionsAllLinked) return false; // nicht positioniert → kein Namens-Raten
+  }
   if (!meta.arrivedShopifyNames || meta.arrivedShopifyNames.size === 0) return false;
   // Noch offene per-Position-ETA für DASSELBE Produkt (gleicher Typ)?
   if (meta.itemEtasByShopify.has(productName)) return false;

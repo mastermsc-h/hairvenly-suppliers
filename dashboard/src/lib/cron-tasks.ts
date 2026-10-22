@@ -435,3 +435,19 @@ export async function cronStockSnapshot(
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
+
+// ── Shopify-Produkt-Verknüpfung ────────────────────────────────
+// Katalog-Farben per Shopify-Produkt-ID verknüpfen und Titel/Handle/
+// name_shopify auf den aktuellen Stand ziehen (Titel ändern sich laufend).
+// ~6 GraphQL-Seiten + nur geänderte Zeilen → wenige Sekunden.
+export async function cronShopifyLinkSync(
+  supabase: SupabaseClient,
+): Promise<{ ok: boolean; linked?: number; rowsUpdated?: number; unresolved?: number; error?: string }> {
+  const { syncShopifyProductLinks } = await import("@/lib/shopify-product-link");
+  const r = await syncShopifyProductLinks(supabase);
+  if (!r.ok) return { ok: false, error: r.error };
+  if (r.unresolved && r.unresolved.length > 0) {
+    console.log("[cron/shopifylinks] unverknüpft:", JSON.stringify(r.unresolved));
+  }
+  return { ok: true, linked: r.linked, rowsUpdated: r.rowsUpdated, unresolved: r.unresolved?.length ?? 0 };
+}

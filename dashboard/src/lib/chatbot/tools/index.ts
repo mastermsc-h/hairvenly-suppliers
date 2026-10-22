@@ -12,6 +12,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { calcPacks, type Method, type PriceRow } from "@/lib/chatbot/pricing";
 import { readDashboardAlerts, readInventorySheet } from "@/lib/stock-sheets";
 import { fetchOrderIdByName } from "@/lib/order-name-map";
+import { loadShopifyTitleIndex } from "@/lib/shopify-product-link";
 import { filterArchivedFromStock } from "@/lib/filter-archived-orders";
 import { pickEta, berlinTodayIso } from "@/lib/chatbot/eta-pick";
 
@@ -1012,6 +1013,8 @@ const getAvailableColors: ToolDef = {
       name_hairvenly,
       name_shopify,
       shopify_url,
+      shopify_product_id,
+      shopify_variant_id,
       description,
       equivalent_in_other_line,
       similar_in_same_line,
@@ -1039,6 +1042,8 @@ const getAvailableColors: ToolDef = {
       name_hairvenly: string;
       name_shopify: string | null;
       shopify_url: string | null;
+      shopify_product_id: string | null;
+      shopify_variant_id: string | null;
       description: string | null;
       equivalent_in_other_line: string | null;
       similar_in_same_line: string | null;
@@ -1109,9 +1114,10 @@ const getAvailableColors: ToolDef = {
     // Stock-Daten parallel laden — für jeden Catalog-Eintrag prüfen wir ob aktuell verfügbar
     // (readDashboardAlerts cached intern; ist nur ein API-Call zum Sheet)
     // + DB-Overrides: archivierte Bestellungen raus, ETAs aus DB
-    const [dashRes2, orderIdByName2] = await Promise.all([
+    const [dashRes2, orderIdByName2, titleIndex] = await Promise.all([
       readDashboardAlerts(),
       fetchOrderIdByName(),
+      loadShopifyTitleIndex(),
     ]);
     const unterwegs = filterArchivedFromStock(dashRes2.unterwegs, orderIdByName2, { todayIso: berlinTodayIso() }).filter(
       (d) => d.unterwegsG > 0,
@@ -1144,6 +1150,50 @@ const getAvailableColors: ToolDef = {
       });
     }
     const nullbestandSet = new Set(nullbestand.map(p => normN(p.product)));
+
+    // ID-Pfad (Bug 22.10.2026): name_shopify hinkte den umbenannten Shopify-
+    // Titeln hinterher → Namens-Match griff nicht → Varianten fälschlich
+    // "nicht vorrätig". Sheet-Zeile → Produkt-ID (URL-Handle, sonst Titel inkl.
+    // Titel-Historie), Katalog-Zeile → shopify_product_id. Namenspfad bleibt Fallback.
+    // Mehr-Varianten-Produkte (Clip-ins 100/150/225g) stehen im Sheet als eine
+    // Zeile pro Variante mit gleichem Titel → Schlüssel "pid|Gramm".
+    const stockById = new Map<string, { quantity: number; totalWeight: number }>();
+    for (const sr of stockRows) {
+      const pid = titleIndex.resolveUrl(sr.url) ?? titleIndex.resolve(sr.product);
+      if (!pid) continue;
+      const v = { quantity: sr.quantity, totalWeight: sr.totalWeight };
+      stockById.set(pid, v);
+      if (sr.unitWeight) stockById.set(`${pid}|${sr.unitWeight}`, v);
+    }
+    const unterwegsById = new Map<string, { etaText: string; etaConfirmed: boolean }>();
+    for (const u of unterwegs) {
+      const pid = titleIndex.resolve(u.product);
+      const v = unterwegsByName.get(normN(u.product));
+      if (pid && v) unterwegsById.set(pid, v);
+    }
+    const nullbestandIds = new Set(
+      nullbestand.map(p => titleIndex.resolve(p.product)).filter((x): x is string => !!x),
+    );
+    // ID-Schlüssel der Katalog-Zeile; Varianten-Zeilen (Clip-ins) nur mit Gramm.
+    const idKey = (r: Row): string | null => {
+      if (!r.shopify_product_id) return null;
+      if (!r.shopify_variant_id) return r.shopify_product_id;
+      const g = r.length?.unit === "g" && r.length?.value ? r.length.value : null;
+      return g ? `${r.shopify_product_id}|${g}` : null;
+    };
+    const stockOf = (r: Row) => {
+      const k = idKey(r);
+      return (k ? stockById.get(k) : undefined) ??
+        (r.name_shopify ? stockByName.get(normN(r.name_shopify)) : undefined);
+    };
+    // Unterwegs/Nullbestand-Listen kennen keine Varianten → ID-Pfad nur für
+    // Ein-Varianten-Produkte, Clip-ins bleiben auf dem Namenspfad.
+    const unterwegsOf = (r: Row) =>
+      (r.shopify_product_id && !r.shopify_variant_id ? unterwegsById.get(r.shopify_product_id) : undefined) ??
+      (r.name_shopify ? unterwegsByName.get(normN(r.name_shopify)) : undefined);
+    const isNullbestand = (r: Row) =>
+      (!!r.shopify_product_id && !r.shopify_variant_id && nullbestandIds.has(r.shopify_product_id)) ||
+      (!!r.name_shopify && nullbestandSet.has(normN(r.name_shopify)));
 
     // Eindeutige Farbnamen — sammle Methoden, Längen, URLs UND Stock-Status.
     // WICHTIG: variants[] enthält URL PRO Methode+Länge — der Bot soll daraus
@@ -1200,8 +1250,8 @@ const getAvailableColors: ToolDef = {
       if (methodName && r.shopify_url) {
         const dup = entry.variants.some(v => v.method === methodName && v.length === lenStr && v.shopify_url === r.shopify_url);
         if (!dup) {
-          const vStock = r.name_shopify ? stockByName.get(normN(r.name_shopify)) : null;
-          const vUw = r.name_shopify ? unterwegsByName.get(normN(r.name_shopify)) : null;
+          const vStock = stockOf(r);
+          const vUw = unterwegsOf(r);
           entry.variants.push({
             method: methodName,
             length: lenStr,
@@ -1215,16 +1265,16 @@ const getAvailableColors: ToolDef = {
       if (r.shopify_url && !entry.shopify_url) entry.shopify_url = r.shopify_url;
 
       // Stock-Status: schaue ob dieser Catalog-Eintrag im Sheet vorrätig ist
-      if (r.name_shopify) {
-        const stockInfo = stockByName.get(normN(r.name_shopify));
+      if (r.name_shopify || r.shopify_product_id) {
+        const stockInfo = stockOf(r);
         if (stockInfo && stockInfo.totalWeight > 0) {
           entry.in_stock = true;
         }
         // ETA falls unterwegs
-        const uw = unterwegsByName.get(normN(r.name_shopify));
+        const uw = unterwegsOf(r);
         if (uw && !entry.eta) entry.eta = uw.etaText;
         // Nullbestand-Hinweis (komplett aus, kein Nachschub)
-        if (nullbestandSet.has(normN(r.name_shopify)) && !entry.in_stock && !entry.eta) {
+        if (isNullbestand(r) && !entry.in_stock && !entry.eta) {
           entry.eta = "aktuell ausverkauft, kein Nachschub";
         }
       }

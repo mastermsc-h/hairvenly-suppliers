@@ -7,6 +7,7 @@ import {
   cronRepurchaseCompute,
   cronProductSalesSync,
   cronStockSnapshot,
+  cronShopifyLinkSync,
 } from "@/lib/cron-tasks";
 
 // Hobby plan timeout = 60s. If you upgrade to Pro you can bump this.
@@ -42,6 +43,13 @@ export async function GET(req: NextRequest) {
 
   if (!skip.includes("refunds")) {
     results.refunds = await cronRefundsSync(supabase);
+  }
+  // Katalog ↔ Shopify per Produkt-ID (Titel ändern sich laufend, die ID nie).
+  // Früh einsortiert: schnell (~5s), und repurchase läuft bis zur Deadline.
+  if (!skip.includes("shopifylinks")) {
+    results.shopifyLinks = overBudget()
+      ? { skipped: "time budget exceeded" }
+      : await cronShopifyLinkSync(supabase);
   }
   if (!skip.includes("collections")) {
     results.collections = overBudget()
