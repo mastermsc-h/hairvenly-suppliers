@@ -68,6 +68,20 @@ export async function fetchBankOverview(daysBack = 60): Promise<{ state: BankSyn
   };
 }
 
+/**
+ * Suche über ALLE Zahlungseingänge (alle Konten, alle Zeiträume) — Name, Zweck, IBAN,
+ * Betrag ("449,90"), Bestellnummer, Datum ("19.10."). SQL-Funktion bank_suche (Migration 0131).
+ */
+export async function searchBankIncoming(q: string): Promise<{ ok: boolean; error?: string; transactions: BankTransaction[] }> {
+  await requireFeature("finances");
+  const query = String(q ?? "").trim().slice(0, 200);
+  if (query.length < 2) return { ok: true, transactions: [] };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("bank_suche", { q: query, nur_eingaenge: true, lim: 200 });
+  if (error) return { ok: false, error: error.message, transactions: [] };
+  return { ok: true, transactions: ((data ?? []) as BankTransaction[]).map((t) => ({ ...t, amount: Number(t.amount) })) };
+}
+
 type ActionResult = { ok: boolean; error?: string; info?: string };
 
 export async function setBankModeAction(mode: BankMode): Promise<ActionResult> {

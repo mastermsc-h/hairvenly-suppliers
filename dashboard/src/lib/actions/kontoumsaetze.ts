@@ -58,6 +58,23 @@ export async function fetchKontoumsaetze(jahr: number): Promise<{ umsaetze: Kont
   return { umsaetze, regeln: (regeln ?? []) as RegelRow[], letzterAbruf: state?.last_success_at ?? null };
 }
 
+/**
+ * Suche über ALLE Kontoumsätze (alle Konten, alle Zeiträume): Name, Zweck, IBAN, Betrag
+ * ("449,90"), Bestellnummer, Datum ("19.10."). SQL-Funktion bank_suche (Migration 0131).
+ */
+export async function sucheKontoumsaetze(q: string): Promise<{ ok: boolean; error?: string; umsaetze: KontoUmsatz[] }> {
+  await requireFeature("finances");
+  const query = String(q ?? "").trim().slice(0, 200);
+  if (query.length < 2) return { ok: true, umsaetze: [] };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("bank_suche", { q: query, nur_eingaenge: false, lim: 300 });
+  if (error) return { ok: false, error: error.message, umsaetze: [] };
+  return {
+    ok: true,
+    umsaetze: ((data ?? []) as KontoUmsatz[]).map((u) => ({ ...u, amount: Number(u.amount), steuer_split: u.steuer_split ?? [] })),
+  };
+}
+
 /** Kategorie für einzelne Umsätze von Hand setzen. */
 export async function setKategorieAction(ids: string[], kategorie: string): Promise<Result> {
   await requireFeature("finances");

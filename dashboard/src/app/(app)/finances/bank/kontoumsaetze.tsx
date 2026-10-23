@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { AlertTriangle, ChevronLeft, ChevronRight, Loader2, RefreshCw, RotateCcw, Search, Trash2, Wand2 } from "lucide-react";
 import { KATEGORIEN, KATEGORIE_BY_KEY, type KategorieGruppe, type SteuerSplit } from "@/lib/bank/kategorien";
@@ -11,6 +11,7 @@ import {
   resetKategorieAction,
   saveRegelAction,
   setKategorieAction,
+  sucheKontoumsaetze,
   type KontoUmsatz,
   type RegelRow,
 } from "@/lib/actions/kontoumsaetze";
@@ -63,6 +64,33 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
   const [kontoFilter, setKontoFilter] = useState("alle");
   const [katFilter, setKatFilter] = useState<string | null>(null);
   const [suche, setSuche] = useState("");
+  // Suche ab 2 Zeichen über ALLE Konten + Zeiträume (Server); null = keine Suche aktiv
+  const [treffer, setTreffer] = useState<KontoUmsatz[] | null>(null);
+  const [sucht, setSucht] = useState(false);
+  const sucheRef = useRef("");
+  sucheRef.current = suche;
+
+  async function suchen(q: string) {
+    if (q.trim().length < 2) {
+      setTreffer(null);
+      return;
+    }
+    setSucht(true);
+    const res = await sucheKontoumsaetze(q);
+    // Nur übernehmen, wenn inzwischen nicht weitergetippt wurde
+    if (sucheRef.current === q) {
+      setTreffer(res.umsaetze);
+      if (!res.ok) setMeldung({ ok: false, text: res.error ?? "Suche fehlgeschlagen" });
+    }
+    setSucht(false);
+  }
+
+  useEffect(() => {
+    const q = suche;
+    const timer = setTimeout(() => suchen(q), 350);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suche]);
   const [limit, setLimit] = useState(150);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [meldung, setMeldung] = useState<{ ok: boolean; text: string } | null>(null);
@@ -71,6 +99,8 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
   async function reload(j = jahr) {
     const d = await fetchKontoumsaetze(j);
     setData(d);
+    // Treffer nach Änderungen (Kategorie, Regel) aktualisieren
+    if (sucheRef.current.trim().length >= 2) await suchen(sucheRef.current);
   }
 
   function changeYear(j: number) {
@@ -121,16 +151,15 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
     [imZeitraum]
   );
 
+  // Suche aktiv → Treffer aus allen Zeiträumen (Konto- und Kategoriefilter gelten weiter)
   const liste = useMemo(() => {
-    const q = suche.trim().toLowerCase();
-    return imZeitraum.filter(
+    const basis = treffer ?? imZeitraum;
+    return basis.filter(
       (u) =>
         (!katFilter || (u.kategorie ?? "unklar") === katFilter) &&
-        (!q ||
-          [u.counterparty_name, u.purpose, u.posting_text, u.counterparty_iban, String(u.amount)]
-            .some((v) => (v ?? "").toLowerCase().includes(q)))
+        (!treffer || kontoFilter === "alle" || u.account_iban === kontoFilter)
     );
-  }, [imZeitraum, katFilter, suche]);
+  }, [imZeitraum, treffer, katFilter, kontoFilter]);
 
   async function setKat(u: KontoUmsatz, kategorie: string) {
     setBusyId(u.id);
@@ -324,17 +353,32 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
       </Card>
 
       {/* Umsätze */}
-      <Card title={`Umsätze (${liste.length})${katFilter ? ` — ${KATEGORIE_BY_KEY[katFilter]?.label}` : ""}`} accent="border-l-neutral-400">
+      <Card
+        title={`${treffer ? `Suchergebnisse — alle Zeiträume (${liste.length}${treffer.length >= 300 ? "+" : ""})` : `Umsätze (${liste.length})`}${katFilter ? ` — ${KATEGORIE_BY_KEY[katFilter]?.label}` : ""}`}
+        accent="border-l-neutral-400"
+      >
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-2.5 text-neutral-400" />
             <input
               value={suche}
               onChange={(e) => setSuche(e.target.value)}
-              placeholder="Suche: Name, Zweck, Betrag…"
-              className="rounded-lg border border-neutral-300 pl-8 pr-3 py-1.5 text-sm w-64 focus:ring-2 focus:ring-neutral-900 focus:outline-none"
+              placeholder="Suche in allen Umsätzen: Name, Zweck, 449,90, 19.10. …"
+              className="rounded-lg border border-neutral-300 pl-8 pr-8 py-1.5 text-sm w-80 max-w-full focus:ring-2 focus:ring-neutral-900 focus:outline-none"
             />
+            {sucht && <Loader2 size={14} className="absolute right-2.5 top-2.5 animate-spin text-neutral-400" />}
+            {!sucht && suche && (
+              <button onClick={() => setSuche("")} className="absolute right-2.5 top-1.5 text-neutral-400 hover:text-neutral-900" title="Suche leeren">
+                ✕
+              </button>
+            )}
           </div>
+          {treffer && (
+            <span className="text-xs text-neutral-500">
+              Alle Konten und Zeiträume · mehrere Begriffe = alle müssen vorkommen · Betrag „449,90“, Datum „19.10.“
+              {treffer.length >= 300 && " · nur die neuesten 300 — Suche genauer eingrenzen"}
+            </span>
+          )}
           {katFilter && (
             <button onClick={() => setKatFilter(null)} className="text-xs rounded-lg border border-neutral-300 px-2 py-1 text-neutral-600 hover:bg-neutral-50">
               Filter „{KATEGORIE_BY_KEY[katFilter]?.label}“ entfernen ✕
@@ -421,7 +465,9 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
             Weitere {Math.min(300, liste.length - limit)} von {liste.length - limit} anzeigen
           </button>
         )}
-        {liste.length === 0 && <p className="py-4 text-sm text-neutral-400">Keine Umsätze für diese Auswahl.</p>}
+        {liste.length === 0 && (
+          <p className="py-4 text-sm text-neutral-400">{treffer ? `Keine Umsätze zu „${suche.trim()}“ gefunden.` : "Keine Umsätze für diese Auswahl."}</p>
+        )}
         <p className="mt-3 text-xs text-neutral-500">
           Kategorie per Auswahlfeld ändern = gilt für diesen einen Umsatz. Mit <Wand2 size={12} className="inline" /> wird daraus eine Regel für alle
           Umsätze derselben Gegenpartei (auch künftige).

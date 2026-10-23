@@ -1,15 +1,15 @@
 "use client";
 
-import { useActionState, useMemo, useState, useTransition } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronRight, CircleSlash, ExternalLink,
-  Eye, Landmark, Loader2, RefreshCw, RotateCcw, Upload, Zap,
+  Eye, Landmark, Loader2, RefreshCw, RotateCcw, Search, Upload, X, Zap,
 } from "lucide-react";
 import { t, type Locale } from "@/lib/i18n";
 import {
   assignBankByNumberAction, confirmBankMatchAction, ignoreBankTxAction, importBankCsvAction,
-  runBankMatchingAction, setBankModeAction,
+  runBankMatchingAction, searchBankIncoming, setBankModeAction,
   type BankSyncState, type BankTransaction,
 } from "@/lib/actions/bank";
 
@@ -50,6 +50,32 @@ export default function PaymentsBoard({
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const mode: Mode = state?.auto_mark_mode ?? "shadow";
 
+  // Suche über ALLE Eingänge (Server, alle Zeiträume) — ab 2 Zeichen, entprellt
+  const [q, setQ] = useState("");
+  const [treffer, setTreffer] = useState<BankTransaction[] | null>(null);
+  const [sucht, setSucht] = useState(false);
+  const qRef = useRef("");
+  qRef.current = q;
+  async function suchen(text: string) {
+    if (text.trim().length < 2) {
+      setTreffer(null);
+      return;
+    }
+    setSucht(true);
+    const res = await searchBankIncoming(text);
+    if (qRef.current === text) {
+      setTreffer(res.transactions);
+      if (!res.ok) setMsg({ ok: false, text: res.error ?? "Suche fehlgeschlagen" });
+    }
+    setSucht(false);
+  }
+  useEffect(() => {
+    const text = q;
+    const timer = setTimeout(() => suchen(text), 350);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
+
   const groups = useMemo(() => {
     const g = {
       review: [] as BankTransaction[], shadow: [] as BankTransaction[], unmatched: [] as BankTransaction[],
@@ -72,6 +98,8 @@ export default function PaymentsBoard({
       if (!res.ok) setMsg({ ok: false, text: res.error ?? "Fehler" });
       else if (res.info || okText) setMsg({ ok: true, text: res.info ?? okText ?? "" });
       router.refresh();
+      // Suchtreffer zeigen sonst den alten Status
+      if (qRef.current.trim().length >= 2) await suchen(qRef.current);
     });
   }
 
@@ -143,6 +171,62 @@ export default function PaymentsBoard({
         </div>
       )}
 
+      {/* Suche */}
+      <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm space-y-3">
+        <div className="relative">
+          <Search size={16} className="absolute left-3 top-2.5 text-neutral-400" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={tr("bank.search.placeholder")}
+            className="w-full rounded-lg border border-neutral-300 pl-9 pr-9 py-2 text-sm focus:ring-2 focus:ring-neutral-900 focus:outline-none"
+          />
+          {sucht ? (
+            <Loader2 size={16} className="absolute right-3 top-2.5 animate-spin text-neutral-400" />
+          ) : q ? (
+            <button type="button" onClick={() => setQ("")} className="absolute right-3 top-2.5 text-neutral-400 hover:text-neutral-900" title="Suche leeren">
+              <X size={16} />
+            </button>
+          ) : null}
+        </div>
+        {treffer && (
+          <>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="text-sm font-medium text-neutral-900">
+                {tr("bank.search.title")} ({treffer.length}{treffer.length >= 200 ? "+" : ""})
+              </span>
+              <span className="text-xs text-neutral-400">{tr("bank.search.hint")}</span>
+            </div>
+            {treffer.length === 0 ? (
+              <p className="text-sm text-neutral-400">{tr("bank.search.none")}</p>
+            ) : (
+              <div className="-mx-4 md:-mx-6 border-t border-neutral-100 divide-y divide-neutral-100">
+                {treffer.map((tx) => {
+                  const offen = tx.match_status === "review" || tx.match_status === "shadow";
+                  return (
+                    <div key={tx.id}>
+                      <div className="px-4 md:px-6 pt-3">
+                        <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] text-neutral-600">{statusLabel(tx, tr)}</span>
+                      </div>
+                      <TxCard
+                        tx={tx}
+                        tr={tr}
+                        shopAdminBase={shopAdminBase}
+                        pending={pending}
+                        onConfirm={offen ? (orders) => confirmOrders(tx, orders) : undefined}
+                        onAssign={tx.match_status === "review" ? (nr) => run(() => assignBankByNumberAction(tx.id, nr), "✓") : undefined}
+                        onIgnore={offen ? () => run(() => ignoreBankTxAction(tx.id, true)) : undefined}
+                        onRestore={tx.match_status === "ignored" ? () => run(() => ignoreBankTxAction(tx.id, false)) : undefined}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Kpi label={tr("bank.kpi.review")} value={groups.review.length} tone="amber" />
@@ -200,6 +284,15 @@ export default function PaymentsBoard({
 }
 
 // ── Bausteine ────────────────────────────────────────────────────────────────
+
+/** Status eines Suchtreffers als kurzes Etikett (gleiche Gruppen wie die Abschnitte). */
+function statusLabel(tx: BankTransaction, tr: (k: string) => string): string {
+  if (tx.match_status === "review") return REVIEW_WITH_REF.has(tx.match_reason ?? "") ? tr("bank.section.review") : tr("bank.section.unmatched");
+  if (tx.match_status === "shadow") return tr("bank.section.shadow");
+  if (tx.match_status === "auto_paid" || tx.match_status === "manual_paid") return tr("bank.section.done");
+  if (tx.match_status === "ignored") return tr("bank.section.ignored");
+  return tr("bank.section.pending");
+}
 
 function WorkerStatus({ state, tr }: { state: BankSyncState | null; tr: (k: string) => string }) {
   let tone = "neutral", icon = <Landmark size={18} />, text = tr("bank.worker.never");
