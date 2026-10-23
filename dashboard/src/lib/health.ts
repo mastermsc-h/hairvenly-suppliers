@@ -86,6 +86,40 @@ export function zeitraumBeginn(z: string): string | null {
   return null;
 }
 
+export interface SteuerPostenRoh {
+  art: string;
+  zeitraum: string;
+  richtung: string;
+  soll_betrag: number;
+  ist_betrag: number;
+  bezahlt_am: string | null;
+  soll_schaetzung: boolean;
+}
+
+/**
+ * Offene Steuern zum Stichtag d: Zeitraum hat begonnen und bis d nicht bezahlt.
+ * Betrag = Ist (falls inzwischen bekannt) sonst Soll; Erstattungen mindern.
+ * Ist ohne Zahldatum gilt als bezahlt (Zeitpunkt unbekannt).
+ */
+export function steuernOffenAm(posten: SteuerPostenRoh[], d: string): HealthSchuld[] {
+  return posten
+    .filter((p) => {
+      const b = zeitraumBeginn(p.zeitraum);
+      if (b != null && b > d) return false;
+      const ist = Number(p.ist_betrag);
+      if (ist !== 0 && (!p.bezahlt_am || String(p.bezahlt_am).slice(0, 10) <= d)) return false;
+      return (ist !== 0 ? ist : Number(p.soll_betrag)) > 0;
+    })
+    .map((p) => {
+      const ist = Number(p.ist_betrag);
+      const schaetzung = ist === 0 && p.soll_schaetzung;
+      return {
+        name: `${STEUER_NAMEN[p.art] ?? p.art} ${p.zeitraum}${schaetzung ? " (≈ Schätzung)" : ""}`,
+        eur: r2((p.richtung === "erstattung" ? -1 : 1) * (ist !== 0 ? ist : Number(p.soll_betrag))),
+      };
+    });
+}
+
 function heuteBerlin(): string {
   return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin" }).format(new Date());
 }
@@ -117,10 +151,7 @@ export async function berechneHealth(
       .select("label, status, remaining_balance, suppliers(name)")
       .gt("remaining_balance", 0)
       .not("status", "in", "(draft,cancelled,hidden)"),
-    sb.from("steuer_posten")
-      .select("art, zeitraum, richtung, soll_betrag, ist_betrag, soll_schaetzung")
-      .eq("ist_betrag", 0)
-      .gt("soll_betrag", 0),
+    sb.from("steuer_posten").select("art, zeitraum, richtung, soll_betrag, ist_betrag, bezahlt_am, soll_schaetzung"),
     sb.from("bank_transactions")
       .select("booking_date, purpose")
       .ilike("purpose", "%USD%")
@@ -171,16 +202,8 @@ export async function berechneHealth(
     .map(([name, usd]) => ({ name, usd: r2(usd), eur: r2(usd / fx.kurs) }))
     .sort((a, b) => b.eur - a.eur);
 
-  // ── Steuern: eingetragenes Soll ohne Ist, Zeitraum hat begonnen (Erstattungen mindern) ──
-  const steuern: HealthSchuld[] = ((posten ?? []) as Array<{ art: string; zeitraum: string; richtung: string; soll_betrag: number; soll_schaetzung: boolean }>)
-    .filter((p) => {
-      const b = zeitraumBeginn(p.zeitraum);
-      return b == null || b <= heute;
-    })
-    .map((p) => ({
-      name: `${STEUER_NAMEN[p.art] ?? p.art} ${p.zeitraum}${p.soll_schaetzung ? " (≈ Schätzung)" : ""}`,
-      eur: r2((p.richtung === "erstattung" ? -1 : 1) * Number(p.soll_betrag)),
-    }));
+  // ── Steuern: Zeitraum begonnen, noch nicht bezahlt (gleiche Regel wie im Monatsverlauf) ──
+  const steuern = steuernOffenAm((posten ?? []) as SteuerPostenRoh[], heute);
 
   const kontenEur = r2(konten.reduce((s, k) => s + k.saldo, 0));
   const lieferantenEur = r2(lieferanten.reduce((s, l) => s + l.eur, 0));
@@ -260,4 +283,167 @@ export async function speichereHealthSnapshot(
   }
   const { error } = await sb.from("company_health_snapshots").insert(row);
   return error ? { ok: false, error: error.message } : { ok: true, score };
+}
+
+// ── Monatsverlauf ───────────────────────────────────────────────────────────
+
+export interface HealthMonat {
+  monat: string; // "2026-09"
+  stichtag: string; // Monatsende bzw. heute
+  live: boolean;
+  kg: number | null;
+  kontenEur: number;
+  paypalEur: number | null; // null = für diesen Monat kein PayPal-Stand bekannt
+  lieferantenEur: number;
+  steuernEur: number;
+  ergaenzungenEur: number;
+  schuldenEur: number;
+  score: number | null;
+}
+
+interface VerlaufOrder {
+  id: string;
+  status: string;
+  order_date: string | null;
+  invoice_effective: number | null;
+}
+
+function monatsEnde(m: string): string {
+  const [y, mo] = m.split("-").map(Number);
+  return new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
+}
+
+function naechsterMonat(m: string): string {
+  const [y, mo] = m.split("-").map(Number);
+  return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Status einer Bestellung am Stichtag d (aus der Status-Historie).
+ * Sammelrechnungen (manual) zählen ab Rechnungsdatum — sie werden oft erst später erfasst.
+ * null = Bestellung gab es zum Stichtag noch nicht (bzw. noch nicht im System).
+ */
+export function statusAm(
+  o: Pick<VerlaufOrder, "status" | "order_date">,
+  events: Array<{ created_at: string; to: string }>,
+  d: string,
+): string | null {
+  if (o.status === "manual") return o.order_date && o.order_date.slice(0, 10) <= d ? "manual" : null;
+  let st: string | null = null;
+  for (const e of events) if (e.created_at.slice(0, 10) <= d) st = e.to; // events aufsteigend sortiert
+  return st;
+}
+
+async function alleZeilen<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await build(from, from + 999);
+    if (error) throw new Error(error.message);
+    out.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
+
+/**
+ * Kennzahl je Monatsende, immer aus den aktuellen Daten neu gerechnet (später eingetragene
+ * Steuer-Ist-Werte oder Zahlungen korrigieren also auch die Vergangenheit).
+ *   Lager    = letzter Lager-Snapshot im Monat (stock_snapshots)
+ *   Konten   = heutiger Bankstand − Buchungen nach dem Stichtag; PayPal nur, wo ein Verlaufs-Eintrag im Monat ihn kennt
+ *   Schulden = Lieferanten "fällig" zum Stichtag + offene Steuern zum Stichtag + Ergänzungen des letzten Eintrags davor
+ * Der laufende Monat kommt live (berechneHealth + Live-Lager).
+ * Startmonat = erster Monat mit Lager-Snapshot (davor keine kg-Historie).
+ */
+export async function ladeHealthVerlauf(
+  sb: Sb,
+  live: { kg: number | null; h: HealthBerechnung },
+): Promise<HealthMonat[]> {
+  const heute = heuteBerlin();
+  const aktMonat = heute.slice(0, 7);
+  const { data: ersterStock } = await sb.from("stock_snapshots").select("taken_on").order("taken_on").limit(1).maybeSingle();
+  const startMonat = ersterStock?.taken_on ? String(ersterStock.taken_on).slice(0, 7) : aktMonat;
+  const seit = `${startMonat}-01`;
+
+  const [stocks, tx, fxTx, orders, payments, events, posten, snaps, { data: salden }] = await Promise.all([
+    alleZeilen<{ taken_on: string; total_kg: number }>((f, t) =>
+      sb.from("stock_snapshots").select("taken_on, total_kg").order("taken_on").range(f, t)),
+    alleZeilen<{ account_iban: string; booking_date: string; amount: number }>((f, t) =>
+      sb.from("bank_transactions").select("account_iban, booking_date, amount").gt("booking_date", monatsEnde(startMonat)).order("id").range(f, t)),
+    alleZeilen<{ booking_date: string; purpose: string | null }>((f, t) =>
+      sb.from("bank_transactions").select("booking_date, purpose").ilike("purpose", "%USD%").order("booking_date").range(f, t)),
+    alleZeilen<VerlaufOrder>((f, t) =>
+      sb.from("orders_with_totals").select("id, status, order_date, invoice_effective").not("status", "in", "(draft,cancelled,hidden)").range(f, t)),
+    alleZeilen<{ order_id: string; amount: number; paid_at: string }>((f, t) =>
+      sb.from("payments").select("order_id, amount, paid_at").range(f, t)),
+    alleZeilen<{ order_id: string; meta: { to?: string; status?: string } | null; created_at: string }>((f, t) =>
+      sb.from("order_events").select("order_id, meta, created_at").eq("event_type", "status_change").order("created_at").range(f, t)),
+    alleZeilen<SteuerPostenRoh>((f, t) =>
+      sb.from("steuer_posten").select("art, zeitraum, richtung, soll_betrag, ist_betrag, bezahlt_am, soll_schaetzung").range(f, t)),
+    alleZeilen<{ created_at: string; details: HealthDetails | null }>((f, t) =>
+      sb.from("company_health_snapshots").select("created_at, details").not("details", "is", null).order("created_at").range(f, t)),
+    sb.from("bank_salden").select("account_iban, saldo"),
+  ]);
+
+  const evByOrder = new Map<string, Array<{ created_at: string; to: string }>>();
+  for (const e of events) {
+    const to = e.meta?.to ?? e.meta?.status;
+    if (!to) continue;
+    const list = evByOrder.get(e.order_id) ?? [];
+    list.push({ created_at: e.created_at, to });
+    evByOrder.set(e.order_id, list);
+  }
+  const fxPunkte = fxTx.map((t) => ({ d: t.booking_date, k: parseFxKurs(t.purpose) })).filter((x): x is { d: string; k: number } => x.k != null);
+  const bankJetzt = ((salden ?? []) as Array<{ account_iban: string; saldo: number }>).filter((s) => s.account_iban !== "PAYPAL");
+
+  const monate: HealthMonat[] = [];
+  for (let m = startMonat; m <= aktMonat; m = naechsterMonat(m)) {
+    if (m === aktMonat) {
+      const h = live.h;
+      const paypal = h.details.konten.find((k) => k.key === "PAYPAL")?.saldo ?? null;
+      monate.push({
+        monat: m, stichtag: heute, live: true, kg: live.kg,
+        kontenEur: h.kontenEur, paypalEur: paypal,
+        lieferantenEur: h.lieferantenEur, steuernEur: h.steuernEur, ergaenzungenEur: h.ergaenzungenEur,
+        schuldenEur: h.schuldenEur,
+        score: live.kg != null ? healthScore(live.kg, h.kontenEur, h.schuldenEur) : null,
+      });
+      break;
+    }
+    const d = monatsEnde(m);
+
+    const stock = stocks.filter((s) => String(s.taken_on).slice(0, 7) === m).at(-1);
+    const kg = stock ? Number(stock.total_kg) : null;
+
+    // Bankkonten: heutiger Stand minus alles, was nach dem Stichtag gebucht wurde
+    let bank = 0;
+    for (const b of bankJetzt) {
+      bank += Number(b.saldo) - tx.filter((t) => t.account_iban === b.account_iban && t.booking_date > d).reduce((s, t) => s + Number(t.amount), 0);
+    }
+    const snapImMonat = snaps.filter((s) => s.created_at.slice(0, 7) === m).at(-1);
+    const paypal = snapImMonat?.details?.konten?.find((k) => k.key === "PAYPAL")?.saldo ?? null;
+    const kontenEur = r2(bank + (paypal ?? 0));
+
+    // Lieferanten fällig zum Stichtag, Kurs der letzten Auslandsüberweisung bis dahin
+    const fx = fxPunkte.filter((p) => p.d <= d).at(-1)?.k ?? live.h.details.fx.kurs;
+    let usd = 0;
+    for (const o of orders) {
+      const st = statusAm(o, evByOrder.get(o.id) ?? [], d);
+      if (!st || debtBucket({ status: st as OrderStatus }) !== "due") continue;
+      const bezahlt = payments.filter((p) => p.order_id === o.id && String(p.paid_at).slice(0, 10) <= d).reduce((s, p) => s + Number(p.amount), 0);
+      usd += Math.max(0, Number(o.invoice_effective ?? 0) - bezahlt);
+    }
+    const lieferantenEur = r2(usd / fx);
+
+    const steuernEur = r2(steuernOffenAm(posten, d).reduce((s, x) => s + x.eur, 0));
+    const erg = snaps.filter((s) => s.created_at.slice(0, 10) <= d).at(-1)?.details?.ergaenzungen;
+    const ergaenzungenEur = r2(Number(erg?.weitere_schulden_eur ?? 0) + Number(erg?.steuer_rueckstellung_eur ?? 0));
+    const schuldenEur = r2(lieferantenEur + steuernEur + ergaenzungenEur);
+
+    monate.push({
+      monat: m, stichtag: d, live: false, kg, kontenEur, paypalEur: paypal,
+      lieferantenEur, steuernEur, ergaenzungenEur, schuldenEur,
+      score: kg != null ? healthScore(kg, kontenEur, schuldenEur) : null,
+    });
+  }
+  return monate;
 }

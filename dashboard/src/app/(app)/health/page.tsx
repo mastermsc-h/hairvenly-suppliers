@@ -2,9 +2,10 @@ import { HeartPulse, Package, Landmark, TrendingDown, AlertTriangle, Info, Bot }
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireFeature } from "@/lib/auth";
 import { getTotalStockKg } from "@/lib/stock-sheets";
-import { berechneHealth, healthScore } from "@/lib/health";
+import { berechneHealth, healthScore, ladeHealthVerlauf, type HealthMonat } from "@/lib/health";
 import type { HealthSnapshot } from "@/lib/actions/health";
 import HealthInputForm from "./health-input-form";
+import HealthChart from "./health-chart";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,12 @@ export default async function HealthPage() {
       .order("created_at", { ascending: false })
       .limit(30),
   ]);
+
+  // Monatsverlauf: Fehler hier dürfen die Seite nicht kippen
+  const verlauf: HealthMonat[] = await ladeHealthVerlauf(supabase, { kg: stock.partial ? null : stock.totalKg, h }).catch((e) => {
+    console.warn("[health] Verlauf:", e instanceof Error ? e.message : e);
+    return [];
+  });
 
   const snapshots = (snapshotsData ?? []) as HealthSnapshot[];
   const { konten, lieferanten, steuern, ergaenzungen, kommend, fx, kontenStand } = h.details;
@@ -164,6 +171,8 @@ export default async function HealthPage() {
           Steuern = im Steuer-Ledger eingetragenes Soll ohne Zahlung.
         </div>
       </section>
+
+      {verlauf.length > 0 && <HealthChart monate={verlauf} />}
 
       {/* Eingabe-Formular */}
       <HealthInputForm
