@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth";
 import { syncShipmentArrivalToSheet } from "@/lib/shipment-sheet-sync";
+import { orderItemsWriter } from "@/lib/order-access";
 
 const num = (v: FormDataEntryValue | null) => {
   const s = String(v ?? "").trim();
@@ -60,7 +61,9 @@ export async function createShipment(orderId: string, formData: FormData) {
   // Optionally assign selected order_items to this new shipment
   const itemIds = formData.getAll("item_ids").map(String).filter(Boolean);
   if (itemIds.length > 0 && data?.id) {
-    const { error: itemErr } = await supabase
+    const writer = await orderItemsWriter(supabase, orderId);
+    if (!writer) return { error: "Keine Berechtigung für diese Bestellung." };
+    const { error: itemErr } = await writer
       .from("order_items")
       .update({ shipment_id: data.id })
       .in("id", itemIds)
@@ -190,11 +193,13 @@ export async function deleteShipment(shipmentId: string) {
   if (!shipment) return { error: "Teillieferung nicht gefunden." };
 
   // Unlink items (set shipment_id to null) before deleting
-  await supabase
+  const writer = await orderItemsWriter(supabase, shipment.order_id);
+  if (!writer) return { error: "Keine Berechtigung für diese Bestellung." };
+  await writer
     .from("order_items")
     .update({ shipment_id: null })
     .eq("shipment_id", shipmentId);
-  await supabase
+  await writer
     .from("documents")
     .update({ shipment_id: null })
     .eq("shipment_id", shipmentId);
@@ -229,7 +234,9 @@ export async function setItemsEta(
   const supabase = await createClient();
   if (itemIds.length === 0) return { ok: true };
 
-  const { error } = await supabase
+  const writer = await orderItemsWriter(supabase, orderId);
+  if (!writer) return { error: "Keine Berechtigung für diese Bestellung." };
+  const { error } = await writer
     .from("order_items")
     .update({ eta })
     .in("id", itemIds)
@@ -291,7 +298,9 @@ export async function createShipmentForItems(
     // Also propagate the shipment's ETA onto each item (so per-position ETA matches)
     const itemPatch: Record<string, unknown> = { shipment_id: created.id };
     if (data.eta) itemPatch.eta = data.eta;
-    const { error: itemErr } = await supabase
+    const writer = await orderItemsWriter(supabase, orderId);
+    if (!writer) return { error: "Keine Berechtigung für diese Bestellung." };
+    const { error: itemErr } = await writer
       .from("order_items")
       .update(itemPatch)
       .in("id", itemIds)
@@ -326,7 +335,9 @@ export async function setItemsShipment(
   const supabase = await createClient();
   if (itemIds.length === 0) return { ok: true };
 
-  const { error } = await supabase
+  const writer = await orderItemsWriter(supabase, orderId);
+  if (!writer) return { error: "Keine Berechtigung für diese Bestellung." };
+  const { error } = await writer
     .from("order_items")
     .update({ shipment_id: shipmentId })
     .in("id", itemIds)

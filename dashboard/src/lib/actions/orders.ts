@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin, requireProfile } from "@/lib/auth";
+import { orderItemsWriter } from "@/lib/order-access";
 
 const num = (v: FormDataEntryValue | null) => {
   const s = String(v ?? "").trim();
@@ -157,8 +158,9 @@ export async function updateOrder(orderId: string, formData: FormData) {
   // Items mit shipment_id bleiben unberührt (ihre ETA kommt aus der Teillieferung).
   if (Object.prototype.hasOwnProperty.call(update, "eta") && update.eta !== prevOrder?.eta) {
     const newEta = update.eta as string | null;
-    if (newEta) {
-      const { data: propagated } = await supabase
+    const writer = newEta ? await orderItemsWriter(supabase, orderId) : null;
+    if (newEta && writer) {
+      const { data: propagated } = await writer
         .from("order_items")
         .update({ eta: newEta })
         .eq("order_id", orderId)
