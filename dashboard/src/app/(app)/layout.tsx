@@ -151,6 +151,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                   { href: "/pack/stats", label: t(locale, "nav.shipping.stats") },
                   { href: "/pack/display", label: t(locale, "nav.shipping.display") },
                   { href: "/pack/kamera", label: t(locale, "nav.shipping.camera") },
+                  // Umsätze + geschätzte Namensherkunft: nur der echte Admin
+                  ...(profile.role === "admin"
+                    ? [{ href: "/pack/kunden", label: t(locale, "nav.shipping.customers") }]
+                    : []),
                 ]}
               />
             )}

@@ -27,6 +27,10 @@
     {
       "path": "/api/cron/bank-check",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/kunden-sync",
+      "schedule": "15 4 * * *"
     }
   ]
 }
