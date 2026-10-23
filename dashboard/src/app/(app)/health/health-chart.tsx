@@ -3,7 +3,7 @@
 import { Bar, CartesianGrid, ComposedChart, LabelList, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { HealthMonat } from "@/lib/health";
 
-// Validierte Palette (dataviz validate_palette, light): Lager / Konten / Schulden; Kennzahl = Tinte
+// Validierte Palette (dataviz validate_palette, light): Lager / Konten / Schulden; HY-Score = Tinte
 const FARBE = { lager: "#6366f1", konten: "#0d9488", schulden: "#e11d48", score: "#171717" };
 
 const MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
@@ -34,14 +34,14 @@ export default function HealthChart({ monate }: { monate: HealthMonat[] }) {
   return (
     <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
-        <h2 className="text-sm font-medium text-neutral-700">Kennzahl pro Monat</h2>
+        <h2 className="text-sm font-medium text-neutral-700">HY-Score pro Monat</h2>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-600">
           <Legende farbe={FARBE.lager} text="Lager (kg)" />
           <Legende farbe={FARBE.konten} text="Konten (T€)" />
           <Legende farbe={FARBE.schulden} text="Schulden (T€)" />
           <span className="inline-flex items-center gap-1.5">
             <svg width="18" height="10" aria-hidden><line x1="0" y1="5" x2="18" y2="5" stroke={FARBE.score} strokeWidth="2" /><circle cx="9" cy="5" r="3.5" fill={FARBE.score} stroke="#fff" strokeWidth="1.5" /></svg>
-            Kennzahl
+            HY-Score
           </span>
         </div>
       </div>
@@ -86,7 +86,7 @@ export default function HealthChart({ monate }: { monate: HealthMonat[] }) {
                 <th className="py-1.5 pr-3 font-medium text-right">Lieferanten</th>
                 <th className="py-1.5 pr-3 font-medium text-right">Steuern</th>
                 <th className="py-1.5 pr-3 font-medium text-right">Ergänzungen</th>
-                <th className="py-1.5 font-medium text-right">Kennzahl</th>
+                <th className="py-1.5 font-medium text-right">HY-Score</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-50 text-neutral-700 tabular-nums">
@@ -110,7 +110,7 @@ export default function HealthChart({ monate }: { monate: HealthMonat[] }) {
   );
 }
 
-/** Kennzahl-Wert über dem Punkt — weiße Plakette, weil der Punkt meist mitten im Lager-Balken liegt. */
+/** HY-Score-Wert über dem Punkt — weiße Plakette, weil der Punkt meist mitten im Lager-Balken liegt. */
 function ScorePlakette(props: { x?: unknown; y?: unknown; value?: unknown }) {
   const x = Number(props.x), y = Number(props.y);
   if (typeof props.value !== "number" || !Number.isFinite(x) || !Number.isFinite(y)) return null;
@@ -156,7 +156,7 @@ function Tipp({ active, payload }: { active?: boolean; payload?: Array<{ payload
       {zeile(null, "· Lieferanten fällig", eur(m.lieferantenEur))}
       {zeile(null, "· Steuern offen", eur(m.steuernEur))}
       {m.ergaenzungenEur !== 0 && zeile(null, "· Ergänzungen", eur(m.ergaenzungenEur))}
-      <div className="border-t border-neutral-100 mt-1 pt-1">{zeile(null, "Kennzahl", m.score != null ? num1(m.score) : "—", true)}</div>
+      <div className="border-t border-neutral-100 mt-1 pt-1">{zeile(null, "HY-Score", m.score != null ? num1(m.score) : "—", true)}</div>
     </div>
   );
 }

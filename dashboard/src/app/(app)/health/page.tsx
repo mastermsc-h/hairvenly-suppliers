@@ -40,7 +40,7 @@ export default async function HealthPage() {
   const snapshots = (snapshotsData ?? []) as HealthSnapshot[];
   const { konten, lieferanten, steuern, ergaenzungen, kommend, fx, kontenStand } = h.details;
 
-  // Kennzahl: kg + Konten(T€) − Schulden(T€) — alles live
+  // HY-Score: kg + Konten(T€) − Schulden(T€) — alles live
   const moneyK = h.kontenEur / 1000;
   const debtK = h.schuldenEur / 1000;
   const score = healthScore(stock.totalKg, h.kontenEur, h.schuldenEur);
@@ -54,10 +54,10 @@ export default async function HealthPage() {
     <div className="p-4 md:p-8 max-w-4xl space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-neutral-900 inline-flex items-center gap-2">
-          <HeartPulse size={22} className="text-rose-500" /> Firmen-Gesundheit
+          <HeartPulse size={22} className="text-rose-500" /> HY-Score
         </h1>
         <p className="text-sm text-neutral-500 mt-1">
-          Kennzahl = Lager (kg) + Konten (T€) − Schulden (T€)
+          Substanz = Lager (kg) + Konten (T€) − Schulden (T€)
         </p>
       </div>
 
@@ -65,7 +65,7 @@ export default async function HealthPage() {
       <section className="bg-white rounded-2xl border border-neutral-200 p-6 md:p-8 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center gap-6">
           <div className="text-center md:text-left">
-            <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">Aktuelle Kennzahl</div>
+            <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">Aktueller HY-Score</div>
             <div className={`text-6xl font-bold mt-1 ${score >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
               {num1(score)}
             </div>
@@ -161,7 +161,7 @@ export default async function HealthPage() {
         <div className="inline-flex items-start gap-1.5">
           <Info size={13} className="mt-0.5 shrink-0 text-neutral-400" />
           <span>
-            <strong>Nicht in der Kennzahl:</strong> {kommend.anzahl} Bestellungen in Produktion, Restbetrag {usd(kommend.usd)} ≈ {eur(kommend.eur)}.
+            <strong>Nicht im HY-Score:</strong> {kommend.anzahl} Bestellungen in Produktion, Restbetrag {usd(kommend.usd)} ≈ {eur(kommend.eur)}.
             Die Ware ist auch noch nicht im Lager — sobald sie versandt ist, zählen kg und Schuld gemeinsam.
           </span>
         </div>
