@@ -61,7 +61,7 @@ export default function HealthChart({ monate }: { monate: HealthMonat[] }) {
             <Bar dataKey="konten" stackId="a" fill={FARBE.konten} stroke="#fff" strokeWidth={2} radius={[4, 4, 0, 0]} maxBarSize={56} />
             <Bar dataKey="schulden" stackId="a" fill={FARBE.schulden} stroke="#fff" strokeWidth={2} radius={[0, 0, 4, 4]} maxBarSize={56} />
             <Line dataKey="score" stroke={FARBE.score} strokeWidth={2} dot={{ r: 4, fill: FARBE.score, stroke: "#fff", strokeWidth: 2 }} activeDot={{ r: 5 }} connectNulls={false} isAnimationActive={false}>
-              <LabelList dataKey="score" position="top" offset={10} formatter={(v: unknown) => (typeof v === "number" ? num1(v) : "")} style={{ fontSize: 11, fontWeight: 600, fill: "#171717" }} />
+              <LabelList dataKey="score" content={ScorePlakette} />
             </Line>
           </ComposedChart>
         </ResponsiveContainer>
@@ -107,6 +107,20 @@ export default function HealthChart({ monate }: { monate: HealthMonat[] }) {
         </div>
       </details>
     </section>
+  );
+}
+
+/** Kennzahl-Wert über dem Punkt — weiße Plakette, weil der Punkt meist mitten im Lager-Balken liegt. */
+function ScorePlakette(props: { x?: unknown; y?: unknown; value?: unknown }) {
+  const x = Number(props.x), y = Number(props.y);
+  if (typeof props.value !== "number" || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const text = num1(props.value);
+  const w = text.length * 6.6 + 10;
+  return (
+    <g>
+      <rect x={x - w / 2} y={y - 24} width={w} height={16} rx={4} fill="#fff" stroke="#e5e5e5" />
+      <text x={x} y={y - 12.5} textAnchor="middle" fontSize={11} fontWeight={600} fill="#171717">{text}</text>
+    </g>
   );
 }
 
