@@ -810,7 +810,7 @@ export async function importSuggestions(tabName: string): Promise<{ rows: Sugges
 export async function readOrderSheetEtas(
   sheetUrl: string,
 ): Promise<{ etas?: Map<string, string>; error?: string }> {
-  const m = sheetUrl.match(/\/spreadsheets\/d\/([^/]+).*[?&]gid=(\d+)/);
+  const m = sheetUrl.match(/\/spreadsheets\/d\/([^/]+).*[?&#]gid=(\d+)/); // Export speichert "…/edit#gid=…"
   if (!m) return { error: "Sheet-URL konnte nicht geparst werden" };
   const spreadsheetId = m[1];
   const sheetGid = Number(m[2]);
@@ -914,7 +914,7 @@ export async function writeOrderSheetEtas(
 ): Promise<{ updated?: number; created_eta_column?: boolean; error?: string }> {
   if (etas.size === 0) return { updated: 0 };
 
-  const m = sheetUrl.match(/\/spreadsheets\/d\/([^/]+).*[?&]gid=(\d+)/);
+  const m = sheetUrl.match(/\/spreadsheets\/d\/([^/]+).*[?&#]gid=(\d+)/); // Export speichert "…/edit#gid=…"
   if (!m) return { error: "Sheet-URL konnte nicht geparst werden" };
   const spreadsheetId = m[1];
   const sheetGid = Number(m[2]);
@@ -1044,7 +1044,7 @@ export async function readOrderSheetItems(
   }[];
   error?: string;
 }> {
-  const m = sheetUrl.match(/\/spreadsheets\/d\/([^/]+).*[?&]gid=(\d+)/);
+  const m = sheetUrl.match(/\/spreadsheets\/d\/([^/]+).*[?&#]gid=(\d+)/); // Export speichert "…/edit#gid=…"
   if (!m) return { error: "Sheet-URL konnte nicht geparst werden" };
   const spreadsheetId = m[1];
   const sheetGid = Number(m[2]);
