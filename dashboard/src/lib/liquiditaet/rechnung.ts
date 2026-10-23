@@ -222,6 +222,9 @@ export interface LiqRohdaten {
     /** Rechnungsbeträge (USD) der Amanda-Lieferungen je Ankunftsmonat (Vergangenheit) — um die
      *  EUSt der übrigen Lieferanten (Ebru …) aus der Historie herauszurechnen. */
     amandaImportUsd?: Record<string, number>;
+    /** Im Steuer-Ledger eingetragenes Soll noch offener Posten, "art|zeitraum" → Betrag
+     *  (+ Zahlung, − Erstattung). Hat Vorrang vor der Schätzung (z.B. USt-VA vom Steuerberater). */
+    sollOffen?: Record<string, number>;
   };
   nachbestellung: {
     /** Ø bestellte kg/Monat (letzte 3 Monate) — war zuletzt Black-Friday-Vorrat, nicht Verbrauch. */
@@ -487,14 +490,15 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       const faellig = faelligkeit("ust_va", m);
       if (!faellig || faellig > ende) break;
       const eustAndere = m >= aktMonat ? eustAndereMonat : 0;
-      const betrag = r2(ustBasis + (ustZusatz[m] ?? 0) - (eustProMonat[m] ?? 0) - eustAndere);
+      const soll = roh.steuern.sollOffen?.[`ust_va|${m}`];
+      const betrag = soll !== undefined ? r2(soll) : r2(ustBasis + (ustZusatz[m] ?? 0) - (eustProMonat[m] ?? 0) - eustAndere);
       const datum = betrag < 0 ? plusTage(faellig, 21) : faellig;
       if (datum > ende) continue;
       ereignisse.push({
         datum: amStart(datum),
         betrag: -betrag,
         art: "steuer",
-        label: betrag < 0 ? `USt-Erstattung ${m} (EUSt-Verrechnung)` : `USt-VA ${m}`,
+        label: (betrag < 0 ? `USt-Erstattung ${m} (EUSt-Verrechnung)` : `USt-VA ${m}`) + (soll !== undefined ? " (Soll laut Vorauszahlungen)" : ""),
         sofort: datum < start,
       });
     }
@@ -507,7 +511,14 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     for (let i = 0; i < 24; i++, m = naechsterMonat(m)) {
       const faellig = faelligkeit("lst_anmeldung", m);
       if (!faellig || faellig > ende) break;
-      ereignisse.push({ datum: amStart(faellig), betrag: -lst, art: "steuer", label: `Lohnsteuer ${m}`, sofort: faellig < start });
+      const soll = roh.steuern.sollOffen?.[`lst_anmeldung|${m}`];
+      ereignisse.push({
+        datum: amStart(faellig),
+        betrag: -(soll ?? lst),
+        art: "steuer",
+        label: `Lohnsteuer ${m}${soll !== undefined ? " (Soll laut Vorauszahlungen)" : ""}`,
+        sofort: faellig < start,
+      });
     }
   }
 
@@ -521,9 +532,11 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       ] as const) {
         const zeitraum = `Q${q} ${jahr}`;
         const faellig = faelligkeit(art, zeitraum);
-        if (!betrag || !faellig || faellig < start || faellig > ende) continue;
+        const soll = roh.steuern.sollOffen?.[`${art}|${zeitraum}`];
+        const wert = soll ?? betrag;
+        if (!wert || !faellig || faellig < start || faellig > ende) continue;
         if (roh.steuern.quartaleErledigt.includes(`${art}|${zeitraum}`)) continue;
-        ereignisse.push({ datum: faellig, betrag: -betrag, art: "steuer", label: `${name} ${zeitraum}` });
+        ereignisse.push({ datum: faellig, betrag: -wert, art: "steuer", label: `${name} ${zeitraum}${soll !== undefined ? " (Soll laut Vorauszahlungen)" : ""}` });
       }
     }
   }

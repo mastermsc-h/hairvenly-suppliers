@@ -279,6 +279,12 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
       gewstLetzte: letzte("gewst_vz"),
       quartaleErledigt: erledigt.filter((p) => p.art === "est_vz" || p.art === "gewst_vz").map((p) => `${p.art}|${p.zeitraum}`),
       amandaImportUsd,
+      // Eingetragenes Soll offener Posten (noch kein Ist) — z.B. USt-VA vom Steuerberater
+      sollOffen: Object.fromEntries(
+        posten
+          .filter((p) => Number(p.ist_betrag) === 0 && Number(p.soll_betrag) > 0)
+          .map((p) => [`${p.art}|${p.zeitraum}`, (p.richtung === "erstattung" ? -1 : 1) * Number(p.soll_betrag)])
+      ),
     },
     nachbestellung: {
       kgProMonatAuto: Math.round((kg90 / 3) * 10) / 10,

@@ -171,6 +171,16 @@ check("Alte Rohdaten (manuellePositionen) gehen weiter", L.prognose(roh({ manuel
 const rp = L.ratenplan([mp({ id: "a", label: "A", restUsd: 50000 }), mp({ id: "b", label: "B", datum: "2026-10-11", restUsd: 30000 })], { "Ebru (CN + TR)": "2026-10-19" }, L.mitDefaults({}), "2026-10-20");
 check("ratenplan: Anteile je Rechnung", rp.map((r) => [r.datum, r.positionen.map((x) => `${x.id}:${x.usd}`)]), [["2026-11-02", ["a:40000"]], ["2026-11-16", ["a:10000", "b:30000"]]]);
 
+// Soll aus dem Steuer-Ledger hat Vorrang vor der Schätzung
+const rs = roh({ steuern: { ustHistorie: [{ monat: "2026-08", ust: 20000, eust: 0 }], ustErledigtBis: "2026-08", eustBezahlt: {}, lstLetzte: [4000], lstErledigtBis: "2026-09",
+  estLetzte: 1735, gewstLetzte: 1025, quartaleErledigt: [], sollOffen: { "ust_va|2026-09": 18200, "lst_anmeldung|2026-10": 4500, "gewst_vz|Q4 2026": 1500 } } });
+const ps = L.prognose(rs, { ...E0, horizontTage: 60 });
+const lbl = (pre) => ps.ereignisse.find((x) => x.label.startsWith(pre));
+check("USt Sep = Soll", [lbl("USt-VA 2026-09").betrag, lbl("USt-VA 2026-09").label.includes("Soll")], [-18200, true]);
+check("USt Okt ohne Soll = Schätzung", lbl("USt-VA 2026-10").betrag, -20000);
+check("LSt Okt = Soll", lbl("Lohnsteuer 2026-10").betrag, -4500);
+check("GewSt Q4 = Soll", lbl("GewSt-Vorauszahlung Q4 2026").betrag, -1500);
+
 // PayPal-Guthaben
 const rpp = (abgerufen) => roh({ bankSalden: [{ iban: "PAYPAL", saldo: 25000, stand: "2026-10-18", abgerufenAm: abgerufen }] });
 check("PayPal frisch → im Startstand", L.prognose(rpp("2026-10-18T10:00:00Z"), E0).startSaldoGesamt, 125000);
