@@ -808,7 +808,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "bank.search.placeholder": "Alle Zahlungseingänge durchsuchen: Name, Zweck, Bestellnr., 449,90, 19.10. …",
     "bank.search.title": "Suchergebnisse",
     "bank.search.none": "Keine Zahlungseingänge gefunden.",
-    "bank.search.hint": "Alle Konten seit Juli 2025 · mehrere Begriffe = alle müssen vorkommen · Betrag „449,90“ · Datum „19.10.“",
+    "bank.search.hint": "Alle Konten · Zeitraum links wählbar · mehrere Begriffe = alle müssen vorkommen · Betrag „449,90“ · Datum „19.10.“",
     "bank.subtitle": "Vorkasse-Überweisungen automatisch mit offenen Shopify-Bestellungen abgleichen",
     "bank.worker.title": "Bankverbindung (Sparkasse)",
     "bank.worker.never": "Noch nicht eingerichtet – FinTS-Worker am Mac einrichten.",

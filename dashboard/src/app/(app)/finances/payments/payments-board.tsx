@@ -52,18 +52,22 @@ export default function PaymentsBoard({
 
   // Suche über ALLE Eingänge (Server, alle Zeiträume) — ab 2 Zeichen, entprellt
   const [q, setQ] = useState("");
+  const [zeitraum, setZeitraum] = useState(""); // "" = alle Zeiträume, sonst "YYYY-MM"
   const [treffer, setTreffer] = useState<BankTransaction[] | null>(null);
   const [sucht, setSucht] = useState(false);
   const qRef = useRef("");
   qRef.current = q;
+  const zeitRef = useRef("");
+  zeitRef.current = zeitraum;
   async function suchen(text: string) {
     if (text.trim().length < 2) {
       setTreffer(null);
       return;
     }
     setSucht(true);
-    const res = await searchBankIncoming(text);
-    if (qRef.current === text) {
+    const z = zeitRef.current;
+    const res = await searchBankIncoming(text, monatGrenzen(z));
+    if (qRef.current === text && zeitRef.current === z) {
       setTreffer(res.transactions);
       if (!res.ok) setMsg({ ok: false, text: res.error ?? "Suche fehlgeschlagen" });
     }
@@ -74,7 +78,7 @@ export default function PaymentsBoard({
     const timer = setTimeout(() => suchen(text), 350);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
+  }, [q, zeitraum]);
 
   const groups = useMemo(() => {
     const g = {
@@ -173,7 +177,18 @@ export default function PaymentsBoard({
 
       {/* Suche */}
       <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm space-y-3">
-        <div className="relative">
+        <div className="flex flex-wrap gap-2">
+        <select
+          value={zeitraum}
+          onChange={(e) => setZeitraum(e.target.value)}
+          className="rounded-lg border border-neutral-300 px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-neutral-900 focus:outline-none"
+        >
+          <option value="">Alle Zeiträume</option>
+          {suchMonate().map((m) => (
+            <option key={m} value={m}>{monatName(m)}</option>
+          ))}
+        </select>
+        <div className="relative flex-1 min-w-[240px]">
           <Search size={16} className="absolute left-3 top-2.5 text-neutral-400" />
           <input
             value={q}
@@ -189,11 +204,12 @@ export default function PaymentsBoard({
             </button>
           ) : null}
         </div>
+        </div>
         {treffer && (
           <>
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <span className="text-sm font-medium text-neutral-900">
-                {tr("bank.search.title")} ({treffer.length}{treffer.length >= 200 ? "+" : ""})
+                {tr("bank.search.title")} — {zeitraum ? monatName(zeitraum) : "Alle Zeiträume"} ({treffer.length}{treffer.length >= 200 ? "+" : ""})
               </span>
               <span className="text-xs text-neutral-400">{tr("bank.search.hint")}</span>
             </div>
@@ -284,6 +300,34 @@ export default function PaymentsBoard({
 }
 
 // ── Bausteine ────────────────────────────────────────────────────────────────
+
+const MONATSNAMEN = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
+const DATEN_AB = "2025-07"; // Kontoumsätze liegen ab Juli 2025 vor
+
+/** Monate für die Zeitraum-Auswahl: aktueller Monat zurück bis Datenbeginn. */
+function suchMonate(): string[] {
+  const out: string[] = [];
+  const d = new Date();
+  let y = d.getFullYear();
+  let m = d.getMonth() + 1;
+  for (let i = 0; i < 60; i++) {
+    const k = `${y}-${String(m).padStart(2, "0")}`;
+    if (k < DATEN_AB) break;
+    out.push(k);
+    m -= 1;
+    if (m === 0) { m = 12; y -= 1; }
+  }
+  return out;
+}
+function monatName(k: string): string {
+  const [y, m] = k.split("-").map(Number);
+  return `${MONATSNAMEN[m - 1]} ${y}`;
+}
+function monatGrenzen(k: string): { von: string; bis: string } | null {
+  if (!k) return null;
+  const [y, m] = k.split("-").map(Number);
+  return { von: `${k}-01`, bis: `${k}-${new Date(Date.UTC(y, m, 0)).getUTCDate()}` };
+}
 
 /** Status eines Suchtreffers als kurzes Etikett (gleiche Gruppen wie die Abschnitte). */
 function statusLabel(tx: BankTransaction, tr: (k: string) => string): string {

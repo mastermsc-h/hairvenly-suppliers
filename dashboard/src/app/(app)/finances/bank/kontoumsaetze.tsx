@@ -57,18 +57,29 @@ function konto(iban: string | null) {
 }
 const gruppeOf = (k: string | null) => KATEGORIE_BY_KEY[k ?? "unklar"]?.gruppe ?? "neutral";
 
+/** Suchzeitraum: -1 = alle (null), 0 = ganzes Jahr, 1–12 = Monat. */
+function zeitraumGrenzen(jahr: number, monat: number): { von: string; bis: string } | null {
+  if (monat === -1) return null;
+  if (monat === 0) return { von: `${jahr}-01-01`, bis: `${jahr}-12-31` };
+  const mm = String(monat).padStart(2, "0");
+  const letzter = new Date(Date.UTC(jahr, monat, 0)).getUTCDate();
+  return { von: `${jahr}-${mm}-01`, bis: `${jahr}-${mm}-${letzter}` };
+}
+
 export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { initialJahr: number; initialMonat: number; initial: Data }) {
   const [jahr, setJahr] = useState(initialJahr);
-  const [monat, setMonat] = useState<number>(initialMonat); // 0 = ganzes Jahr
+  const [monat, setMonat] = useState<number>(initialMonat); // 0 = ganzes Jahr, -1 = alle Zeiträume
   const [data, setData] = useState<Data>(initial);
   const [kontoFilter, setKontoFilter] = useState("alle");
   const [katFilter, setKatFilter] = useState<string | null>(null);
   const [suche, setSuche] = useState("");
-  // Suche ab 2 Zeichen über ALLE Konten + Zeiträume (Server); null = keine Suche aktiv
+  // Suche ab 2 Zeichen im gewählten Zeitraum (Monat / Jahr / alle), alle Konten; null = keine Suche
   const [treffer, setTreffer] = useState<KontoUmsatz[] | null>(null);
   const [sucht, setSucht] = useState(false);
   const sucheRef = useRef("");
   sucheRef.current = suche;
+  const zeitRef = useRef({ jahr, monat });
+  zeitRef.current = { jahr, monat };
 
   async function suchen(q: string) {
     if (q.trim().length < 2) {
@@ -76,9 +87,10 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
       return;
     }
     setSucht(true);
-    const res = await sucheKontoumsaetze(q);
-    // Nur übernehmen, wenn inzwischen nicht weitergetippt wurde
-    if (sucheRef.current === q) {
+    const { jahr: j, monat: m } = zeitRef.current;
+    const res = await sucheKontoumsaetze(q, zeitraumGrenzen(j, m));
+    // Nur übernehmen, wenn inzwischen nicht weitergetippt / umgeschaltet wurde
+    if (sucheRef.current === q && zeitRef.current.jahr === j && zeitRef.current.monat === m) {
       setTreffer(res.umsaetze);
       if (!res.ok) setMeldung({ ok: false, text: res.error ?? "Suche fehlgeschlagen" });
     }
@@ -90,14 +102,14 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
     const timer = setTimeout(() => suchen(q), 350);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [suche]);
+  }, [suche, jahr, monat]);
   const [limit, setLimit] = useState(150);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [meldung, setMeldung] = useState<{ ok: boolean; text: string } | null>(null);
   const [loading, startLoad] = useTransition();
 
-  async function reload(j = jahr) {
-    const d = await fetchKontoumsaetze(j);
+  async function reload(j = jahr, alle = zeitRef.current.monat === -1) {
+    const d = await fetchKontoumsaetze(j, alle);
     setData(d);
     // Treffer nach Änderungen (Kategorie, Regel) aktualisieren
     if (sucheRef.current.trim().length >= 2) await suchen(sucheRef.current);
@@ -108,6 +120,14 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
     startLoad(() => reload(j));
   }
 
+  // "Alle Zeiträume" lädt alle Jahre; zurück auf Monat/Jahr lädt wieder nur das gewählte Jahr
+  function changeMonat(m: number) {
+    const vorher = monat;
+    setMonat(m);
+    if (m === -1 && vorher !== -1) startLoad(() => reload(jahr, true));
+    if (m !== -1 && vorher === -1) startLoad(() => reload(jahr, false));
+  }
+
   const konten = useMemo(() => [...new Set(data.umsaetze.map((u) => u.account_iban).filter(Boolean))] as string[], [data]);
 
   // Zeitraum + Konto (Basis für Summen)
@@ -115,7 +135,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
     () =>
       data.umsaetze.filter(
         (u) =>
-          (monat === 0 || Number(u.booking_date.slice(5, 7)) === monat) &&
+          (monat <= 0 || Number(u.booking_date.slice(5, 7)) === monat) &&
           (kontoFilter === "alle" || u.account_iban === kontoFilter)
       ),
     [data, monat, kontoFilter]
@@ -213,7 +233,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
     setBusyId(null);
   }
 
-  const zeitraumText = monat === 0 ? `Jahr ${jahr}` : `${MONATE[monat - 1]} ${jahr}`;
+  const zeitraumText = monat === -1 ? "Alle Zeiträume" : monat === 0 ? `Jahr ${jahr}` : `${MONATE[monat - 1]} ${jahr}`;
   const steuerNetto = -summen.g.steuern;
 
   return (
@@ -228,7 +248,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center rounded-lg border border-neutral-300 bg-white">
+          <div className={`flex items-center rounded-lg border border-neutral-300 bg-white ${monat === -1 ? "opacity-40 pointer-events-none" : ""}`}>
             <button onClick={() => changeYear(jahr - 1)} className="px-2 py-1.5 text-neutral-500 hover:text-neutral-900" aria-label="Vorjahr">
               <ChevronLeft size={16} />
             </button>
@@ -237,7 +257,8 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
               <ChevronRight size={16} />
             </button>
           </div>
-          <select value={monat} onChange={(e) => setMonat(Number(e.target.value))} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm bg-white">
+          <select value={monat} onChange={(e) => changeMonat(Number(e.target.value))} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm bg-white">
+            <option value={-1}>Alle Zeiträume</option>
             <option value={0}>Ganzes Jahr</option>
             {MONATE.map((m, i) => (
               <option key={m} value={i + 1}>{m}</option>
@@ -354,7 +375,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
 
       {/* Umsätze */}
       <Card
-        title={`${treffer ? `Suchergebnisse — alle Zeiträume (${liste.length}${treffer.length >= 300 ? "+" : ""})` : `Umsätze (${liste.length})`}${katFilter ? ` — ${KATEGORIE_BY_KEY[katFilter]?.label}` : ""}`}
+        title={`${treffer ? `Suchergebnisse — ${zeitraumText} (${liste.length}${treffer.length >= 300 ? "+" : ""})` : `Umsätze (${liste.length})`}${katFilter ? ` — ${KATEGORIE_BY_KEY[katFilter]?.label}` : ""}`}
         accent="border-l-neutral-400"
       >
         <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -363,7 +384,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
             <input
               value={suche}
               onChange={(e) => setSuche(e.target.value)}
-              placeholder="Suche in allen Umsätzen: Name, Zweck, 449,90, 19.10. …"
+              placeholder={`Suche — ${zeitraumText}: Name, Zweck, 449,90, 19.10. …`}
               className="rounded-lg border border-neutral-300 pl-8 pr-8 py-1.5 text-sm w-80 max-w-full focus:ring-2 focus:ring-neutral-900 focus:outline-none"
             />
             {sucht && <Loader2 size={14} className="absolute right-2.5 top-2.5 animate-spin text-neutral-400" />}
@@ -375,7 +396,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
           </div>
           {treffer && (
             <span className="text-xs text-neutral-500">
-              Alle Konten und Zeiträume · mehrere Begriffe = alle müssen vorkommen · Betrag „449,90“, Datum „19.10.“
+              {zeitraumText} (oben umschaltbar, auch „Alle Zeiträume“) · alle Konten · mehrere Begriffe = alle müssen vorkommen · Betrag „449,90“, Datum „19.10.“
               {treffer.length >= 300 && " · nur die neuesten 300 — Suche genauer eingrenzen"}
             </span>
           )}

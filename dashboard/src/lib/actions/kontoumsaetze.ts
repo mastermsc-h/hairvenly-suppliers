@@ -34,7 +34,10 @@ function revalidateFinanzen() {
 }
 
 /** Alle Umsätze eines Jahres (seitenweise, Supabase liefert max. 1000 pro Abfrage) + Regeln. */
-export async function fetchKontoumsaetze(jahr: number): Promise<{ umsaetze: KontoUmsatz[]; regeln: RegelRow[]; letzterAbruf: string | null }> {
+export async function fetchKontoumsaetze(
+  jahr: number,
+  alleZeitraeume = false
+): Promise<{ umsaetze: KontoUmsatz[]; regeln: RegelRow[]; letzterAbruf: string | null }> {
   await requireFeature("finances");
   const supabase = await createClient();
   const umsaetze: KontoUmsatz[] = [];
@@ -42,8 +45,8 @@ export async function fetchKontoumsaetze(jahr: number): Promise<{ umsaetze: Kont
     const { data, error } = await supabase
       .from("bank_transactions")
       .select("id, account_iban, booking_date, amount, counterparty_name, counterparty_iban, purpose, posting_text, kategorie, kategorie_quelle, kategorie_regel_id, steuer_split")
-      .gte("booking_date", `${jahr}-01-01`)
-      .lte("booking_date", `${jahr}-12-31`)
+      .gte("booking_date", alleZeitraeume ? "1900-01-01" : `${jahr}-01-01`)
+      .lte("booking_date", alleZeitraeume ? "2999-12-31" : `${jahr}-12-31`)
       .order("booking_date", { ascending: false })
       .order("id", { ascending: true })
       .range(from, from + 999);
@@ -62,12 +65,22 @@ export async function fetchKontoumsaetze(jahr: number): Promise<{ umsaetze: Kont
  * Suche über ALLE Kontoumsätze (alle Konten, alle Zeiträume): Name, Zweck, IBAN, Betrag
  * ("449,90"), Bestellnummer, Datum ("19.10."). SQL-Funktion bank_suche (Migration 0131).
  */
-export async function sucheKontoumsaetze(q: string): Promise<{ ok: boolean; error?: string; umsaetze: KontoUmsatz[] }> {
+export async function sucheKontoumsaetze(
+  q: string,
+  zeitraum?: { von: string; bis: string } | null
+): Promise<{ ok: boolean; error?: string; umsaetze: KontoUmsatz[] }> {
   await requireFeature("finances");
   const query = String(q ?? "").trim().slice(0, 200);
   if (query.length < 2) return { ok: true, umsaetze: [] };
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("bank_suche", { q: query, nur_eingaenge: false, lim: 300 });
+  const datum = (v: string | undefined) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+  const { data, error } = await supabase.rpc("bank_suche", {
+    q: query,
+    nur_eingaenge: false,
+    lim: 300,
+    von: datum(zeitraum?.von),
+    bis: datum(zeitraum?.bis),
+  });
   if (error) return { ok: false, error: error.message, umsaetze: [] };
   return {
     ok: true,
