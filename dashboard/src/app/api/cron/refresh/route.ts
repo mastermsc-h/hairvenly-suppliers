@@ -9,6 +9,7 @@ import {
   cronStockSnapshot,
   cronShopifyLinkSync,
 } from "@/lib/cron-tasks";
+import { speichereHealthSnapshot } from "@/lib/health";
 
 // Hobby plan timeout = 60s. If you upgrade to Pro you can bump this.
 export const maxDuration = 60;
@@ -84,6 +85,15 @@ export async function GET(req: NextRequest) {
     results.stockSnapshot = overBudget()
       ? { skipped: "time budget exceeded" }
       : await cronStockSnapshot(supabase);
+  }
+  // Firmen-Gesundheit: täglicher Auto-Eintrag (Konten/Schulden/Lager) für den Verlauf auf /health.
+  if (!skip.includes("healthsnapshot")) {
+    results.healthSnapshot = overBudget()
+      ? { skipped: "time budget exceeded" }
+      : await speichereHealthSnapshot(supabase, { auto: true, note: "automatisch" }).catch((e) => ({
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+        }));
   }
 
   results.finishedAt = new Date().toISOString();

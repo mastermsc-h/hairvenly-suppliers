@@ -1,7 +1,8 @@
-import { HeartPulse, Package, Landmark, TrendingDown, AlertTriangle } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { HeartPulse, Package, Landmark, TrendingDown, AlertTriangle, Info, Bot } from "lucide-react";
+import { createServiceClient } from "@/lib/supabase/server";
 import { requireFeature } from "@/lib/auth";
 import { getTotalStockKg } from "@/lib/stock-sheets";
+import { berechneHealth, healthScore } from "@/lib/health";
 import type { HealthSnapshot } from "@/lib/actions/health";
 import HealthInputForm from "./health-input-form";
 
@@ -9,37 +10,37 @@ export const dynamic = "force-dynamic";
 
 const eur = (n: number) =>
   new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
+const usd = (n: number) =>
+  new Intl.NumberFormat("de-DE", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 const num1 = (n: number) => new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 }).format(n);
+const datum = (iso: string | null) => (iso ? new Date(`${iso}T12:00:00Z`).toLocaleDateString("de-DE") : "—");
 
 export default async function HealthPage() {
   await requireFeature("finances");
-  const supabase = await createClient();
+  // Service-Client: Bank-Salden/Steuer-Ledger liegen hinter Finanz-RLS; Seite ist oben per Feature geschützt.
+  const supabase = createServiceClient();
 
-  const [stock, { data: snapshotsData }] = await Promise.all([
+  const [stock, h, { data: snapshotsData }] = await Promise.all([
     getTotalStockKg().catch(() => ({ russianKg: 0, uzbekKg: 0, totalKg: 0, lastUpdated: null, partial: true })),
+    berechneHealth(supabase),
     supabase
       .from("company_health_snapshots")
       .select("*")
       .order("created_at", { ascending: false })
-      .limit(20),
+      .limit(30),
   ]);
 
   const snapshots = (snapshotsData ?? []) as HealthSnapshot[];
-  const latest = snapshots[0] ?? null;
+  const { konten, lieferanten, steuern, ergaenzungen, kommend, fx, kontenStand } = h.details;
 
-  const treatwell = Number(latest?.treatwell_eur ?? 0);
-  const shopify = Number(latest?.shopify_eur ?? 0);
-  const targobank = Number(latest?.targobank_eur ?? 0);
-  const debt = Number(latest?.debt_eur ?? 0);
-  const moneySum = treatwell + shopify + targobank;
+  // Kennzahl: kg + Konten(T€) − Schulden(T€) — alles live
+  const moneyK = h.kontenEur / 1000;
+  const debtK = h.schuldenEur / 1000;
+  const score = healthScore(stock.totalKg, h.kontenEur, h.schuldenEur);
 
-  // Kennzahl: kg + Geld(T€) − Schulden(T€) — Live-kg, letzte manuelle Geldwerte
-  const moneyK = moneySum / 1000;
-  const debtK = debt / 1000;
-  const score = Math.round((stock.totalKg + moneyK - debtK) * 10) / 10;
-
-  // Vergleich zum vorherigen Snapshot (eingefrorener Score)
-  const prevScore = snapshots[1]?.score != null ? Number(snapshots[1].score) : null;
+  // Vergleich zum letzten gespeicherten Eintrag
+  const prev = snapshots.find((s) => s.score != null);
+  const prevScore = prev ? Number(prev.score) : null;
   const delta = prevScore != null ? Math.round((score - prevScore) * 10) / 10 : null;
 
   return (
@@ -63,7 +64,7 @@ export default async function HealthPage() {
             </div>
             {delta != null && (
               <div className={`text-xs mt-1 font-medium ${delta >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                {delta >= 0 ? "▲" : "▼"} {num1(Math.abs(delta))} seit letztem Eintrag
+                {delta >= 0 ? "▲" : "▼"} {num1(Math.abs(delta))} seit {new Date(prev!.created_at).toLocaleDateString("de-DE")}
               </div>
             )}
           </div>
@@ -73,7 +74,8 @@ export default async function HealthPage() {
             {" − "}{num1(debtK)}
             {" = "}<strong>{num1(score)}</strong>
             <div className="text-[11px] text-neutral-400 mt-1 font-sans">
-              Lager (live) + Konten/1000 − Schulden/1000
+              Lager (live) + Konten/1000 − Schulden/1000 · alles automatisch
+              {kontenStand && <> · Kontostände vom {datum(kontenStand)}</>}
             </div>
           </div>
         </div>
@@ -102,34 +104,70 @@ export default async function HealthPage() {
           <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide inline-flex items-center gap-1.5">
             <Landmark size={13} className="text-emerald-500" /> Konten
           </div>
-          <div className="text-2xl font-semibold text-neutral-900 mt-1">{eur(moneySum)}</div>
+          <div className="text-2xl font-semibold text-neutral-900 mt-1">{eur(h.kontenEur)}</div>
           <div className="text-xs text-neutral-500 mt-1 space-y-0.5">
-            <div>Treatwell: {eur(treatwell)}</div>
-            <div>Shopify: {eur(shopify)}</div>
-            <div>Targobank: {eur(targobank)}</div>
+            {konten.map((k) => (
+              <div key={k.key} className="flex justify-between gap-2">
+                <span>{k.name}</span>
+                <span className="tabular-nums">{eur(k.saldo)}</span>
+              </div>
+            ))}
+            {konten.length === 0 && <div className="text-amber-700">Noch keine Kontostände abgerufen (FinTS-Worker).</div>}
           </div>
         </div>
         <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm">
           <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide inline-flex items-center gap-1.5">
             <TrendingDown size={13} className="text-rose-500" /> Schulden
           </div>
-          <div className="text-2xl font-semibold text-rose-600 mt-1">{eur(debt)}</div>
-          {latest && (
-            <div className="text-xs text-neutral-400 mt-1">
-              Eingaben vom {new Date(latest.created_at).toLocaleDateString("de-DE")}
-            </div>
-          )}
+          <div className="text-2xl font-semibold text-rose-600 mt-1">{eur(h.schuldenEur)}</div>
+          <div className="text-xs text-neutral-500 mt-1 space-y-0.5">
+            {lieferanten.map((l) => (
+              <div key={l.name} className="flex justify-between gap-2">
+                <span>{l.name} <span className="text-neutral-400">({usd(l.usd ?? 0)})</span></span>
+                <span className="tabular-nums">{eur(l.eur)}</span>
+              </div>
+            ))}
+            {steuern.map((st) => (
+              <div key={st.name} className="flex justify-between gap-2">
+                <span>{st.name}</span>
+                <span className="tabular-nums">{eur(st.eur)}</span>
+              </div>
+            ))}
+            {ergaenzungen.steuer_rueckstellung_eur > 0 && (
+              <div className="flex justify-between gap-2">
+                <span>Steuer-Rückstellung (manuell)</span>
+                <span className="tabular-nums">{eur(ergaenzungen.steuer_rueckstellung_eur)}</span>
+              </div>
+            )}
+            {ergaenzungen.weitere_schulden_eur > 0 && (
+              <div className="flex justify-between gap-2">
+                <span>Weitere Schulden (manuell)</span>
+                <span className="tabular-nums">{eur(ergaenzungen.weitere_schulden_eur)}</span>
+              </div>
+            )}
+            {h.schuldenEur === 0 && <div>Keine offenen Schulden.</div>}
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-xs text-neutral-600 space-y-1">
+        <div className="inline-flex items-start gap-1.5">
+          <Info size={13} className="mt-0.5 shrink-0 text-neutral-400" />
+          <span>
+            <strong>Nicht in der Kennzahl:</strong> {kommend.anzahl} Bestellungen in Produktion, Restbetrag {usd(kommend.usd)} ≈ {eur(kommend.eur)}.
+            Die Ware ist auch noch nicht im Lager — sobald sie versandt ist, zählen kg und Schuld gemeinsam.
+          </span>
+        </div>
+        <div className="pl-5">
+          Lieferanten-Schulden = Restbetrag aller Bestellungen ab „Versandt“ plus Sammelrechnungen, umgerechnet mit {fx.kurs.toLocaleString("de-DE", { maximumFractionDigits: 4 })} USD/€
+          {fx.quelle === "auto" ? ` (letzte Auslandsüberweisung, ${datum(fx.datum)})` : fx.quelle === "manuell" ? " (aus der Liquiditätsvorschau)" : " (Standard)"}.
+          Steuern = im Steuer-Ledger eingetragenes Soll ohne Zahlung.
         </div>
       </section>
 
       {/* Eingabe-Formular */}
       <HealthInputForm
-        defaults={{
-          treatwell_eur: treatwell,
-          shopify_eur: shopify,
-          targobank_eur: targobank,
-          debt_eur: debt,
-        }}
+        defaults={ergaenzungen}
       />
 
       {/* Historie */}
@@ -141,6 +179,7 @@ export default async function HealthPage() {
               <thead className="text-left text-neutral-500">
                 <tr className="border-b border-neutral-100">
                   <th className="py-1.5 pr-3 font-medium">Datum</th>
+                  <th className="py-1.5 pr-3 font-medium" aria-label="Art"></th>
                   <th className="py-1.5 pr-3 font-medium text-right">Score</th>
                   <th className="py-1.5 pr-3 font-medium text-right">Lager kg</th>
                   <th className="py-1.5 pr-3 font-medium text-right">Konten</th>
@@ -155,11 +194,14 @@ export default async function HealthPage() {
                   return (
                     <tr key={s.id} className="text-neutral-700">
                       <td className="py-1.5 pr-3 whitespace-nowrap">{new Date(s.created_at).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</td>
+                      <td className="py-1.5 pr-3 text-neutral-400" title={s.auto ? "Automatischer Tages-Eintrag" : "Manuell gespeichert"}>
+                        {s.auto ? <Bot size={12} /> : null}
+                      </td>
                       <td className="py-1.5 pr-3 text-right font-semibold">{s.score != null ? num1(Number(s.score)) : "—"}</td>
                       <td className="py-1.5 pr-3 text-right">{kg > 0 ? num1(kg) : "—"}</td>
                       <td className="py-1.5 pr-3 text-right">{eur(money)}</td>
                       <td className="py-1.5 pr-3 text-right text-rose-600">{eur(Number(s.debt_eur))}</td>
-                      <td className="py-1.5 text-neutral-400 max-w-[200px] truncate">{s.note ?? ""}</td>
+                      <td className="py-1.5 text-neutral-400 max-w-[200px] truncate">{s.auto ? "" : s.note ?? ""}</td>
                     </tr>
                   );
                 })}

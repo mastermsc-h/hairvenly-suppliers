@@ -1,8 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth";
+import { speichereHealthSnapshot, type HealthDetails } from "@/lib/health";
 
 export interface HealthSnapshot {
   id: string;
@@ -14,34 +15,19 @@ export interface HealthSnapshot {
   stock_kg_uzbek: number | null;
   score: number | null;
   note: string | null;
+  details: HealthDetails | null;
+  auto: boolean;
   created_at: string;
 }
 
 /**
- * Kennzahl-Formel (User-Definition):
- *   score = lager_kg + (konten_summe_eur / 1000) − (schulden_eur / 1000)
- * Beispiel: 440 kg + 200.000 € − 300.000 € → 440 + 200 − 300 = 340
- */
-export async function computeScore(
-  stockKg: number,
-  treatwell: number,
-  shopify: number,
-  targobank: number,
-  debt: number,
-): Promise<number> {
-  const moneyK = (treatwell + shopify + targobank) / 1000;
-  const debtK = debt / 1000;
-  return Math.round((stockKg + moneyK - debtK) * 10) / 10;
-}
-
-/**
- * Speichert einen neuen Snapshot (append-only → Historie). Der beim
- * Speichern gültige Live-Lagerstand + Score werden mit eingefroren.
+ * Speichert einen neuen Verlaufs-Eintrag. Konten, Lieferanten-Schulden und Steuern kommen
+ * automatisch (lib/health); manuell sind nur die Ergänzungen + Notiz. Die Ergänzungen gelten
+ * ab jetzt auch für die täglichen Auto-Einträge.
  */
 export async function saveHealthSnapshot(formData: FormData): Promise<{ ok?: boolean; error?: string }> {
   const profile = await requireProfile();
   if (!profile.is_admin) return { error: "Nur Admins" };
-  const supabase = await createClient();
 
   const num = (key: string): number => {
     const raw = String(formData.get(key) ?? "").trim().replace(",", ".");
@@ -49,38 +35,16 @@ export async function saveHealthSnapshot(formData: FormData): Promise<{ ok?: boo
     return Number.isFinite(n) ? n : 0;
   };
 
-  const treatwell = num("treatwell_eur");
-  const shopify = num("shopify_eur");
-  const targobank = num("targobank_eur");
-  const debt = num("debt_eur");
-  const note = String(formData.get("note") ?? "").trim() || null;
-
-  // Live-kg beim Speichern einfrieren (best effort — Sheet kann leer sein)
-  let ruKg: number | null = null;
-  let uzKg: number | null = null;
-  let score: number | null = null;
-  try {
-    const { getTotalStockKg } = await import("@/lib/stock-sheets");
-    const stock = await getTotalStockKg();
-    ruKg = stock.russianKg;
-    uzKg = stock.uzbekKg;
-    score = await computeScore(stock.totalKg, treatwell, shopify, targobank, debt);
-  } catch (e) {
-    console.warn("[saveHealthSnapshot] kg nicht lesbar:", e);
-  }
-
-  const { error } = await supabase.from("company_health_snapshots").insert({
-    treatwell_eur: treatwell,
-    shopify_eur: shopify,
-    targobank_eur: targobank,
-    debt_eur: debt,
-    stock_kg_russian: ruKg,
-    stock_kg_uzbek: uzKg,
-    score,
-    note,
-    created_by: profile.id,
+  const res = await speichereHealthSnapshot(createServiceClient(), {
+    auto: false,
+    note: String(formData.get("note") ?? "").trim() || null,
+    createdBy: profile.id,
+    ergaenzungen: {
+      weitere_schulden_eur: num("weitere_schulden_eur"),
+      steuer_rueckstellung_eur: num("steuer_rueckstellung_eur"),
+    },
   });
-  if (error) return { error: error.message };
+  if (!res.ok) return { error: res.error };
 
   revalidatePath("/health");
   return { ok: true };

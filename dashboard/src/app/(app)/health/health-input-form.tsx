@@ -5,10 +5,8 @@ import { Save, Loader2, Check, AlertCircle, Pencil } from "lucide-react";
 import { saveHealthSnapshot } from "@/lib/actions/health";
 
 interface Defaults {
-  treatwell_eur: number;
-  shopify_eur: number;
-  targobank_eur: number;
-  debt_eur: number;
+  weitere_schulden_eur: number;
+  steuer_rueckstellung_eur: number;
 }
 
 export default function HealthInputForm({ defaults }: { defaults: Defaults }) {
@@ -34,11 +32,11 @@ export default function HealthInputForm({ defaults }: { defaults: Defaults }) {
           onClick={() => setOpen(true)}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800 transition"
         >
-          <Pencil size={14} /> Werte aktualisieren
+          <Pencil size={14} /> Ergänzungen / Eintrag speichern
         </button>
         {msg?.ok && (
           <span className="inline-flex items-center gap-1 text-xs text-emerald-700">
-            <Check size={13} /> Gespeichert — Kennzahl aktualisiert
+            <Check size={13} /> Gespeichert — Eintrag im Verlauf
           </span>
         )}
       </div>
@@ -47,13 +45,26 @@ export default function HealthInputForm({ defaults }: { defaults: Defaults }) {
 
   return (
     <section className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
-      <h2 className="text-sm font-medium text-neutral-700 mb-4">Manuelle Werte aktualisieren</h2>
+      <h2 className="text-sm font-medium text-neutral-700 mb-4">Ergänzungen (fließen in die Schulden ein)</h2>
       <form action={submit} className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <Field label="Treatwell (€)" name="treatwell_eur" defaultValue={defaults.treatwell_eur} />
-          <Field label="Shopify (€)" name="shopify_eur" defaultValue={defaults.shopify_eur} />
-          <Field label="Targobank (€)" name="targobank_eur" defaultValue={defaults.targobank_eur} />
-          <Field label="Schulden (€)" name="debt_eur" defaultValue={defaults.debt_eur} accent="rose" />
+        <p className="text-xs text-neutral-500">
+          Konten, Lieferanten-Schulden und offene Steuern kommen automatisch. Hier nur, was das System nicht kennt.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Field
+            label="Steuer-Rückstellung (€)"
+            name="steuer_rueckstellung_eur"
+            defaultValue={defaults.steuer_rueckstellung_eur}
+            hint="z.B. erwartete ESt-/GewSt-Nachzahlung"
+            accent="rose"
+          />
+          <Field
+            label="Weitere Schulden (€)"
+            name="weitere_schulden_eur"
+            defaultValue={defaults.weitere_schulden_eur}
+            hint="z.B. Darlehen, offene Rechnungen außerhalb der Bestellungen"
+            accent="rose"
+          />
         </div>
         <div>
           <label className="block text-xs font-medium text-neutral-600 uppercase tracking-wide mb-1">Notiz (optional)</label>
@@ -87,14 +98,14 @@ export default function HealthInputForm({ defaults }: { defaults: Defaults }) {
           </button>
         </div>
         <p className="text-[11px] text-neutral-400">
-          Jedes Speichern erzeugt einen neuen Verlaufs-Eintrag mit dem aktuellen Live-Lagerstand — so entsteht automatisch eine Historie der Kennzahl.
+          Jedes Speichern erzeugt einen Verlaufs-Eintrag. Zusätzlich speichert das System jeden Morgen automatisch einen Eintrag — die Ergänzungen gelten weiter, bis du sie änderst.
         </p>
       </form>
     </section>
   );
 }
 
-function Field({ label, name, defaultValue, accent }: { label: string; name: string; defaultValue: number; accent?: "rose" }) {
+function Field({ label, name, defaultValue, accent, hint }: { label: string; name: string; defaultValue: number; accent?: "rose"; hint?: string }) {
   return (
     <div>
       <label className={`block text-xs font-medium uppercase tracking-wide mb-1 ${accent === "rose" ? "text-rose-600" : "text-neutral-600"}`}>
@@ -108,6 +119,7 @@ function Field({ label, name, defaultValue, accent }: { label: string; name: str
         placeholder="0"
         className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm text-right focus:ring-2 focus:ring-neutral-900"
       />
+      {hint && <p className="text-[11px] text-neutral-400 mt-1">{hint}</p>}
     </div>
   );
 }
