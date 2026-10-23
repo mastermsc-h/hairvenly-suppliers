@@ -47,6 +47,7 @@ function fieldsFromForm(formData: FormData) {
     jahr: Number(str(formData.get("jahr")) ?? new Date().getFullYear()),
     richtung: str(formData.get("richtung")) ?? "zahlung",
     soll_betrag: num(formData.get("soll_betrag")),
+    soll_schaetzung: formData.get("soll_schaetzung") === "on",
     faellig_am: str(formData.get("faellig_am")),
     ist_betrag: num(formData.get("ist_betrag")),
     bezahlt_am: str(formData.get("bezahlt_am")),

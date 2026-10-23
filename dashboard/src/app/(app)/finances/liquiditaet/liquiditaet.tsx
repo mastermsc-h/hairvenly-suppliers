@@ -5,7 +5,8 @@ import Link from "next/link";
 import { AlertTriangle, Check, Loader2 } from "lucide-react";
 import { Area, CartesianGrid, ComposedChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
-import { LIQ_DEFAULTS, prognose, type LiqEinstellungen, type LiqRohdaten } from "@/lib/liquiditaet/rechnung";
+import { LIQ_DEFAULTS, prognose, type Ereignis, type LiqEinstellungen, type LiqRohdaten } from "@/lib/liquiditaet/rechnung";
+import { SYMBOLE, TerminSymbol, symbolTyp, type SymbolTyp } from "./termin-symbol";
 import { AMPEL_STIL } from "../../orders/liquiditaet-badge";
 import { saveLiquiditaetEinstellungen } from "@/lib/actions/liquiditaet";
 
@@ -55,9 +56,15 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
   const laufendMonat = (p.laufendProTag * 365) / 12;
   const freiProTag = p.einnahmenProTag + p.laufendProTag;
   const chartData = useMemo(() => {
-    const byDay = new Map<string, string[]>();
-    for (const ev of p.ereignisse) byDay.set(ev.datum, [...(byDay.get(ev.datum) ?? []), `${ev.betrag < 0 ? "−" : "+"}${eur(Math.abs(ev.betrag))} ${ev.label}`]);
+    const byDay = new Map<string, Ereignis[]>();
+    for (const ev of p.ereignisse) byDay.set(ev.datum, [...(byDay.get(ev.datum) ?? []), ev]);
     return p.tage.map((t) => ({ ...t, ev: byDay.get(t.datum) ?? [] }));
+  }, [p]);
+  // Steuertermine als Marken im Diagramm (gleicher Tag → übereinander)
+  const steuerMarken = useMemo(() => {
+    const m = new Map<string, Ereignis[]>();
+    for (const ev of p.ereignisse) if (ev.art === "steuer") m.set(ev.datum, [...(m.get(ev.datum) ?? []), ev]);
+    return [...m.entries()];
   }, [p]);
   // Aktions-Eingänge (ein Eintrag pro Tag) im Terminkalender zu einer Zeile zusammenfassen
   const aktionEv = p.ereignisse.filter((x) => x.art === "aktion");
@@ -191,18 +198,28 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
       <Card title="Kontostand-Verlauf (Vorschau)" accent="border-l-blue-500">
         <div style={{ width: "100%", height: 300 }}>
           <ResponsiveContainer>
-            <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+            <ComposedChart data={chartData} margin={{ top: 12, right: 8, left: 8, bottom: 0 }}>
               <CartesianGrid stroke="#f3f4f6" />
               <XAxis dataKey="datum" tick={{ fontSize: 11, fill: "#737373" }} tickFormatter={(d) => `${String(d).slice(8, 10)}.${String(d).slice(5, 7)}.`} minTickGap={24} />
               <YAxis tick={{ fontSize: 11, fill: "#737373" }} tickFormatter={(v) => `${Math.round(v / 1000)}k`} width={44} />
               <Tooltip
                 content={({ active, payload }) => {
                   if (!active || !payload?.length) return null;
-                  const d = payload[0].payload as { datum: string; saldo: number; ev: string[] };
+                  const d = payload[0].payload as { datum: string; saldo: number; ev: Ereignis[] };
                   return (
-                    <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs shadow-sm max-w-xs">
+                    <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs shadow-sm max-w-sm space-y-1">
                       <div className="font-semibold">{deDate(d.datum)}: {eur(d.saldo)}</div>
-                      {d.ev.map((x, i) => <div key={i} className="text-neutral-600">{x}</div>)}
+                      {d.ev.map((x, i) => (
+                        <div key={i} className="flex items-start gap-1.5 text-neutral-600">
+                          <TerminSymbol typ={symbolTyp(x)} schaetzung={x.schaetzung} />
+                          <span>
+                            <span className={`tabular-nums font-medium ${x.betrag >= 0 ? "text-emerald-700" : "text-neutral-900"}`}>
+                              {x.betrag < 0 ? "−" : "+"}{eur(Math.abs(x.betrag))}
+                            </span>{" "}
+                            {x.label}
+                          </span>
+                        </div>
+                      ))}
                     </div>
                   );
                 }}
@@ -210,11 +227,30 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
               <ReferenceLine y={0} stroke="#dc2626" strokeWidth={1.5} />
               <ReferenceLine y={e.puffer} stroke="#d97706" strokeDasharray="4 4" label={{ value: "Reserve", position: "insideTopRight", fontSize: 10, fill: "#d97706" }} />
               <Area type="stepAfter" dataKey="saldo" stroke="#2563eb" fill="#dbeafe" strokeWidth={2} />
+              {steuerMarken.map(([datum, evs]) => (
+                <ReferenceLine
+                  key={datum}
+                  x={datum}
+                  stroke={SYMBOLE[symbolTyp(evs[0])].farbe}
+                  strokeDasharray="2 3"
+                  strokeOpacity={0.6}
+                  label={(props: { viewBox?: { x?: number; y?: number } }) => <SteuerMarke x={props.viewBox?.x ?? 0} y={props.viewBox?.y ?? 0} evs={evs} />}
+                />
+              ))}
             </ComposedChart>
           </ResponsiveContainer>
         </div>
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-neutral-500">
+          {(["ust", "lst", "est", "gewst", "einfuhr", "lieferant", "manuell", "aktion"] as SymbolTyp[]).map((t) => (
+            <span key={t} className="inline-flex items-center gap-1">
+              <TerminSymbol typ={t} /> {SYMBOLE[t].name}
+            </span>
+          ))}
+          <span className="inline-flex items-center gap-1"><span className="font-semibold">≈</span> = Schätzung</span>
+        </div>
         <p className="mt-2 text-xs text-neutral-500">
-          Täglich: + Ø Einnahmen − Ø laufende Abgänge. Stufen = Lieferantenzahlungen, Einfuhrabgaben und Steuertermine (Maus darüber für Details).
+          Täglich: + Ø Einnahmen − Ø laufende Abgänge. Stufen = Lieferantenzahlungen, Einfuhrabgaben und Steuertermine; die Marken oben zeigen,
+          wann welche Steuer abgeht (Maus darüber für Details).
         </p>
       </Card>
 
@@ -289,6 +325,9 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
               {termine.map((t, i) => (
                 <tr key={i} className="border-b border-neutral-100">
                   <td className="py-1.5 pr-3 tabular-nums text-neutral-600 whitespace-nowrap">{deDate(t.datum)}</td>
+                  <td className="py-1.5 pr-2 whitespace-nowrap">
+                    <TerminSymbol typ={symbolTyp(t)} schaetzung={"schaetzung" in t ? t.schaetzung : false} />
+                  </td>
                   <td className="py-1.5 pr-3 text-neutral-800">{t.label}{t.sofort && <span className="ml-1 text-xs text-red-600">überfällig</span>}</td>
                   <td className={`py-1.5 text-right tabular-nums font-medium ${t.betrag >= 0 ? "text-emerald-700" : "text-neutral-900"}`}>{t.betrag >= 0 ? "+" : "−"}{eur(Math.abs(t.betrag))}</td>
                 </tr>
@@ -475,6 +514,30 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
         )}
       </Card>
     </div>
+  );
+}
+
+/** Steuer-Marke(n) oben im Diagramm: farbige Kapsel mit Symbol + Kürzel, gleicher Tag gestapelt. */
+function SteuerMarke({ x, y, evs }: { x: number; y: number; evs: Ereignis[] }) {
+  return (
+    <g>
+      {evs.map((ev, i) => {
+        const s = SYMBOLE[symbolTyp(ev)];
+        const text = `${ev.schaetzung ? "≈" : ""}${s.kurz}`;
+        const w = 18 + text.length * 6;
+        const top = y + 2 + i * 18;
+        return (
+          <g key={i}>
+            <title>{`${ev.label}: ${eur(Math.abs(ev.betrag))}`}</title>
+            <rect x={x - w / 2} y={top} width={w} height={16} rx={8} fill="#fff" stroke={s.farbe} strokeWidth={1.2} />
+            <s.Icon x={x - w / 2 + 4} y={top + 3} width={10} height={10} color={s.farbe} strokeWidth={2.5} />
+            <text x={x - w / 2 + 16} y={top + 11.5} fontSize={9.5} fontWeight={600} fill={s.farbe}>
+              {text}
+            </text>
+          </g>
+        );
+      })}
+    </g>
   );
 }
 

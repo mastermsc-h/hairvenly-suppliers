@@ -673,6 +673,8 @@ export interface SteuerPosten {
   jahr: number;
   richtung: SteuerRichtung;
   soll_betrag: number;
+  /** Soll ist nur eine Schätzung (bis Steuerberater/DATEV den echten Wert liefert). */
+  soll_schaetzung: boolean;
   faellig_am: string | null;
   ist_betrag: number;
   bezahlt_am: string | null;

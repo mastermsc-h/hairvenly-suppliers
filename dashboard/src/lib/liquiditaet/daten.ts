@@ -102,8 +102,8 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
         .order("id", { ascending: true })
         .range(from, to)
     ),
-    selectAll<{ art: string; zeitraum: string; richtung: string; ist_betrag: number; soll_betrag: number }>((from, to) =>
-      sb.from("steuer_posten").select("art, zeitraum, richtung, ist_betrag, soll_betrag").gte("jahr", Number(heute.slice(0, 4)) - 1).range(from, to)
+    selectAll<{ art: string; zeitraum: string; richtung: string; ist_betrag: number; soll_betrag: number; soll_schaetzung: boolean }>((from, to) =>
+      sb.from("steuer_posten").select("art, zeitraum, richtung, ist_betrag, soll_betrag, soll_schaetzung").gte("jahr", Number(heute.slice(0, 4)) - 1).range(from, to)
     ),
     sb.from("orders_with_totals")
       .select("id, label, status, eta, invoice_total, remaining_balance, import_vat, weight_kg")
@@ -280,6 +280,9 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
       quartaleErledigt: erledigt.filter((p) => p.art === "est_vz" || p.art === "gewst_vz").map((p) => `${p.art}|${p.zeitraum}`),
       amandaImportUsd,
       // Eingetragenes Soll offener Posten (noch kein Ist) — z.B. USt-VA vom Steuerberater
+      sollGeschaetzt: posten
+        .filter((p) => Number(p.ist_betrag) === 0 && Number(p.soll_betrag) > 0 && p.soll_schaetzung)
+        .map((p) => `${p.art}|${p.zeitraum}`),
       sollOffen: Object.fromEntries(
         posten
           .filter((p) => Number(p.ist_betrag) === 0 && Number(p.soll_betrag) > 0)

@@ -225,6 +225,8 @@ export interface LiqRohdaten {
     /** Im Steuer-Ledger eingetragenes Soll noch offener Posten, "art|zeitraum" → Betrag
      *  (+ Zahlung, − Erstattung). Hat Vorrang vor der Schätzung (z.B. USt-VA vom Steuerberater). */
     sollOffen?: Record<string, number>;
+    /** Schlüssel aus sollOffen, deren Soll nur eine Schätzung ist. */
+    sollGeschaetzt?: string[];
   };
   nachbestellung: {
     /** Ø bestellte kg/Monat (letzte 3 Monate) — war zuletzt Black-Friday-Vorrat, nicht Verbrauch. */
@@ -246,6 +248,10 @@ export interface Ereignis {
   art: EreignisArt;
   label: string;
   orderId?: string;
+  /** Steuerart für Symbole/Filter (nur art "steuer"). */
+  steuer?: "ust" | "lst" | "est" | "gewst";
+  /** Betrag beruht auf einer Schätzung (Soll als Schätzung markiert bzw. Modell). */
+  schaetzung?: boolean;
   /** Ratenzahlung: welche Rechnungen diese Rate (anteilig) bezahlt. */
   orderIds?: string[];
   sofort?: boolean; // eigentlich schon fällig
@@ -299,6 +305,15 @@ export interface PrognoseErgebnis {
 
 const SOFORT_STATUS = ["ready_to_ship", "shipped", "in_customs"];
 const r2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Label-Zusatz + Schätzungs-Merkmal für einen Steuerposten. */
+function sollInfo(roh: LiqRohdaten, key: string): { soll: number | undefined; zusatz: string; schaetzung: boolean } {
+  const soll = roh.steuern.sollOffen?.[key];
+  // Ohne Soll rechnet das Modell — Schätzung, aber ohne Label-Zusatz (Oberfläche zeigt "≈")
+  if (soll === undefined) return { soll, zusatz: "", schaetzung: true };
+  const geschaetzt = (roh.steuern.sollGeschaetzt ?? []).includes(key);
+  return { soll, zusatz: geschaetzt ? " (Schätzung laut Vorauszahlungen)" : " (Soll laut Vorauszahlungen)", schaetzung: geschaetzt };
+}
 
 function ampelFuer(saldo: number, puffer: number): Ampel {
   return saldo < 0 ? "luecke" : saldo < puffer ? "knapp" : "ok";
@@ -490,7 +505,8 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       const faellig = faelligkeit("ust_va", m);
       if (!faellig || faellig > ende) break;
       const eustAndere = m >= aktMonat ? eustAndereMonat : 0;
-      const soll = roh.steuern.sollOffen?.[`ust_va|${m}`];
+      const si = sollInfo(roh, `ust_va|${m}`);
+      const soll = si.soll;
       const betrag = soll !== undefined ? r2(soll) : r2(ustBasis + (ustZusatz[m] ?? 0) - (eustProMonat[m] ?? 0) - eustAndere);
       const datum = betrag < 0 ? plusTage(faellig, 21) : faellig;
       if (datum > ende) continue;
@@ -498,8 +514,10 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
         datum: amStart(datum),
         betrag: -betrag,
         art: "steuer",
-        label: (betrag < 0 ? `USt-Erstattung ${m} (EUSt-Verrechnung)` : `USt-VA ${m}`) + (soll !== undefined ? " (Soll laut Vorauszahlungen)" : ""),
+        label: (betrag < 0 ? `USt-Erstattung ${m} (EUSt-Verrechnung)` : `USt-VA ${m}`) + si.zusatz,
         sofort: datum < start,
+        steuer: "ust",
+        schaetzung: si.schaetzung,
       });
     }
   }
@@ -511,13 +529,15 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     for (let i = 0; i < 24; i++, m = naechsterMonat(m)) {
       const faellig = faelligkeit("lst_anmeldung", m);
       if (!faellig || faellig > ende) break;
-      const soll = roh.steuern.sollOffen?.[`lst_anmeldung|${m}`];
+      const si = sollInfo(roh, `lst_anmeldung|${m}`);
       ereignisse.push({
         datum: amStart(faellig),
-        betrag: -(soll ?? lst),
+        betrag: -(si.soll ?? lst),
         art: "steuer",
-        label: `Lohnsteuer ${m}${soll !== undefined ? " (Soll laut Vorauszahlungen)" : ""}`,
+        label: `Lohnsteuer ${m}${si.zusatz}`,
         sofort: faellig < start,
+        steuer: "lst",
+        schaetzung: si.schaetzung,
       });
     }
   }
@@ -532,11 +552,19 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       ] as const) {
         const zeitraum = `Q${q} ${jahr}`;
         const faellig = faelligkeit(art, zeitraum);
-        const soll = roh.steuern.sollOffen?.[`${art}|${zeitraum}`];
-        const wert = soll ?? betrag;
+        const si = sollInfo(roh, `${art}|${zeitraum}`);
+        // Ohne Soll = letzter Bescheidbetrag (Vorauszahlungen sind festgesetzt, keine echte Schätzung)
+        const wert = si.soll ?? betrag;
         if (!wert || !faellig || faellig < start || faellig > ende) continue;
         if (roh.steuern.quartaleErledigt.includes(`${art}|${zeitraum}`)) continue;
-        ereignisse.push({ datum: faellig, betrag: -wert, art: "steuer", label: `${name} ${zeitraum}${soll !== undefined ? " (Soll laut Vorauszahlungen)" : ""}` });
+        ereignisse.push({
+          datum: faellig,
+          betrag: -wert,
+          art: "steuer",
+          label: `${name} ${zeitraum}${si.soll !== undefined ? si.zusatz : ""}`,
+          steuer: art === "est_vz" ? "est" : "gewst",
+          schaetzung: si.soll !== undefined && si.schaetzung,
+        });
       }
     }
   }

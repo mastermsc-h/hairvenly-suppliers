@@ -180,6 +180,13 @@ check("USt Sep = Soll", [lbl("USt-VA 2026-09").betrag, lbl("USt-VA 2026-09").lab
 check("USt Okt ohne Soll = Schätzung", lbl("USt-VA 2026-10").betrag, -20000);
 check("LSt Okt = Soll", lbl("Lohnsteuer 2026-10").betrag, -4500);
 check("GewSt Q4 = Soll", lbl("GewSt-Vorauszahlung Q4 2026").betrag, -1500);
+// Soll als Schätzung markiert → Merkmal + Label; Modellwert → Merkmal ohne Label-Zusatz
+const rsg = roh({ steuern: { ...rs.steuern, sollGeschaetzt: ["ust_va|2026-09"] } });
+const psg = L.prognose(rsg, { ...E0, horizontTage: 60 });
+const ustSep = psg.ereignisse.find((x) => x.label.startsWith("USt-VA 2026-09"));
+check("Soll-Schätzung markiert", [ustSep.schaetzung, ustSep.steuer, ustSep.label.includes("Schätzung")], [true, "ust", true]);
+check("Echtes Soll (LSt) nicht als Schätzung", psg.ereignisse.find((x) => x.label.startsWith("Lohnsteuer 2026-10")).schaetzung, false);
+check("Modellwert (USt Okt) = Schätzung ohne Zusatz", [psg.ereignisse.find((x) => x.label === "USt-VA 2026-10").schaetzung], [true]);
 
 // PayPal-Guthaben
 const rpp = (abgerufen) => roh({ bankSalden: [{ iban: "PAYPAL", saldo: 25000, stand: "2026-10-18", abgerufenAm: abgerufen }] });

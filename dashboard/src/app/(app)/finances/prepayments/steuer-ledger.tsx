@@ -222,7 +222,17 @@ export default function SteuerLedger({
                             <td className="py-2 px-3 whitespace-nowrap text-neutral-600">
                               {fmtDate(p.faellig_am)}
                             </td>
-                            <td className="py-2 px-3 text-right tabular-nums">{sollN ? fmt(sollN) : "—"}</td>
+                            <td className="py-2 px-3 text-right tabular-nums">
+                              {sollN ? fmt(sollN) : "—"}
+                              {sollN !== 0 && p.soll_schaetzung && (
+                                <span
+                                  className="block text-[10px] font-medium text-amber-700"
+                                  title="Nur eine Schätzung — echten Wert vom Steuerberater/DATEV eintragen und das Häkchen „Schätzung“ entfernen"
+                                >
+                                  ≈ Schätzung
+                                </span>
+                              )}
+                            </td>
                             <td className="py-2 px-3 text-right tabular-nums text-neutral-600">
                               {p.ist_quelle === "bank" && istN !== 0 && (
                                 <span className="mr-1 text-[10px] font-medium rounded px-1.5 py-0.5 bg-blue-50 text-blue-700" title="Aus den Kontoumsätzen übernommen">
@@ -412,6 +422,10 @@ function PostenForm({ locale, jahr, editing, onClose, onSaved }: {
             <div>
               <label className={labelCls}>{richtung === "erstattung" ? tl("field.soll_refund") : tl("field.soll")}</label>
               <input name="soll_betrag" inputMode="decimal" defaultValue={editing?.soll_betrag ? String(editing.soll_betrag) : ""} placeholder="0,00" className={inputCls} />
+              <label className="mt-1.5 flex items-center gap-1.5 text-xs text-neutral-600">
+                <input type="checkbox" name="soll_schaetzung" defaultChecked={editing?.soll_schaetzung ?? false} className="h-3.5 w-3.5 rounded border-neutral-300" />
+                nur Schätzung <span className="text-neutral-400">(Haken weg, sobald der echte Wert da ist)</span>
+              </label>
             </div>
             <div>
               <label className={labelCls}>{richtung === "erstattung" ? tl("field.ist_refund") : tl("field.ist")}</label>

@@ -1164,7 +1164,7 @@ function YearView({
 }
 
 // ---- Rücklage: was diesen Monat für Steuern beiseitegelegt werden muss ----
-type LstInfo = { amount: number; source: "ist" | "soll" | null };
+type LstInfo = { amount: number; source: "ist" | "soll" | null; schaetzung?: boolean };
 
 // Lohnsteuer wird nicht berechnet — Ist aus der Lohnabrechnung, sonst Soll, sonst unbekannt.
 function lstFor(posten: SteuerPosten[], zeitraum: string): LstInfo {
@@ -1172,7 +1172,7 @@ function lstFor(posten: SteuerPosten[], zeitraum: string): LstInfo {
   const ist = Number(row?.ist_betrag) || 0;
   if (ist > 0) return { amount: ist, source: "ist" };
   const soll = Number(row?.soll_betrag) || 0;
-  if (soll > 0) return { amount: soll, source: "soll" };
+  if (soll > 0) return { amount: soll, source: "soll", schaetzung: !!row?.soll_schaetzung };
   return { amount: 0, source: null };
 }
 
@@ -1200,7 +1200,9 @@ function RuecklageBox({
         lst.source === "ist"
           ? "laut Lohnabrechnung, im Bruttolohn enthalten"
           : lst.source === "soll"
-            ? "Soll-Betrag, im Bruttolohn enthalten"
+            ? lst.schaetzung
+              ? "≈ Schätzung aus den Vorauszahlungen, im Bruttolohn enthalten"
+              : "Soll-Betrag, im Bruttolohn enthalten"
             : "noch nicht erfasst — Betrag aus der Lohnabrechnung im Finanzamt-Abgleich eintragen",
       value: lst.source ? lst.amount : null,
     },
@@ -1446,6 +1448,11 @@ function FinanzamtAbgleich({
                 <td className="py-1.5 text-right tabular-nums">{berechnet !== null ? fmt(berechnet) : "—"}</td>
                 <td className="py-1.5 text-right tabular-nums text-neutral-500">
                   {row && Number(row.soll_betrag) !== 0 ? fmt(Number(row.soll_betrag)) : "—"}
+                  {row && Number(row.soll_betrag) !== 0 && row.soll_schaetzung && (
+                    <span className="block text-[10px] font-medium text-amber-700" title="Nur eine Schätzung — echten Wert in den Vorauszahlungen eintragen">
+                      ≈ Schätzung
+                    </span>
+                  )}
                 </td>
                 <td className="py-1.5 text-right whitespace-nowrap">
                   {row?.ist_quelle === "bank" && (
