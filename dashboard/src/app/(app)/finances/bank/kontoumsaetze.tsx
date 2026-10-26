@@ -12,11 +12,12 @@ import {
   saveRegelAction,
   setKategorieAction,
   sucheKontoumsaetze,
+  type KontoSaldo,
   type KontoUmsatz,
   type RegelRow,
 } from "@/lib/actions/kontoumsaetze";
 
-type Data = { umsaetze: KontoUmsatz[]; regeln: RegelRow[]; letzterAbruf: string | null };
+type Data = { umsaetze: KontoUmsatz[]; regeln: RegelRow[]; letzterAbruf: string | null; salden: KontoSaldo[] };
 
 const MONATE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
 
@@ -287,6 +288,9 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
         </div>
       )}
 
+      {/* Aktuelle Kontostände (Bank per FinTS, PayPal per API — stündlich) */}
+      <KontostandLeiste salden={data.salden} />
+
       {/* Kennzahlen */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <Kachel label="Einnahmen" value={fmt(summen.g.einnahmen)} tone="green" />
@@ -543,6 +547,44 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
           {summen.unklar.n} Umsätze ({fmt(summen.unklar.sum)}) sind noch nicht zugeordnet. Kachel „Nicht zugeordnet“ anklicken, um nur diese zu sehen.
         </div>
       )}
+    </div>
+  );
+}
+
+/** Reihenfolge: Sparkasse-Konten, Targobank, PayPal. */
+function saldoRang(iban: string): number {
+  if (iban === "PAYPAL") return 3;
+  return iban.slice(4, 12) === "30020900" ? 2 : 1;
+}
+
+function KontostandLeiste({ salden }: { salden: KontoSaldo[] }) {
+  if (!salden.length) return null;
+  const liste = [...salden].sort((a, b) => saldoRang(a.iban) - saldoRang(b.iban) || a.iban.localeCompare(b.iban));
+  const gesamt = liste.reduce((s, b) => s + b.saldo, 0);
+  const jetzt = Date.now();
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      {liste.map((b) => {
+        const alt = jetzt - new Date(b.abgerufenAm).getTime() > 26 * 3600_000;
+        const abgerufen = new Date(b.abgerufenAm).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+        return (
+          <div key={b.iban} className={`rounded-xl border p-3 ${alt ? "border-amber-300 bg-amber-50" : "border-neutral-200 bg-white"}`}>
+            <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">
+              {b.iban === "PAYPAL" ? "PayPal-Guthaben" : konto(b.iban)}
+            </div>
+            <div className={`text-lg font-bold mt-1 tabular-nums ${b.saldo < 0 ? "text-red-700" : "text-neutral-900"}`}>{fmt(b.saldo)}</div>
+            <div className={`text-[11px] mt-0.5 ${alt ? "text-amber-700 font-medium" : "text-neutral-400"}`}>
+              {alt ? "veraltet · " : ""}abgerufen {abgerufen}
+              {b.iban.slice(4, 12) === "30020900" && " · Gehaltskonto"}
+            </div>
+          </div>
+        );
+      })}
+      <div className="rounded-xl border border-neutral-900 bg-neutral-900 p-3 text-white">
+        <div className="text-xs font-medium uppercase tracking-wide text-neutral-300">Gesamt verfügbar</div>
+        <div className="text-lg font-bold mt-1 tabular-nums">{fmt(gesamt)}</div>
+        <div className="text-[11px] mt-0.5 text-neutral-400">alle Geschäftskonten + PayPal</div>
+      </div>
     </div>
   );
 }

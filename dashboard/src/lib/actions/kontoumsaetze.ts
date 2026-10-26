@@ -21,6 +21,14 @@ export interface KontoUmsatz {
   steuer_split: SteuerSplit[];
 }
 
+/** Aktueller Kontostand laut Bank (FinTS) bzw. PayPal-API — stündlich vom Worker. */
+export interface KontoSaldo {
+  iban: string; // "PAYPAL" für das PayPal-Guthaben
+  saldo: number;
+  stand: string;
+  abgerufenAm: string;
+}
+
 export interface RegelRow extends KategorieRegel {
   notiz: string | null;
 }
@@ -37,7 +45,7 @@ function revalidateFinanzen() {
 export async function fetchKontoumsaetze(
   jahr: number,
   alleZeitraeume = false
-): Promise<{ umsaetze: KontoUmsatz[]; regeln: RegelRow[]; letzterAbruf: string | null }> {
+): Promise<{ umsaetze: KontoUmsatz[]; regeln: RegelRow[]; letzterAbruf: string | null; salden: KontoSaldo[] }> {
   await requireFeature("finances");
   const supabase = await createClient();
   const umsaetze: KontoUmsatz[] = [];
@@ -54,11 +62,22 @@ export async function fetchKontoumsaetze(
     umsaetze.push(...((data ?? []) as KontoUmsatz[]).map((u) => ({ ...u, amount: Number(u.amount), steuer_split: u.steuer_split ?? [] })));
     if (!data || data.length < 1000) break;
   }
-  const [{ data: regeln }, { data: state }] = await Promise.all([
+  const [{ data: regeln }, { data: state }, { data: salden }] = await Promise.all([
     supabase.from("bank_kategorie_regeln").select("id, prioritaet, feld, muster, richtung, kategorie, notiz").order("prioritaet").order("muster"),
     supabase.from("bank_sync_state").select("last_success_at").eq("id", 1).maybeSingle(),
+    supabase.from("bank_salden").select("account_iban, saldo, stand, abgerufen_am"),
   ]);
-  return { umsaetze, regeln: (regeln ?? []) as RegelRow[], letzterAbruf: state?.last_success_at ?? null };
+  return {
+    umsaetze,
+    regeln: (regeln ?? []) as RegelRow[],
+    letzterAbruf: state?.last_success_at ?? null,
+    salden: ((salden ?? []) as Array<{ account_iban: string; saldo: number; stand: string; abgerufen_am: string }>).map((b) => ({
+      iban: b.account_iban,
+      saldo: Number(b.saldo),
+      stand: b.stand,
+      abgerufenAm: b.abgerufen_am,
+    })),
+  };
 }
 
 /**
