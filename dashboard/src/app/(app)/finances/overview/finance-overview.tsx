@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { t, type Locale } from "@/lib/i18n";
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, Users } from "lucide-react";
-import type { FinanzInput, FinanzMitarbeiter, FinanzMonatsdaten, SteuerArt, SteuerPosten } from "@/lib/types";
-import { fetchFinanzJahr, saveFinanzMonat } from "@/lib/actions/finanzen";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, Pencil, Plus, RefreshCw, Trash2, Users } from "lucide-react";
+import type { FinanzInput, FinanzMitarbeiter, FinanzMonatsdaten, ShopifyUmsatzMonat, SteuerArt, SteuerPosten } from "@/lib/types";
+import { aktualisiereShopifyUmsatz, fetchFinanzJahr, fetchShopifyUmsatzJahr, saveFinanzMonat } from "@/lib/actions/finanzen";
 import { fetchSteuerPosten, upsertSteuerIst } from "@/lib/actions/steuer";
 
 // Gespeichert wird Netto; eingegeben wird (wie im Sheet) der Brutto-Rechnungsbetrag.
@@ -197,6 +197,7 @@ function compute(d: FinanzInput) {
 }
 
 const keyOf = (jahr: number, monat: number) => `${jahr}-${monat}`;
+const ymOf = (jahr: number, monat: number) => `${jahr}-${String(monat).padStart(2, "0")}`;
 
 type Props = {
   locale: Locale;
@@ -204,10 +205,11 @@ type Props = {
   initialMonat: number;
   initialRows: FinanzMonatsdaten[];
   initialSteuerPosten: SteuerPosten[];
+  initialShopify: ShopifyUmsatzMonat[];
   staffEmployees: FinanzMitarbeiter[];
 };
 
-export default function FinanceOverview({ locale, initialJahr, initialMonat, initialRows, initialSteuerPosten, staffEmployees }: Props) {
+export default function FinanceOverview({ locale, initialJahr, initialMonat, initialRows, initialSteuerPosten, initialShopify, staffEmployees }: Props) {
   const [jahr, setJahr] = useState(initialJahr);
   const [monat, setMonat] = useState(initialMonat);
   const [view, setView] = useState<"month" | "year">("month");
@@ -218,6 +220,12 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
   const [steuerPosten, setSteuerPosten] = useState<Record<number, SteuerPosten[]>>({
     [initialJahr]: initialSteuerPosten,
   });
+  // Shop-Umsatz je Monat direkt aus Shopify (Schlüssel YYYY-MM)
+  const [shopify, setShopify] = useState<Record<string, ShopifyUmsatzMonat>>(() =>
+    Object.fromEntries(initialShopify.map((u) => [u.monat, u]))
+  );
+  const [shopifyLaedt, setShopifyLaedt] = useState(false);
+  const [shopifyFehler, setShopifyFehler] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, FinanzInput>>({});
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
@@ -238,7 +246,12 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
     setJahr(next);
     if (!loadedYears.includes(next)) {
       startYearLoad(async () => {
-        const [rows, posten] = await Promise.all([fetchFinanzJahr(next), fetchSteuerPosten(next)]);
+        const [rows, posten, umsatz] = await Promise.all([
+          fetchFinanzJahr(next),
+          fetchSteuerPosten(next),
+          fetchShopifyUmsatzJahr(next),
+        ]);
+        setShopify((prev) => ({ ...prev, ...Object.fromEntries(umsatz.map((u) => [u.monat, u])) }));
         setSaved((prev) => ({
           ...prev,
           ...Object.fromEntries(rows.map((r) => [keyOf(r.jahr, r.monat), r.daten])),
@@ -249,9 +262,16 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
     }
   }
 
+  // Shop-Umsatz kommt aus Shopify (nach Erstattungen), außer er wurde bewusst von Hand eingetragen
+  function mitShopify<T extends FinanzInput | null>(j: number, m: number, input: T): T {
+    const u = shopify[ymOf(j, m)];
+    if (!input || input.shopManuell || !u) return input;
+    return { ...input, shopBrutto: u.netto };
+  }
+
   // Effektive Eingaben eines Monats: lokale Edits > gespeichert > nichts
   const effective = (j: number, m: number): FinanzInput | null =>
-    edits[keyOf(j, m)] ?? saved[keyOf(j, m)] ?? null;
+    mitShopify(j, m, edits[keyOf(j, m)] ?? saved[keyOf(j, m)] ?? null);
 
   // Vorbefüllung für einen leeren Monat: letzter erfasster Monat davor, sonst Vorjahres-Dezember,
   // sonst Defaults mit den aktuellen Gehältern aus dem Mitarbeiter-Bereich
@@ -266,7 +286,9 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
   const k = keyOf(jahr, monat);
   const isSaved = k in saved && !(k in edits);
   const isEdited = k in edits;
-  const current: FinanzInput = edits[k] ?? saved[k] ?? prefillFor(jahr, monat);
+  const current: FinanzInput = mitShopify(jahr, monat, edits[k] ?? saved[k] ?? prefillFor(jahr, monat));
+  const shopifyMonat = shopify[ymOf(jahr, monat)] ?? null;
+  const shopAusShopify = !!shopifyMonat && !current.shopManuell;
   const isPrefilled = !isSaved && !isEdited;
 
   const c = useMemo(() => compute(current), [current]);
@@ -274,6 +296,15 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
   function update(patch: Partial<FinanzInput>) {
     setEdits((prev) => ({ ...prev, [k]: { ...current, ...patch } }));
     setSavedFlash(false);
+  }
+
+  async function shopifyAktualisieren() {
+    setShopifyLaedt(true);
+    setShopifyFehler(null);
+    const res = await aktualisiereShopifyUmsatz(jahr, monat);
+    if (res.ok) setShopify((prev) => ({ ...prev, [res.umsatz.monat]: res.umsatz }));
+    else setShopifyFehler(res.error);
+    setShopifyLaedt(false);
   }
 
   async function handleSave() {
@@ -310,7 +341,7 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
         return { monat: m, input, calc: input ? compute(input) : null };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [jahr, saved, edits]
+    [jahr, saved, edits, shopify]
   );
   const recorded = yearMonths.filter((r) => r.calc);
   const yrNetto = recorded.reduce((s, r) => s + r.calc!.totalNetto, 0);
@@ -472,14 +503,39 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
                   <td className="py-1.5 text-right tabular-nums">{fmt(c.salonNetto)}</td>
                   <td className="py-1.5 text-right tabular-nums">{fmt(c.salonUst)}</td>
                 </tr>
-                <tr className="border-b border-neutral-100">
+                <tr className={shopifyMonat ? "" : "border-b border-neutral-100"}>
                   <td className="py-1.5 text-neutral-700">{t(locale, "finance.revenue.shop")}</td>
                   <td className="py-1.5 text-right">
-                    <NumField value={current.shopBrutto} onCommit={(v) => update({ shopBrutto: v })} className={`${inputCls} w-28`} />
+                    {shopAusShopify ? (
+                      <span
+                        className="inline-block w-28 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-sm text-right tabular-nums text-emerald-900"
+                        title="Automatisch aus Shopify (nach Erstattungen)"
+                      >
+                        {current.shopBrutto.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    ) : (
+                      <NumField value={current.shopBrutto} onCommit={(v) => update({ shopBrutto: v })} className={`${inputCls} w-28`} />
+                    )}
                   </td>
                   <td className="py-1.5 text-right tabular-nums">{fmt(c.shopNetto)}</td>
                   <td className="py-1.5 text-right tabular-nums">{fmt(c.shopUst)}</td>
                 </tr>
+                {shopifyMonat && (
+                  <tr className="border-b border-neutral-100">
+                    <td colSpan={4} className="pb-2">
+                      <ShopifyHinweis
+                        umsatz={shopifyMonat}
+                        aktiv={shopAusShopify}
+                        laufend={ymOf(jahr, monat) === ymOf(new Date().getFullYear(), new Date().getMonth() + 1)}
+                        laedt={shopifyLaedt}
+                        fehler={shopifyFehler}
+                        onAktualisieren={shopifyAktualisieren}
+                        onManuell={() => update({ shopManuell: true })}
+                        onShopify={() => update({ shopManuell: false, shopBrutto: shopifyMonat.netto })}
+                      />
+                    </td>
+                  </tr>
+                )}
                 <tr className="bg-green-50 font-semibold text-green-800">
                   <td className="py-2">{t(locale, "finance.revenue.total")}</td>
                   <td className="py-2 text-right tabular-nums">{fmt(c.totalBrutto)}</td>
@@ -1636,6 +1692,72 @@ function KpiCard({ label, value, desc }: { label: string; value: string; desc: s
       <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">{label}</div>
       <div className="text-lg font-bold text-neutral-900 mt-1 tabular-nums">{value}</div>
       <div className="text-xs text-neutral-400 mt-0.5">{desc}</div>
+    </div>
+  );
+}
+
+// Herkunft des Shop-Umsatzes: aus Shopify (Standard) oder von Hand überschrieben
+function ShopifyHinweis({
+  umsatz,
+  aktiv,
+  laufend,
+  laedt,
+  fehler,
+  onAktualisieren,
+  onManuell,
+  onShopify,
+}: {
+  umsatz: ShopifyUmsatzMonat;
+  aktiv: boolean;
+  laufend: boolean;
+  laedt: boolean;
+  fehler: string | null;
+  onAktualisieren: () => void;
+  onManuell: () => void;
+  onShopify: () => void;
+}) {
+  const e = (n: number) => n.toLocaleString("de-DE", { maximumFractionDigits: 0 }) + " €";
+  const stand = new Date(umsatz.stand).toLocaleString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Berlin",
+  });
+  const kanaele = Object.entries(umsatz.kanaele).sort((a, b) => b[1] - a[1]);
+  return (
+    <div className={`rounded-lg px-3 py-2 text-xs ${aktiv ? "bg-emerald-50 text-emerald-900" : "bg-neutral-50 text-neutral-600"}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span>
+          {aktiv ? "Automatisch aus Shopify" : "Von Hand eingetragen — Shopify meldet"}:{" "}
+          <b className="tabular-nums">{e(umsatz.brutto)}</b> Bestellungen − <b className="tabular-nums">{e(umsatz.erstattet)}</b>{" "}
+          Erstattungen = <b className="tabular-nums">{e(umsatz.netto)}</b> · {umsatz.bestellungen.toLocaleString("de-DE")} Bestellungen ·
+          Stand {stand}
+          {laufend && " · Monat läuft noch"}
+        </span>
+        <span className="flex items-center gap-3">
+          <button onClick={onAktualisieren} disabled={laedt} className="flex items-center gap-1 font-medium hover:underline disabled:opacity-50">
+            <RefreshCw size={12} className={laedt ? "animate-spin" : ""} />
+            Aktualisieren
+          </button>
+          {aktiv ? (
+            <button onClick={onManuell} className="flex items-center gap-1 font-medium hover:underline">
+              <Pencil size={12} />
+              Manuell eintragen
+            </button>
+          ) : (
+            <button onClick={onShopify} className="font-medium hover:underline">
+              Shopify-Wert übernehmen
+            </button>
+          )}
+        </span>
+      </div>
+      {kanaele.length > 0 && (
+        <div className="mt-1 text-[11px] opacity-80">
+          Davon {kanaele.map(([k, v]) => `${k} ${e(v)}`).join(" · ")} (brutto vor Erstattungen, ohne Stornos)
+        </div>
+      )}
+      {fehler && <div className="mt-1 text-red-700">{fehler}</div>}
     </div>
   );
 }

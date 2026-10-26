@@ -1204,6 +1204,7 @@ export async function fetchMonthlyRevenue(
     };
   };
 
+  const berlinYm = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin" });
   const monthly = new Map<string, { revenue: number; orderCount: number }>();
   let cursor: string | null = null;
   const maxPages = 150; // up to 37500 orders per call
@@ -1219,7 +1220,9 @@ export async function fetchMonthlyRevenue(
 
     for (const e of edges) {
       if (e.node.cancelledAt) continue;
-      const month = e.node.createdAt.slice(0, 7); // "YYYY-MM"
+      // Deutsche Zeit wie der Shopify-Filter (created_at:>=YYYY-MM-DD gilt in Shop-Zeitzone) —
+      // nach UTC landeten Bestellungen vom 1. vor 02:00 im Vormonat und überschrieben ihn
+      const month = berlinYm.format(new Date(e.node.createdAt)).slice(0, 7); // "YYYY-MM"
       const amount = parseFloat(e.node.totalPriceSet.shopMoney.amount) || 0;
       const existing = monthly.get(month) ?? { revenue: 0, orderCount: 0 };
       existing.revenue += amount;
@@ -1231,7 +1234,9 @@ export async function fetchMonthlyRevenue(
     cursor = res.data.orders.pageInfo.endCursor;
   }
 
+  // Monate vor dem Startmonat können nur Randstummel sein — nie zurückgeben
   return Array.from(monthly.entries())
+    .filter(([month]) => month >= startStr.slice(0, 7))
     .map(([month, v]) => ({ month: `${month}-01`, revenue: v.revenue, orderCount: v.orderCount }))
     .sort((a, b) => a.month.localeCompare(b.month));
 }

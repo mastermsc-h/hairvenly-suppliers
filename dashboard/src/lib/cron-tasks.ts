@@ -9,11 +9,11 @@ import {
   fetchOrdersWithRefunds,
   fetchMonthlyCollectionSales,
   fetchMonthlyProductSales,
-  fetchMonthlyRevenue,
   pickPrimaryCollection,
   refineCollection,
   shopifyGraphQL,
 } from "@/lib/shopify";
+import { laufendeMonate, syncShopifyUmsatz } from "@/lib/shopify-umsatz";
 
 // ── Collection sales ──────────────────────────────────────────
 // Nightly default: current + previous 2 months only. Historical months never
@@ -120,27 +120,16 @@ export async function cronProductSalesSync(
 }
 
 // ── Monthly revenue ───────────────────────────────────────────
+// Delegiert an syncShopifyUmsatz (deutsche Monatsgrenzen). Die frühere Variante bucketete
+// nach UTC: ein Lauf ab dem 1. holte die Bestellungen vom 1. 00:00–02:00 deutscher Zeit als
+// "Vormonat" und überschrieb so den vollen Vormonat mit einem 1-Bestellungs-Stummel
+// (März 2026: 375 €, Juli 2026: 168 €). Hauptweg ist jetzt /api/cron/shopify-umsatz.
 export async function cronRevenueSync(
   supabase: SupabaseClient,
-  monthsBack = 2,
 ): Promise<{ synced: number; error?: string }> {
   try {
-    const rows = await fetchMonthlyRevenue(monthsBack);
-    if (rows.length === 0) return { synced: 0 };
-    const syncedAt = new Date().toISOString();
-    const payload = rows.map((r) => ({
-      month: r.month,
-      gross_revenue: r.revenue,
-      order_count: r.orderCount,
-      synced_at: syncedAt,
-    }));
-    for (let i = 0; i < payload.length; i += 500) {
-      const { error } = await supabase
-        .from("shopify_monthly_revenue")
-        .upsert(payload.slice(i, i + 500), { onConflict: "month" });
-      if (error) throw error;
-    }
-    return { synced: rows.length };
+    const res = await syncShopifyUmsatz(laufendeMonate(), Date.now() + 15_000, supabase);
+    return { synced: res.erledigt.length };
   } catch (e) {
     return { synced: 0, error: e instanceof Error ? e.message : String(e) };
   }

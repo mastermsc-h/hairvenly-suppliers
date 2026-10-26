@@ -720,6 +720,19 @@ export interface FinanzInput {
   otherExpenses: FinanzSonstigeAusgabe[];
   gewstHebesatz: number;
   gewstFreibetrag: number;
+  /** true = Shop-Umsatz von Hand eingetragen; sonst kommt er aus shopify_umsatz_monat */
+  shopManuell?: boolean;
+}
+
+/** Shopify-Umsatz eines Kalendermonats (deutsche Zeit), aus shopify_umsatz_monat. */
+export interface ShopifyUmsatzMonat {
+  monat: string; // YYYY-MM
+  brutto: number;
+  erstattet: number;
+  netto: number; // brutto − erstattet
+  bestellungen: number;
+  kanaele: Record<string, number>;
+  stand: string;
 }
 
 export interface FinanzMonatsdaten {

@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireFeature } from "@/lib/auth";
-import type { FinanzInput, FinanzMitarbeiter, FinanzMonatsdaten } from "@/lib/types";
+import { syncShopifyUmsatz } from "@/lib/shopify-umsatz";
+import type { FinanzInput, FinanzMitarbeiter, FinanzMonatsdaten, ShopifyUmsatzMonat } from "@/lib/types";
 
 const PATH = "/finances/overview";
 
@@ -18,6 +19,53 @@ export async function fetchFinanzJahr(jahr: number): Promise<FinanzMonatsdaten[]
     .order("monat", { ascending: true });
   if (error) throw new Error(error.message);
   return (data ?? []) as FinanzMonatsdaten[];
+}
+
+const toUmsatz = (r: Record<string, unknown>): ShopifyUmsatzMonat => ({
+  monat: String(r.monat),
+  brutto: n(r.brutto),
+  erstattet: n(r.erstattet),
+  netto: n(r.netto),
+  bestellungen: n(r.bestellungen),
+  kanaele: (r.kanaele ?? {}) as Record<string, number>,
+  stand: String(r.stand),
+});
+
+/** Shopify-Umsätze eines Jahres (täglich per Cron /api/cron/shopify-umsatz aktualisiert). */
+export async function fetchShopifyUmsatzJahr(jahr: number): Promise<ShopifyUmsatzMonat[]> {
+  await requireFeature("finances");
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("shopify_umsatz_monat")
+    .select("*")
+    .gte("monat", `${jahr}-01`)
+    .lte("monat", `${jahr}-12`)
+    .order("monat", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map(toUmsatz);
+}
+
+/** Einen Monat sofort neu aus Shopify holen (Button „Aktualisieren"). */
+export async function aktualisiereShopifyUmsatz(
+  jahr: number,
+  monat: number,
+): Promise<{ ok: true; umsatz: ShopifyUmsatzMonat } | { ok: false; error: string }> {
+  await requireFeature("finances");
+  if (!Number.isInteger(jahr) || !Number.isInteger(monat) || monat < 1 || monat > 12) {
+    return { ok: false, error: "Ungültiger Monat" };
+  }
+  const key = `${jahr}-${String(monat).padStart(2, "0")}`;
+  try {
+    const sb = createServiceClient();
+    const res = await syncShopifyUmsatz([key], Date.now() + 50_000, sb);
+    if (!res.erledigt.length) return { ok: false, error: "Shopify hat zu lange gebraucht — bitte nochmal versuchen" };
+    const { data, error } = await sb.from("shopify_umsatz_monat").select("*").eq("monat", key).single();
+    if (error) return { ok: false, error: error.message };
+    revalidatePath(PATH);
+    return { ok: true, umsatz: toUmsatz(data) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /**
@@ -91,6 +139,7 @@ function sanitize(input: FinanzInput): FinanzInput {
       .map((e) => ({ label: s(e?.label), netto: n(e?.netto), ustRate: n(e?.ustRate) })),
     gewstHebesatz: n(input.gewstHebesatz),
     gewstFreibetrag: n(input.gewstFreibetrag),
+    shopManuell: input.shopManuell === true,
   };
 }
 
