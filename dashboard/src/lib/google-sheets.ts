@@ -506,28 +506,51 @@ export async function startSuggestionGeneration(
   supplier: "amanda" | "china",
   budgetGrams: number,
 ): Promise<{ ok: boolean; error?: string }> {
-  const url = process.env.GOOGLE_APPS_SCRIPT_URL;
-  if (!url) return { ok: false, error: "GOOGLE_APPS_SCRIPT_URL nicht konfiguriert" };
+  const res = await postAppsScript({ mode: "start", supplier, budgetG: budgetGrams }, 30000);
+  if ("netError" in res) return { ok: false, error: `Start fehlgeschlagen: ${res.netError}` };
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "start", supplier, budgetG: budgetGrams }),
-      signal: AbortSignal.timeout(30000),
-    });
-    const text = await response.text();
-    try {
-      const data = JSON.parse(text) as { ok?: boolean; started?: boolean; error?: string };
-      if (data.error) return { ok: false, error: data.error };
-      if (data.started) return { ok: true };
-      return { ok: false, error: "Unerwartete Antwort beim Start: " + text.slice(0, 200) };
-    } catch {
-      return { ok: false, error: "Apps Script antwortete unerwartet (kein JSON): " + text.slice(0, 200) };
-    }
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: `Start fehlgeschlagen: ${message}` };
+    const data = JSON.parse(res.text) as { ok?: boolean; started?: boolean; error?: string };
+    // Wiederholversuch nach Netzwerkabbruch: der erste Aufruf kam offenbar doch an und läuft
+    if (data.error && res.attempts > 1 && /läuft bereits/i.test(data.error)) return { ok: true };
+    if (data.error) return { ok: false, error: data.error };
+    if (data.started) return { ok: true };
+    return { ok: false, error: "Unerwartete Antwort beim Start: " + res.text.slice(0, 200) };
+  } catch {
+    return { ok: false, error: "Apps Script antwortete unerwartet (kein JSON): " + res.text.slice(0, 200) };
   }
+}
+
+/**
+ * POST an die Apps-Script-Web-App. Netzwerkfehler ("fetch failed": Verbindungsabbruch,
+ * DNS, Connect-Timeout zwischen Vercel und Google) werden bis zu 3× wiederholt; HTTP-Antworten
+ * nie (die wertet der Aufrufer aus). Fehlertext enthält die eigentliche Ursache (err.cause).
+ */
+async function postAppsScript(
+  body: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<{ text: string; attempts: number } | { netError: string }> {
+  const url = process.env.GOOGLE_APPS_SCRIPT_URL?.trim();
+  if (!url) return { netError: "GOOGLE_APPS_SCRIPT_URL nicht konfiguriert" };
+  let letzter = "";
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      return { text: await response.text(), attempts: attempt };
+    } catch (err: unknown) {
+      const e = err as { name?: string; message?: string; cause?: { code?: string; message?: string } };
+      const ursache = e.cause?.code ?? e.cause?.message;
+      letzter = `${e.message ?? String(err)}${ursache ? ` (${ursache})` : ""}`;
+      console.warn(`[postAppsScript] Versuch ${attempt}/3 (${String(body.mode ?? "run")}): ${letzter}`);
+      if (e.name === "TimeoutError" || e.name === "AbortError") break; // Script hat zu lange gebraucht — nicht erneut feuern
+      if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 1500));
+    }
+  }
+  return { netError: `${letzter} — Verbindung zu Google Apps Script nach mehreren Versuchen nicht möglich` };
 }
 
 export interface GenerationStatus {
@@ -541,24 +564,12 @@ export interface GenerationStatus {
 
 /** Fragt den Status des laufenden Generierungs-Jobs ab (Polling). */
 export async function pollSuggestionGeneration(): Promise<GenerationStatus | { pollError: string }> {
-  const url = process.env.GOOGLE_APPS_SCRIPT_URL;
-  if (!url) return { pollError: "GOOGLE_APPS_SCRIPT_URL nicht konfiguriert" };
+  const res = await postAppsScript({ mode: "status" }, 20000);
+  if ("netError" in res) return { pollError: res.netError };
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "status" }),
-      signal: AbortSignal.timeout(20000),
-    });
-    const text = await response.text();
-    try {
-      return JSON.parse(text) as GenerationStatus;
-    } catch {
-      return { pollError: "Status-Antwort kein JSON: " + text.slice(0, 200) };
-    }
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { pollError: message };
+    return JSON.parse(res.text) as GenerationStatus;
+  } catch {
+    return { pollError: "Status-Antwort kein JSON: " + res.text.slice(0, 200) };
   }
 }
 
