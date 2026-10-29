@@ -4,7 +4,9 @@ import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireFeature } from "@/lib/auth";
-import type { ZBon, ZBonQuelle } from "@/lib/types";
+import { erkenneZBon } from "@/lib/z-bons/erkennung";
+import { heuteBerlin, zbonLage } from "@/lib/z-bons/pruefung";
+import type { ZBon, ZBonErkennung, ZBonFehlend, ZBonQuelle, ZBonStatus } from "@/lib/types";
 
 const PATH = "/finances/z-bons";
 const BUCKET = "z-bons";
@@ -83,22 +85,25 @@ export async function zbonSpeichern(input: {
   betrag: number | null;
   notiz: string;
   dateien: Array<{ pfad: string; name: string; type: string; size: number }>;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+  erkannt?: ZBonErkennung | null;
+  automatisch?: boolean;
+}): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const profile = await requireFeature("finances");
   if (!istDatum(input.datum)) return { ok: false, error: "Ungültiges Datum" };
   if (!QUELLEN.includes(input.quelle)) return { ok: false, error: "Ungültige Kasse" };
   if (!input.dateien.length) return { ok: false, error: "Keine Datei" };
-  if (input.dateien.some((d) => !PFAD_RE.test(d.pfad) || !d.pfad.startsWith(input.datum.slice(0, 7)))) {
-    return { ok: false, error: "Ungültiger Dateipfad" };
-  }
+  // Ordner = Upload-Monat (der Scanner lädt hoch, bevor das Bon-Datum erkannt ist)
+  if (input.dateien.some((d) => !PFAD_RE.test(d.pfad))) return { ok: false, error: "Ungültiger Dateipfad" };
   const betrag = input.betrag == null || !Number.isFinite(input.betrag) ? null : Math.round(input.betrag * 100) / 100;
   const svc = createServiceClient();
 
   // Nur tatsächlich hochgeladene Dateien verknüpfen
-  const ordner = input.datum.slice(0, 7);
-  const { data: vorhanden, error: listErr } = await svc.storage.from(BUCKET).list(ordner, { limit: 1000, sortBy: { column: "created_at", order: "desc" } });
-  if (listErr) return { ok: false, error: listErr.message };
-  const namen = new Set((vorhanden ?? []).map((o) => `${ordner}/${o.name}`));
+  const namen = new Set<string>();
+  for (const ordner of new Set(input.dateien.map((d) => d.pfad.slice(0, 7)))) {
+    const { data: vorhanden, error: listErr } = await svc.storage.from(BUCKET).list(ordner, { limit: 1000, sortBy: { column: "created_at", order: "desc" } });
+    if (listErr) return { ok: false, error: listErr.message };
+    for (const o of vorhanden ?? []) namen.add(`${ordner}/${o.name}`);
+  }
   const fehlt = input.dateien.find((d) => !namen.has(d.pfad));
   if (fehlt) return { ok: false, error: `Upload von ${fehlt.name} nicht angekommen — bitte nochmal versuchen` };
 
@@ -110,6 +115,8 @@ export async function zbonSpeichern(input: {
       betrag,
       notiz: input.notiz.trim().slice(0, 500) || null,
       hochgeladen_von: profile.id,
+      erkannt: input.erkannt ?? null,
+      automatisch: input.automatisch === true,
     })
     .select("id")
     .single();
@@ -129,6 +136,99 @@ export async function zbonSpeichern(input: {
     await svc.from("z_bons").delete().eq("id", bon.id);
     return { ok: false, error: e2.message };
   }
+  revalidatePath(PATH);
+  return { ok: true, id: bon.id };
+}
+
+/** Kasse/Datum/Umsatz vom Bon lesen lassen (Bilder als JPEG-Base64, optional ein PDF). */
+export async function zbonErkennen(input: { bilder: string[]; pdf?: string | null }): Promise<ZBonErkennung> {
+  await requireFeature("finances");
+  const bilder = (Array.isArray(input.bilder) ? input.bilder : []).filter((b) => typeof b === "string").slice(0, 8);
+  const pdf = typeof input.pdf === "string" ? input.pdf : null;
+  const groesse = bilder.reduce((s, b) => s + b.length, 0) + (pdf?.length ?? 0);
+  if (groesse > 4_000_000) {
+    return { ist_z_bon: false, kasse: "unklar", datum: null, umsatz_brutto: null, sicherheit: "niedrig", hinweis: "Datei zu groß für die Erkennung" };
+  }
+  return erkenneZBon({ bilder, pdf }, heuteBerlin());
+}
+
+/** Kasse/Datum/Umsatz eines Z-Bons korrigieren (z.B. nach automatischer Erkennung). */
+export async function zbonAendern(
+  id: string,
+  felder: { quelle: ZBonQuelle; datum: string; betrag: number | null },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireFeature("finances");
+  if (!istDatum(felder.datum) || felder.datum > heuteBerlin()) return { ok: false, error: "Ungültiges Datum" };
+  if (!QUELLEN.includes(felder.quelle)) return { ok: false, error: "Ungültige Kasse" };
+  const betrag = felder.betrag == null || !Number.isFinite(felder.betrag) ? null : Math.round(felder.betrag * 100) / 100;
+  const svc = createServiceClient();
+  const { error } = await svc
+    .from("z_bons")
+    .update({ quelle: felder.quelle, datum: felder.datum, betrag })
+    .eq("id", id)
+    .is("geloescht_am", null);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(PATH);
+  return { ok: true };
+}
+
+/** Erwartete/fehlende Bons eines Monats (bis heute) + letzter Wochencheck. */
+export async function fetchZBonStatus(jahr: number, monat: number): Promise<ZBonStatus> {
+  await requireFeature("finances");
+  const svc = createServiceClient();
+  const von = `${jahr}-${String(monat).padStart(2, "0")}-01`;
+  const ende = new Date(Date.UTC(jahr, monat, 0)).toISOString().slice(0, 10);
+  const heute = heuteBerlin();
+  const bis = ende < heute ? ende : heute;
+  const [lage, pruef] = await Promise.all([
+    von <= bis ? zbonLage(svc, von, bis) : null,
+    svc.from("z_bon_pruefungen").select("von, bis, fehlend, geprueft_am, mail_status").order("geprueft_am", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  const einst = lage?.einst ?? ((await svc.from("z_bon_einstellungen").select("pruef_ab, nexi_wochentage").eq("id", 1).single()).data as ZBonStatus["einstellungen"]);
+  return {
+    fehlend: lage?.fehlend ?? [],
+    erwartet: lage?.erwartet ?? [],
+    posUmsatz: lage?.posUmsatz ?? {},
+    ausnahmen: lage?.ausnahmen ?? [],
+    einstellungen: einst,
+    letztePruefung: pruef.data
+      ? { ...pruef.data, fehlend: (pruef.data.fehlend ?? []) as ZBonFehlend[] }
+      : null,
+  };
+}
+
+/** Tag als „kein Z-Bon nötig" markieren (geschlossen, Kasse nicht benutzt …). */
+export async function zbonAusnahmeSetzen(datum: string, quelle: ZBonQuelle, grund: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const profile = await requireFeature("finances");
+  if (!istDatum(datum) || !QUELLEN.includes(quelle)) return { ok: false, error: "Ungültige Angabe" };
+  if (!grund.trim()) return { ok: false, error: "Bitte einen Grund angeben" };
+  const svc = createServiceClient();
+  const { error } = await svc
+    .from("z_bon_ausnahmen")
+    .upsert({ datum, quelle, grund: grund.trim().slice(0, 200), erstellt_von: profile.id }, { onConflict: "datum,quelle" });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(PATH);
+  return { ok: true };
+}
+
+export async function zbonAusnahmeEntfernen(datum: string, quelle: ZBonQuelle): Promise<void> {
+  await requireFeature("finances");
+  const svc = createServiceClient();
+  await svc.from("z_bon_ausnahmen").delete().eq("datum", datum).eq("quelle", quelle);
+  revalidatePath(PATH);
+}
+
+/** Prüfregeln: ab wann geprüft wird + an welchen Wochentagen (0=So … 6=Sa) Nexi-Bons erwartet werden. */
+export async function zbonEinstellungenSpeichern(pruefAb: string, nexiWochentage: number[]): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireFeature("finances");
+  if (!istDatum(pruefAb)) return { ok: false, error: "Ungültiges Datum" };
+  const tage = Array.from(new Set(nexiWochentage.filter((t) => Number.isInteger(t) && t >= 0 && t <= 6))).sort();
+  const svc = createServiceClient();
+  const { error } = await svc
+    .from("z_bon_einstellungen")
+    .update({ pruef_ab: pruefAb, nexi_wochentage: tage, updated_at: new Date().toISOString() })
+    .eq("id", 1);
+  if (error) return { ok: false, error: error.message };
   revalidatePath(PATH);
   return { ok: true };
 }

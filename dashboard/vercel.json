@@ -35,6 +35,10 @@
     {
       "path": "/api/cron/shopify-umsatz",
       "schedule": "30 4 * * *"
+    },
+    {
+      "path": "/api/cron/z-bon-check",
+      "schedule": "0 6 * * 1"
     }
   ]
 }

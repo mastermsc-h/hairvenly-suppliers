@@ -61,6 +61,14 @@ async function jedeBestellung<N>(
  *   Vergangene Monate bleiben dadurch stabil.
  */
 export async function holeShopifyUmsatzMonat(monat: string, deadlineMs?: number): Promise<ShopifyUmsatzMonat | null> {
+  return (await holeMonat(monat, deadlineMs))?.row ?? null;
+}
+
+/** POS-Umsatz je Kalendertag (deutsche Zeit) — Erwartung + Abgleich für die Z-Bons. */
+type PosTage = Record<string, { umsatz: number; bestellungen: number }>;
+const berlinTag = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin" });
+
+async function holeMonat(monat: string, deadlineMs?: number): Promise<{ row: ShopifyUmsatzMonat; posTage: PosTage } | null> {
   const von = `${monat}-01T00:00:00${berlinOffset(`${monat}-01`)}`;
   const bisTag = `${naechsterMonat(monat)}-01`;
   const bis = `${bisTag}T00:00:00${berlinOffset(bisTag)}`;
@@ -68,13 +76,20 @@ export async function holeShopifyUmsatzMonat(monat: string, deadlineMs?: number)
 
   let brutto = 0, erstattet = 0, bestellungen = 0;
   const kanaele: Record<string, number> = {};
-  type Bestellung = { cancelledAt: string | null; test: boolean; sourceName: string | null; totalPriceSet: Geld; totalRefundedSet: Geld };
+  const posTage: PosTage = {};
+  type Bestellung = { createdAt: string; cancelledAt: string | null; test: boolean; sourceName: string | null; totalPriceSet: Geld; totalRefundedSet: Geld };
   const ok1 = await jedeBestellung<Bestellung>(
-    "cancelledAt test sourceName totalPriceSet { shopMoney { amount } } totalRefundedSet { shopMoney { amount } }",
+    "createdAt cancelledAt test sourceName totalPriceSet { shopMoney { amount } } totalRefundedSet { shopMoney { amount } }",
     `created_at:>='${von}' created_at:<'${bis}'`,
     deadlineMs,
     (n) => {
       if (n.test) return;
+      if (n.sourceName === "pos" && !n.cancelledAt) {
+        const tag = berlinTag.format(new Date(n.createdAt));
+        const t = (posTage[tag] ??= { umsatz: 0, bestellungen: 0 });
+        t.umsatz = Math.round((t.umsatz + betrag(n.totalPriceSet)) * 100) / 100;
+        t.bestellungen++;
+      }
       const b = n.cancelledAt ? betrag(n.totalRefundedSet) : betrag(n.totalPriceSet);
       if (!n.cancelledAt) bestellungen++;
       if (b === 0) return;
@@ -102,7 +117,10 @@ export async function holeShopifyUmsatzMonat(monat: string, deadlineMs?: number)
   if (!ok2) return null;
 
   const r2 = (n: number) => Math.round(n * 100) / 100;
-  return { monat, brutto: r2(brutto), erstattet: r2(erstattet), netto: r2(brutto - erstattet), bestellungen, kanaele, stand: new Date().toISOString() };
+  return {
+    row: { monat, brutto: r2(brutto), erstattet: r2(erstattet), netto: r2(brutto - erstattet), bestellungen, kanaele, stand: new Date().toISOString() },
+    posTage,
+  };
 }
 
 /**
@@ -117,8 +135,9 @@ export async function syncShopifyUmsatz(
   const erledigt: string[] = [];
   for (const monat of monate) {
     if (Date.now() > deadlineMs) break;
-    const row = await holeShopifyUmsatzMonat(monat, deadlineMs);
-    if (!row) break;
+    const res = await holeMonat(monat, deadlineMs);
+    if (!res) break;
+    const { row, posTage } = res;
     const { error } = await sb.from("shopify_umsatz_monat").upsert(row, { onConflict: "monat" });
     if (error) throw new Error(error.message);
     const { error: e2 } = await sb.from("shopify_monthly_revenue").upsert(
@@ -126,6 +145,14 @@ export async function syncShopifyUmsatz(
       { onConflict: "month" },
     );
     if (e2) throw new Error(e2.message);
+    // POS-Tage des Monats ersetzen (ein stornierter Tag soll wieder verschwinden)
+    const { error: e3 } = await sb.from("shopify_pos_tage").delete().gte("datum", `${monat}-01`).lt("datum", `${naechsterMonat(monat)}-01`);
+    if (e3) throw new Error(e3.message);
+    const tage = Object.entries(posTage).map(([datum, t]) => ({ datum, umsatz: t.umsatz, bestellungen: t.bestellungen, stand: row.stand }));
+    if (tage.length) {
+      const { error: e4 } = await sb.from("shopify_pos_tage").insert(tage);
+      if (e4) throw new Error(e4.message);
+    }
     erledigt.push(monat);
   }
   return { erledigt, offen: monate.filter((m) => !erledigt.includes(m)) };

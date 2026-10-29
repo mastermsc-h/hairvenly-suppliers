@@ -1,17 +1,36 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { Camera, ChevronLeft, ChevronRight, Download, ExternalLink, FileText, Loader2, Paperclip, Receipt, Trash2, X } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import Link from "next/link";
 import {
+  AlertTriangle,
+  Camera,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  ExternalLink,
+  FileText,
+  Loader2,
+  Paperclip,
+  Receipt,
+  Settings,
+  Smartphone,
+  Trash2,
+  X,
+} from "lucide-react";
+import {
+  fetchZBonStatus,
   fetchZBons,
+  zbonAusnahmeEntfernen,
+  zbonAusnahmeSetzen,
   zbonDateiUrl,
+  zbonEinstellungenSpeichern,
   zbonLoeschen,
   zbonSpeichern,
-  zbonUploadVerwerfen,
-  zbonUploadZiele,
 } from "@/lib/actions/z-bons";
-import type { ZBon, ZBonQuelle } from "@/lib/types";
+import { ladeHoch, mimeVon, verkleinere } from "@/lib/z-bons/browser";
+import type { ZBon, ZBonQuelle, ZBonStatus } from "@/lib/types";
 
 const QUELLEN: Record<ZBonQuelle, { name: string; cls: string; aktiv: string }> = {
   shopify_pos: { name: "Shopify POS", cls: "bg-emerald-50 text-emerald-800 border-emerald-200", aktiv: "bg-emerald-600 text-white border-emerald-600" },
@@ -25,53 +44,27 @@ const WT = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 const iso = (j: number, m: number, t: number) => `${j}-${String(m).padStart(2, "0")}-${String(t).padStart(2, "0")}`;
 const deDatum = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}`;
 
-// Manche Browser liefern HEIC ohne MIME-Typ
-function mimeVon(f: File): string {
-  if (f.type) return f.type;
-  const ext = f.name.split(".").pop()?.toLowerCase();
-  return ext === "heic" ? "image/heic" : ext === "heif" ? "image/heif" : ext === "pdf" ? "application/pdf" : "";
-}
-
-/** Fotos auf max. 3200 px (lange Kante) als JPEG — Bon-Text bleibt scharf, Upload bleibt klein. */
-async function verkleinere(file: File): Promise<File> {
-  const type = mimeVon(file);
-  if (!type.startsWith("image/")) return file;
-  try {
-    const bmp = await createImageBitmap(file);
-    const f = Math.min(1, 3200 / Math.max(bmp.width, bmp.height));
-    if (f === 1 && type === "image/jpeg" && file.size < 2_000_000) {
-      bmp.close();
-      return file;
-    }
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bmp.width * f);
-    canvas.height = Math.round(bmp.height * f);
-    canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-    bmp.close();
-    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", 0.85));
-    if (!blob || blob.size >= file.size) return file;
-    return new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" });
-  } catch {
-    return file; // nicht dekodierbar (z.B. HEIC in Chrome) → Original hochladen
-  }
-}
-
 type Auswahl = { id: string; file: File; vorschau: string | null };
 
 export default function ZBons({
   initialJahr,
   initialMonat,
   initialBons,
+  initialStatus,
   heute,
 }: {
   initialJahr: number;
   initialMonat: number;
   initialBons: ZBon[];
+  initialStatus: ZBonStatus;
   heute: string;
 }) {
   const [jahr, setJahr] = useState(initialJahr);
   const [monat, setMonat] = useState(initialMonat);
   const [bons, setBons] = useState<ZBon[]>(initialBons);
+  const [status, setStatusDaten] = useState<ZBonStatus>(initialStatus);
+  const [ausnahmeFuer, setAusnahmeFuer] = useState<{ datum: string; quelle: ZBonQuelle } | null>(null);
+  const [ausnahmeGrund, setAusnahmeGrund] = useState("geschlossen");
   const [laedt, startLaden] = useTransition();
   const [offen, setOffen] = useState<ZBon | null>(null);
 
@@ -81,7 +74,7 @@ export default function ZBons({
   const [betrag, setBetrag] = useState("");
   const [notiz, setNotiz] = useState("");
   const [auswahl, setAuswahl] = useState<Auswahl[]>([]);
-  const [status, setStatus] = useState<string | null>(null);
+  const [schritt, setSchritt] = useState<string | null>(null);
   const [fehler, setFehler] = useState<string | null>(null);
   const [erfolg, setErfolg] = useState<string | null>(null);
   const kameraRef = useRef<HTMLInputElement>(null);
@@ -93,7 +86,11 @@ export default function ZBons({
   function laden(j: number, m: number) {
     setJahr(j);
     setMonat(m);
-    startLaden(async () => setBons(await fetchZBons(j, m)));
+    startLaden(async () => {
+      const [b, st] = await Promise.all([fetchZBons(j, m), fetchZBonStatus(j, m)]);
+      setBons(b);
+      setStatusDaten(st);
+    });
   }
   function blaettern(d: number) {
     const m0 = jahr * 12 + (monat - 1) + d;
@@ -124,34 +121,17 @@ export default function ZBons({
   const betragUngueltig = betragZahl !== null && !Number.isFinite(betragZahl);
 
   async function speichern() {
-    if (!auswahl.length || status) return;
+    if (!auswahl.length || schritt) return;
     if (betragUngueltig) return setFehler("Betrag ist keine Zahl");
     if (datum > heute) return setFehler("Datum liegt in der Zukunft");
     setFehler(null);
     setErfolg(null);
-    const hochgeladen: string[] = [];
     try {
-      setStatus("Fotos werden vorbereitet …");
+      setSchritt("Fotos werden vorbereitet …");
       const files = await Promise.all(auswahl.map((a) => verkleinere(a.file)));
-      const meta = files.map((f) => ({ name: f.name, type: mimeVon(f), size: f.size }));
-      const ziele = await zbonUploadZiele(datum, meta);
-      if (!ziele.ok) throw new Error(ziele.error);
-      const sb = createClient();
-      for (let i = 0; i < files.length; i++) {
-        setStatus(`Hochladen ${i + 1} von ${files.length} …`);
-        const z = ziele.ziele[i];
-        const { error } = await sb.storage.from("z-bons").uploadToSignedUrl(z.pfad, z.token, files[i], { contentType: meta[i].type });
-        if (error) throw new Error(`${meta[i].name}: ${error.message}`);
-        hochgeladen.push(z.pfad);
-      }
-      setStatus("Speichern …");
-      const res = await zbonSpeichern({
-        datum,
-        quelle,
-        betrag: betragZahl,
-        notiz,
-        dateien: meta.map((m, i) => ({ ...m, pfad: ziele.ziele[i].pfad })),
-      });
+      const dateien = await ladeHoch(datum, files, (i, n) => setSchritt(`Hochladen ${i} von ${n} …`));
+      setSchritt("Speichern …");
+      const res = await zbonSpeichern({ datum, quelle, betrag: betragZahl, notiz, dateien });
       if (!res.ok) throw new Error(res.error);
       setErfolg(`${QUELLEN[quelle].name} vom ${deDatum(datum)} gespeichert`);
       auswahl.forEach((a) => a.vorschau && URL.revokeObjectURL(a.vorschau));
@@ -160,10 +140,9 @@ export default function ZBons({
       setNotiz("");
       laden(Number(datum.slice(0, 4)), Number(datum.slice(5, 7)));
     } catch (e) {
-      if (hochgeladen.length) await zbonUploadVerwerfen(hochgeladen).catch(() => {});
       setFehler(e instanceof Error ? e.message : String(e));
     } finally {
-      setStatus(null);
+      setSchritt(null);
     }
   }
 
@@ -176,6 +155,17 @@ export default function ZBons({
   const summe = (q: ZBonQuelle) => bons.filter((b) => b.quelle === q).reduce((s, b) => s + (b.betrag ?? 0), 0);
   const anzahl = (q: ZBonQuelle) => new Set(bons.filter((b) => b.quelle === q).map((b) => b.datum)).size;
   const istAktuellerMonat = iso(jahr, monat, 1).slice(0, 7) === heute.slice(0, 7);
+  const erwartet = new Set(status.erwartet.map((e) => `${e.datum}|${e.quelle}`));
+  const ausnahme = new Map(status.ausnahmen.map((a) => [`${a.datum}|${a.quelle}`, a.grund]));
+  const fehltImMonat = status.fehlend.filter((f) => f.datum < heute); // heute kommt der Bon erst abends
+
+  async function ausnahmeSpeichern() {
+    if (!ausnahmeFuer) return;
+    const res = await zbonAusnahmeSetzen(ausnahmeFuer.datum, ausnahmeFuer.quelle, ausnahmeGrund);
+    if (!res.ok) return setFehler(res.error);
+    setAusnahmeFuer(null);
+    laden(jahr, monat);
+  }
 
   function nachtragen(d: string, q: ZBonQuelle) {
     setDatum(d);
@@ -192,6 +182,19 @@ export default function ZBons({
           Tagesabschlüsse von Shopify POS und Nexi (Treatwell) — als Foto, PDF oder Bild ablegen.
         </p>
       </div>
+
+      <Link
+        href="/finances/z-bons/scan"
+        className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-900 hover:bg-emerald-100"
+      >
+        <Smartphone size={28} className="shrink-0" />
+        <span className="text-sm">
+          <b>Z-Bon-Scanner fürs iPhone/iPad:</b> Bon fotografieren — Kasse, Datum und Umsatz werden automatisch erkannt und
+          gespeichert. Auf dem iPhone öffnen und über <i>Teilen → Zum Home-Bildschirm</i> als App ablegen.
+        </span>
+      </Link>
+
+      <WochencheckBanner status={status} fehltImMonat={fehltImMonat.length} istAktuellerMonat={istAktuellerMonat} />
 
       {/* Hochladen */}
       <div ref={formRef} className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm space-y-4 scroll-mt-4">
@@ -329,11 +332,11 @@ export default function ZBons({
         <button
           type="button"
           onClick={speichern}
-          disabled={!auswahl.length || !!status}
+          disabled={!auswahl.length || !!schritt}
           className="w-full md:w-auto flex items-center justify-center gap-2 bg-neutral-900 text-white font-medium rounded-lg px-5 py-2.5 text-sm disabled:opacity-40"
         >
-          {status ? <Loader2 size={16} className="animate-spin" /> : null}
-          {status ?? (auswahl.length ? `Z-Bon speichern (${auswahl.length} ${auswahl.length === 1 ? "Datei" : "Dateien"})` : "Erst Foto oder Datei hinzufügen")}
+          {schritt ? <Loader2 size={16} className="animate-spin" /> : null}
+          {schritt ?? (auswahl.length ? `Z-Bon speichern (${auswahl.length} ${auswahl.length === 1 ? "Datei" : "Dateien"})` : "Erst Foto oder Datei hinzufügen")}
         </button>
       </div>
 
@@ -405,10 +408,39 @@ export default function ZBons({
                                 </button>
                               ))}
                             </div>
+                          ) : ausnahme.has(`${d}|${q}`) ? (
+                            <button
+                              onClick={async () => {
+                                await zbonAusnahmeEntfernen(d, q);
+                                laden(jahr, monat);
+                              }}
+                              title="Ausnahme aufheben"
+                              className="text-xs text-neutral-400 hover:text-neutral-700"
+                            >
+                              kein Bon · {ausnahme.get(`${d}|${q}`)}
+                            </button>
+                          ) : erwartet.has(`${d}|${q}`) && d < heute ? (
+                            <span className="flex flex-wrap items-center gap-x-2 text-xs">
+                              <button onClick={() => nachtragen(d, q)} className="font-medium text-red-600 hover:underline">
+                                fehlt · nachtragen
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setAusnahmeFuer({ datum: d, quelle: q });
+                                  setAusnahmeGrund("geschlossen");
+                                }}
+                                className="text-neutral-400 hover:text-neutral-700"
+                              >
+                                kein Bon
+                              </button>
+                            </span>
                           ) : (
                             <button onClick={() => nachtragen(d, q)} className="text-xs text-neutral-300 hover:text-neutral-700">
                               – nachtragen
                             </button>
+                          )}
+                          {q === "shopify_pos" && status.posUmsatz[d] != null && (
+                            <PosAbgleich shopify={status.posUmsatz[d]} bons={liste} />
                           )}
                         </td>
                       );
@@ -420,6 +452,45 @@ export default function ZBons({
           </table>
         )}
       </div>
+
+      {ausnahmeFuer && (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50" onClick={() => setAusnahmeFuer(null)}>
+          <div className="bg-white w-full md:max-w-sm rounded-t-2xl md:rounded-2xl p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="font-semibold text-neutral-900">
+              Kein Z-Bon: {QUELLEN[ausnahmeFuer.quelle].name}, {deDatum(ausnahmeFuer.datum)}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {["geschlossen", "Feiertag", "Kasse nicht benutzt", "Urlaub"].map((g) => (
+                <button
+                  key={g}
+                  onClick={() => setAusnahmeGrund(g)}
+                  className={`rounded-full border px-3 py-1 text-xs ${ausnahmeGrund === g ? "bg-neutral-900 text-white border-neutral-900" : "border-neutral-300"}`}
+                >
+                  {g}
+                </button>
+              ))}
+            </div>
+            <input
+              value={ausnahmeGrund}
+              onChange={(e) => setAusnahmeGrund(e.target.value)}
+              className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+            />
+            <div className="flex gap-2">
+              <button onClick={ausnahmeSpeichern} disabled={!ausnahmeGrund.trim()} className="flex-1 rounded-lg bg-neutral-900 py-2 text-sm font-medium text-white disabled:opacity-40">
+                Speichern
+              </button>
+              <button onClick={() => setAusnahmeFuer(null)} className="rounded-lg border border-neutral-300 px-4 py-2 text-sm">
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <PruefEinstellungen
+        einst={status.einstellungen}
+        onGespeichert={() => laden(jahr, monat)}
+      />
 
       {offen && (
         <BonDetail
@@ -460,7 +531,7 @@ function BonDetail({ bon, onClose, onGeloescht }: { bon: ZBon; onClose: () => vo
 
   async function herunterladen(pfad: string) {
     const url = await zbonDateiUrl(pfad, true);
-    if (url) window.location.href = url;
+    if (url) window.location.assign(url);
   }
 
   async function bestaetigeLoeschen() {
@@ -575,6 +646,112 @@ function BonDetail({ bon, onClose, onGeloescht }: { bon: ZBon; onClose: () => vo
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function WochencheckBanner({ status, fehltImMonat, istAktuellerMonat }: { status: ZBonStatus; fehltImMonat: number; istAktuellerMonat: boolean }) {
+  const p = status.letztePruefung;
+  const datum = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}.`;
+  return (
+    <div className="space-y-2">
+      {p && (
+        <div
+          className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-sm ${p.fehlend.length ? "border-red-200 bg-red-50 text-red-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}
+        >
+          {p.fehlend.length ? <AlertTriangle size={16} className="mt-0.5 shrink-0" /> : <CheckCircle2 size={16} className="mt-0.5 shrink-0" />}
+          <span>
+            <b>Wochencheck {datum(p.von)}–{datum(p.bis)}:</b>{" "}
+            {p.fehlend.length
+              ? `${p.fehlend.length} Z-Bons fehlten (${p.fehlend.map((f) => `${datum(f.datum)} ${QUELLEN[f.quelle].name}`).join(", ")})`
+              : "alle Z-Bons da"}
+            <span className="opacity-70"> · geprüft {new Date(p.geprueft_am).toLocaleDateString("de-DE")}{p.mail_status ? ` · Mail: ${p.mail_status}` : ""}</span>
+          </span>
+        </div>
+      )}
+      {fehltImMonat > 0 && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <span>
+            {istAktuellerMonat ? "Diesen Monat" : "In diesem Monat"} fehlen aktuell <b>{fehltImMonat}</b> Z-Bons — unten rot markiert.
+          </span>
+        </div>
+      )}
+      {!p && (
+        <p className="text-xs text-neutral-500">Der Wochencheck läuft jeden Montag früh und meldet fehlende Z-Bons der Vorwoche per Mail.</p>
+      )}
+    </div>
+  );
+}
+
+// Shopify-POS-Umsatz des Tages laut Shopify neben dem Bon-Betrag
+function PosAbgleich({ shopify, bons }: { shopify: number; bons: ZBon[] }) {
+  const bonSumme = bons.reduce((s, b) => s + (b.betrag ?? 0), 0);
+  const mitBetrag = bons.some((b) => b.betrag != null);
+  const abweichung = mitBetrag && Math.abs(bonSumme - shopify) > 1;
+  return (
+    <div className={`mt-0.5 text-[11px] tabular-nums ${abweichung ? "text-amber-700 font-medium" : "text-neutral-400"}`}>
+      Shopify: {eur(shopify)}
+      {abweichung && ` · Abweichung ${eur(bonSumme - shopify)}`}
+    </div>
+  );
+}
+
+function PruefEinstellungen({ einst, onGespeichert }: { einst: ZBonStatus["einstellungen"]; onGespeichert: () => void }) {
+  const [offen, setOffen] = useState(false);
+  const [ab, setAb] = useState(einst.pruef_ab);
+  const [tage, setTage] = useState<number[]>(einst.nexi_wochentage);
+  const [busy, setBusy] = useState(false);
+  const [fehler, setFehler] = useState<string | null>(null);
+  const reihenfolge = [1, 2, 3, 4, 5, 6, 0];
+  return (
+    <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
+      <button onClick={() => setOffen((o) => !o)} className="flex items-center gap-2 text-sm font-medium text-neutral-700">
+        <Settings size={16} /> Prüfregeln für den Wochencheck
+      </button>
+      {offen && (
+        <div className="mt-4 space-y-4 text-sm">
+          <p className="text-neutral-600">
+            <b>Shopify POS</b> wird an jedem Tag erwartet, an dem Shopify Kassenverkäufe zeigt. <b>Nexi (Treatwell)</b> wird an den
+            gewählten Öffnungstagen erwartet, außer an Feiertagen in Bremen. Einzelne Tage lassen sich in der Tabelle als „kein Bon“
+            markieren.
+          </p>
+          <div>
+            <div className="text-xs font-medium text-neutral-600 uppercase tracking-wide mb-1.5">Salon-Öffnungstage (Nexi)</div>
+            <div className="flex flex-wrap gap-1.5">
+              {reihenfolge.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTage((x) => (x.includes(t) ? x.filter((y) => y !== t) : [...x, t]))}
+                  className={`w-11 rounded-lg border py-1.5 text-sm ${tage.includes(t) ? "bg-neutral-900 text-white border-neutral-900" : "border-neutral-300 text-neutral-600"}`}
+                >
+                  {WT[t]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="block">
+            <span className="block text-xs font-medium text-neutral-600 uppercase tracking-wide mb-1.5">Prüfen ab</span>
+            <input type="date" value={ab} onChange={(e) => setAb(e.target.value)} className="rounded-lg border border-neutral-300 px-3 py-2" />
+          </label>
+          {fehler && <div className="text-xs text-red-700">{fehler}</div>}
+          <button
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              setFehler(null);
+              const res = await zbonEinstellungenSpeichern(ab, tage);
+              setBusy(false);
+              if (!res.ok) return setFehler(res.error);
+              setOffen(false);
+              onGespeichert();
+            }}
+            className="rounded-lg bg-neutral-900 px-4 py-2 font-medium text-white disabled:opacity-40"
+          >
+            {busy ? "…" : "Speichern"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

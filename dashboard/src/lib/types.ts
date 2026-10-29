@@ -765,3 +765,27 @@ export interface ZBon {
   created_at: string;
   dateien: ZBonDatei[];
 }
+
+export interface ZBonFehlend {
+  datum: string;
+  quelle: ZBonQuelle;
+}
+
+/** Was die KI auf dem Bon gelesen hat. */
+export interface ZBonErkennung {
+  ist_z_bon: boolean;
+  kasse: ZBonQuelle | "unklar";
+  datum: string | null;
+  umsatz_brutto: number | null;
+  sicherheit: "hoch" | "mittel" | "niedrig";
+  hinweis: string;
+}
+
+export interface ZBonStatus {
+  fehlend: ZBonFehlend[];
+  erwartet: ZBonFehlend[];
+  posUmsatz: Record<string, number>;
+  ausnahmen: Array<{ datum: string; quelle: ZBonQuelle; grund: string }>;
+  einstellungen: { pruef_ab: string; nexi_wochentage: number[] };
+  letztePruefung: { von: string; bis: string; fehlend: ZBonFehlend[]; geprueft_am: string; mail_status: string | null } | null;
+}
