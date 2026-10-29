@@ -1731,7 +1731,10 @@ function ShopifyHinweis({
         <span>
           {aktiv ? "Automatisch aus Shopify" : "Von Hand eingetragen — Shopify meldet"}:{" "}
           <b className="tabular-nums">{e(umsatz.brutto)}</b> Bestellungen − <b className="tabular-nums">{e(umsatz.erstattet)}</b>{" "}
-          Erstattungen = <b className="tabular-nums">{e(umsatz.netto)}</b> · {umsatz.bestellungen.toLocaleString("de-DE")} Bestellungen ·
+          <span title="Nach Erstattungsdatum gebucht, auch auf ältere Bestellungen — wie in Shopify-Analytics und für die USt (§ 17 UStG)">
+            im Monat gebuchte Erstattungen
+          </span>{" "}
+          = <b className="tabular-nums">{e(umsatz.netto)}</b> · {umsatz.bestellungen.toLocaleString("de-DE")} Bestellungen ·
           Stand {stand}
           {laufend && " · Monat läuft noch"}
         </span>
