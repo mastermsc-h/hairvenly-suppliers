@@ -531,6 +531,12 @@ async function postAppsScript(
 ): Promise<{ text: string; attempts: number } | { netError: string }> {
   const url = process.env.GOOGLE_APPS_SCRIPT_URL?.trim();
   if (!url) return { netError: "GOOGLE_APPS_SCRIPT_URL nicht konfiguriert" };
+  // Tippfehler in der Vercel-Variable (z.B. "htps://") würde sonst nur als "fetch failed (unknown scheme)" auftauchen
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url)) {
+    return {
+      netError: `GOOGLE_APPS_SCRIPT_URL ist ungültig (beginnt mit "${url.slice(0, 30)}…"). Erwartet: https://script.google.com/macros/s/<ID>/exec — in Vercel → Settings → Environment Variables korrigieren und neu deployen`,
+    };
+  }
   let letzter = "";
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
