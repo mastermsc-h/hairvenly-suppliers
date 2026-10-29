@@ -6,6 +6,7 @@ import { Search, Package2, ArrowRight, RefreshCw, ArrowDown, ArrowUp, Printer, X
 import { t, type Locale } from "@/lib/i18n";
 import type { PackOrderWithStatus } from "./page";
 import { extractOrderNumberFromScan } from "./scan-order";
+import { isAccessoryCode } from "./accessory-code";
 import OrderNoteCell, { type OrderNote } from "./order-note-cell";
 import { useRouter } from "next/navigation";
 import { resetSlipPrint, resetSlipPrintBulk } from "@/lib/actions/pack";
@@ -108,7 +109,7 @@ export default function PackList({
   }
   // Sichtbares Feedback unter dem Suchfeld: Was kam an, was wurde daraus?
   // Hilft im Betrieb sofort zu sehen, ob der Scanner verwürfelt tippt.
-  const [scanInfo, setScanInfo] = useState<{ ok: boolean; text: string } | null>(null);
+  const [scanInfo, setScanInfo] = useState<{ ok: boolean; text: string; hint?: boolean } | null>(null);
   function openOrder(num: string) {
     setQuery("");
     setScanInfo({ ok: true, text: `#${num}` });
@@ -133,6 +134,14 @@ export default function PackList({
     // Millisekunden und schickt sofort Enter — der React-State hinkt dann noch
     // hinterher und enthielte z.B. "…pack-2744" → falsche/404-Bestellung.
     const raw = e.currentTarget.value;
+    // Zubehör-Code gehört IN eine Bestellung — hier würde er sonst als
+    // Bestellnummer 9900000000 geöffnet (404).
+    if (isAccessoryCode(raw)) {
+      e.preventDefault();
+      setQuery("");
+      setScanInfo({ ok: false, hint: true, text: "Zubehör-Code erkannt — bitte zuerst den Lieferschein scannen, dann in der Bestellung den Zubehör-Code." });
+      return;
+    }
     const n = resolveScan(raw);
     if (n) {
       e.preventDefault();
@@ -163,6 +172,10 @@ export default function PackList({
     }
     function finish(raw: string) {
       scanBufRef.current = "";
+      if (isAccessoryCode(raw)) {
+        setScanInfo({ ok: false, hint: true, text: "Zubehör-Code erkannt — bitte zuerst den Lieferschein scannen, dann in der Bestellung den Zubehör-Code." });
+        return;
+      }
       const n = extractOrderNumberFromScan(raw);
       if (n) {
         router.push(`/pack/${n}`);
@@ -220,6 +233,8 @@ export default function PackList({
             <div className={`mt-1 text-xs ${scanInfo.ok ? "text-emerald-700" : "text-red-700"}`}>
               {scanInfo.ok
                 ? `Lieferschein erkannt → öffne ${scanInfo.text} …`
+                : scanInfo.hint
+                ? scanInfo.text
                 : `Scan nicht erkannt: „${scanInfo.text}" — bitte so an den Admin melden.`}
             </div>
           )}

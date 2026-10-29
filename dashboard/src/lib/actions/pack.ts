@@ -16,6 +16,7 @@ import {
   type ShippingAddressUpdate,
 } from "@/lib/shopify";
 import { revalidatePath } from "next/cache";
+import { classifyItem } from "@/lib/item-classify";
 
 export async function scanProductByBarcode(
   barcode: string,
@@ -56,18 +57,16 @@ export type PhotoSkipReason =
  */
 function detectAutoSkipReason(items: PackOrderLineItem[]): PhotoSkipReason | null {
   if (items.length === 0) return null;
-  const accessoriesSet = new Set<string>(SKIP_PHOTO_COLLECTIONS.accessories);
-  const careSet = new Set<string>(SKIP_PHOTO_COLLECTIONS.care_products);
-  const digitalSet = new Set<string>(SKIP_PHOTO_COLLECTIONS.digital_goods);
-
+  // Zentrale Klassifikation (Collections + Titel) — die früheren Zubehör-
+  // Collections existieren in Shopify nicht mehr, siehe item-classify.ts.
   let allAccessories = true;
   let allCare = true;
   let allDigital = true;
   for (const li of items) {
-    const handles = li.collectionHandles ?? [];
-    const isAcc = handles.some((h) => accessoriesSet.has(h));
-    const isCare = handles.some((h) => careSet.has(h));
-    const isDigital = handles.some((h) => digitalSet.has(h));
+    const kind = classifyItem({ title: li.title, collectionHandles: li.collectionHandles });
+    const isAcc = kind === "accessory";
+    const isCare = kind === "care";
+    const isDigital = kind === "digital";
     if (!isAcc) allAccessories = false;
     if (!isCare) allCare = false;
     if (!isDigital) allDigital = false;
@@ -122,15 +121,10 @@ interface ExpectedItem {
   isExtension?: boolean;
 }
 
-const ALL_SKIP_HANDLES = new Set<string>([
-  ...SKIP_PHOTO_COLLECTIONS.accessories,
-  ...SKIP_PHOTO_COLLECTIONS.care_products,
-  ...SKIP_PHOTO_COLLECTIONS.digital_goods,
-]);
-
-function isExtensionItem(handles: string[] | undefined): boolean {
-  if (!handles || handles.length === 0) return true; // unbekannt → default auf Extension
-  return !handles.some((h) => ALL_SKIP_HANDLES.has(h));
+// Collections + Titel (zentrale Regel). Früher NUR Collections → seit die
+// Zubehör-Collections gelöscht wurden, galt ~70 % des Zubehörs als Extension.
+function isExtensionItem(title: string, handles: string[] | undefined): boolean {
+  return classifyItem({ title, collectionHandles: handles }) === "extension";
 }
 
 function toExpected(items: PackOrderLineItem[]): ExpectedItem[] {
@@ -148,7 +142,7 @@ function toExpected(items: PackOrderLineItem[]): ExpectedItem[] {
       variantTitle: li.variantTitle,
       quantity: li.quantity,
       imageUrl: li.imageUrl,
-      isExtension: isExtensionItem(li.collectionHandles),
+      isExtension: isExtensionItem(li.title, li.collectionHandles),
     };
     if (li.barcode) {
       const existing = byBarcode.get(li.barcode);

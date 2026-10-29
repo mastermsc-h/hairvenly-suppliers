@@ -2,23 +2,11 @@ import { requireProfile, hasFeature } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { fetchOrdersForPrintAll } from "@/lib/shopify";
 import { createClient } from "@/lib/supabase/server";
+import { isExtensionTitle } from "@/lib/item-classify";
 import PrintAllClient from "./print-all-client";
 
 export const dynamic = "force-dynamic";
 
-const SKIP_HANDLES = new Set([
-  "accessoires-werkzeuge",
-  "extensions-zubehoer",
-  "blessed-haarpflege",
-  "haarpflegeprodukte",
-  "sonstige-haarpflege",
-  "extensions-schulungen",
-]);
-
-function isExtensionItem(handles: string[] | undefined): boolean {
-  if (!handles || handles.length === 0) return true;
-  return !handles.some((h) => SKIP_HANDLES.has(h));
-}
 
 export default async function PrintAllPage({
   searchParams,
@@ -67,7 +55,7 @@ export default async function PrintAllPage({
       title: li.title,
       variantTitle: li.variantTitle,
       quantity: li.quantity,
-      isExtension: isExtensionItem(li.collectionHandles),
+      isExtension: isExtensionTitle(li.title, li.collectionHandles),
       unitPrice: li.unitPrice,
       lineTotal: li.lineTotal,
     })),

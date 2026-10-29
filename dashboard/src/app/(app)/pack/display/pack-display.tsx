@@ -7,6 +7,7 @@ import Link from "next/link";
 import QRCode from "qrcode";
 import CelebrationOverlay from "../celebration-overlay";
 import { completePackSession } from "@/lib/actions/pack";
+import { isExtensionTitle } from "@/lib/item-classify";
 import { CheckCircle2, ScanLine, Send, Package2, Camera, Pencil, Smartphone } from "lucide-react";
 
 interface ExpectedItem {
@@ -531,7 +532,7 @@ export default function PackDisplay({
                     )}
                     <div className="flex-1 min-w-0">
                       {/* Methode/Länge/Herkunft/Farbe-Badges nur bei Haar-Extensions */}
-                      {it.isExtension !== false && (
+                      {it.isExtension !== false && isExtensionTitle(it.title) && (
                         <div className="flex flex-wrap gap-2 mb-2">
                           {a.method.label && (
                             <span className={`inline-block ${a.method.cls} text-white text-lg font-bold px-3 py-1 rounded tracking-widest`}>

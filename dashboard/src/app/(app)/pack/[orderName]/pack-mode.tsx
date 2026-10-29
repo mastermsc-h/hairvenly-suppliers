@@ -33,6 +33,7 @@ import CameraScanner from "./camera-scanner";
 import OrderQrScanner from "../order-qr-scanner";
 import { isAccessoryCode } from "../accessory-code";
 import { extractOrderNumberFromScan } from "../scan-order";
+import { isExtensionTitle } from "@/lib/item-classify";
 
 interface ExpectedItem {
   variantId: string | null;
@@ -46,6 +47,13 @@ interface ExpectedItem {
 }
 
 type FlashState = { kind: "match" | "mismatch" | "overflow" | null; message?: string };
+
+// Extension? Gespeichertes Flag UND Titel-Prüfung: Sessions, die vor dem
+// Klassifikations-Fix (29.10.2026) angelegt wurden, tragen bei Zubehör noch
+// isExtension=true — der Titel korrigiert das sofort, ohne Neuanlage.
+function isExt(it: { isExtension?: boolean; title: string }): boolean {
+  return it.isExtension !== false && isExtensionTitle(it.title);
+}
 
 const PHOTO_TYPES = ["products_invoice"] as const;
 type PhotoType = (typeof PHOTO_TYPES)[number];
@@ -557,13 +565,24 @@ export default function PackMode({
       // echten Barcode). So geht Zubehör/Pflege/Schulungen ohne Tippen weiter.
       if (isAccessoryCode(trimmed)) {
         const accIdx = expectedItems.findIndex((it, i) => {
-          if (it.isExtension !== false) return false; // nur echtes Zubehör
+          if (isExt(it)) return false; // nur echtes Zubehör
           const key = it.barcode || `manual:${i}`;
           return (counts[key] ?? 0) < it.quantity;
         });
         if (accIdx < 0) {
           playBeep(false);
-          setFlash({ kind: "mismatch", message: "Kein offenes Zubehör zum Bestätigen" });
+          // Sagen, WAS stattdessen offen ist — sonst wirkt es wie "Code geht nicht".
+          const openExt = expectedItems.filter((it, i) => {
+            const key = it.barcode || `manual:${i}`;
+            return isExt(it) && (counts[key] ?? 0) < it.quantity;
+          }).length;
+          setFlash({
+            kind: "mismatch",
+            message:
+              openExt > 0
+                ? `Kein offenes Zubehör — offen ${openExt === 1 ? "ist noch 1 Extension" : `sind noch ${openExt} Extensions`}: bitte deren Barcode scannen`
+                : "Zubehör ist bereits komplett bestätigt",
+          });
           return;
         }
         inFlightRef.current = true;
@@ -986,7 +1005,7 @@ export default function PackMode({
                   <div className="w-16 h-16 rounded-lg bg-neutral-200 shrink-0" />
                 )}
                 <div className="flex-1 min-w-0">
-                  {nextItem.item.isExtension !== false ? (
+                  {isExt(nextItem.item) ? (
                     <div className="flex flex-wrap gap-1 mb-1">
                       {nextItem.attrs.method.label && (
                         <span className={`inline-block ${nextItem.attrs.method.cls} text-white text-xs font-bold px-2 py-0.5 rounded tracking-wider`}>
@@ -1051,7 +1070,7 @@ export default function PackMode({
                   Jetzt · {packProgress.currentPos}/{packProgress.total}
                 </span>
                 <div className="flex flex-wrap gap-1 flex-1 min-w-0">
-                  {nextItem.item.isExtension !== false ? (
+                  {isExt(nextItem.item) ? (
                     <>
                       {nextItem.attrs.method.label && (
                         <span className={`inline-block ${nextItem.attrs.method.cls} text-white text-[11px] font-bold px-1.5 py-0.5 rounded tracking-wider`}>
@@ -1300,7 +1319,7 @@ export default function PackMode({
 
                     <div className="flex-1 min-w-0">
                       {/* Große Tags — nur bei Haar-Extensions, nicht bei Zubehör/Pflege/Schulungen */}
-                      {it.isExtension !== false && (
+                      {isExt(it) && (
                         <div className="flex flex-wrap gap-2 mb-2">
                           {attrs.method.label && (
                             <span
@@ -1392,7 +1411,7 @@ export default function PackMode({
                           </div>
                           {(() => {
                             // Bei Zubehör/Pflege/Schulungen die Extension-Attribute weglassen
-                            const showExtensionAttrs = it.isExtension !== false;
+                            const showExtensionAttrs = isExt(it);
                             const rows = [
                               ...(showExtensionAttrs
                                 ? [
