@@ -743,3 +743,25 @@ export interface FinanzMonatsdaten {
   created_at: string;
   updated_at: string;
 }
+
+// ── Z-Bons (Tagesabschlüsse Shopify POS / Nexi) ──────────────
+export type ZBonQuelle = "shopify_pos" | "nexi";
+
+export interface ZBonDatei {
+  id: string;
+  pfad: string;
+  dateiname: string;
+  mime: string;
+  groesse: number;
+}
+
+export interface ZBon {
+  id: string;
+  datum: string; // YYYY-MM-DD
+  quelle: ZBonQuelle;
+  betrag: number | null;
+  notiz: string | null;
+  hochgeladen_von_name: string | null;
+  created_at: string;
+  dateien: ZBonDatei[];
+}

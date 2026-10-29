@@ -267,6 +267,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "nav.finances.bwa": "BWA-Analyse",
     "nav.finances.prepayments": "Vorauszahlungen",
     "nav.finances.transfers": "Übertragungsprotokolle",
+    "nav.finances.zbons": "Z-Bons (Tagesabschlüsse)",
 
     // Finance
     "finance.title": "Finanz-Dashboard",
@@ -1128,6 +1129,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "nav.finances.bwa": "BWA Analysis",
     "nav.finances.prepayments": "Tax Prepayments",
     "nav.finances.transfers": "Transfer Logs",
+    "nav.finances.zbons": "Z reports (daily closings)",
 
     // Finance
     "finance.title": "Finance Dashboard",
@@ -1981,6 +1983,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "nav.finances.bwa": "BWA Analizi",
     "nav.finances.prepayments": "Vergi Ön Ödemeleri",
     "nav.finances.transfers": "Transfer Protokolleri",
+    "nav.finances.zbons": "Z raporları (gün sonu)",
 
     // Finance
     "finance.title": "Finans Paneli",
