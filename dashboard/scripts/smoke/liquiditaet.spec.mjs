@@ -237,6 +237,24 @@ check("Rate verstrichen, unbezahlt: sofort, Rest läuft ab heute", [rvA[0].datum
 check("ratenplan: Bestell-Termine folgen der Verschiebung", L.ratenplan([mp({ id: "a", restUsd: 50000 })], { [EB]: "2026-10-19" }, L.mitDefaults({}), "2026-10-20", { [EB]: { datum: "2026-11-20", notiz: null, basisZahlung: "2026-10-19" } }).map((r) => r.datum), ["2026-11-20", "2026-12-04"]);
 check("Keine Verschiebungen (alte Rohdaten) ändern nichts", L.prognose(roh({ bestellungen: [bv] }), E0).bestellungen[0].termin, { regelDatum: "2026-10-17", verschoben: false, notiz: null, abgelaufenAm: null });
 
+// Echter Verlauf: rückwärts aus dem heutigen Stand
+const vb = (iban, datum, betrag, name = "X", intern = false) => ({ iban, datum, betrag, name, intern });
+const vBuchungen = [
+  vb("A", "2026-10-01", 100), vb("B", "2026-10-02", 50),
+  vb("A", "2026-10-03", -500, "Finanzamt"), vb("A", "2026-10-03", 20, "Shop"),
+  vb("A", "2026-10-05", -300, "Übertrag", true), vb("B", "2026-10-05", 300, "Übertrag", true),
+];
+const vKonten = [{ iban: "A", saldo: 1000 }, { iban: "B", saldo: 2000 }];
+const v = L.kontoVerlauf(vBuchungen, vKonten, "2026-10-06");
+check("Verlauf startet, sobald alle Konten Daten haben", v[0].datum, "2026-10-02");
+check("Verlauf Tagesende-Stände", v.map((t) => t.saldo), [3480, 3000, 3000, 3000, 3000]);
+check("Letzter Tag = heutiger Stand", v.at(-1).saldo, 3000);
+check("Tage ohne Buchung sind dabei", v[2].datum, "2026-10-04");
+check("Größte Buchung zuerst", v[1].buchungen, [{ name: "Finanzamt", betrag: -500 }, { name: "Shop", betrag: 20 }]);
+check("Übertrag zwischen eigenen Konten nicht in der Tagesliste", v[3].buchungen, []);
+check("Mehr Buchungen als angezeigt werden gezählt", L.kontoVerlauf(vBuchungen, vKonten, "2026-10-06", 1)[1].weitere, 1);
+check("Konto ohne Buchungen → kein Verlauf statt falscher Summe", L.kontoVerlauf(vBuchungen, [...vKonten, { iban: "C", saldo: 5 }], "2026-10-06"), []);
+
 // Defaults
 check("Defaults vollständig", Object.keys(L.mitDefaults({})).length, Object.keys(L.LIQ_DEFAULTS).length);
 

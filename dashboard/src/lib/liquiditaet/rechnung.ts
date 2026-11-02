@@ -266,6 +266,56 @@ export interface LiqRohdaten {
   };
 }
 
+// ── Echter Verlauf (Vergangenheit) ──────────────────────────────────────────
+
+export interface VerlaufBuchung {
+  iban: string;
+  datum: string;
+  betrag: number;
+  name: string;
+  /** Übertrag zwischen den eigenen Konten: ändert die Summe nicht, gehört nicht in die Tagesliste. */
+  intern?: boolean;
+}
+
+export interface VerlaufTag {
+  datum: string;
+  saldo: number;
+  /** Größte Buchungen des Tages. */
+  buchungen: Array<{ name: string; betrag: number }>;
+  weitere: number;
+}
+
+/**
+ * Kontostand am Tagesende, rückwärts aus dem heutigen Stand und den Buchungen danach.
+ * Beginnt erst, wenn für jedes Konto Buchungen vorliegen — davor wäre die Summe unvollständig.
+ */
+export function kontoVerlauf(buchungen: VerlaufBuchung[], konten: Array<{ iban: string; saldo: number }>, bis: string, maxProTag = 5): VerlaufTag[] {
+  const ersteBuchung = new Map<string, string>();
+  const proTag = new Map<string, VerlaufBuchung[]>();
+  for (const b of buchungen) {
+    if (!ersteBuchung.has(b.iban) || b.datum < (ersteBuchung.get(b.iban) as string)) ersteBuchung.set(b.iban, b.datum);
+    proTag.set(b.datum, [...(proTag.get(b.datum) ?? []), b]);
+  }
+  if (!konten.length || konten.some((k) => !ersteBuchung.has(k.iban))) return [];
+  const von = konten.map((k) => ersteBuchung.get(k.iban) as string).sort().at(-1) as string;
+
+  let saldo = konten.reduce((s, k) => s + k.saldo, 0);
+  for (const b of buchungen) if (b.datum > von) saldo -= b.betrag;
+  const out: VerlaufTag[] = [];
+  for (let d = von; d <= bis; d = plusTage(d, 1)) {
+    const amTag = proTag.get(d) ?? [];
+    if (d > von) saldo += amTag.reduce((s, b) => s + b.betrag, 0);
+    const sichtbar = amTag.filter((b) => !b.intern && b.betrag !== 0).sort((a, b) => Math.abs(b.betrag) - Math.abs(a.betrag));
+    out.push({
+      datum: d,
+      saldo: r2(saldo),
+      buchungen: sichtbar.slice(0, maxProTag).map((b) => ({ name: b.name, betrag: b.betrag })),
+      weitere: Math.max(0, sichtbar.length - maxProTag),
+    });
+  }
+  return out;
+}
+
 // ── Ereignisse + Prognose ───────────────────────────────────────────────────
 
 export type EreignisArt = "lieferant" | "manuell" | "einfuhr" | "steuer" | "nachbestellung" | "aktion";

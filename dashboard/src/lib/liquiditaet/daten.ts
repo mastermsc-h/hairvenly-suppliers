@@ -6,6 +6,7 @@ import { readVerkaufsanalyse } from "@/lib/stock-sheets";
 import { createServiceClient } from "@/lib/supabase/server";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import {
+  kontoVerlauf,
   mitDefaults,
   parseFxKurs,
   parseKontostand,
@@ -18,6 +19,7 @@ import {
   type LiqRohdaten,
   type LiqVerschiebungen,
   type PrognoseErgebnis,
+  type VerlaufTag,
   ratenRegelFuer,
   ratenplan,
 } from "./rechnung";
@@ -387,6 +389,34 @@ export const ladeRatenTermine = cache(async (): Promise<Record<string, string[]>
   }
   return termine;
 });
+
+/**
+ * Echter Kontostand je Tag für das Diagramm — nur die Liquiditätsseite braucht ihn,
+ * deshalb nicht in ladeRohdaten (das läuft auch bei jeder Bestellliste).
+ */
+export async function ladeKontoVerlauf(sb: Sb, roh: Pick<LiqRohdaten, "konten" | "heute">): Promise<VerlaufTag[]> {
+  const ibans = roh.konten.map((k) => k.iban);
+  if (!ibans.length) return [];
+  const tx = await selectAll<Pick<Tx, "account_iban" | "booking_date" | "amount" | "kategorie" | "counterparty_name">>((from, to) =>
+    sb.from("bank_transactions")
+      .select("account_iban, booking_date, amount, kategorie, counterparty_name")
+      .in("account_iban", ibans)
+      .order("booking_date", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)
+  );
+  return kontoVerlauf(
+    tx.map((t) => ({
+      iban: t.account_iban as string,
+      datum: t.booking_date,
+      betrag: Number(t.amount),
+      name: t.counterparty_name?.trim() || KATEGORIE_BY_KEY[t.kategorie ?? "unklar"]?.label || "Buchung",
+      intern: t.kategorie === "umbuchung",
+    })),
+    roh.konten,
+    roh.heute,
+  );
+}
 
 /** Einmal pro Request (Bestellliste + Detailseite rufen es ggf. mehrfach). */
 export const ladePrognose = cache(async (): Promise<{ roh: LiqRohdaten; einstellungen: LiqEinstellungen; ergebnis: PrognoseErgebnis }> => {

@@ -2,10 +2,10 @@
 
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Check, ChevronRight, Loader2, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
 import { Area, CartesianGrid, ComposedChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
-import { LIQ_DEFAULTS, prognose, type Ereignis, type LiqEinstellungen, type LiqRohdaten } from "@/lib/liquiditaet/rechnung";
+import { LIQ_DEFAULTS, prognose, type Ereignis, type LiqEinstellungen, type LiqRohdaten, type VerlaufTag } from "@/lib/liquiditaet/rechnung";
 import { SYMBOLE, TerminSymbol, symbolTyp, type SymbolTyp } from "./termin-symbol";
 import { AMPEL_STIL } from "../../orders/liquiditaet-badge";
 import ZahlTermin from "./zahl-termin";
@@ -35,7 +35,10 @@ function monatLabel(m: string) {
   return `${MONATE[Number(mo) - 1]} ${y}`;
 }
 
-export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqRohdaten; gespeichert: LiqEinstellungen; verbrauch: Verbrauch | null }) {
+/** Diagrammzeile: Vergangenheit hat nur `ist`, Vorschau `saldo`. */
+type DiagrammTag = { datum: string; saldo?: number; ist?: number; ev: Ereignis[]; buchungen?: VerlaufTag["buchungen"]; weitere?: number };
+
+export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { roh: LiqRohdaten; gespeichert: LiqEinstellungen; verbrauch: Verbrauch | null; verlauf: VerlaufTag[] }) {
   const [e, setE] = useState<LiqEinstellungen>(gespeichert);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -60,6 +63,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
   const [markiert, setMarkiert] = useState<string | null>(null);
   const [fokus, setFokus] = useState<{ key: string; n: number } | null>(null);
   const markierTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Wie viele Tage das Diagramm von der Vorschau in die Vergangenheit geschoben ist
+  const [zurueck, setZurueck] = useState(0);
 
   const set = <K extends keyof LiqEinstellungen>(k: K, v: LiqEinstellungen[K]) => {
     setE((prev) => ({ ...prev, [k]: v }));
@@ -96,11 +101,24 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
 
   const laufendMonat = (p.laufendProTag * 365) / 12;
   const freiProTag = p.einnahmenProTag + p.laufendProTag;
-  const chartData = useMemo(() => {
+  const alleTage = useMemo<DiagrammTag[]>(() => {
     const byDay = new Map<string, Ereignis[]>();
     for (const ev of p.ereignisse) byDay.set(ev.datum, [...(byDay.get(ev.datum) ?? []), ev]);
-    return p.tage.map((t) => ({ ...t, ev: byDay.get(t.datum) ?? [] }));
-  }, [p]);
+    const vergangen = verlauf.filter((t) => t.datum < p.start);
+    const vorschau: DiagrammTag[] = p.tage.map((t) => ({ ...t, ev: byDay.get(t.datum) ?? [] }));
+    // Echte Linie läuft bis an den Start der Vorschau heran
+    if (vorschau[0] && vergangen.length) vorschau[0] = { ...vorschau[0], ist: vergangen.at(-1)?.saldo };
+    return [...vergangen.map((t) => ({ datum: t.datum, ist: t.saldo, ev: [], buchungen: t.buchungen, weitere: t.weitere })), ...vorschau];
+  }, [p, verlauf]);
+  const fensterTage = p.tage.length;
+  const maxZurueck = Math.max(0, alleTage.length - fensterTage);
+  const versatz = Math.min(zurueck, maxZurueck); // Vorschau-Zeitraum kann in den Annahmen kürzer werden
+  const schritt = Math.max(7, Math.round(fensterTage / 3));
+  const chartData = useMemo(() => alleTage.slice(maxZurueck - versatz, maxZurueck - versatz + fensterTage), [alleTage, maxZurueck, versatz, fensterTage]);
+  const verschiebe = (tage: number) => {
+    setPin(null);
+    setZurueck(Math.max(0, Math.min(maxZurueck, versatz + tage)));
+  };
   // Steuertermine als Marken im Diagramm (gleicher Tag → übereinander)
   const steuerMarken = useMemo(() => {
     const m = new Map<string, Ereignis[]>();
@@ -126,11 +144,12 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
     const idx = Number(state.activeTooltipIndex);
     if (!Number.isInteger(idx) || !chartData[idx]) return setPin(null);
     const toleranz = Math.max(2, Math.round(chartData.length / 40));
+    const hatInhalt = (t: DiagrammTag | undefined) => !!t && (t.ev.length > 0 || !!t.buchungen?.length);
     let tag = chartData[idx];
-    for (let d = 1; !tag.ev.length && d <= toleranz; d++) {
-      tag = chartData[idx + d]?.ev.length ? chartData[idx + d] : chartData[idx - d]?.ev.length ? chartData[idx - d] : tag;
+    for (let d = 1; !hatInhalt(tag) && d <= toleranz; d++) {
+      tag = hatInhalt(chartData[idx + d]) ? chartData[idx + d] : hatInhalt(chartData[idx - d]) ? chartData[idx - d] : tag;
     }
-    if (!tag.ev.length || pin?.datum === tag.datum) return setPin(null);
+    if (!hatInhalt(tag) || pin?.datum === tag.datum) return setPin(null);
     setPin({ datum: tag.datum, x: state.activeCoordinate?.x ?? 0 });
   }
 
@@ -157,6 +176,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
 
   const zeileCls = (id: string) => `transition-colors duration-500 ${markiert === id ? "bg-amber-100" : ""}`;
   const pinTag = pin ? chartData.find((d) => d.datum === pin.datum) : undefined;
+  const fensterVon = chartData[0]?.datum ?? p.start;
+  const fensterBis = chartData.at(-1)?.datum ?? p.start;
   const ebruRegel = e.ratenLieferanten[0] ?? null;
   const setEbru = (patch: Partial<NonNullable<typeof ebruRegel>>) =>
     ebruRegel && set("ratenLieferanten", [{ ...ebruRegel, ...patch }, ...e.ratenLieferanten.slice(1)]);
@@ -273,7 +294,39 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
       ))}
 
       {/* Verlauf */}
-      <Card title="Kontostand-Verlauf (Vorschau)" accent="border-l-blue-500">
+      <Card title="Kontostand-Verlauf" accent="border-l-blue-500">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs tabular-nums text-neutral-500">
+            {deDate(fensterVon)} – {deDate(fensterBis)}
+            {fensterVon < p.start && <span className="ml-2 inline-flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-neutral-500" /> echter Kontostand</span>}
+            {fensterBis >= p.start && <span className="ml-2 inline-flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-blue-600" /> Vorschau</span>}
+          </span>
+          <span className="flex items-center gap-1">
+            {versatz > 0 && (
+              <button onClick={() => verschiebe(-versatz)} className="rounded-md px-2 py-1 text-xs font-medium text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900">
+                Heute
+              </button>
+            )}
+            <button
+              onClick={() => verschiebe(schritt)}
+              disabled={versatz >= maxZurueck}
+              aria-label={`${schritt} Tage zurück`}
+              title={`${schritt} Tage zurück`}
+              className="rounded-md border border-neutral-200 p-1 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 disabled:opacity-30 disabled:hover:bg-transparent"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <button
+              onClick={() => verschiebe(-schritt)}
+              disabled={versatz === 0}
+              aria-label={`${schritt} Tage vor`}
+              title={`${schritt} Tage vor`}
+              className="rounded-md border border-neutral-200 p-1 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 disabled:opacity-30 disabled:hover:bg-transparent"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </span>
+        </div>
         <div className="relative cursor-pointer [&_*:focus]:outline-none" style={{ width: "100%", height: 300 }}>
           <ResponsiveContainer>
             <ComposedChart data={chartData} margin={{ top: 12, right: 8, left: 8, bottom: 0 }} onClick={diagrammKlick}>
@@ -283,10 +336,11 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
               <Tooltip
                 content={({ active, payload }) => {
                   if (pin || !active || !payload?.length) return null;
-                  const d = payload[0].payload as { datum: string; saldo: number; ev: Ereignis[] };
+                  const d = payload[0].payload as DiagrammTag;
                   return (
                     <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs shadow-sm max-w-sm space-y-1">
-                      <div className="font-semibold">{deDate(d.datum)}: {eur(d.saldo)}</div>
+                      <div className="font-semibold">{deDate(d.datum)}: {eur(d.saldo ?? d.ist ?? 0)}</div>
+                      <TagesBuchungen tag={d} />
                       {d.ev.map((x, i) => (
                         <div key={i} className="flex items-start gap-1.5 text-neutral-600">
                           <TerminSymbol typ={symbolTyp(x)} schaetzung={x.schaetzung} />
@@ -305,9 +359,13 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
               />
               <ReferenceLine y={0} stroke="#dc2626" strokeWidth={1.5} />
               {pin && <ReferenceLine x={pin.datum} stroke="#171717" strokeWidth={1.5} />}
+              {versatz > 0 && fensterBis >= p.start && (
+                <ReferenceLine x={p.start} stroke="#737373" strokeDasharray="4 3" label={{ value: "Heute", position: "insideBottomLeft", fontSize: 10, fill: "#737373" }} />
+              )}
               <ReferenceLine y={e.puffer} stroke="#d97706" strokeDasharray="4 4" label={{ value: "Reserve", position: "insideTopRight", fontSize: 10, fill: "#d97706" }} />
-              <Area type="stepAfter" dataKey="saldo" stroke="#2563eb" fill="#dbeafe" strokeWidth={2} />
-              {steuerMarken.map(([datum, evs]) => (
+              <Area type="stepAfter" dataKey="ist" stroke="#737373" fill="#f5f5f5" strokeWidth={2} isAnimationActive={false} />
+              <Area type="stepAfter" dataKey="saldo" stroke="#2563eb" fill="#dbeafe" strokeWidth={2} isAnimationActive={false} />
+              {steuerMarken.filter(([datum]) => datum >= fensterVon && datum <= fensterBis).map(([datum, evs]) => (
                 <ReferenceLine
                   key={datum}
                   x={datum}
@@ -322,8 +380,9 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
           {pin && pinTag && (
             <TagPopup
               datum={pinTag.datum}
-              saldo={pinTag.saldo}
+              saldo={pinTag.saldo ?? pinTag.ist ?? 0}
               ereignisse={pinTag.ev}
+              tag={pinTag}
               x={pin.x}
               onSchliessen={() => setPin(null)}
               onWaehlen={springeZu}
@@ -341,6 +400,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
         <p className="mt-2 text-xs text-neutral-500">
           Täglich: + Ø Einnahmen − Ø laufende Abgänge. Stufen = Lieferantenzahlungen, Einfuhrabgaben und Steuertermine; die Marken oben zeigen,
           wann welche Steuer abgeht (Maus darüber für Details). Ein Klick auf einen Termin im Diagramm hält die Liste fest, von dort springst du zum Eintrag.
+          Mit dem Pfeil nach links siehst du die Vergangenheit: echter Kontostand der Sparkasse am Tagesende{verlauf[0] ? ` ab ${deDate(verlauf[0].datum)}` : ""}, ohne PayPal.
         </p>
       </Card>
 
@@ -706,11 +766,30 @@ function terminId(ev: Pick<Ereignis, "art" | "datum" | "label">) {
 
 const ZIEL_TEXT: Partial<Record<Ereignis["art"], string>> = { lieferant: "Termin ändern", manuell: "Termin ändern" };
 
+/** Größte Buchungen eines vergangenen Tages. */
+function TagesBuchungen({ tag }: { tag: DiagrammTag }) {
+  if (!tag.buchungen?.length) return null;
+  return (
+    <div className="space-y-0.5">
+      {tag.buchungen.map((b, i) => (
+        <div key={i} className="flex items-baseline justify-between gap-3 text-neutral-600">
+          <span className="min-w-0 truncate">{b.name}</span>
+          <span className={`shrink-0 tabular-nums font-medium ${b.betrag >= 0 ? "text-emerald-700" : "text-neutral-900"}`}>
+            {b.betrag < 0 ? "−" : "+"}{eur(Math.abs(b.betrag))}
+          </span>
+        </div>
+      ))}
+      {!!tag.weitere && <div className="text-neutral-400">+ {tag.weitere} kleinere Buchungen</div>}
+    </div>
+  );
+}
+
 /** Festgehaltene Tagesliste im Diagramm; jeder Eintrag springt zu seiner Zeile auf der Seite. */
 function TagPopup({
   datum,
   saldo,
   ereignisse,
+  tag,
   x,
   onSchliessen,
   onWaehlen,
@@ -718,6 +797,7 @@ function TagPopup({
   datum: string;
   saldo: number;
   ereignisse: Ereignis[];
+  tag: DiagrammTag;
   x: number;
   onSchliessen: () => void;
   onWaehlen: (ev: Ereignis) => void;
@@ -734,6 +814,14 @@ function TagPopup({
         <button onClick={onSchliessen} aria-label="Schließen" className="text-neutral-400 hover:text-neutral-900">
           <X size={14} />
         </button>
+      </div>
+      <div className="px-1">
+        <TagesBuchungen tag={tag} />
+        {!!tag.buchungen?.length && (
+          <Link href="/finances/bank" className="mt-1 inline-block text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-neutral-900">
+            Alle Kontoumsätze
+          </Link>
+        )}
       </div>
       <div className="space-y-0.5">
         {ereignisse.map((x2, i) => (

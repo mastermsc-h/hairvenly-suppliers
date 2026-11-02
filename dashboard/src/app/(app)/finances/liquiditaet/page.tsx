@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireFeature } from "@/lib/auth";
-import { ladeEinstellungen, ladeRohdaten } from "@/lib/liquiditaet/daten";
+import { ladeEinstellungen, ladeKontoVerlauf, ladeRohdaten } from "@/lib/liquiditaet/daten";
 import { readVerkaufsanalyse } from "@/lib/stock-sheets";
 import { createServiceClient } from "@/lib/supabase/server";
 import Liquiditaet, { type Verbrauch } from "./liquiditaet";
@@ -26,5 +26,6 @@ export default async function LiquiditaetPage() {
   if (profile.role === "supplier") redirect("/");
   const sb = createServiceClient();
   const [roh, einstellungen, verbrauch] = await Promise.all([ladeRohdaten(sb), ladeEinstellungen(sb), ladeVerbrauch()]);
-  return <Liquiditaet roh={roh} gespeichert={einstellungen} verbrauch={verbrauch} />;
+  const verlauf = await ladeKontoVerlauf(sb, roh);
+  return <Liquiditaet roh={roh} gespeichert={einstellungen} verbrauch={verbrauch} verlauf={verlauf} />;
 }
