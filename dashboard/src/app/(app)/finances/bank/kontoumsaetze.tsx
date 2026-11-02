@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { AlertTriangle, ChevronLeft, ChevronRight, Loader2, RefreshCw, RotateCcw, Search, Trash2, Wand2 } from "lucide-react";
 import { KATEGORIEN, KATEGORIE_BY_KEY, type KategorieGruppe, type SteuerSplit } from "@/lib/bank/kategorien";
+import { monatGrenzen, monatName, suchMonate } from "@/lib/bank/such-zeitraum";
 import {
   deleteRegelAction,
   fetchKontoumsaetze,
@@ -74,13 +75,17 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
   const [kontoFilter, setKontoFilter] = useState("alle");
   const [katFilter, setKatFilter] = useState<string | null>(null);
   const [suche, setSuche] = useState("");
-  // Suche ab 2 Zeichen im gewählten Zeitraum (Monat / Jahr / alle), alle Konten; null = keine Suche
+  // Eigener Zeitraum der Suche, unabhängig von der Auswahl oben: "" = alle, sonst "YYYY" oder "YYYY-MM"
+  const [suchZeit, setSuchZeit] = useState("");
+  // Suche ab 2 Zeichen; null = keine Suche
   const [treffer, setTreffer] = useState<KontoUmsatz[] | null>(null);
   const [sucht, setSucht] = useState(false);
   const sucheRef = useRef("");
   sucheRef.current = suche;
-  const zeitRef = useRef({ jahr, monat });
-  zeitRef.current = { jahr, monat };
+  const suchZeitRef = useRef("");
+  suchZeitRef.current = suchZeit;
+  const monatRef = useRef(monat);
+  monatRef.current = monat;
 
   async function suchen(q: string) {
     if (q.trim().length < 2) {
@@ -88,10 +93,10 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
       return;
     }
     setSucht(true);
-    const { jahr: j, monat: m } = zeitRef.current;
-    const res = await sucheKontoumsaetze(q, zeitraumGrenzen(j, m));
+    const z = suchZeitRef.current;
+    const res = await sucheKontoumsaetze(q, z.length === 4 ? zeitraumGrenzen(Number(z), 0) : monatGrenzen(z));
     // Nur übernehmen, wenn inzwischen nicht weitergetippt / umgeschaltet wurde
-    if (sucheRef.current === q && zeitRef.current.jahr === j && zeitRef.current.monat === m) {
+    if (sucheRef.current === q && suchZeitRef.current === z) {
       setTreffer(res.umsaetze);
       if (!res.ok) setMeldung({ ok: false, text: res.error ?? "Suche fehlgeschlagen" });
     }
@@ -103,13 +108,13 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
     const timer = setTimeout(() => suchen(q), 350);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [suche, jahr, monat]);
+  }, [suche, suchZeit]);
   const [limit, setLimit] = useState(150);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [meldung, setMeldung] = useState<{ ok: boolean; text: string } | null>(null);
   const [loading, startLoad] = useTransition();
 
-  async function reload(j = jahr, alle = zeitRef.current.monat === -1) {
+  async function reload(j = jahr, alle = monatRef.current === -1) {
     const d = await fetchKontoumsaetze(j, alle);
     setData(d);
     // Treffer nach Änderungen (Kategorie, Regel) aktualisieren
@@ -172,7 +177,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
     [imZeitraum]
   );
 
-  // Suche aktiv → Treffer aus allen Zeiträumen (Konto- und Kategoriefilter gelten weiter)
+  // Suche aktiv → Treffer aus dem Zeitraum der Suche (Konto- und Kategoriefilter gelten weiter)
   const liste = useMemo(() => {
     const basis = treffer ?? imZeitraum;
     return basis.filter(
@@ -235,6 +240,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
   }
 
   const zeitraumText = monat === -1 ? "Alle Zeiträume" : monat === 0 ? `Jahr ${jahr}` : `${MONATE[monat - 1]} ${jahr}`;
+  const suchZeitText = !suchZeit ? "Alle Zeiträume" : suchZeit.length === 4 ? `Jahr ${suchZeit}` : monatName(suchZeit);
   const steuerNetto = -summen.g.steuern;
 
   return (
@@ -379,16 +385,30 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
 
       {/* Umsätze */}
       <Card
-        title={`${treffer ? `Suchergebnisse — ${zeitraumText} (${liste.length}${treffer.length >= 300 ? "+" : ""})` : `Umsätze (${liste.length})`}${katFilter ? ` — ${KATEGORIE_BY_KEY[katFilter]?.label}` : ""}`}
+        title={`${treffer ? `Suchergebnisse — ${suchZeitText} (${liste.length}${treffer.length >= 300 ? "+" : ""})` : `Umsätze (${liste.length})`}${katFilter ? ` — ${KATEGORIE_BY_KEY[katFilter]?.label}` : ""}`}
         accent="border-l-neutral-400"
       >
         <div className="flex flex-wrap items-center gap-2 mb-3">
+          <select
+            value={suchZeit}
+            onChange={(e) => setSuchZeit(e.target.value)}
+            aria-label="Zeitraum der Suche"
+            className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-neutral-900 focus:outline-none"
+          >
+            <option value="">Alle Zeiträume</option>
+            {[...new Set(suchMonate().map((m) => m.slice(0, 4)))].map((j) => (
+              <option key={j} value={j}>Jahr {j}</option>
+            ))}
+            {suchMonate().map((m) => (
+              <option key={m} value={m}>{monatName(m)}</option>
+            ))}
+          </select>
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-2.5 text-neutral-400" />
             <input
               value={suche}
               onChange={(e) => setSuche(e.target.value)}
-              placeholder={`Suche — ${zeitraumText}: Name, Zweck, 449,90, 19.10. …`}
+              placeholder="Suche: Name, Zweck, 449,90, 19.10. …"
               className="rounded-lg border border-neutral-300 pl-8 pr-8 py-1.5 text-sm w-80 max-w-full focus:ring-2 focus:ring-neutral-900 focus:outline-none"
             />
             {sucht && <Loader2 size={14} className="absolute right-2.5 top-2.5 animate-spin text-neutral-400" />}
@@ -400,7 +420,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
           </div>
           {treffer && (
             <span className="text-xs text-neutral-500">
-              {zeitraumText} (oben umschaltbar, auch „Alle Zeiträume“) · alle Konten · mehrere Begriffe = alle müssen vorkommen · Betrag „449,90“, Datum „19.10.“
+              {suchZeitText} · {kontoFilter === "alle" ? "alle Konten" : konto(kontoFilter)} · mehrere Begriffe = alle müssen vorkommen · Betrag „449,90“, Datum „19.10.“
               {treffer.length >= 300 && " · nur die neuesten 300 — Suche genauer eingrenzen"}
             </span>
           )}

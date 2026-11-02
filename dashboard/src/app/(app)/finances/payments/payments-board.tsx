@@ -7,6 +7,7 @@ import {
   Eye, Landmark, Loader2, RefreshCw, RotateCcw, Search, Upload, X, Zap,
 } from "lucide-react";
 import { t, type Locale } from "@/lib/i18n";
+import { monatGrenzen, monatName, suchMonate } from "@/lib/bank/such-zeitraum";
 import {
   assignBankByNumberAction, confirmBankMatchAction, ignoreBankTxAction, importBankCsvAction,
   runBankMatchingAction, searchBankIncoming, setBankModeAction,
@@ -300,34 +301,6 @@ export default function PaymentsBoard({
 }
 
 // ── Bausteine ────────────────────────────────────────────────────────────────
-
-const MONATSNAMEN = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
-const DATEN_AB = "2025-07"; // Kontoumsätze liegen ab Juli 2025 vor
-
-/** Monate für die Zeitraum-Auswahl: aktueller Monat zurück bis Datenbeginn. */
-function suchMonate(): string[] {
-  const out: string[] = [];
-  const d = new Date();
-  let y = d.getFullYear();
-  let m = d.getMonth() + 1;
-  for (let i = 0; i < 60; i++) {
-    const k = `${y}-${String(m).padStart(2, "0")}`;
-    if (k < DATEN_AB) break;
-    out.push(k);
-    m -= 1;
-    if (m === 0) { m = 12; y -= 1; }
-  }
-  return out;
-}
-function monatName(k: string): string {
-  const [y, m] = k.split("-").map(Number);
-  return `${MONATSNAMEN[m - 1]} ${y}`;
-}
-function monatGrenzen(k: string): { von: string; bis: string } | null {
-  if (!k) return null;
-  const [y, m] = k.split("-").map(Number);
-  return { von: `${k}-01`, bis: `${k}-${new Date(Date.UTC(y, m, 0)).getUTCDate()}` };
-}
 
 /** Status eines Suchtreffers als kurzes Etikett (gleiche Gruppen wie die Abschnitte). */
 function statusLabel(tx: BankTransaction, tr: (k: string) => string): string {
