@@ -253,6 +253,8 @@ export interface LiqRohdaten {
     sollOffen?: Record<string, number>;
     /** Schlüssel aus sollOffen, deren Soll nur eine Schätzung ist. */
     sollGeschaetzt?: string[];
+    /** Datum aus dem Steuer-Ledger je offenem Soll, "art|zeitraum" → YYYY-MM-DD. */
+    sollFaellig?: Record<string, string>;
   };
   nachbestellung: {
     /** Ø bestellte kg/Monat (letzte 3 Monate) — war zuletzt Black-Friday-Vorrat, nicht Verbrauch. */
@@ -583,7 +585,9 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       const si = sollInfo(roh, `ust_va|${m}`);
       const soll = si.soll;
       const betrag = soll !== undefined ? r2(soll) : r2(ustBasis + (ustZusatz[m] ?? 0) - (eustProMonat[m] ?? 0) - eustAndere);
-      const datum = betrag < 0 ? plusTage(faellig, 21) : faellig;
+      // Erstattung: von Hand eingetragener Eingangstermin, sonst ca. 3 Wochen nach dem Termin
+      const eingetragen = roh.steuern.sollFaellig?.[`ust_va|${m}`];
+      const datum = betrag >= 0 ? faellig : eingetragen && eingetragen !== faellig ? eingetragen : plusTage(faellig, 21);
       if (datum > ende) continue;
       ereignisse.push({
         datum: amStart(datum),

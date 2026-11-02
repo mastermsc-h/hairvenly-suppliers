@@ -103,8 +103,8 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
         .order("id", { ascending: true })
         .range(from, to)
     ),
-    selectAll<{ art: string; zeitraum: string; richtung: string; ist_betrag: number; soll_betrag: number; soll_schaetzung: boolean }>((from, to) =>
-      sb.from("steuer_posten").select("art, zeitraum, richtung, ist_betrag, soll_betrag, soll_schaetzung").gte("jahr", Number(heute.slice(0, 4)) - 1).range(from, to)
+    selectAll<{ art: string; zeitraum: string; richtung: string; ist_betrag: number; soll_betrag: number; soll_schaetzung: boolean; faellig_am: string | null }>((from, to) =>
+      sb.from("steuer_posten").select("art, zeitraum, richtung, ist_betrag, soll_betrag, soll_schaetzung, faellig_am").gte("jahr", Number(heute.slice(0, 4)) - 1).range(from, to)
     ),
     sb.from("orders_with_totals")
       .select("id, label, status, eta, invoice_total, remaining_balance, import_vat, weight_kg")
@@ -288,6 +288,11 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
       sollGeschaetzt: posten
         .filter((p) => Number(p.ist_betrag) === 0 && Number(p.soll_betrag) > 0 && p.soll_schaetzung)
         .map((p) => `${p.art}|${p.zeitraum}`),
+      sollFaellig: Object.fromEntries(
+        posten
+          .filter((p) => Number(p.ist_betrag) === 0 && Number(p.soll_betrag) > 0 && p.faellig_am)
+          .map((p) => [`${p.art}|${p.zeitraum}`, String(p.faellig_am).slice(0, 10)])
+      ),
       sollOffen: Object.fromEntries(
         posten
           .filter((p) => Number(p.ist_betrag) === 0 && Number(p.soll_betrag) > 0)

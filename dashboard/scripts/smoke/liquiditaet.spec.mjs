@@ -188,6 +188,15 @@ check("Soll-Schätzung markiert", [ustSep.schaetzung, ustSep.steuer, ustSep.labe
 check("Echtes Soll (LSt) nicht als Schätzung", psg.ereignisse.find((x) => x.label.startsWith("Lohnsteuer 2026-10")).schaetzung, false);
 check("Modellwert (USt Okt) = Schätzung ohne Zusatz", [psg.ereignisse.find((x) => x.label === "USt-VA 2026-10").schaetzung], [true]);
 
+// Erstattung mit eingetragenem Eingangstermin (Ledger), sonst Termin + 21 Tage
+const ustRoh = (extra) => roh({ steuern: { ustHistorie: [{ monat: "2026-09", ust: 18000, eust: 0 }], ustErledigtBis: "2026-09", eustBezahlt: {}, lstLetzte: [], lstErledigtBis: null, estLetzte: null, gewstLetzte: null, quartaleErledigt: [], sollOffen: { "ust_va|2026-10": -22000 }, sollGeschaetzt: ["ust_va|2026-10"], ...extra } });
+const ustEv = (x) => x.ereignisse.find((ev) => ev.steuer === "ust" && ev.label.includes("2026-10"));
+const EH = { ...E0, horizontTage: 90 };
+check("Erstattung ohne Termin: Fälligkeit + 21 T", ustEv(L.prognose(ustRoh({}), EH)).datum, "2026-12-31");
+check("Erstattung mit eingetragenem Eingang", [ustEv(L.prognose(ustRoh({ sollFaellig: { "ust_va|2026-10": "2026-12-04" } }), EH)).datum, ustEv(L.prognose(ustRoh({ sollFaellig: { "ust_va|2026-10": "2026-12-04" } }), EH)).betrag, ustEv(L.prognose(ustRoh({ sollFaellig: { "ust_va|2026-10": "2026-12-04" } }), EH)).schaetzung], ["2026-12-04", 22000, true]);
+check("Regeltermin im Ledger zählt nicht als eigener Eingang", ustEv(L.prognose(ustRoh({ sollFaellig: { "ust_va|2026-10": "2026-12-10" } }), EH)).datum, "2026-12-31");
+check("Zahlung bleibt am Fälligkeitstag", ustEv(L.prognose(ustRoh({ sollOffen: { "ust_va|2026-10": 5000 }, sollFaellig: { "ust_va|2026-10": "2026-12-04" } }), EH)).datum, "2026-12-10");
+
 // PayPal-Guthaben
 const rpp = (abgerufen) => roh({ bankSalden: [{ iban: "PAYPAL", saldo: 25000, stand: "2026-10-18", abgerufenAm: abgerufen }] });
 check("PayPal frisch → im Startstand", L.prognose(rpp("2026-10-18T10:00:00Z"), E0).startSaldoGesamt, 125000);
