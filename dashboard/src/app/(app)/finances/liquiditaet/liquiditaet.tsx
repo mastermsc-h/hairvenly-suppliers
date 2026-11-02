@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Check, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, Loader2, X } from "lucide-react";
 import { Area, CartesianGrid, ComposedChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import { LIQ_DEFAULTS, prognose, type Ereignis, type LiqEinstellungen, type LiqRohdaten } from "@/lib/liquiditaet/rechnung";
@@ -55,6 +55,11 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
   }, [roh, entwuerfe]);
   const p = useMemo(() => prognose(rohMitEntwurf, e), [rohMitEntwurf, e]);
   const geaendert = JSON.stringify(e) !== JSON.stringify(gespeichert);
+  // Angeklickter Tag im Diagramm + Sprung zum Eintrag darunter
+  const [pin, setPin] = useState<{ datum: string; x: number } | null>(null);
+  const [markiert, setMarkiert] = useState<string | null>(null);
+  const [fokus, setFokus] = useState<{ key: string; n: number } | null>(null);
+  const markierTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const set = <K extends keyof LiqEinstellungen>(k: K, v: LiqEinstellungen[K]) => {
     setE((prev) => ({ ...prev, [k]: v }));
@@ -73,11 +78,14 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
     return {
       min: p.start,
       max: p.tage.at(-1)?.datum ?? p.start,
+      oeffnenSignal: fokus?.key === key ? fokus.n : 0,
       tiefpunkt: `${eur(p.tiefpunkt.saldo)} am ${deDate(p.tiefpunkt.datum)}`,
       onVorschau: (datum: string | null) =>
         setEntwuerfe((prev) => {
-          const { [key]: _, ...rest } = prev;
-          return datum ? { ...rest, [key]: datum } : rest;
+          const next = { ...prev };
+          if (datum) next[key] = datum;
+          else delete next[key];
+          return next;
         }),
       onSpeichern: async (datum: string | null, notiz: string) => {
         const res = await setZahlTermin({ art, schluessel, datum, notiz });
@@ -112,6 +120,43 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
     }
     return [...sum.entries()].sort((a, b) => b[1] - a[1]);
   }, [p]);
+
+  // Ein Klick trifft selten genau den Tag mit der Stufe → nächsten Tag mit Terminen in der Nähe nehmen
+  function diagrammKlick(state: { activeTooltipIndex?: unknown; activeCoordinate?: { x: number } }) {
+    const idx = Number(state.activeTooltipIndex);
+    if (!Number.isInteger(idx) || !chartData[idx]) return setPin(null);
+    const toleranz = Math.max(2, Math.round(chartData.length / 40));
+    let tag = chartData[idx];
+    for (let d = 1; !tag.ev.length && d <= toleranz; d++) {
+      tag = chartData[idx + d]?.ev.length ? chartData[idx + d] : chartData[idx - d]?.ev.length ? chartData[idx - d] : tag;
+    }
+    if (!tag.ev.length || pin?.datum === tag.datum) return setPin(null);
+    setPin({ datum: tag.datum, x: state.activeCoordinate?.x ?? 0 });
+  }
+
+  /** Wo ein Termin auf der Seite steht und welches Terminfeld sich dabei öffnet. */
+  function zielVon(ev: Ereignis): { id: string; oeffnen?: string } {
+    if (ev.art === "lieferant") return { id: `bestellung-${ev.orderId}`, oeffnen: `bestellung:${ev.orderId}` };
+    if (ev.art === "einfuhr" && ev.orderId) return { id: `bestellung-${ev.orderId}` };
+    if (ev.art === "manuell") {
+      const lieferant = ev.ratenLieferant ?? "";
+      return { id: `rate-${manuellRaten.indexOf(ev)}`, oeffnen: `rate:${lieferant}` };
+    }
+    return { id: terminId(ev) };
+  }
+
+  function springeZu(ev: Ereignis) {
+    const ziel = zielVon(ev);
+    setPin(null);
+    setMarkiert(ziel.id);
+    if (ziel.oeffnen) setFokus((prev) => ({ key: ziel.oeffnen!, n: (prev?.n ?? 0) + 1 }));
+    if (markierTimer.current) clearTimeout(markierTimer.current);
+    markierTimer.current = setTimeout(() => setMarkiert(null), 3000);
+    requestAnimationFrame(() => document.getElementById(ziel.id)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  }
+
+  const zeileCls = (id: string) => `transition-colors duration-500 ${markiert === id ? "bg-amber-100" : ""}`;
+  const pinTag = pin ? chartData.find((d) => d.datum === pin.datum) : undefined;
   const ebruRegel = e.ratenLieferanten[0] ?? null;
   const setEbru = (patch: Partial<NonNullable<typeof ebruRegel>>) =>
     ebruRegel && set("ratenLieferanten", [{ ...ebruRegel, ...patch }, ...e.ratenLieferanten.slice(1)]);
@@ -229,15 +274,15 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
 
       {/* Verlauf */}
       <Card title="Kontostand-Verlauf (Vorschau)" accent="border-l-blue-500">
-        <div style={{ width: "100%", height: 300 }}>
+        <div className="relative cursor-pointer [&_*:focus]:outline-none" style={{ width: "100%", height: 300 }}>
           <ResponsiveContainer>
-            <ComposedChart data={chartData} margin={{ top: 12, right: 8, left: 8, bottom: 0 }}>
+            <ComposedChart data={chartData} margin={{ top: 12, right: 8, left: 8, bottom: 0 }} onClick={diagrammKlick}>
               <CartesianGrid stroke="#f3f4f6" />
               <XAxis dataKey="datum" tick={{ fontSize: 11, fill: "#737373" }} tickFormatter={(d) => `${String(d).slice(8, 10)}.${String(d).slice(5, 7)}.`} minTickGap={24} />
               <YAxis tick={{ fontSize: 11, fill: "#737373" }} tickFormatter={(v) => `${Math.round(v / 1000)}k`} width={44} />
               <Tooltip
                 content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
+                  if (pin || !active || !payload?.length) return null;
                   const d = payload[0].payload as { datum: string; saldo: number; ev: Ereignis[] };
                   return (
                     <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs shadow-sm max-w-sm space-y-1">
@@ -259,6 +304,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
                 }}
               />
               <ReferenceLine y={0} stroke="#dc2626" strokeWidth={1.5} />
+              {pin && <ReferenceLine x={pin.datum} stroke="#171717" strokeWidth={1.5} />}
               <ReferenceLine y={e.puffer} stroke="#d97706" strokeDasharray="4 4" label={{ value: "Reserve", position: "insideTopRight", fontSize: 10, fill: "#d97706" }} />
               <Area type="stepAfter" dataKey="saldo" stroke="#2563eb" fill="#dbeafe" strokeWidth={2} />
               {steuerMarken.map(([datum, evs]) => (
@@ -273,6 +319,16 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
               ))}
             </ComposedChart>
           </ResponsiveContainer>
+          {pin && pinTag && (
+            <TagPopup
+              datum={pinTag.datum}
+              saldo={pinTag.saldo}
+              ereignisse={pinTag.ev}
+              x={pin.x}
+              onSchliessen={() => setPin(null)}
+              onWaehlen={springeZu}
+            />
+          )}
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-neutral-500">
           {(["ust", "lst", "est", "gewst", "einfuhr", "lieferant", "manuell", "aktion"] as SymbolTyp[]).map((t) => (
@@ -284,7 +340,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
         </div>
         <p className="mt-2 text-xs text-neutral-500">
           Täglich: + Ø Einnahmen − Ø laufende Abgänge. Stufen = Lieferantenzahlungen, Einfuhrabgaben und Steuertermine; die Marken oben zeigen,
-          wann welche Steuer abgeht (Maus darüber für Details).
+          wann welche Steuer abgeht (Maus darüber für Details). Ein Klick auf einen Termin im Diagramm hält die Liste fest, von dort springst du zum Eintrag.
         </p>
       </Card>
 
@@ -306,7 +362,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
             </thead>
             <tbody>
               {p.bestellungen.map((b) => (
-                <tr key={b.orderId} className="border-b border-neutral-100 align-top">
+                <tr key={b.orderId} id={`bestellung-${b.orderId}`} className={`border-b border-neutral-100 align-top ${zeileCls(`bestellung-${b.orderId}`)}`}>
                   <td className="py-2 pr-2">
                     <Link href={`/orders/${b.orderId}`} className="font-medium text-neutral-900 hover:underline">{b.label}</Link>
                   </td>
@@ -319,7 +375,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
                       <ZahlTermin datum={b.zahlDatum} sofort={b.sofort} termin={b.termin} {...terminProps("bestellung", b.orderId)} />
                     )}
                   </td>
-                  <td className="py-2 pr-2 text-right tabular-nums">
+                  <td className="py-2 pr-2 text-right tabular-nums whitespace-nowrap">
                     {b.bezahlt ? "—" : <>{eur(b.betragEur)}<div className="text-xs text-neutral-400">{usd(b.betragUsd)}</div></>}
                   </td>
                   <td className={`py-2 pr-2 text-right tabular-nums font-medium ${b.bezahlt ? "text-neutral-400" : b.saldoNachZahlung < 0 ? "text-red-700" : "text-neutral-900"}`}>
@@ -361,7 +417,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
           <table className="w-full text-sm">
             <tbody>
               {termine.map((t, i) => (
-                <tr key={i} className="border-b border-neutral-100">
+                <tr key={i} id={terminId(t)} className={`border-b border-neutral-100 ${zeileCls(terminId(t))}`}>
                   <td className="py-1.5 pr-3 tabular-nums text-neutral-600 whitespace-nowrap">{deDate(t.datum)}</td>
                   <td className="py-1.5 pr-2 whitespace-nowrap">
                     <TerminSymbol typ={symbolTyp(t)} schaetzung={"schaetzung" in t ? t.schaetzung : false} />
@@ -370,6 +426,11 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
                     {t.label}
                     {t.sofort && <span className="ml-1 text-xs text-red-600">überfällig</span>}
                     {"verschoben" in t && t.verschoben && <span className="ml-1 text-xs font-medium text-amber-700">verschoben</span>}
+                    {t.art === "steuer" && (
+                      <Link href="/finances/prepayments" className="ml-2 text-xs text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-neutral-900">
+                        in Vorauszahlungen ändern
+                      </Link>
+                    )}
                   </td>
                   <td className={`py-1.5 text-right tabular-nums font-medium ${t.betrag >= 0 ? "text-emerald-700" : "text-neutral-900"}`}>{t.betrag >= 0 ? "+" : "−"}{eur(Math.abs(t.betrag))}</td>
                 </tr>
@@ -492,7 +553,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
           </div>
           <div className="divide-y divide-neutral-100">
             {manuellRaten.map((r, i) => (
-              <div key={i} className="flex items-center justify-between gap-3 py-1.5 text-sm">
+              <div key={i} id={`rate-${i}`} className={`flex items-center justify-between gap-3 py-1.5 text-sm ${zeileCls(`rate-${i}`)}`}>
                 <span className="text-neutral-500 min-w-24 shrink-0">
                   {r.naechsteRate ? (
                     <ZahlTermin datum={r.datum} sofort={!!r.sofort} termin={r.naechsteRate} {...terminProps("rate", r.naechsteRate.lieferant)} />
@@ -634,6 +695,68 @@ function Kachel({ label, value, sub, tone = "neutral" }: { label: string; value:
       <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">{label}</div>
       <div className={`text-lg font-bold mt-1 tabular-nums ${color}`}>{value}</div>
       {sub && <div className="text-[11px] text-neutral-400 mt-0.5 leading-tight">{sub}</div>}
+    </div>
+  );
+}
+
+/** Anker einer Zeile in „Weitere Termine“; die Aktion ist dort eine Sammelzeile. */
+function terminId(ev: Pick<Ereignis, "art" | "datum" | "label">) {
+  return ev.art === "aktion" ? "termin-aktion" : `termin-${ev.art}-${ev.datum}-${ev.label}`;
+}
+
+const ZIEL_TEXT: Partial<Record<Ereignis["art"], string>> = { lieferant: "Termin ändern", manuell: "Termin ändern" };
+
+/** Festgehaltene Tagesliste im Diagramm; jeder Eintrag springt zu seiner Zeile auf der Seite. */
+function TagPopup({
+  datum,
+  saldo,
+  ereignisse,
+  x,
+  onSchliessen,
+  onWaehlen,
+}: {
+  datum: string;
+  saldo: number;
+  ereignisse: Ereignis[];
+  x: number;
+  onSchliessen: () => void;
+  onWaehlen: (ev: Ereignis) => void;
+}) {
+  const links = x > 340;
+  return (
+    <div
+      onClick={(ev) => ev.stopPropagation()}
+      style={links ? { right: `calc(100% - ${x - 8}px)` } : { left: x + 8 }}
+      className="absolute top-2 z-10 max-h-72 w-80 max-w-full cursor-default overflow-y-auto rounded-lg border border-neutral-300 bg-white p-2 text-xs shadow-lg"
+    >
+      <div className="flex items-center justify-between gap-2 px-1 pb-1">
+        <span className="font-semibold text-neutral-900">{deDate(datum)}: {eur(saldo)}</span>
+        <button onClick={onSchliessen} aria-label="Schließen" className="text-neutral-400 hover:text-neutral-900">
+          <X size={14} />
+        </button>
+      </div>
+      <div className="space-y-0.5">
+        {ereignisse.map((x2, i) => (
+          <button
+            key={i}
+            onClick={() => onWaehlen(x2)}
+            className="flex w-full items-start gap-1.5 rounded-md px-1 py-1 text-left text-neutral-600 hover:bg-neutral-100"
+          >
+            <TerminSymbol typ={symbolTyp(x2)} schaetzung={x2.schaetzung} />
+            <span className="min-w-0 flex-1">
+              <span className={`tabular-nums font-medium ${x2.betrag >= 0 ? "text-emerald-700" : "text-neutral-900"}`}>
+                {x2.betrag < 0 ? "−" : "+"}{eur(Math.abs(x2.betrag))}
+              </span>{" "}
+              {x2.label}
+              {x2.verschoben && <span className="ml-1 font-medium text-amber-700">verschoben</span>}
+            </span>
+            <span className="inline-flex shrink-0 items-center whitespace-nowrap font-medium text-neutral-900">
+              {ZIEL_TEXT[x2.art] ?? "Zum Eintrag"}
+              <ChevronRight size={12} />
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

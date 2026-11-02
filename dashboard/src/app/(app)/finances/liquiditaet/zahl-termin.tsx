@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, Pencil } from "lucide-react";
 import type { TerminStand } from "@/lib/liquiditaet/rechnung";
 
@@ -20,6 +20,7 @@ export default function ZahlTermin({
   min,
   max,
   tiefpunkt,
+  oeffnenSignal = 0,
   onVorschau,
   onSpeichern,
 }: {
@@ -30,6 +31,8 @@ export default function ZahlTermin({
   max: string;
   /** Aktueller Tiefpunkt der Vorschau, als Rückmeldung beim Ausprobieren. */
   tiefpunkt: string;
+  /** Steigt der Wert, öffnet sich das Feld (Sprung aus dem Diagramm). */
+  oeffnenSignal?: number;
   onVorschau: (datum: string | null) => void;
   onSpeichern: (datum: string | null, notiz: string) => Promise<string | null>;
 }) {
@@ -46,6 +49,11 @@ export default function ZahlTermin({
     setFehler(null);
     setOffen(true);
   }
+
+  useEffect(() => {
+    if (oeffnenSignal) oeffnen();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oeffnenSignal]);
 
   function aendern(v: string) {
     setWert(v);
@@ -94,6 +102,7 @@ export default function ZahlTermin({
     <div className="w-52 space-y-1.5 rounded-lg border border-neutral-200 bg-neutral-50 p-2 text-xs">
       <input
         type="date"
+        autoFocus
         value={wert}
         min={min}
         max={max}

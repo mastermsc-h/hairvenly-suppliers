@@ -283,6 +283,8 @@ export interface Ereignis {
   sofort?: boolean; // eigentlich schon fällig
   /** Termin wurde von Hand verschoben. */
   verschoben?: boolean;
+  /** Ratenzahlung: an welchen Lieferanten. */
+  ratenLieferant?: string;
   /** Nächste Rate eines Lieferanten — nur diese lässt sich verschieben. */
   naechsteRate?: TerminStand & { lieferant: string };
 }
@@ -507,6 +509,7 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       orderIds: r.positionen.map((x) => x.id),
       sofort: !r.termin?.verschoben && r.datum <= start,
       verschoben: r.termin?.verschoben,
+      ratenLieferant: r.lieferant,
       naechsteRate: r.termin && { ...r.termin, lieferant: r.lieferant },
     });
   }
