@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireFeature } from "@/lib/auth";
 import { LIQ_DEFAULTS, type LiqEinstellungen } from "@/lib/liquiditaet/rechnung";
+import { ladeEinstellungen, ladeRatenDaten } from "@/lib/liquiditaet/daten";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 
 const ZAHLEN: Array<[keyof LiqEinstellungen, number, number]> = [
@@ -59,6 +60,55 @@ export async function saveLiquiditaetEinstellungen(input: Partial<LiqEinstellung
   const sb = createServiceClient();
   const { error } = await sb.from("liquiditaet_einstellungen").upsert({ id: 1, daten: out, updated_at: new Date().toISOString() });
   if (error) return { ok: false, error: error.message };
+  revalidatePath("/finances/liquiditaet");
+  revalidatePath("/orders");
+  return { ok: true };
+}
+
+/**
+ * Zahltermin verschieben (datum) oder zurück auf den berechneten Termin (datum null).
+ * Betrifft nur die Planung — Rechnung, Saldo und Ankunftsdatum bleiben, wie sie sind.
+ */
+export async function setZahlTermin(input: {
+  art: "bestellung" | "rate";
+  schluessel: string;
+  datum: string | null;
+  notiz?: string | null;
+}): Promise<{ ok: boolean; error?: string }> {
+  const profile = await requireFeature("finances");
+  if (profile.role === "supplier") return { ok: false, error: "Keine Berechtigung" };
+  const { art, schluessel, datum } = input;
+  if ((art !== "bestellung" && art !== "rate") || !schluessel) return { ok: false, error: "Ungültiger Termin" };
+  if (datum !== null && !/^\d{4}-\d{2}-\d{2}$/.test(datum)) return { ok: false, error: "Ungültiges Datum" };
+  const sb = createServiceClient();
+
+  if (datum === null) {
+    const { error } = await sb.from("liquiditaet_verschiebung").delete().eq("art", art).eq("schluessel", schluessel);
+    if (error) return { ok: false, error: error.message };
+  } else {
+    let letzteZahlung: string | null = null;
+    if (art === "rate") {
+      const daten = await ladeRatenDaten(sb, await ladeEinstellungen(sb));
+      if (!daten.ratenPositionen.some((x) => x.lieferant === schluessel)) return { ok: false, error: "Kein offener Ratenplan für diesen Lieferanten" };
+      letzteZahlung = daten.letzteZahlung[schluessel] ?? null;
+    } else {
+      const { data, error } = await sb.from("orders").select("id").eq("id", schluessel).maybeSingle();
+      if (error) return { ok: false, error: error.message };
+      if (!data) return { ok: false, error: "Bestellung nicht gefunden" };
+    }
+    const { error } = await sb.from("liquiditaet_verschiebung").upsert(
+      {
+        art,
+        schluessel,
+        datum,
+        notiz: input.notiz?.trim().slice(0, 200) || null,
+        letzte_zahlung: letzteZahlung,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "art,schluessel" },
+    );
+    if (error) return { ok: false, error: error.message };
+  }
   revalidatePath("/finances/liquiditaet");
   revalidatePath("/orders");
   return { ok: true };

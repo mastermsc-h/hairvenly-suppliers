@@ -16,6 +16,7 @@ import {
   type LiqEinstellungen,
   type LiqManuellePosition,
   type LiqRohdaten,
+  type LiqVerschiebungen,
   type PrognoseErgebnis,
   ratenRegelFuer,
   ratenplan,
@@ -236,7 +237,10 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     .sort((a, b) => (a.eta ?? "").localeCompare(b.eta ?? ""));
 
   // ── Ratenzahlung: Ebru komplett, sonst nur manuelle Positionen ──
-  const { ratenPositionen, letzteZahlung, ratenKommendUsd } = await ladeRatenDaten(sb, await ladeEinstellungen(sb));
+  const [{ ratenPositionen, letzteZahlung, ratenKommendUsd }, verschiebungen] = await Promise.all([
+    ladeRatenDaten(sb, await ladeEinstellungen(sb)),
+    ladeVerschiebungen(sb),
+  ]);
 
   // ── Nachbestellung (Schätzung aus dem eigenen Bestellrhythmus) ──
   const hist = (amanda ?? []) as Array<{ order_date: string | null; invoice_total: number | null; weight_kg: number | null }>;
@@ -269,6 +273,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     ratenPositionen,
     letzteZahlung,
     ratenKommendUsd,
+    verschiebungen,
     steuern: {
       ustHistorie,
       ustErledigtBis: ustPosten.at(-1)?.zeitraum ?? null,
@@ -353,13 +358,26 @@ export async function ladeRatenDaten(
   return { ratenPositionen, letzteZahlung, ratenKommendUsd };
 }
 
+/** Von Hand verschobene Zahltermine (Tabelle liquiditaet_verschiebung). */
+export async function ladeVerschiebungen(sb: Sb): Promise<LiqVerschiebungen> {
+  const { data, error } = await sb.from("liquiditaet_verschiebung").select("art, schluessel, datum, notiz, letzte_zahlung");
+  if (error) throw new Error(error.message);
+  const out: LiqVerschiebungen = { bestellungen: {}, raten: {} };
+  for (const v of (data ?? []) as Array<{ art: string; schluessel: string; datum: string; notiz: string | null; letzte_zahlung: string | null }>) {
+    const eintrag = { datum: v.datum, notiz: v.notiz, basisZahlung: v.letzte_zahlung };
+    if (v.art === "bestellung") out.bestellungen[v.schluessel] = eintrag;
+    else out.raten[v.schluessel] = eintrag;
+  }
+  return out;
+}
+
 /** Geplante Ratentermine je Bestellung (für "nächste Rate" in Übersicht/Bestellliste). */
 export const ladeRatenTermine = cache(async (): Promise<Record<string, string[]>> => {
   const sb = createServiceClient();
   const e = await ladeEinstellungen(sb);
-  const { ratenPositionen, letzteZahlung } = await ladeRatenDaten(sb, e);
+  const [{ ratenPositionen, letzteZahlung }, verschiebungen] = await Promise.all([ladeRatenDaten(sb, e), ladeVerschiebungen(sb)]);
   const termine: Record<string, string[]> = {};
-  for (const r of ratenplan(ratenPositionen, letzteZahlung, e, heuteBerlin())) {
+  for (const r of ratenplan(ratenPositionen, letzteZahlung, e, heuteBerlin(), verschiebungen.raten)) {
     for (const p of r.positionen) (termine[p.id] ??= []).push(r.datum);
   }
   return termine;

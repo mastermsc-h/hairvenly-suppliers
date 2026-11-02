@@ -195,6 +195,39 @@ check("PayPal frisch → erster Tag", L.prognose(rpp("2026-10-18T10:00:00Z"), E0
 check("PayPal veraltet → nicht eingerechnet", L.prognose(rpp("2026-10-10T10:00:00Z"), E0).startSaldoGesamt, 100000);
 check("PayPal abgeschaltet", L.prognose(rpp("2026-10-18T10:00:00Z"), { ...E0, paypalEinrechnen: false }).paypal.eingerechnet, false);
 
+// Verschobene Zahltermine (nur Planung)
+const vs = (bestellungen = {}, raten = {}) => ({ verschiebungen: { bestellungen, raten } });
+const zahlEv = (x) => x.ereignisse.find((ev) => ev.art === "lieferant");
+const bv = best({ status: "shipped", eta: "2026-11-10" });
+const pv0 = L.prognose(roh({ bestellungen: [bv] }), E0);
+const pv1 = L.prognose(roh({ bestellungen: [bv], ...vs({ x: { datum: "2026-11-05", notiz: "abgesprochen" } }) }), E0);
+check("Amanda ohne Verschiebung sofort", [pv0.bestellungen[0].zahlDatum, pv0.bestellungen[0].sofort], ["2026-10-17", true]);
+check("Amanda verschoben: neuer Termin, nicht mehr sofort", [pv1.bestellungen[0].zahlDatum, pv1.bestellungen[0].sofort, pv1.bestellungen[0].termin.verschoben], ["2026-11-05", false, true]);
+check("Amanda verschoben: berechneter Termin + Notiz bleiben sichtbar", [pv1.bestellungen[0].termin.regelDatum, pv1.bestellungen[0].termin.notiz], ["2026-10-17", "abgesprochen"]);
+check("Amanda verschoben: Betrag unverändert", zahlEv(pv1).betrag, zahlEv(pv0).betrag);
+check("Amanda verschoben: Einfuhrabgaben bleiben bei Ankunft", pv1.bestellungen[0].einfuhr.datum, "2026-11-10");
+check("Verschieben ändert nur die Zeitachse, nicht den Endstand", pv1.tage.at(-1).saldo, pv0.tage.at(-1).saldo);
+const pvA = L.prognose(roh({ bestellungen: [bv], ...vs({ x: { datum: "2026-10-10", notiz: null } }) }), E0);
+check("Termin verstrichen, unbezahlt: wieder sofort", [pvA.bestellungen[0].zahlDatum, pvA.bestellungen[0].sofort, pvA.bestellungen[0].termin.verschoben, pvA.bestellungen[0].termin.abgelaufenAm], ["2026-10-17", true, false, "2026-10-10"]);
+check("Termin verstrichen: Hinweis", pvA.hinweise.some((h) => h.includes("verstrichen")), true);
+const pvZ = L.prognose(roh({ bestellungen: [best({ eta: "2026-12-01" })], ...vs({ x: { datum: "2026-10-05", notiz: null } }) }), E0);
+check("Vorgezogener Termin verstrichen: Zahlung bleibt in der Rechnung", [pvZ.bestellungen[0].zahlDatum, pvZ.bestellungen[0].sofort], ["2026-10-17", true]);
+check("Termin hinter dem Zeitraum: Warnung", L.prognose(roh({ bestellungen: [bv], ...vs({ x: { datum: "2027-03-01", notiz: null } }) }), E0).hinweise.some((h) => h.includes("Vorschau-Zeitraum")), true);
+const pvB = L.prognose(roh({ bestellungen: [best({ restUsd: 0, status: "shipped" })], ...vs({ x: { datum: "2026-10-10", notiz: null } }) }), E0);
+check("Bezahlte Bestellung ignoriert Verschiebung", [pvB.bestellungen[0].termin.verschoben, pvB.bestellungen[0].termin.abgelaufenAm, pvB.hinweise.some((h) => h.includes("verstrichen"))], [false, null, false]);
+
+const EB = "Ebru (CN + TR)";
+const rv = (raten, letzte = "2026-10-19") => L.prognose(roh({ ratenPositionen: [mp({ restUsd: 120000 })], letzteZahlung: { [EB]: letzte }, ...vs({}, raten) }), E0).ereignisse.filter((x) => x.art === "manuell");
+check("Rate verschoben: Folgeraten rutschen mit", rv({ [EB]: { datum: "2026-11-09", notiz: null, basisZahlung: "2026-10-19" } }).map((x) => x.datum), ["2026-11-09", "2026-11-23", "2026-12-07"]);
+check("Rate verschoben: nur die nächste trägt die Termin-Infos", rv({ [EB]: { datum: "2026-11-09", notiz: null, basisZahlung: "2026-10-19" } }).map((x) => [!!x.verschoben, !!x.naechsteRate]), [[true, true], [false, false], [false, false]]);
+check("Rate vorziehen geht auch", rv({ [EB]: { datum: "2026-10-26", notiz: null, basisZahlung: "2026-10-19" } }).map((x) => x.datum), ["2026-10-26", "2026-11-09", "2026-11-23"]);
+check("Neue Bankzahlung beendet die Verschiebung", rv({ [EB]: { datum: "2026-11-09", notiz: null, basisZahlung: "2026-10-05" } }).map((x) => x.datum), ["2026-11-02", "2026-11-16", "2026-11-30"]);
+check("Ohne Zahlungsstand: erste Bankzahlung beendet sie", rv({ [EB]: { datum: "2026-11-09", notiz: null, basisZahlung: null } }).map((x) => x.datum)[0], "2026-11-02");
+const rvA = rv({ [EB]: { datum: "2026-10-12", notiz: null, basisZahlung: "2026-10-19" } });
+check("Rate verstrichen, unbezahlt: sofort, Rest läuft ab heute", [rvA[0].datum, rvA[0].sofort, rvA[0].naechsteRate.abgelaufenAm, rvA[1].datum], ["2026-10-17", true, "2026-10-12", "2026-10-31"]);
+check("ratenplan: Bestell-Termine folgen der Verschiebung", L.ratenplan([mp({ id: "a", restUsd: 50000 })], { [EB]: "2026-10-19" }, L.mitDefaults({}), "2026-10-20", { [EB]: { datum: "2026-11-20", notiz: null, basisZahlung: "2026-10-19" } }).map((r) => r.datum), ["2026-11-20", "2026-12-04"]);
+check("Keine Verschiebungen (alte Rohdaten) ändern nichts", L.prognose(roh({ bestellungen: [bv] }), E0).bestellungen[0].termin, { regelDatum: "2026-10-17", verschoben: false, notiz: null, abgelaufenAm: null });
+
 // Defaults
 check("Defaults vollständig", Object.keys(L.mitDefaults({})).length, Object.keys(L.LIQ_DEFAULTS).length);
 

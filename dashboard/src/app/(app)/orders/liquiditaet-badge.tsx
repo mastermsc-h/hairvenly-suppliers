@@ -20,7 +20,7 @@ export default function LiquiditaetBadge({ p, groß = false, alsLink = true }: {
   const einfuhr = p.einfuhr ? ` · Einfuhrabgaben ${eur(p.einfuhr.eust + p.einfuhr.zoll)} am ${deDate(p.einfuhr.datum)} (Konto danach ${eur(p.einfuhr.saldoDanach)})` : "";
   const title = p.bezahlt
     ? `Lieferant bezahlt${einfuhr}`
-    : `Zahlung ${eur(p.betragEur)} ${p.sofort ? "sofort fällig" : `ca. ${deDate(p.zahlDatum)} (versandbereit)`} · Konto danach ${eur(p.saldoNachZahlung)}${einfuhr}`;
+    : `Zahlung ${eur(p.betragEur)} ${p.sofort ? "sofort fällig" : p.termin.verschoben ? `verschoben auf ${deDate(p.zahlDatum)}` : `ca. ${deDate(p.zahlDatum)} (versandbereit)`} · Konto danach ${eur(p.saldoNachZahlung)}${einfuhr}`;
   const text = p.bezahlt
     ? `EUSt ${p.einfuhr ? eur(p.einfuhr.eust + p.einfuhr.zoll) : "—"}`
     : ampel === "luecke"

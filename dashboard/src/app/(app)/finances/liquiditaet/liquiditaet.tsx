@@ -8,7 +8,8 @@ import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import { LIQ_DEFAULTS, prognose, type Ereignis, type LiqEinstellungen, type LiqRohdaten } from "@/lib/liquiditaet/rechnung";
 import { SYMBOLE, TerminSymbol, symbolTyp, type SymbolTyp } from "./termin-symbol";
 import { AMPEL_STIL } from "../../orders/liquiditaet-badge";
-import { saveLiquiditaetEinstellungen } from "@/lib/actions/liquiditaet";
+import ZahlTermin from "./zahl-termin";
+import { saveLiquiditaetEinstellungen, setZahlTermin } from "@/lib/actions/liquiditaet";
 
 type VerbrauchWerte = { avg12mKg: number; avg3mKg: number; d30Kg: number; avg3mEur: number } | null;
 export type Verbrauch = { glatt: VerbrauchWerte; wellig: VerbrauchWerte; stand: string | null };
@@ -38,7 +39,21 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
   const [e, setE] = useState<LiqEinstellungen>(gespeichert);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const p = useMemo(() => prognose(roh, e), [roh, e]);
+  // Offene Terminfelder rechnen sofort mit (Schlüssel "bestellung:<id>" / "rate:<Lieferant>")
+  const [entwuerfe, setEntwuerfe] = useState<Record<string, string>>({});
+  const rohMitEntwurf = useMemo(() => {
+    const keys = Object.entries(entwuerfe);
+    if (!keys.length) return roh;
+    const v = { bestellungen: { ...roh.verschiebungen?.bestellungen }, raten: { ...roh.verschiebungen?.raten } };
+    for (const [key, datum] of keys) {
+      const [art, ...rest] = key.split(":");
+      const id = rest.join(":");
+      if (art === "bestellung") v.bestellungen[id] = { datum, notiz: null };
+      else v.raten[id] = { datum, notiz: null, basisZahlung: roh.letzteZahlung?.[id] ?? null };
+    }
+    return { ...roh, verschiebungen: v };
+  }, [roh, entwuerfe]);
+  const p = useMemo(() => prognose(rohMitEntwurf, e), [rohMitEntwurf, e]);
   const geaendert = JSON.stringify(e) !== JSON.stringify(gespeichert);
 
   const set = <K extends keyof LiqEinstellungen>(k: K, v: LiqEinstellungen[K]) => {
@@ -52,6 +67,24 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
     setSaving(false);
     setMsg(res.ok ? { ok: true, text: "Gespeichert — gilt jetzt auch für die Ampel an den Bestellungen." } : { ok: false, text: res.error ?? "Fehler" });
   }
+
+  const terminProps = (art: "bestellung" | "rate", schluessel: string) => {
+    const key = `${art}:${schluessel}`;
+    return {
+      min: p.start,
+      max: p.tage.at(-1)?.datum ?? p.start,
+      tiefpunkt: `${eur(p.tiefpunkt.saldo)} am ${deDate(p.tiefpunkt.datum)}`,
+      onVorschau: (datum: string | null) =>
+        setEntwuerfe((prev) => {
+          const { [key]: _, ...rest } = prev;
+          return datum ? { ...rest, [key]: datum } : rest;
+        }),
+      onSpeichern: async (datum: string | null, notiz: string) => {
+        const res = await setZahlTermin({ art, schluessel, datum, notiz });
+        return res.ok ? null : (res.error ?? "Fehler");
+      },
+    };
+  };
 
   const laufendMonat = (p.laufendProTag * 365) / 12;
   const freiProTag = p.einnahmenProTag + p.laufendProTag;
@@ -217,6 +250,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
                               {x.betrag < 0 ? "−" : "+"}{eur(Math.abs(x.betrag))}
                             </span>{" "}
                             {x.label}
+                            {x.verschoben && <span className="ml-1 font-medium text-amber-700">verschoben</span>}
                           </span>
                         </div>
                       ))}
@@ -279,7 +313,11 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
                   <td className="py-2 pr-2 text-xs text-neutral-600">{STATUS[b.status] ?? b.status}</td>
                   <td className="py-2 pr-2 tabular-nums text-neutral-600">{b.eta ? deDate(b.eta) : "—"}</td>
                   <td className="py-2 pr-2 tabular-nums">
-                    {b.bezahlt ? <span className="text-emerald-700">bezahlt</span> : <>{deDate(b.zahlDatum)}{b.sofort && <span className="ml-1 text-xs font-medium text-red-600">sofort</span>}</>}
+                    {b.bezahlt ? (
+                      <span className="text-emerald-700">bezahlt</span>
+                    ) : (
+                      <ZahlTermin datum={b.zahlDatum} sofort={b.sofort} termin={b.termin} {...terminProps("bestellung", b.orderId)} />
+                    )}
                   </td>
                   <td className="py-2 pr-2 text-right tabular-nums">
                     {b.bezahlt ? "—" : <>{eur(b.betragEur)}<div className="text-xs text-neutral-400">{usd(b.betragUsd)}</div></>}
@@ -328,7 +366,11 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
                   <td className="py-1.5 pr-2 whitespace-nowrap">
                     <TerminSymbol typ={symbolTyp(t)} schaetzung={"schaetzung" in t ? t.schaetzung : false} />
                   </td>
-                  <td className="py-1.5 pr-3 text-neutral-800">{t.label}{t.sofort && <span className="ml-1 text-xs text-red-600">überfällig</span>}</td>
+                  <td className="py-1.5 pr-3 text-neutral-800">
+                    {t.label}
+                    {t.sofort && <span className="ml-1 text-xs text-red-600">überfällig</span>}
+                    {"verschoben" in t && t.verschoben && <span className="ml-1 text-xs font-medium text-amber-700">verschoben</span>}
+                  </td>
                   <td className={`py-1.5 text-right tabular-nums font-medium ${t.betrag >= 0 ? "text-emerald-700" : "text-neutral-900"}`}>{t.betrag >= 0 ? "+" : "−"}{eur(Math.abs(t.betrag))}</td>
                 </tr>
               ))}
@@ -446,11 +488,18 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch }: { roh: LiqR
               Manuelle Positionen anderer Lieferanten: Raten à {usd(e.manuellRateUsd)}, erste {e.manuellFristTage} Tage nach Datum, dann alle {e.manuellAbstandTage} Tage.
               Älteste Rechnung zuerst; eine Rate kann den Rest der einen und den Anfang der nächsten abdecken.
             </p>
+            <p>Klick aufs Datum der nächsten Rate verschiebt sie, die folgenden Raten rutschen mit. Mit der nächsten Bankzahlung läuft die Verschiebung aus.</p>
           </div>
           <div className="divide-y divide-neutral-100">
             {manuellRaten.map((r, i) => (
               <div key={i} className="flex items-center justify-between gap-3 py-1.5 text-sm">
-                <span className="text-neutral-500 w-24 shrink-0">{deDate(r.datum)}</span>
+                <span className="text-neutral-500 min-w-24 shrink-0">
+                  {r.naechsteRate ? (
+                    <ZahlTermin datum={r.datum} sofort={!!r.sofort} termin={r.naechsteRate} {...terminProps("rate", r.naechsteRate.lieferant)} />
+                  ) : (
+                    deDate(r.datum)
+                  )}
+                </span>
                 <span className="flex-1 min-w-0 truncate text-neutral-800">{r.label}</span>
                 <span className="font-medium text-neutral-900">{eur(-r.betrag)}</span>
               </div>

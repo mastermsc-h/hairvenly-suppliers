@@ -180,6 +180,31 @@ export interface LiqManuellePosition {
   restUsd: number;
 }
 
+/** Von Hand verschobener Zahltermin — nur Planung, Rechnung und Saldo bleiben unberührt. */
+export interface LiqVerschiebung {
+  datum: string;
+  notiz: string | null;
+  /** Nur Raten: letzte Bankzahlung beim Verschieben. Eine neuere = Rate bezahlt → erledigt. */
+  basisZahlung?: string | null;
+}
+
+export interface LiqVerschiebungen {
+  /** order id → Termin */
+  bestellungen: Record<string, LiqVerschiebung>;
+  /** Lieferant → Termin der nächsten Rate (Folgeraten rutschen mit) */
+  raten: Record<string, LiqVerschiebung>;
+}
+
+/** Wie ein Zahltermin zustande kam. */
+export interface TerminStand {
+  /** Termin laut Regel, ohne Verschiebung. */
+  regelDatum: string;
+  verschoben: boolean;
+  notiz: string | null;
+  /** Verschobener Termin ist verstrichen, ohne dass bezahlt wurde. */
+  abgelaufenAm: string | null;
+}
+
 export interface LiqRohdaten {
   heute: string;
   /** Saldo der Geschäftskonten (ohne Targobank-Gehaltskonto) zum Stand `saldoStand`. */
@@ -206,6 +231,7 @@ export interface LiqRohdaten {
   letzteZahlung?: Record<string, string>;
   /** Ratenlieferanten: Ware in Produktion ohne Rechnung (geschätzt, USD) — noch nicht im Plan. */
   ratenKommendUsd?: Record<string, number>;
+  verschiebungen?: LiqVerschiebungen;
   steuern: {
     /** Vergangene Monate: gezahlte USt-VA (+) bzw. Erstattung (−) und im Monat gezahlte EUSt. */
     ustHistorie: Array<{ monat: string; ust: number; eust: number }>;
@@ -255,6 +281,10 @@ export interface Ereignis {
   /** Ratenzahlung: welche Rechnungen diese Rate (anteilig) bezahlt. */
   orderIds?: string[];
   sofort?: boolean; // eigentlich schon fällig
+  /** Termin wurde von Hand verschoben. */
+  verschoben?: boolean;
+  /** Nächste Rate eines Lieferanten — nur diese lässt sich verschieben. */
+  naechsteRate?: TerminStand & { lieferant: string };
 }
 
 export type Ampel = "ok" | "knapp" | "luecke";
@@ -266,6 +296,7 @@ export interface BestellPrognose {
   eta: string | null;
   zahlDatum: string;
   sofort: boolean;
+  termin: TerminStand;
   /** Restbetrag 0 → an den Lieferanten nichts mehr zu zahlen (nur noch Einfuhrabgaben). */
   bezahlt: boolean;
   betragUsd: number;
@@ -326,7 +357,7 @@ interface Plan {
   fxQuelle: PrognoseErgebnis["fxQuelle"];
   ereignisse: Ereignis[];
   ustBasis: number;
-  bestellInfo: Map<string, { zahlDatum: string; sofort: boolean; usd: number; eur: number; einfuhr: { datum: string; eust: number; zoll: number } | null }>;
+  bestellInfo: Map<string, { zahlDatum: string; sofort: boolean; termin: TerminStand; usd: number; eur: number; einfuhr: { datum: string; eust: number; zoll: number } | null }>;
   hinweise: string[];
   nachbestellKgMonat: number;
   eustAndereMonat: number;
@@ -340,6 +371,26 @@ export interface Rate {
   datum: string;
   usd: number;
   positionen: Array<{ id: string; label: string; usd: number }>;
+  /** Nur die nächste Rate (nr 1) lässt sich verschieben. */
+  termin?: TerminStand;
+}
+
+/**
+ * Verschobener Termin vor Regeltermin. Ist er verstrichen und die Zahlung noch offen, zählt sie
+ * wieder als sofort fällig — eine Verschiebung darf nie still aus der Rechnung fallen.
+ */
+function terminMit(regelDatum: string, v: LiqVerschiebung | undefined, start: string): TerminStand & { datum: string } {
+  if (!v) return { datum: regelDatum, regelDatum, verschoben: false, notiz: null, abgelaufenAm: null };
+  if (v.datum < start) return { datum: start, regelDatum, verschoben: false, notiz: v.notiz, abgelaufenAm: v.datum };
+  return { datum: v.datum, regelDatum, verschoben: true, notiz: v.notiz, abgelaufenAm: null };
+}
+
+const deKurz = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(2, 4)}`;
+
+function terminHinweis(name: string, t: TerminStand & { datum: string }, ende: string): string | null {
+  if (t.abgelaufenAm) return `${name}: verschobener Termin ${deKurz(t.abgelaufenAm)} ist verstrichen und noch nicht bezahlt — wieder als sofort fällig gerechnet.`;
+  if (t.verschoben && t.datum > ende) return `${name}: verschobener Termin ${deKurz(t.datum)} liegt nach dem Vorschau-Zeitraum — die Zahlung fehlt in der Kurve.`;
+  return null;
 }
 
 /**
@@ -347,12 +398,15 @@ export interface Rate {
  * Termin = max(Rechnungsdatum + Frist, vorige Zahlung + Abstand, start) — "vorige Zahlung" ist
  * zuerst die letzte echte Bankzahlung, danach die jeweils vorige geplante Rate.
  * Eine Rate kann den Rest der einen und den Anfang der nächsten Rechnung abdecken.
+ * Verschiebung gilt für die nächste Rate, die folgenden rechnen ab ihr weiter. Sie endet mit der
+ * nächsten echten Bankzahlung.
  */
 export function ratenplan(
   positionen: LiqManuellePosition[],
   letzteZahlung: Record<string, string>,
   e: LiqEinstellungen,
   start: string,
+  verschiebungen: Record<string, LiqVerschiebung> = {},
 ): Rate[] {
   const out: Rate[] = [];
   const offenAlle = positionen.filter((p) => p.restUsd > 0.01);
@@ -365,10 +419,18 @@ export function ratenplan(
     const rate = Math.max(1, cfg.rateUsd);
     const raten: Rate[] = [];
     let letzte: string | null = letzteZahlung[lieferant] ?? null;
+    const v = verschiebungen[lieferant];
+    const vGueltig = v && (letzte ?? "") <= (v.basisZahlung ?? "") ? v : undefined;
     for (let kopf = 0; kopf < offen.length && raten.length < 200; ) {
       const frueh: string = letzte ? plusTage(letzte, cfg.abstandTage) : offen[kopf].faellig;
       let datum: string = frueh > offen[kopf].faellig ? frueh : offen[kopf].faellig;
       if (datum < start) datum = start;
+      let termin: TerminStand | undefined;
+      if (raten.length === 0) {
+        const t = terminMit(datum, vGueltig, start);
+        datum = t.datum;
+        termin = { regelDatum: t.regelDatum, verschoben: t.verschoben, notiz: t.notiz, abgelaufenAm: t.abgelaufenAm };
+      }
       let usd = 0;
       const pos: Rate["positionen"] = [];
       while (kopf < offen.length && usd < rate - 0.005) {
@@ -378,7 +440,7 @@ export function ratenplan(
         pos.push({ id: offen[kopf].id, label: offen[kopf].label, usd: r2(teil) });
         if (offen[kopf].rest <= 0.005) kopf++;
       }
-      raten.push({ lieferant, nr: raten.length + 1, von: 0, datum, usd: r2(usd), positionen: pos });
+      raten.push({ lieferant, nr: raten.length + 1, von: 0, datum, usd: r2(usd), positionen: pos, termin });
       letzte = datum;
     }
     for (const r of raten) out.push({ ...r, von: raten.length });
@@ -408,12 +470,17 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
   // 1) Amanda-Bestellungen: Zahlung bei "versandbereit" (≈ Ankunft − X Tage), Einfuhrabgaben bei Ankunft
   for (const b of roh.bestellungen) {
     const bezahlt = b.restUsd <= 0.01;
-    const sofort = !bezahlt && (SOFORT_STATUS.includes(b.status) || (!!b.eta && plusTage(b.eta, -e.zahlungVorAnkunftTage) < start));
-    const zahlDatum = SOFORT_STATUS.includes(b.status) || !b.eta ? start : amStart(plusTage(b.eta, -e.zahlungVorAnkunftTage));
+    const sofortRegel = !bezahlt && (SOFORT_STATUS.includes(b.status) || (!!b.eta && plusTage(b.eta, -e.zahlungVorAnkunftTage) < start));
+    const regelDatum = SOFORT_STATUS.includes(b.status) || !b.eta ? start : amStart(plusTage(b.eta, -e.zahlungVorAnkunftTage));
+    const t = terminMit(regelDatum, bezahlt ? undefined : roh.verschiebungen?.bestellungen[b.id], start);
+    const zahlDatum = t.datum;
+    const sofort = t.verschoben ? false : !!t.abgelaufenAm || sofortRegel;
+    const hinweis = terminHinweis(b.label, t, ende);
+    if (hinweis) hinweise.push(hinweis);
     if (!b.eta && !bezahlt) hinweise.push(`${b.label}: kein Ankunftsdatum — Zahlung sofort angenommen.`);
     const eur = r2(b.restUsd / fx);
     if (!bezahlt) {
-      ereignisse.push({ datum: zahlDatum, betrag: -eur, art: "lieferant", label: b.label, orderId: b.id, sofort });
+      ereignisse.push({ datum: zahlDatum, betrag: -eur, art: "lieferant", label: b.label, orderId: b.id, sofort, verschoben: t.verschoben });
     }
     let einfuhr: { datum: string; eust: number; zoll: number } | null = null;
     if (b.status !== "delivered" && (b.invoiceUsd ?? 0) > 0) {
@@ -423,19 +490,24 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       ereignisse.push({ datum, betrag: -(ab.eust + ab.zoll), art: "einfuhr", label: `Einfuhrabgaben ${b.label}`, orderId: b.id });
       eustProMonat[monatVon(datum)] = (eustProMonat[monatVon(datum)] ?? 0) + ab.eust;
     }
-    bestellInfo.set(b.id, { zahlDatum, sofort, usd: b.restUsd, eur, einfuhr });
+    const termin = { regelDatum: t.regelDatum, verschoben: t.verschoben, notiz: t.notiz, abgelaufenAm: t.abgelaufenAm };
+    bestellInfo.set(b.id, { zahlDatum, sofort, termin, usd: b.restUsd, eur, einfuhr });
   }
 
   // 1b) Ratenzahlung (Ebru: alle offenen Rechnungen; andere Lieferanten: nur manuelle Positionen)
   const ratenPos = (roh.ratenPositionen ?? roh.manuellePositionen ?? []).filter((p) => p.restUsd > 0.01);
-  for (const r of ratenplan(ratenPos, roh.letzteZahlung ?? {}, e, start)) {
+  for (const r of ratenplan(ratenPos, roh.letzteZahlung ?? {}, e, start, roh.verschiebungen?.raten)) {
+    const hinweis = r.termin ? terminHinweis(`${r.lieferant} nächste Rate`, { ...r.termin, datum: r.datum }, ende) : null;
+    if (hinweis) hinweise.push(hinweis);
     ereignisse.push({
       datum: r.datum,
       betrag: -r2(r.usd / fx),
       art: "manuell",
       label: `${r.lieferant} Rate ${r.nr}/${r.von} · ${r.usd.toLocaleString("de-DE", { maximumFractionDigits: 0 })} $ (${r.positionen.map((x) => x.label).join(", ")})`,
       orderIds: r.positionen.map((x) => x.id),
-      sofort: r.datum <= start,
+      sofort: !r.termin?.verschoben && r.datum <= start,
+      verschoben: r.termin?.verschoben,
+      naechsteRate: r.termin && { ...r.termin, lieferant: r.lieferant },
     });
   }
   if (ratenPos.length && e.andereLieferantenEinrechnen) {
@@ -641,6 +713,7 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
       eta: b.eta,
       zahlDatum: info.zahlDatum,
       sofort: info.sofort,
+      termin: info.termin,
       bezahlt: info.usd <= 0.01,
       betragUsd: info.usd,
       betragEur: info.eur,
