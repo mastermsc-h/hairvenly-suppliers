@@ -11,6 +11,7 @@ import {
   parseFxKurs,
   parseKontostand,
   plusTage,
+  WARE_DA,
   prognose,
   tageZwischen,
   type LiqBestellung,
@@ -111,7 +112,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     sb.from("orders_with_totals")
       .select("id, label, status, eta, invoice_total, remaining_balance, import_vat, weight_kg")
       .eq("supplier_id", amandaId)
-      .not("status", "in", "(stocked,cancelled,hidden,manual,draft)"),
+      .not("status", "in", "(cancelled,hidden,manual,draft)"),
     sb.from("orders")
       .select("order_date, invoice_total, weight_kg")
       .eq("supplier_id", amandaId)
@@ -234,8 +235,8 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
       importVatEur: o.import_vat == null ? null : Number(o.import_vat),
       kg: o.weight_kg == null ? null : Number(o.weight_kg),
     }))
-    // Angekommen + bezahlt = erledigt
-    .filter((b) => !(b.status === "delivered" && b.restUsd <= 0.01))
+    // Angekommen/eingelagert + bezahlt = erledigt; unbezahlte Ware bleibt eine offene Schuld
+    .filter((b) => !(WARE_DA.includes(b.status) && b.restUsd <= 0.01))
     .sort((a, b) => (a.eta ?? "").localeCompare(b.eta ?? ""));
 
   // ── Ratenzahlung: Ebru komplett, sonst nur manuelle Positionen ──

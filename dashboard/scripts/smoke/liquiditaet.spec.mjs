@@ -237,6 +237,13 @@ check("Rate verstrichen, unbezahlt: sofort, Rest läuft ab heute", [rvA[0].datum
 check("ratenplan: Bestell-Termine folgen der Verschiebung", L.ratenplan([mp({ id: "a", restUsd: 50000 })], { [EB]: "2026-10-19" }, L.mitDefaults({}), "2026-10-20", { [EB]: { datum: "2026-11-20", notiz: null, basisZahlung: "2026-10-19" } }).map((r) => r.datum), ["2026-11-20", "2026-12-04"]);
 check("Keine Verschiebungen (alte Rohdaten) ändern nichts", L.prognose(roh({ bestellungen: [bv] }), E0).bestellungen[0].termin, { regelDatum: "2026-10-17", verschoben: false, notiz: null, abgelaufenAm: null });
 
+// Eingelagert, aber unbezahlt: bleibt Schuld, sofort fällig, keine Einfuhrabgaben mehr
+const eingelagert = L.prognose(roh({ bestellungen: [{ ...bv, status: "stocked", eta: "2026-12-20" }] }), E0);
+check("Eingelagert unbezahlt ist sofort fällig", eingelagert.bestellungen[0].sofort, true);
+check("Eingelagert: Zahlung am ersten Tag", eingelagert.ereignisse.filter((x) => x.art === "lieferant").map((x) => x.datum), [eingelagert.start]);
+check("Eingelagert: keine Einfuhrabgaben", eingelagert.ereignisse.filter((x) => x.art === "einfuhr").length, 0);
+check("Angekommen verhält sich gleich", L.prognose(roh({ bestellungen: [{ ...bv, status: "delivered", eta: "2026-12-20" }] }), E0).bestellungen[0].sofort, true);
+
 // Echter Verlauf: rückwärts aus dem heutigen Stand
 const vb = (iban, datum, betrag, name = "X", intern = false) => ({ iban, datum, betrag, name, intern });
 const vBuchungen = [

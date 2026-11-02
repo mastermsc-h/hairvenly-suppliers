@@ -388,7 +388,9 @@ export interface PrognoseErgebnis {
   hinweise: string[];
 }
 
-const SOFORT_STATUS = ["ready_to_ship", "shipped", "in_customs"];
+/** Ware ist angekommen: Einfuhrabgaben sind erledigt, ein offener Rest ist sofort fällig. */
+export const WARE_DA = ["delivered", "stocked"];
+const SOFORT_STATUS = ["ready_to_ship", "shipped", "in_customs", ...WARE_DA];
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 /** Label-Zusatz + Schätzungs-Merkmal für einen Steuerposten. */
@@ -537,7 +539,7 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       ereignisse.push({ datum: zahlDatum, betrag: -eur, art: "lieferant", label: b.label, orderId: b.id, sofort, verschoben: t.verschoben });
     }
     let einfuhr: { datum: string; eust: number; zoll: number } | null = null;
-    if (b.status !== "delivered" && (b.invoiceUsd ?? 0) > 0) {
+    if (!WARE_DA.includes(b.status) && (b.invoiceUsd ?? 0) > 0) {
       const ab = einfuhrFuer(b.invoiceUsd ?? 0, b.importVatEur);
       const datum = amStart(b.eta ?? start);
       einfuhr = { datum, ...ab };
