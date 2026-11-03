@@ -21,6 +21,7 @@ import {
   type LiqVerschiebungen,
   type PrognoseErgebnis,
   type VerlaufTag,
+  type ZahlGruppe,
   ratenRegelFuer,
   ratenplan,
 } from "./rechnung";
@@ -403,25 +404,49 @@ export const ladeRatenTermine = cache(async (): Promise<Record<string, string[]>
  * Echter Kontostand je Tag für das Diagramm — nur die Liquiditätsseite braucht ihn,
  * deshalb nicht in ladeRohdaten (das läuft auch bei jeder Bestellliste).
  */
-export async function ladeKontoVerlauf(sb: Sb, roh: Pick<LiqRohdaten, "konten" | "heute">): Promise<VerlaufTag[]> {
+export async function ladeKontoVerlauf(sb: Sb, roh: Pick<LiqRohdaten, "konten" | "heute">, e: LiqEinstellungen): Promise<VerlaufTag[]> {
   const ibans = roh.konten.map((k) => k.iban);
   if (!ibans.length) return [];
-  const tx = await selectAll<Pick<Tx, "account_iban" | "booking_date" | "amount" | "kategorie" | "counterparty_name">>((from, to) =>
+  const ratenMuster = e.ratenLieferanten.map((r) => r.bankMuster.trim().toLowerCase()).filter(Boolean);
+  // Gleiche Gruppen wie die Termine der Vorschau, damit Vergangenheit und Plan zusammenpassen
+  const gruppeVon = (t: Pick<Tx, "amount" | "kategorie" | "counterparty_name" | "purpose">): ZahlGruppe | null => {
+    const k = t.kategorie ?? "";
+    if (k === "st_eust") return "einfuhr";
+    if (k.startsWith("st_")) return "steuern";
+    if (t.amount >= 0) return null;
+    if (istAmandaZahlung(t.counterparty_name, t.purpose)) return "amanda";
+    const name = (t.counterparty_name ?? "").toLowerCase();
+    return ratenMuster.some((m) => name.includes(m)) ? "ebru" : null;
+  };
+  // Amanda/Ebru: Rechnungsnummer aus dem Verwendungszweck ist aussagekräftiger als der Empfänger
+  const nameVon = (t: Pick<Tx, "kategorie" | "counterparty_name" | "purpose">, gruppe: ZahlGruppe | null) => {
+    const basis = t.counterparty_name?.trim() || KATEGORIE_BY_KEY[t.kategorie ?? "unklar"]?.label || "Buchung";
+    const nr = gruppe === "amanda" || gruppe === "ebru" ? (t.purpose ?? "").match(/AMANDAGRM[\w-]+|EHL\d{6,}/i)?.[0] : null;
+    if (gruppe === "amanda") return nr ? `Amanda · ${nr}` : "Amanda";
+    if (gruppe === "ebru") return nr ? `Ebru · ${nr}` : `Ebru · ${basis}`;
+    return basis;
+  };
+  const tx = await selectAll<Pick<Tx, "account_iban" | "booking_date" | "amount" | "kategorie" | "counterparty_name" | "purpose">>((from, to) =>
     sb.from("bank_transactions")
-      .select("account_iban, booking_date, amount, kategorie, counterparty_name")
+      .select("account_iban, booking_date, amount, kategorie, counterparty_name, purpose")
       .in("account_iban", ibans)
       .order("booking_date", { ascending: true })
       .order("id", { ascending: true })
       .range(from, to)
   );
   return kontoVerlauf(
-    tx.map((t) => ({
-      iban: t.account_iban as string,
-      datum: t.booking_date,
-      betrag: Number(t.amount),
-      name: t.counterparty_name?.trim() || KATEGORIE_BY_KEY[t.kategorie ?? "unklar"]?.label || "Buchung",
-      intern: t.kategorie === "umbuchung",
-    })),
+    tx.map((t) => {
+      const betrag = Number(t.amount);
+      const gruppe = gruppeVon({ ...t, amount: betrag });
+      return {
+        iban: t.account_iban as string,
+        datum: t.booking_date,
+        betrag,
+        name: gruppe ? nameVon(t, gruppe) : t.counterparty_name?.trim() || KATEGORIE_BY_KEY[t.kategorie ?? "unklar"]?.label || "Buchung",
+        intern: t.kategorie === "umbuchung",
+        gruppe,
+      };
+    }),
     roh.konten,
     roh.heute,
   );

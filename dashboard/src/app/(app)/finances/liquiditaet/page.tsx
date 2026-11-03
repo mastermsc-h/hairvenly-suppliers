@@ -26,6 +26,6 @@ export default async function LiquiditaetPage() {
   if (profile.role === "supplier") redirect("/");
   const sb = createServiceClient();
   const [roh, einstellungen, verbrauch] = await Promise.all([ladeRohdaten(sb), ladeEinstellungen(sb), ladeVerbrauch()]);
-  const verlauf = await ladeKontoVerlauf(sb, roh);
+  const verlauf = await ladeKontoVerlauf(sb, roh, einstellungen);
   return <Liquiditaet roh={roh} gespeichert={einstellungen} verbrauch={verbrauch} verlauf={verlauf} />;
 }

@@ -3,9 +3,9 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
-import { Area, CartesianGrid, ComposedChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, Bar, CartesianGrid, ComposedChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
-import { LIQ_DEFAULTS, prognose, type Ereignis, type LiqEinstellungen, type LiqRohdaten, type VerlaufTag } from "@/lib/liquiditaet/rechnung";
+import { LIQ_DEFAULTS, prognose, zahlGruppe, type Ereignis, type LiqEinstellungen, type LiqRohdaten, type VerlaufTag, type ZahlGruppe } from "@/lib/liquiditaet/rechnung";
 import { SYMBOLE, TerminSymbol, symbolTyp, type SymbolTyp } from "./termin-symbol";
 import { AMPEL_STIL } from "../../orders/liquiditaet-badge";
 import ZahlTermin, { type TerminEntwurf } from "./zahl-termin";
@@ -35,8 +35,27 @@ function monatLabel(m: string) {
   return `${MONATE[Number(mo) - 1]} ${y}`;
 }
 
-/** Diagrammzeile: Vergangenheit hat nur `ist`, Vorschau `saldo`. */
-type DiagrammTag = { datum: string; saldo?: number; ist?: number; ev: Ereignis[]; buchungen?: VerlaufTag["buchungen"]; weitere?: number };
+/** Diagrammzeile: Vergangenheit hat nur `ist`, Vorschau `saldo`. `b_<gruppe>`/`g_<gruppe>` = bezahlt/geplant (Abfluss positiv). */
+type DiagrammTag = {
+  datum: string;
+  saldo?: number;
+  ist?: number;
+  ev: Ereignis[];
+  buchungen?: VerlaufTag["buchungen"];
+  weitere?: number;
+  zahlungen?: VerlaufTag["zahlungen"];
+} & Partial<Record<`${"b" | "g"}_${ZahlGruppe}`, number>>;
+
+/** Einblendbare Zahlungsarten im Diagramm. */
+const GRUPPEN: Array<{ key: ZahlGruppe; name: string; typ: SymbolTyp }> = [
+  { key: "amanda", name: "Amanda", typ: "lieferant" },
+  { key: "ebru", name: "Ebru / Raten", typ: "manuell" },
+  { key: "einfuhr", name: "Einfuhrabgaben", typ: "einfuhr" },
+  { key: "steuern", name: "Steuern", typ: "ust" },
+];
+
+/** Eine Zeile der Zahlungsliste unter dem Diagramm. */
+type ZahlZeile = { datum: string; gruppe: ZahlGruppe; label: string; betrag: number; bezahlt: boolean; ev?: Ereignis };
 
 export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { roh: LiqRohdaten; gespeichert: LiqEinstellungen; verbrauch: Verbrauch | null; verlauf: VerlaufTag[] }) {
   const [e, setE] = useState<LiqEinstellungen>(gespeichert);
@@ -76,6 +95,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
   const markierTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Wie viele Tage das Diagramm von der Vorschau in die Vergangenheit geschoben ist
   const [zurueck, setZurueck] = useState(0);
+  // Eingeblendete Zahlungsarten (Balken + Liste unter dem Diagramm)
+  const [zeigen, setZeigen] = useState<ZahlGruppe[]>([]);
 
   const set = <K extends keyof LiqEinstellungen>(k: K, v: LiqEinstellungen[K]) => {
     setE((prev) => ({ ...prev, [k]: v }));
@@ -116,10 +137,23 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
     const byDay = new Map<string, Ereignis[]>();
     for (const ev of p.ereignisse) byDay.set(ev.datum, [...(byDay.get(ev.datum) ?? []), ev]);
     const vergangen = verlauf.filter((t) => t.datum < p.start);
-    const vorschau: DiagrammTag[] = p.tage.map((t) => ({ ...t, ev: byDay.get(t.datum) ?? [] }));
+    // Heutige Buchungen stecken schon im Startstand, gehören aber als "bezahlt" zum ersten Vorschau-Tag
+    const heuteGebucht = verlauf.find((t) => t.datum === p.start)?.zahlungen;
+    const vorschau: DiagrammTag[] = p.tage.map((t, i) => ({ ...t, ev: byDay.get(t.datum) ?? [], ...(i === 0 && heuteGebucht ? { zahlungen: heuteGebucht } : {}) }));
     // Echte Linie läuft bis an den Start der Vorschau heran
     if (vorschau[0] && vergangen.length) vorschau[0] = { ...vorschau[0], ist: vergangen.at(-1)?.saldo };
-    return [...vergangen.map((t) => ({ datum: t.datum, ist: t.saldo, ev: [], buchungen: t.buchungen, weitere: t.weitere })), ...vorschau];
+    const zeilen: DiagrammTag[] = [
+      ...vergangen.map((t) => ({ datum: t.datum, ist: t.saldo, ev: [], buchungen: t.buchungen, weitere: t.weitere, zahlungen: t.zahlungen })),
+      ...vorschau,
+    ];
+    for (const z of zeilen) {
+      for (const b of z.zahlungen ?? []) z[`b_${b.gruppe}`] = (z[`b_${b.gruppe}`] ?? 0) - b.betrag;
+      for (const ev of z.ev) {
+        const g = zahlGruppe(ev);
+        if (g) z[`g_${g}`] = (z[`g_${g}`] ?? 0) - ev.betrag;
+      }
+    }
+    return zeilen;
   }, [p, verlauf]);
   const fensterTage = p.tage.length;
   const maxZurueck = Math.max(0, alleTage.length - fensterTage);
@@ -189,6 +223,16 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
   const pinTag = pin ? chartData.find((d) => d.datum === pin.datum) : undefined;
   const fensterVon = chartData[0]?.datum ?? p.start;
   const fensterBis = chartData.at(-1)?.datum ?? p.start;
+  const zahlListe: ZahlZeile[] = zeigen.length
+    ? chartData.flatMap((t) => [
+        ...(t.zahlungen ?? []).filter((b) => zeigen.includes(b.gruppe)).map((b) => ({ datum: t.datum, gruppe: b.gruppe, label: b.name, betrag: b.betrag, bezahlt: true })),
+        ...t.ev.flatMap((ev) => {
+          const g = zahlGruppe(ev);
+          return g && zeigen.includes(g) ? [{ datum: t.datum, gruppe: g, label: ev.label, betrag: ev.betrag, bezahlt: false, ev }] : [];
+        }),
+      ])
+    : [];
+  const umschalten = (g: ZahlGruppe) => setZeigen((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]));
   const ebruRegel = e.ratenLieferanten[0] ?? null;
   const setEbru = (patch: Partial<NonNullable<typeof ebruRegel>>) =>
     ebruRegel && set("ratenLieferanten", [{ ...ebruRegel, ...patch }, ...e.ratenLieferanten.slice(1)]);
@@ -338,12 +382,45 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
             </button>
           </span>
         </div>
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="mr-1 text-neutral-500">Zahlungen einblenden:</span>
+          {GRUPPEN.map((g) => {
+            const an = zeigen.includes(g.key);
+            const farbe = SYMBOLE[g.typ].farbe;
+            return (
+              <button
+                key={g.key}
+                onClick={() => umschalten(g.key)}
+                aria-pressed={an}
+                style={an ? { backgroundColor: farbe, borderColor: farbe } : { borderColor: farbe, color: farbe }}
+                className={`rounded-full border px-2.5 py-0.5 font-medium transition-colors ${an ? "text-white" : "bg-white hover:bg-neutral-50"}`}
+              >
+                {g.name}
+              </button>
+            );
+          })}
+          {zeigen.length > 0 && (
+            <button onClick={() => setZeigen([])} className="ml-1 text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-neutral-900">
+              ausblenden
+            </button>
+          )}
+        </div>
         <div className="relative cursor-pointer [&_*:focus]:outline-none" style={{ width: "100%", height: 300 }}>
           <ResponsiveContainer>
             <ComposedChart data={chartData} margin={{ top: 12, right: 8, left: 8, bottom: 0 }} onClick={diagrammKlick}>
               <CartesianGrid stroke="#f3f4f6" />
               <XAxis dataKey="datum" tick={{ fontSize: 11, fill: "#737373" }} tickFormatter={(d) => `${String(d).slice(8, 10)}.${String(d).slice(5, 7)}.`} minTickGap={24} />
               <YAxis tick={{ fontSize: 11, fill: "#737373" }} tickFormatter={(v) => `${Math.round(v / 1000)}k`} width={44} />
+              {zeigen.length > 0 && (
+                <YAxis
+                  yAxisId="z"
+                  orientation="right"
+                  tick={{ fontSize: 10, fill: "#a3a3a3" }}
+                  tickFormatter={(v) => `${Math.round(v / 1000)}k`}
+                  width={44}
+                  label={{ value: "Zahlungen (Balken)", angle: 90, position: "insideRight", fontSize: 10, fill: "#a3a3a3", dx: 6 }}
+                />
+              )}
               <Tooltip
                 content={({ active, payload }) => {
                   if (pin || !active || !payload?.length) return null;
@@ -376,6 +453,11 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
               <ReferenceLine y={e.puffer} stroke="#d97706" strokeDasharray="4 4" label={{ value: "Reserve", position: "insideTopRight", fontSize: 10, fill: "#d97706" }} />
               <Area type="stepAfter" dataKey="ist" stroke="#737373" fill="#f5f5f5" strokeWidth={2} isAnimationActive={false} />
               <Area type="stepAfter" dataKey="saldo" stroke="#2563eb" fill="#dbeafe" strokeWidth={2} isAnimationActive={false} />
+              {/* Zahlungen als Balken (rechte Achse): bezahlt blass, geplant kräftig */}
+              {GRUPPEN.filter((g) => zeigen.includes(g.key)).flatMap((g) => [
+                <Bar key={`b_${g.key}`} yAxisId="z" dataKey={`b_${g.key}`} stackId="z" fill={SYMBOLE[g.typ].farbe} fillOpacity={0.4} maxBarSize={10} isAnimationActive={false} />,
+                <Bar key={`g_${g.key}`} yAxisId="z" dataKey={`g_${g.key}`} stackId="z" fill={SYMBOLE[g.typ].farbe} maxBarSize={10} isAnimationActive={false} />,
+              ])}
               {steuerMarken.filter(([datum]) => datum >= fensterVon && datum <= fensterBis).map(([datum, evs]) => (
                 <ReferenceLine
                   key={datum}
@@ -400,6 +482,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
             />
           )}
         </div>
+        {zeigen.length > 0 && <ZahlungsListe zeilen={zahlListe} zeigen={zeigen} von={fensterVon} bis={fensterBis} onWaehlen={springeZu} />}
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-neutral-500">
           {(["ust", "lst", "est", "gewst", "einfuhr", "lieferant", "manuell", "aktion"] as SymbolTyp[]).map((t) => (
             <span key={t} className="inline-flex items-center gap-1">
@@ -784,6 +867,79 @@ function terminId(ev: Pick<Ereignis, "art" | "datum" | "label">) {
 }
 
 const ZIEL_TEXT: Partial<Record<Ereignis["art"], string>> = { lieferant: "Termin ändern", manuell: "Termin ändern" };
+
+/** Eingeblendete Zahlungen im sichtbaren Zeitraum: Summen je Art + Liste (bezahlt = Bank, geplant = Vorschau). */
+function ZahlungsListe({ zeilen, zeigen, von, bis, onWaehlen }: { zeilen: ZahlZeile[]; zeigen: ZahlGruppe[]; von: string; bis: string; onWaehlen: (ev: Ereignis) => void }) {
+  const summe = (g: ZahlGruppe, bezahlt: boolean) => {
+    const z = zeilen.filter((x) => x.gruppe === g && x.bezahlt === bezahlt);
+    return { betrag: -z.reduce((s, x) => s + x.betrag, 0), n: z.length };
+  };
+  return (
+    <div className="mt-3 rounded-xl border border-neutral-200">
+      <div className="grid gap-px overflow-hidden rounded-t-xl bg-neutral-200 sm:grid-cols-2 lg:grid-cols-4">
+        {GRUPPEN.filter((g) => zeigen.includes(g.key)).map((g) => {
+          const b = summe(g.key, true);
+          const v = summe(g.key, false);
+          return (
+            <div key={g.key} className="bg-neutral-50 px-3 py-2 text-xs">
+              <div className="flex items-center gap-1.5 font-semibold text-neutral-800">
+                <TerminSymbol typ={g.typ} /> {g.name}
+              </div>
+              <div className="mt-1 flex justify-between text-neutral-500">
+                <span>bezahlt ({b.n})</span>
+                <span className="tabular-nums text-neutral-700">{eur(b.betrag)}</span>
+              </div>
+              <div className="flex justify-between text-neutral-500">
+                <span>geplant ({v.n})</span>
+                <span className="tabular-nums font-semibold text-neutral-900">{eur(v.betrag)}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="px-3 pt-2 text-[11px] text-neutral-400">
+        {deDate(von)} – {deDate(bis)} · mit den Pfeilen oben verschieben · bezahlt = laut Kontoumsätzen, geplant = Vorschau
+      </div>
+      {zeilen.length === 0 ? (
+        <p className="px-3 py-3 text-sm text-neutral-400">Keine Zahlungen in diesem Zeitraum.</p>
+      ) : (
+        <div className="max-h-80 overflow-y-auto px-3 pb-2">
+          <table className="w-full text-sm">
+            <tbody>
+              {zeilen.map((z, i) => {
+                const typ = GRUPPEN.find((g) => g.key === z.gruppe)!.typ;
+                return (
+                  <tr key={i} className="border-b border-neutral-100 last:border-0">
+                    <td className="py-1.5 pr-3 tabular-nums text-neutral-600 whitespace-nowrap">{deDate(z.datum)}</td>
+                    <td className="py-1.5 pr-2 whitespace-nowrap">
+                      <TerminSymbol typ={z.ev ? symbolTyp(z.ev) : typ} schaetzung={z.ev?.schaetzung} />
+                    </td>
+                    <td className="py-1.5 pr-3 text-neutral-800">
+                      {z.ev ? (
+                        <button onClick={() => onWaehlen(z.ev!)} className="text-left hover:underline">
+                          {z.label}
+                          {z.ev.verschoben && <span className="ml-1 text-xs font-medium text-amber-700">verschoben</span>}
+                        </button>
+                      ) : (
+                        z.label
+                      )}
+                    </td>
+                    <td className="py-1.5 pr-3 text-xs whitespace-nowrap">
+                      {z.bezahlt ? <span className="text-emerald-700">bezahlt</span> : <span className="text-neutral-500">geplant</span>}
+                    </td>
+                    <td className={`py-1.5 text-right tabular-nums font-medium whitespace-nowrap ${z.betrag >= 0 ? "text-emerald-700" : z.bezahlt ? "text-neutral-500" : "text-neutral-900"}`}>
+                      {z.betrag >= 0 ? "+" : "−"}{eur(Math.abs(z.betrag))}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Größte Buchungen eines vergangenen Tages. */
 function TagesBuchungen({ tag }: { tag: DiagrammTag }) {

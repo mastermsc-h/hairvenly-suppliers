@@ -281,6 +281,10 @@ check("Tage ohne Buchung sind dabei", v[2].datum, "2026-10-04");
 check("Größte Buchung zuerst", v[1].buchungen, [{ name: "Finanzamt", betrag: -500 }, { name: "Shop", betrag: 20 }]);
 check("Übertrag zwischen eigenen Konten nicht in der Tagesliste", v[3].buchungen, []);
 check("Mehr Buchungen als angezeigt werden gezählt", L.kontoVerlauf(vBuchungen, vKonten, "2026-10-06", 1)[1].weitere, 1);
+const vg = L.kontoVerlauf([...vBuchungen, vb("A", "2026-10-04", -700, "Amanda · AMANDAGRM1"), vb("B", "2026-10-04", -90, "Finanzamt")].map((x) => ({ ...x, gruppe: x.name.startsWith("Amanda") ? "amanda" : x.name === "Finanzamt" ? "steuern" : null })), vKonten, "2026-10-06");
+check("Verlauf: Zahlungsgruppen je Tag (alle, nicht nur die größten)", vg.find((t) => t.datum === "2026-10-04").zahlungen, [{ gruppe: "amanda", name: "Amanda · AMANDAGRM1", betrag: -700 }, { gruppe: "steuern", name: "Finanzamt", betrag: -90 }]);
+check("Verlauf: Tage ohne Gruppenzahlung ohne Feld", "zahlungen" in vg.find((t) => t.datum === "2026-10-05"), false);
+check("Termin-Gruppen", ["lieferant", "nachbestellung", "manuell", "einfuhr", "steuer", "aktion"].map((art) => L.zahlGruppe({ art })), ["amanda", "amanda", "ebru", "einfuhr", "steuern", null]);
 check("Konto ohne Buchungen → kein Verlauf statt falscher Summe", L.kontoVerlauf(vBuchungen, [...vKonten, { iban: "C", saldo: 5 }], "2026-10-06"), []);
 
 // Defaults

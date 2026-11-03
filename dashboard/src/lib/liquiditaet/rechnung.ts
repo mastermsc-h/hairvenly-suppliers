@@ -277,6 +277,18 @@ export interface LiqRohdaten {
 
 // ── Echter Verlauf (Vergangenheit) ──────────────────────────────────────────
 
+/** Zahlungsarten, die sich im Diagramm einzeln einblenden lassen (Vergangenheit + Vorschau). */
+export type ZahlGruppe = "amanda" | "ebru" | "einfuhr" | "steuern";
+
+/** Gruppe eines geplanten Termins; null = nicht einzeln darstellbar (z.B. Aktions-Eingänge). */
+export function zahlGruppe(ev: Pick<Ereignis, "art">): ZahlGruppe | null {
+  if (ev.art === "lieferant" || ev.art === "nachbestellung") return "amanda";
+  if (ev.art === "manuell") return "ebru";
+  if (ev.art === "einfuhr") return "einfuhr";
+  if (ev.art === "steuer") return "steuern";
+  return null;
+}
+
 export interface VerlaufBuchung {
   iban: string;
   datum: string;
@@ -284,6 +296,7 @@ export interface VerlaufBuchung {
   name: string;
   /** Übertrag zwischen den eigenen Konten: ändert die Summe nicht, gehört nicht in die Tagesliste. */
   intern?: boolean;
+  gruppe?: ZahlGruppe | null;
 }
 
 export interface VerlaufTag {
@@ -292,6 +305,8 @@ export interface VerlaufTag {
   /** Größte Buchungen des Tages. */
   buchungen: Array<{ name: string; betrag: number }>;
   weitere: number;
+  /** Alle Buchungen des Tages, die zu einer Zahlungsgruppe gehören (fehlt, wenn keine). */
+  zahlungen?: Array<{ gruppe: ZahlGruppe; name: string; betrag: number }>;
 }
 
 /**
@@ -315,11 +330,13 @@ export function kontoVerlauf(buchungen: VerlaufBuchung[], konten: Array<{ iban: 
     const amTag = proTag.get(d) ?? [];
     if (d > von) saldo += amTag.reduce((s, b) => s + b.betrag, 0);
     const sichtbar = amTag.filter((b) => !b.intern && b.betrag !== 0).sort((a, b) => Math.abs(b.betrag) - Math.abs(a.betrag));
+    const zahlungen = amTag.filter((b) => b.gruppe && b.betrag !== 0).map((b) => ({ gruppe: b.gruppe as ZahlGruppe, name: b.name, betrag: b.betrag }));
     out.push({
       datum: d,
       saldo: r2(saldo),
       buchungen: sichtbar.slice(0, maxProTag).map((b) => ({ name: b.name, betrag: b.betrag })),
       weitere: Math.max(0, sichtbar.length - maxProTag),
+      ...(zahlungen.length ? { zahlungen } : {}),
     });
   }
   return out;
