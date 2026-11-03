@@ -634,7 +634,7 @@ const STATUS_COLORS: Record<string, string> = {
   in_customs: "bg-orange-50 text-orange-700",
   delivered: "bg-emerald-50 text-emerald-700",
   cancelled: "bg-red-50 text-red-700",
-  manual: "bg-amber-50 text-amber-800",
+  manual: "bg-fuchsia-50 text-fuchsia-700 outline outline-1 outline-dashed outline-fuchsia-400 -outline-offset-1",
   hidden: "bg-neutral-100 text-neutral-500",
 };
 
