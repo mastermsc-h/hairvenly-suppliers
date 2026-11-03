@@ -237,6 +237,27 @@ check("Rate verstrichen, unbezahlt: sofort, Rest läuft ab heute", [rvA[0].datum
 check("ratenplan: Bestell-Termine folgen der Verschiebung", L.ratenplan([mp({ id: "a", restUsd: 50000 })], { [EB]: "2026-10-19" }, L.mitDefaults({}), "2026-10-20", { [EB]: { datum: "2026-11-20", notiz: null, basisZahlung: "2026-10-19" } }).map((r) => r.datum), ["2026-11-20", "2026-12-04"]);
 check("Keine Verschiebungen (alte Rohdaten) ändern nichts", L.prognose(roh({ bestellungen: [bv] }), E0).bestellungen[0].termin, { regelDatum: "2026-10-17", verschoben: false, notiz: null, abgelaufenAm: null });
 
+// Anzahlung + Rest (Amanda)
+const anz = (o = {}, rest = 50000) => L.prognose(roh({ bestellungen: [best({ restUsd: rest })], ...vs({ x: { datum: "2026-10-25", notiz: null, anzahlungUsd: 10000, restDatum: "2026-11-22", restBasisUsd: 50000, ...o } }) }), E0);
+const lief = (x) => x.ereignisse.filter((ev) => ev.art === "lieferant").map((ev) => [ev.datum, ev.teil, Math.round(-ev.betrag * x.fx)]);
+const pA = anz();
+check("Anzahlung: zwei Zahlungen", lief(pA), [["2026-10-25", "anzahlung", 10000], ["2026-11-22", "rest", 40000]]);
+check("Anzahlung: Summe unverändert", pA.tage.at(-1).saldo, L.prognose(roh({ bestellungen: [best({})] }), E0).tage.at(-1).saldo);
+check("Anzahlung: Teilung in der Bestellung", [pA.bestellungen[0].teilung.anzahlungBezahlt, pA.bestellungen[0].teilung.restUsd, pA.bestellungen[0].zahlDatum], [false, 40000, "2026-10-25"]);
+const nachAnz = (x) => x.ereignisse.filter((ev) => ev.art === "lieferant").map((ev) => x.tage.find((t) => t.datum === ev.datum).saldo);
+check("Anzahlung: Ampel nach der knapperen Zahlung", pA.bestellungen[0].saldoNachZahlung, Math.min(...nachAnz(pA)));
+const pB = anz({}, 41000);
+check("Anzahlung bezahlt (Rest kleiner als beim Planen): nur noch der Rest", lief(pB), [["2026-11-22", "rest", 41000]]);
+check("Anzahlung bezahlt: Zahltag = Rest-Termin", [pB.bestellungen[0].zahlDatum, pB.bestellungen[0].teilung.anzahlungBezahlt], ["2026-11-22", true]);
+check("Anzahlung ≥ Rest: nur eine Zahlung", lief(anz({ anzahlungUsd: 60000 })), [["2026-10-25", "anzahlung", 50000]]);
+check("Rest-Termin vor der Anzahlung: rückt auf die Anzahlung", lief(anz({ restDatum: "2026-10-20" })).map((x) => x[0]), ["2026-10-25", "2026-10-25"]);
+const pC = anz({ datum: "2026-10-10" });
+check("Anzahlung verstrichen, unbezahlt: sofort", [lief(pC)[0][0], pC.bestellungen[0].sofort, pC.hinweise.some((h) => h.includes("(Anzahlung)"))], ["2026-10-17", true, true]);
+const pD = anz({ restDatum: "2026-10-12" }, 41000);
+check("Rest verstrichen: sofort + Hinweis", [lief(pD)[0][0], pD.bestellungen[0].sofort, pD.bestellungen[0].teilung.restAbgelaufenAm], ["2026-10-17", true, "2026-10-12"]);
+check("Ohne Teilung: kein teilung-Feld", L.prognose(roh({ bestellungen: [bv] }), E0).bestellungen[0].teilung, null);
+check("Einfuhrabgaben bleiben bei Ankunft", pA.bestellungen[0].einfuhr.datum, "2026-11-10");
+
 // Eingelagert, aber unbezahlt: bleibt Schuld, sofort fällig, keine Einfuhrabgaben mehr
 const eingelagert = L.prognose(roh({ bestellungen: [{ ...bv, status: "stocked", eta: "2026-12-20" }] }), E0);
 check("Eingelagert unbezahlt ist sofort fällig", eingelagert.bestellungen[0].sofort, true);

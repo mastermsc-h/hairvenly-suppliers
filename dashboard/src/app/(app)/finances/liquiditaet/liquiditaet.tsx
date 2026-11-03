@@ -8,7 +8,7 @@ import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import { LIQ_DEFAULTS, prognose, type Ereignis, type LiqEinstellungen, type LiqRohdaten, type VerlaufTag } from "@/lib/liquiditaet/rechnung";
 import { SYMBOLE, TerminSymbol, symbolTyp, type SymbolTyp } from "./termin-symbol";
 import { AMPEL_STIL } from "../../orders/liquiditaet-badge";
-import ZahlTermin from "./zahl-termin";
+import ZahlTermin, { type TerminEntwurf } from "./zahl-termin";
 import { saveLiquiditaetEinstellungen, setZahlTermin } from "@/lib/actions/liquiditaet";
 
 type VerbrauchWerte = { avg12mKg: number; avg3mKg: number; d30Kg: number; avg3mEur: number } | null;
@@ -43,16 +43,27 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   // Offene Terminfelder rechnen sofort mit (Schlüssel "bestellung:<id>" / "rate:<Lieferant>")
-  const [entwuerfe, setEntwuerfe] = useState<Record<string, string>>({});
+  const [entwuerfe, setEntwuerfe] = useState<Record<string, TerminEntwurf>>({});
   const rohMitEntwurf = useMemo(() => {
     const keys = Object.entries(entwuerfe);
     if (!keys.length) return roh;
     const v = { bestellungen: { ...roh.verschiebungen?.bestellungen }, raten: { ...roh.verschiebungen?.raten } };
-    for (const [key, datum] of keys) {
+    for (const [key, ent] of keys) {
       const [art, ...rest] = key.split(":");
       const id = rest.join(":");
-      if (art === "bestellung") v.bestellungen[id] = { datum, notiz: null };
-      else v.raten[id] = { datum, notiz: null, basisZahlung: roh.letzteZahlung?.[id] ?? null };
+      if (art === "bestellung") {
+        // Stand beim Planen wie auf dem Server: bleibt, solange dieselbe Anzahlung schon bezahlt ist
+        const alt = roh.verschiebungen?.bestellungen[id];
+        const offen = roh.bestellungen.find((b) => b.id === id)?.restUsd ?? 0;
+        const schonBezahlt = !!ent.anzahlungUsd && alt?.anzahlungUsd === ent.anzahlungUsd && alt.restBasisUsd != null && offen < alt.restBasisUsd - 0.01;
+        v.bestellungen[id] = {
+          datum: ent.datum,
+          notiz: null,
+          anzahlungUsd: ent.anzahlungUsd ?? null,
+          restDatum: ent.restDatum ?? null,
+          restBasisUsd: ent.anzahlungUsd ? (schonBezahlt ? alt.restBasisUsd : offen) : null,
+        };
+      } else v.raten[id] = { datum: ent.datum, notiz: null, basisZahlung: roh.letzteZahlung?.[id] ?? null };
     }
     return { ...roh, verschiebungen: v };
   }, [roh, entwuerfe]);
@@ -85,15 +96,15 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
       max: p.tage.at(-1)?.datum ?? p.start,
       oeffnenSignal: fokus?.key === key ? fokus.n : 0,
       tiefpunkt: `${eur(p.tiefpunkt.saldo)} am ${deDate(p.tiefpunkt.datum)}`,
-      onVorschau: (datum: string | null) =>
+      onVorschau: (ent: TerminEntwurf | null) =>
         setEntwuerfe((prev) => {
           const next = { ...prev };
-          if (datum) next[key] = datum;
+          if (ent) next[key] = ent;
           else delete next[key];
           return next;
         }),
-      onSpeichern: async (datum: string | null, notiz: string) => {
-        const res = await setZahlTermin({ art, schluessel, datum, notiz });
+      onSpeichern: async (ent: TerminEntwurf | null, notiz: string) => {
+        const res = await setZahlTermin({ art, schluessel, datum: ent?.datum ?? null, notiz, anzahlungUsd: ent?.anzahlungUsd ?? null, restDatum: ent?.restDatum ?? null });
         return res.ok ? null : (res.error ?? "Fehler");
       },
     };
@@ -432,7 +443,13 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
                     {b.bezahlt ? (
                       <span className="text-emerald-700">bezahlt</span>
                     ) : (
-                      <ZahlTermin datum={b.zahlDatum} sofort={b.sofort} termin={b.termin} {...terminProps("bestellung", b.orderId)} />
+                      <ZahlTermin
+                        datum={b.zahlDatum}
+                        sofort={b.sofort}
+                        termin={b.termin}
+                        anzahlung={{ offenUsd: b.betragUsd, restTage: e.restNachAnzahlungTage, teilung: b.teilung }}
+                        {...terminProps("bestellung", b.orderId)}
+                      />
                     )}
                   </td>
                   <td className="py-2 pr-2 text-right tabular-nums whitespace-nowrap">
@@ -465,7 +482,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
         </div>
         <p className="mt-3 text-xs text-neutral-500">
           Seit Juni zahlt ihr Amanda komplett, sobald die Ware versandbereit ist (vorher mit Anzahlung). Zahltag hier = Ankunft − {e.zahlungVorAnkunftTage} Tage;
-          Status „Versandbereit/Versandt“ ohne Zahlung = sofort. Betrag = offener Rest in USD ÷ {p.fx.toLocaleString("de-DE", { maximumFractionDigits: 4 })} USD/€
+          Status „Versandbereit/Versandt“ ohne Zahlung = sofort. Klick aufs Datum: verschieben oder Anzahlung planen (Rest standardmäßig {e.restNachAnzahlungTage} Tage später) —
+          sobald eine Zahlung an der Bestellung eingetragen ist, gilt die Anzahlung als bezahlt. Betrag = offener Rest in USD ÷ {p.fx.toLocaleString("de-DE", { maximumFractionDigits: 4 })} USD/€
           ({p.fxQuelle === "auto" ? `Kurs eurer letzten Auslandsüberweisung${roh.fxAuto ? ` vom ${deDate(roh.fxAuto.datum)}` : ""}` : p.fxQuelle === "manuell" ? "manuell" : "Standard"}).
           Die EUSt holt ihr über die USt-Voranmeldung zurück — das ist unten bei der Umsatzsteuer eingerechnet; der Zoll nicht.
         </p>
@@ -634,6 +652,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
         <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
           <Feld label="Zahlung an Amanda (Tage vor Ankunft)" value={e.zahlungVorAnkunftTage} onChange={(v) => set("zahlungVorAnkunftTage", v ?? LIQ_DEFAULTS.zahlungVorAnkunftTage)} />
           <Feld label="Reserve / Puffer (€)" value={e.puffer} onChange={(v) => set("puffer", v ?? 0)} />
+          <Feld label="Amanda: Rest nach Anzahlung (Tage)" value={e.restNachAnzahlungTage} onChange={(v) => set("restNachAnzahlungTage", Math.max(1, Math.min(180, v ?? LIQ_DEFAULTS.restNachAnzahlungTage)))} />
           {ebruRegel && (
             <>
               <Feld label={`${ebruRegel.name}: Rate (USD)`} value={ebruRegel.rateUsd} step={1000} onChange={(v) => setEbru({ rateUsd: Math.max(1000, v ?? 40_000) })} />

@@ -368,11 +368,19 @@ export async function ladeRatenDaten(
 
 /** Von Hand verschobene Zahltermine (Tabelle liquiditaet_verschiebung). */
 export async function ladeVerschiebungen(sb: Sb): Promise<LiqVerschiebungen> {
-  const { data, error } = await sb.from("liquiditaet_verschiebung").select("art, schluessel, datum, notiz, letzte_zahlung");
+  const { data, error } = await sb.from("liquiditaet_verschiebung").select("art, schluessel, datum, notiz, letzte_zahlung, anzahlung_usd, rest_datum, rest_basis_usd");
   if (error) throw new Error(error.message);
   const out: LiqVerschiebungen = { bestellungen: {}, raten: {} };
-  for (const v of (data ?? []) as Array<{ art: string; schluessel: string; datum: string; notiz: string | null; letzte_zahlung: string | null }>) {
-    const eintrag = { datum: v.datum, notiz: v.notiz, basisZahlung: v.letzte_zahlung };
+  type Zeile = { art: string; schluessel: string; datum: string; notiz: string | null; letzte_zahlung: string | null; anzahlung_usd: number | null; rest_datum: string | null; rest_basis_usd: number | null };
+  for (const v of (data ?? []) as Zeile[]) {
+    const eintrag = {
+      datum: v.datum,
+      notiz: v.notiz,
+      basisZahlung: v.letzte_zahlung,
+      anzahlungUsd: v.anzahlung_usd == null ? null : Number(v.anzahlung_usd),
+      restDatum: v.rest_datum,
+      restBasisUsd: v.rest_basis_usd == null ? null : Number(v.rest_basis_usd),
+    };
     if (v.art === "bestellung") out.bestellungen[v.schluessel] = eintrag;
     else out.raten[v.schluessel] = eintrag;
   }

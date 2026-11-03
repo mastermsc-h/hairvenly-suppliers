@@ -86,6 +86,8 @@ export interface LiqEinstellungen {
   ratenLieferanten: LiqRatenRegel[];
   /** PayPal-Guthaben (noch nicht aufs Konto überwiesen) als verfügbares Geld mitzählen. */
   paypalEinrechnen: boolean;
+  /** Amanda-Anzahlung: Rest so viele Tage nach der Anzahlung (Vorschlag im Terminfeld). */
+  restNachAnzahlungTage: number;
 }
 
 export interface LiqRatenRegel {
@@ -151,6 +153,8 @@ export const LIQ_DEFAULTS: LiqEinstellungen = {
   // User 20.10.2026: Ebru — 2 Wochen nach Rechnungseingang erste Rate à 40k $, dann alle 2 Wochen
   ratenLieferanten: [{ name: "Ebru", rateUsd: 40_000, fristTage: 14, abstandTage: 14, bankMuster: "JUANCHENG" }],
   paypalEinrechnen: true,
+  // User 03.11.2026: nach einer Anzahlung bleiben 4 Wochen für den Rest
+  restNachAnzahlungTage: 28,
 };
 
 export function mitDefaults(e: Partial<LiqEinstellungen> | null | undefined): LiqEinstellungen {
@@ -186,6 +190,11 @@ export interface LiqVerschiebung {
   notiz: string | null;
   /** Nur Raten: letzte Bankzahlung beim Verschieben. Eine neuere = Rate bezahlt → erledigt. */
   basisZahlung?: string | null;
+  /** Nur Bestellungen: geplante Anzahlung (USD) am `datum`, der Rest am `restDatum`. */
+  anzahlungUsd?: number | null;
+  restDatum?: string | null;
+  /** Offener Betrag beim Planen. Ist der Rest heute kleiner, gilt die Anzahlung als bezahlt. */
+  restBasisUsd?: number | null;
 }
 
 export interface LiqVerschiebungen {
@@ -339,6 +348,8 @@ export interface Ereignis {
   ratenLieferant?: string;
   /** Nächste Rate eines Lieferanten — nur diese lässt sich verschieben. */
   naechsteRate?: TerminStand & { lieferant: string };
+  /** Bestellung in Anzahlung + Rest geteilt. */
+  teil?: "anzahlung" | "rest";
 }
 
 export type Ampel = "ok" | "knapp" | "luecke";
@@ -359,6 +370,20 @@ export interface BestellPrognose {
   ampel: Ampel;
   fehlbetrag: number; // > 0 bei Lücke/unter Puffer
   einfuhr: { datum: string; eust: number; zoll: number; saldoDanach: number; ampel: Ampel } | null;
+  /** Geplante Anzahlung + Rest; null = ganzer Betrag auf einmal. */
+  teilung: Teilung | null;
+}
+
+export interface Teilung {
+  anzahlungUsd: number;
+  anzahlungEur: number;
+  anzahlungDatum: string;
+  /** Seit dem Planen ist eine Zahlung eingegangen → nur noch der Rest offen. */
+  anzahlungBezahlt: boolean;
+  restUsd: number;
+  restEur: number;
+  restDatum: string;
+  restAbgelaufenAm: string | null;
 }
 
 export interface PrognoseErgebnis {
@@ -413,7 +438,7 @@ interface Plan {
   fxQuelle: PrognoseErgebnis["fxQuelle"];
   ereignisse: Ereignis[];
   ustBasis: number;
-  bestellInfo: Map<string, { zahlDatum: string; sofort: boolean; termin: TerminStand; usd: number; eur: number; einfuhr: { datum: string; eust: number; zoll: number } | null }>;
+  bestellInfo: Map<string, { zahlDatum: string; sofort: boolean; termin: TerminStand; usd: number; eur: number; einfuhr: { datum: string; eust: number; zoll: number } | null; teilung: Teilung | null }>;
   hinweise: string[];
   nachbestellKgMonat: number;
   eustAndereMonat: number;
@@ -528,14 +553,46 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     const bezahlt = b.restUsd <= 0.01;
     const sofortRegel = !bezahlt && (SOFORT_STATUS.includes(b.status) || (!!b.eta && plusTage(b.eta, -e.zahlungVorAnkunftTage) < start));
     const regelDatum = SOFORT_STATUS.includes(b.status) || !b.eta ? start : amStart(plusTage(b.eta, -e.zahlungVorAnkunftTage));
-    const t = terminMit(regelDatum, bezahlt ? undefined : roh.verschiebungen?.bestellungen[b.id], start);
-    const zahlDatum = t.datum;
-    const sofort = t.verschoben ? false : !!t.abgelaufenAm || sofortRegel;
-    const hinweis = terminHinweis(b.label, t, ende);
-    if (hinweis) hinweise.push(hinweis);
-    if (!b.eta && !bezahlt) hinweise.push(`${b.label}: kein Ankunftsdatum — Zahlung sofort angenommen.`);
+    const v = bezahlt ? undefined : roh.verschiebungen?.bestellungen[b.id];
+    const t = terminMit(regelDatum, v, start);
     const eur = r2(b.restUsd / fx);
-    if (!bezahlt) {
+    if (!b.eta && !bezahlt) hinweise.push(`${b.label}: kein Ankunftsdatum — Zahlung sofort angenommen.`);
+    // Anzahlung + Rest: jede Zahlung seit dem Planen zählt als Anzahlung, danach ist nur noch der Rest offen
+    let teilung: Teilung | null = null;
+    if (v?.anzahlungUsd && v.anzahlungUsd > 0 && v.restDatum) {
+      const anzahlungBezahlt = v.restBasisUsd != null && b.restUsd < v.restBasisUsd - 0.01;
+      const anzUsd = anzahlungBezahlt ? 0 : Math.min(v.anzahlungUsd, b.restUsd);
+      const tRest = terminMit(regelDatum, { datum: v.restDatum, notiz: v.notiz }, start);
+      const restDatum = !anzahlungBezahlt && tRest.datum < t.datum ? t.datum : tRest.datum;
+      teilung = {
+        anzahlungUsd: r2(anzahlungBezahlt ? v.anzahlungUsd : anzUsd),
+        anzahlungEur: r2((anzahlungBezahlt ? v.anzahlungUsd : anzUsd) / fx),
+        anzahlungDatum: t.datum,
+        anzahlungBezahlt,
+        restUsd: r2(b.restUsd - anzUsd),
+        restEur: r2((b.restUsd - anzUsd) / fx),
+        restDatum,
+        restAbgelaufenAm: tRest.abgelaufenAm,
+      };
+      if (!anzahlungBezahlt) {
+        const h = terminHinweis(`${b.label} (Anzahlung)`, t, ende);
+        if (h) hinweise.push(h);
+        ereignisse.push({ datum: t.datum, betrag: -teilung.anzahlungEur, art: "lieferant", label: `${b.label} · Anzahlung`, orderId: b.id, sofort: !!t.abgelaufenAm, verschoben: true, teil: "anzahlung" });
+      }
+      if (teilung.restUsd > 0.01) {
+        const h = terminHinweis(`${b.label} (Rest)`, tRest, ende);
+        if (h) hinweise.push(h);
+        ereignisse.push({ datum: restDatum, betrag: -teilung.restEur, art: "lieferant", label: `${b.label} · Rest`, orderId: b.id, sofort: !!tRest.abgelaufenAm, verschoben: true, teil: "rest" });
+      }
+    } else {
+      const hinweis = terminHinweis(b.label, t, ende);
+      if (hinweis) hinweise.push(hinweis);
+    }
+    const sofort = teilung
+      ? !!(teilung.anzahlungBezahlt ? teilung.restAbgelaufenAm : t.abgelaufenAm)
+      : t.verschoben ? false : !!t.abgelaufenAm || sofortRegel;
+    const zahlDatum = teilung?.anzahlungBezahlt ? teilung.restDatum : t.datum;
+    if (!bezahlt && !teilung) {
       ereignisse.push({ datum: zahlDatum, betrag: -eur, art: "lieferant", label: b.label, orderId: b.id, sofort, verschoben: t.verschoben });
     }
     let einfuhr: { datum: string; eust: number; zoll: number } | null = null;
@@ -547,7 +604,7 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       eustProMonat[monatVon(datum)] = (eustProMonat[monatVon(datum)] ?? 0) + ab.eust;
     }
     const termin = { regelDatum: t.regelDatum, verschoben: t.verschoben, notiz: t.notiz, abgelaufenAm: t.abgelaufenAm };
-    bestellInfo.set(b.id, { zahlDatum, sofort, termin, usd: b.restUsd, eur, einfuhr });
+    bestellInfo.set(b.id, { zahlDatum, sofort, termin, usd: b.restUsd, eur, einfuhr, teilung });
   }
 
   // 1b) Ratenzahlung (Ebru: alle offenen Rechnungen; andere Lieferanten: nur manuelle Positionen)
@@ -760,10 +817,11 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
   for (const b of roh.bestellungen) {
     const info = plan.bestellInfo.get(b.id);
     if (!info) continue;
-    const zahlEv = plan.ereignisse.find((x) => x.orderId === b.id && x.art === "lieferant");
+    // Bei Anzahlung + Rest zählt die knappere der beiden Zahlungen
+    const zahlEvs = plan.ereignisse.filter((x) => x.orderId === b.id && x.art === "lieferant");
     const einfEv = plan.ereignisse.find((x) => x.orderId === b.id && x.art === "einfuhr");
-    const saldoNach = zahlEv ? sim.nachEreignis.get(zahlEv) ?? startSaldo : startSaldo;
-    const ampel = zahlEv ? ampelFuer(saldoNach, e.puffer) : "ok";
+    const saldoNach = zahlEvs.length ? Math.min(...zahlEvs.map((x) => sim.nachEreignis.get(x) ?? startSaldo)) : startSaldo;
+    const ampel = zahlEvs.length ? ampelFuer(saldoNach, e.puffer) : "ok";
     const einfSaldo = einfEv ? sim.nachEreignis.get(einfEv) ?? saldoNach : null;
     bestellungen.push({
       orderId: b.id,
@@ -782,6 +840,7 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
       einfuhr: info.einfuhr && einfSaldo !== null
         ? { ...info.einfuhr, saldoDanach: r2(einfSaldo), ampel: ampelFuer(einfSaldo, e.puffer) }
         : null,
+      teilung: info.teilung,
     });
   }
 

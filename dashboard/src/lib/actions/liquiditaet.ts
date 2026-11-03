@@ -14,6 +14,7 @@ const ZAHLEN: Array<[keyof LiqEinstellungen, number, number]> = [
   ["frachtProzent", 0, 100],
   ["puffer", 0, 10_000_000],
   ["horizontTage", 14, 365],
+  ["restNachAnzahlungTage", 1, 180],
 ];
 const OPTIONAL: Array<[keyof LiqEinstellungen, number, number]> = [
   ["fxUsdProEur", 0.5, 2],
@@ -67,6 +68,7 @@ export async function saveLiquiditaetEinstellungen(input: Partial<LiqEinstellung
 
 /**
  * Zahltermin verschieben (datum) oder zurück auf den berechneten Termin (datum null).
+ * Bestellungen auch als Anzahlung (anzahlungUsd am datum) + Rest (restDatum).
  * Betrifft nur die Planung — Rechnung, Saldo und Ankunftsdatum bleiben, wie sie sind.
  */
 export async function setZahlTermin(input: {
@@ -74,12 +76,22 @@ export async function setZahlTermin(input: {
   schluessel: string;
   datum: string | null;
   notiz?: string | null;
+  anzahlungUsd?: number | null;
+  restDatum?: string | null;
 }): Promise<{ ok: boolean; error?: string }> {
   const profile = await requireFeature("finances");
   if (profile.role === "supplier") return { ok: false, error: "Keine Berechtigung" };
   const { art, schluessel, datum } = input;
+  const istDatum = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
   if ((art !== "bestellung" && art !== "rate") || !schluessel) return { ok: false, error: "Ungültiger Termin" };
-  if (datum !== null && !/^\d{4}-\d{2}-\d{2}$/.test(datum)) return { ok: false, error: "Ungültiges Datum" };
+  if (datum !== null && !istDatum(datum)) return { ok: false, error: "Ungültiges Datum" };
+  const anzahlung = input.anzahlungUsd == null ? null : Number(input.anzahlungUsd);
+  if (anzahlung !== null) {
+    if (art !== "bestellung") return { ok: false, error: "Anzahlung nur bei Bestellungen" };
+    if (!Number.isFinite(anzahlung) || anzahlung <= 0) return { ok: false, error: "Anzahlung muss größer als 0 sein" };
+    if (!istDatum(input.restDatum)) return { ok: false, error: "Datum für den Rest fehlt" };
+    if (datum && input.restDatum < datum) return { ok: false, error: "Der Rest kann nicht vor der Anzahlung kommen" };
+  }
   const sb = createServiceClient();
 
   if (datum === null) {
@@ -87,14 +99,25 @@ export async function setZahlTermin(input: {
     if (error) return { ok: false, error: error.message };
   } else {
     let letzteZahlung: string | null = null;
+    let restBasis: number | null = null;
     if (art === "rate") {
       const daten = await ladeRatenDaten(sb, await ladeEinstellungen(sb));
       if (!daten.ratenPositionen.some((x) => x.lieferant === schluessel)) return { ok: false, error: "Kein offener Ratenplan für diesen Lieferanten" };
       letzteZahlung = daten.letzteZahlung[schluessel] ?? null;
     } else {
-      const { data, error } = await sb.from("orders").select("id").eq("id", schluessel).maybeSingle();
+      const { data, error } = await sb.from("orders_with_totals").select("id, remaining_balance").eq("id", schluessel).maybeSingle();
       if (error) return { ok: false, error: error.message };
       if (!data) return { ok: false, error: "Bestellung nicht gefunden" };
+      if (anzahlung !== null) {
+        const offen = Math.round(Number(data.remaining_balance ?? 0) * 100) / 100;
+        // Ist die geplante Anzahlung schon eingegangen, bleibt der Stand beim Planen erhalten,
+        // sonst sähe die Vorschau sie wieder als offen an
+        const { data: alt } = await sb.from("liquiditaet_verschiebung").select("anzahlung_usd, rest_basis_usd").eq("art", art).eq("schluessel", schluessel).maybeSingle();
+        const altBasis = alt?.rest_basis_usd == null ? null : Number(alt.rest_basis_usd);
+        const schonBezahlt = alt?.anzahlung_usd != null && Number(alt.anzahlung_usd) === anzahlung && altBasis !== null && offen < altBasis - 0.01;
+        if (!schonBezahlt && anzahlung >= offen) return { ok: false, error: "Anzahlung ist so hoch wie der offene Betrag — dann einfach den Termin verschieben" };
+        restBasis = schonBezahlt ? altBasis : offen;
+      }
     }
     const { error } = await sb.from("liquiditaet_verschiebung").upsert(
       {
@@ -103,6 +126,9 @@ export async function setZahlTermin(input: {
         datum,
         notiz: input.notiz?.trim().slice(0, 200) || null,
         letzte_zahlung: letzteZahlung,
+        anzahlung_usd: anzahlung,
+        rest_datum: anzahlung !== null ? input.restDatum : null,
+        rest_basis_usd: restBasis,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "art,schluessel" },
