@@ -53,7 +53,9 @@ async function jedeBestellung<N>(
 /**
  * Umsatz eines Monats (deutsche Zeit) wie in Shopify-Analytics:
  * - brutto: Bestellsummen (inkl. USt + Versand, nach Rabatten) der im Monat angelegten Bestellungen,
- *   ohne Tests. Stornierte Bestellungen zählen nur mit dem Betrag, der tatsächlich erstattet wurde —
+ *   ohne Tests, NACH Bestellbearbeitungen (Artikel entfernt/Preis geändert ohne Erstattung): aktueller
+ *   Betrag + bereits Erstattetes. Shopify-Analytics zieht solche Änderungen ebenfalls ab (Okt 2026:
+ *   −5.170 €, sonst lag der Umsatz um so viel zu hoch). Stornierte Bestellungen zählen nur mit dem Betrag, der tatsächlich erstattet wurde —
  *   dieser Betrag taucht als Erstattung wieder auf und gleicht sich aus; unbezahlt stornierte
  *   Bestellungen zählen gar nicht.
  * - erstattet: alle Erstattungen, die im Monat gebucht wurden — auch auf ältere Bestellungen.
@@ -77,9 +79,9 @@ async function holeMonat(monat: string, deadlineMs?: number): Promise<{ row: Sho
   let brutto = 0, erstattet = 0, bestellungen = 0;
   const kanaele: Record<string, number> = {};
   const posTage: PosTage = {};
-  type Bestellung = { createdAt: string; cancelledAt: string | null; test: boolean; sourceName: string | null; totalPriceSet: Geld; totalRefundedSet: Geld };
+  type Bestellung = { createdAt: string; cancelledAt: string | null; test: boolean; sourceName: string | null; totalPriceSet: Geld; currentTotalPriceSet: Geld; totalRefundedSet: Geld };
   const ok1 = await jedeBestellung<Bestellung>(
-    "createdAt cancelledAt test sourceName totalPriceSet { shopMoney { amount } } totalRefundedSet { shopMoney { amount } }",
+    "createdAt cancelledAt test sourceName totalPriceSet { shopMoney { amount } } currentTotalPriceSet { shopMoney { amount } } totalRefundedSet { shopMoney { amount } }",
     `created_at:>='${von}' created_at:<'${bis}'`,
     deadlineMs,
     (n) => {
@@ -90,7 +92,8 @@ async function holeMonat(monat: string, deadlineMs?: number): Promise<{ row: Sho
         t.umsatz = Math.round((t.umsatz + betrag(n.totalPriceSet)) * 100) / 100;
         t.bestellungen++;
       }
-      const b = n.cancelledAt ? betrag(n.totalRefundedSet) : betrag(n.totalPriceSet);
+      // Erstattungen stehen separat (nach Buchungsdatum) → hier wieder dazurechnen, nur Bearbeitungen fallen weg
+      const b = n.cancelledAt ? betrag(n.totalRefundedSet) : Math.round((betrag(n.currentTotalPriceSet) + betrag(n.totalRefundedSet)) * 100) / 100;
       if (!n.cancelledAt) bestellungen++;
       if (b === 0) return;
       brutto += b;
