@@ -15,6 +15,7 @@ import {
   type OrderShipment,
 } from "@/lib/types";
 import { debtBucket } from "@/lib/order-debt";
+import { PaidStamp, isFullyPaid } from "../../open-amount";
 import { t, type Locale } from "@/lib/i18n";
 import { loadCatalog } from "@/lib/actions/catalog";
 import EditPanel from "./edit-panel";
@@ -424,7 +425,7 @@ export default async function OrderDetailPage({
                 <div className="pt-2 mt-2 border-t border-neutral-100" />
                 <Row label={t(locale, "order.landed_cost")} value={usd(o.landed_cost)} bold />
                 <Row label={t(locale, "order.paid")} value={usd(o.paid_total)} />
-                <Row label={t(locale, "order.remaining")} value={`${o.invoice_is_estimated ? "≈ " : ""}${usd(o.remaining_balance)}${debtBucket(o) === "upcoming" && Number(o.remaining_balance) > 0 ? ` (${t(locale, "dashboard.upcoming_short")})` : ""}`} bold />
+                <Row label={t(locale, "order.remaining")} value={isFullyPaid(o) ? <PaidStamp locale={locale} /> : `${o.invoice_is_estimated ? "≈ " : ""}${usd(o.remaining_balance)}${debtBucket(o) === "upcoming" && Number(o.remaining_balance) > 0 ? ` (${t(locale, "dashboard.upcoming_short")})` : ""}`} bold />
               </dl>
             </section>
 
@@ -459,7 +460,7 @@ function Info({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+function Row({ label, value, bold }: { label: string; value: React.ReactNode; bold?: boolean }) {
   return (
     <div className="flex justify-between">
       <span className="text-neutral-600">{label}</span>

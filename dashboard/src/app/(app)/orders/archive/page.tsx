@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { usd, date } from "@/lib/format";
 import { type OrderWithTotals, type OrderDocument, type Supplier } from "@/lib/types";
+import { PaidStamp, isFullyPaid } from "../../open-amount";
 import { t, type Locale } from "@/lib/i18n";
 import QuickDocs from "../[id]/quick-docs";
 import TrackingLink from "../../tracking-link";
@@ -190,7 +191,10 @@ export default async function OrdersArchivePage() {
                         </td>
                       )}
                       {showInvoices && (
-                        <td className="px-4 py-3 text-right text-neutral-700">{usd(o.invoice_total)}</td>
+                        <td className="px-4 py-3 text-right text-neutral-700">
+                          {usd(o.invoice_total)}
+                          {isFullyPaid(o) && <div className="mt-1"><PaidStamp locale={locale} /></div>}
+                        </td>
                       )}
                     </tr>
                   ))}
@@ -217,6 +221,7 @@ export default async function OrdersArchivePage() {
                       {showInvoices && (
                         <div className="text-right shrink-0">
                           <div className="text-sm font-semibold text-neutral-900">{usd(o.invoice_total)}</div>
+                          {isFullyPaid(o) && <div className="mt-1"><PaidStamp locale={locale} /></div>}
                         </div>
                       )}
                     </div>
