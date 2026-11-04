@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireFeature } from "@/lib/auth";
-import { LIQ_DEFAULTS, type LiqEinstellungen } from "@/lib/liquiditaet/rechnung";
+import { LIQ_DEFAULTS, rechnungsNummern, type LiqEinstellungen } from "@/lib/liquiditaet/rechnung";
 import { ladeEinstellungen, ladeRatenDaten } from "@/lib/liquiditaet/daten";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 
@@ -137,5 +137,23 @@ export async function setZahlTermin(input: {
   }
   revalidatePath("/finances/liquiditaet");
   revalidatePath("/orders");
+  return { ok: true };
+}
+
+/**
+ * DHL-/Zoll-Rechnungsnummer(n) einer Bestellung, z.B. "ZIT8150777" (mehrere mit Komma).
+ * Steht die Nummer im Verwendungszweck einer Abbuchung, gelten die Einfuhrabgaben als bezahlt.
+ */
+export async function setEinfuhrRechnung(orderId: string, text: string | null): Promise<{ ok: boolean; error?: string }> {
+  const profile = await requireFeature("finances");
+  if (profile.role === "supplier") return { ok: false, error: "Keine Berechtigung" };
+  const wert = (text ?? "").replace(/\s+/g, " ").trim().slice(0, 300) || null;
+  if (wert && !rechnungsNummern(wert).length) return { ok: false, error: "Keine gültige Rechnungsnummer (mind. 5 Zeichen, z.B. ZIT8150777)" };
+  const sb = createServiceClient();
+  const { data, error } = await sb.from("orders").update({ einfuhr_rechnung: wert }).eq("id", orderId).select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!data?.length) return { ok: false, error: "Bestellung nicht gefunden" };
+  revalidatePath("/finances/liquiditaet");
+  revalidatePath(`/orders/${orderId}`);
   return { ok: true };
 }

@@ -172,6 +172,72 @@ export interface LiqBestellung {
   restUsd: number;
   importVatEur: number | null;
   kg: number | null;
+  /** Eingetragene DHL-/Zoll-Rechnungsnummer(n) — Rohtext wie im Feld. */
+  einfuhrRechnung?: string | null;
+  /** Abgleich der Rechnungsnummern mit den Kontoumsätzen (nur wenn welche eingetragen sind). */
+  einfuhrZahlung?: EinfuhrZahlung | null;
+}
+
+// ── Einfuhrabgaben ↔ Kontoumsatz ────────────────────────────────────────────
+
+/** Abbuchungen, in deren Verwendungszweck die Rechnungsnummer(n) einer Bestellung stehen. */
+export interface EinfuhrZahlung {
+  /** Eingetragene Nummern (normalisiert). */
+  rechnungen: string[];
+  /** Davon auf dem Konto gefunden. */
+  gefunden: string[];
+  /** Summe der gefundenen Abbuchungen (positiv). */
+  betragEur: number;
+  /** Letzte gefundene Abbuchung. */
+  datum: string | null;
+  /** Eine Abbuchung enthält auch fremde Rechnungen (DHL-Sammelzahlung) → Betrag nicht nur diese Bestellung. */
+  sammel: boolean;
+}
+
+const nurZeichen = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/**
+ * "ZIT8150777, zit 8150778" → ["ZIT8150777", "ZIT8150778"]. Getrennt wird an Komma, Semikolon,
+ * Schrägstrich und Zeilenumbruch — Leerzeichen bleiben Teil der Nummer ("26 33474" = Ungewitter-Rechnung).
+ */
+export function rechnungsNummern(text: string | null | undefined): string[] {
+  if (!text) return [];
+  const out = text.split(/[,;\/\n]+/).map(nurZeichen).filter((x) => x.length >= 5);
+  return [...new Set(out)];
+}
+
+/**
+ * Sucht jede eingetragene Rechnungsnummer im Verwendungszweck der Abbuchungen (Satzzeichen und
+ * Leerzeichen egal). Gutschriften zählen nicht. Bestellungen ohne Nummer fehlen in der Map.
+ */
+export function einfuhrZahlungen(
+  bestellungen: Array<{ id: string; rechnung: string | null | undefined }>,
+  buchungen: Array<{ datum: string; betrag: number; zweck: string | null }>,
+): Map<string, EinfuhrZahlung> {
+  const abb = buchungen.filter((t) => t.betrag < 0 && t.zweck).map((t) => ({ ...t, n: nurZeichen(t.zweck as string) }));
+  const nummern = bestellungen.map((b) => ({ id: b.id, nr: rechnungsNummern(b.rechnung) })).filter((b) => b.nr.length);
+  const out = new Map<string, EinfuhrZahlung>();
+  for (const b of nummern) {
+    const treffer = new Set<(typeof abb)[number]>();
+    const gefunden: string[] = [];
+    for (const nr of b.nr) {
+      const hits = abb.filter((t) => t.n.includes(nr));
+      if (hits.length) gefunden.push(nr);
+      hits.forEach((t) => treffer.add(t));
+    }
+    const fremd = (t: (typeof abb)[number]) =>
+      nummern.some((o) => o.id !== b.id && o.nr.some((nr) => t.n.includes(nr))) ||
+      (t.n.match(/ZIT\d{5,}/g) ?? []).some((z) => !b.nr.some((nr) => nr === z || nr.includes(z) || z.includes(nr)));
+    const liste = [...treffer];
+    out.set(b.id, {
+      rechnungen: b.nr,
+      gefunden,
+      betragEur: r2(liste.reduce((s, t) => s - t.betrag, 0)),
+      datum: liste.length ? liste.map((t) => t.datum).sort().at(-1)! : null,
+      sammel: liste.some(fremd),
+    });
+  }
+  return out;
 }
 
 /** Manuelle Position (Status "manual"): Rechnung ohne Warenbewegung, z.B. Sammelrechnung. */
@@ -387,6 +453,9 @@ export interface BestellPrognose {
   ampel: Ampel;
   fehlbetrag: number; // > 0 bei Lücke/unter Puffer
   einfuhr: { datum: string; eust: number; zoll: number; saldoDanach: number; ampel: Ampel } | null;
+  /** Eingetragene DHL-/Zoll-Rechnungsnummer(n) (Rohtext) und ihr Abgleich mit dem Konto. */
+  einfuhrRechnung: string | null;
+  einfuhrZahlung: EinfuhrZahlung | null;
   /** Geplante Anzahlung + Rest; null = ganzer Betrag auf einmal. */
   teilung: Teilung | null;
 }
@@ -612,13 +681,24 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     if (!bezahlt && !teilung) {
       ereignisse.push({ datum: zahlDatum, betrag: -eur, art: "lieferant", label: b.label, orderId: b.id, sofort, verschoben: t.verschoben });
     }
+    // Einfuhrabgaben: ohne Rechnungsnummer bis die Ware angekommen ist (Status). Mit Rechnungsnummer
+    // zählt das Konto — erst die Abbuchung erledigt sie, auch wenn die Ware schon eingelagert ist.
     let einfuhr: { datum: string; eust: number; zoll: number } | null = null;
-    if (!WARE_DA.includes(b.status) && (b.invoiceUsd ?? 0) > 0) {
+    const ez = b.einfuhrZahlung ?? null;
+    const ezErledigt = !!ez && ez.gefunden.length === ez.rechnungen.length;
+    if (!ezErledigt && (!WARE_DA.includes(b.status) || ez) && (b.invoiceUsd ?? 0) > 0) {
       const ab = einfuhrFuer(b.invoiceUsd ?? 0, b.importVatEur);
-      const datum = amStart(b.eta ?? start);
-      einfuhr = { datum, ...ab };
-      ereignisse.push({ datum, betrag: -(ab.eust + ab.zoll), art: "einfuhr", label: `Einfuhrabgaben ${b.label}`, orderId: b.id });
-      eustProMonat[monatVon(datum)] = (eustProMonat[monatVon(datum)] ?? 0) + ab.eust;
+      // Teil schon abgebucht (mehrere Rechnungen): nur der Rest; bei Sammelzahlungen ist der Anteil unbekannt
+      const summe = ab.eust + ab.zoll;
+      const schon = ez && !ez.sammel ? Math.min(ez.betragEur, summe) : 0;
+      const f = summe > 0 ? 1 - schon / summe : 0;
+      const rest = { eust: r2(ab.eust * f), zoll: r2(ab.zoll * f) };
+      if (rest.eust + rest.zoll > 0.005) {
+        const datum = amStart(b.eta ?? start);
+        einfuhr = { datum, ...rest };
+        ereignisse.push({ datum, betrag: -r2(rest.eust + rest.zoll), art: "einfuhr", label: `Einfuhrabgaben ${b.label}`, orderId: b.id });
+        eustProMonat[monatVon(datum)] = (eustProMonat[monatVon(datum)] ?? 0) + rest.eust;
+      }
     }
     const termin = { regelDatum: t.regelDatum, verschoben: t.verschoben, notiz: t.notiz, abgelaufenAm: t.abgelaufenAm };
     bestellInfo.set(b.id, { zahlDatum, sofort, termin, usd: b.restUsd, eur, einfuhr, teilung });
@@ -857,6 +937,8 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
       einfuhr: info.einfuhr && einfSaldo !== null
         ? { ...info.einfuhr, saldoDanach: r2(einfSaldo), ampel: ampelFuer(einfSaldo, e.puffer) }
         : null,
+      einfuhrRechnung: b.einfuhrRechnung ?? null,
+      einfuhrZahlung: b.einfuhrZahlung ?? null,
       teilung: info.teilung,
     });
   }

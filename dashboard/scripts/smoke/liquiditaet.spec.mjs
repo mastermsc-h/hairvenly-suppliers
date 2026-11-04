@@ -265,6 +265,45 @@ check("Eingelagert: Zahlung am ersten Tag", eingelagert.ereignisse.filter((x) =>
 check("Eingelagert: keine Einfuhrabgaben", eingelagert.ereignisse.filter((x) => x.art === "einfuhr").length, 0);
 check("Angekommen verhält sich gleich", L.prognose(roh({ bestellungen: [{ ...bv, status: "delivered", eta: "2026-12-20" }] }), E0).bestellungen[0].sofort, true);
 
+// Einfuhrabgaben per DHL-Rechnungsnummer (ZIT) mit dem Konto abgleichen
+check("Rechnungsnummern: Komma/Leerzeichen/Groß-klein", L.rechnungsNummern(" zit8150777, ZIT 8150778; 26 33474 ;x1"), ["ZIT8150777", "ZIT8150778", "2633474"]);
+check("Rechnungsnummern leer", L.rechnungsNummern(null), []);
+const dhl = (datum, betrag, zweck) => ({ datum, betrag, zweck });
+const ezB = [
+  dhl("2026-11-04", -7790.76, "/OBO/DHL EXPRESS GERMANY GMBH/INV/ZIT8150777 INV/ZIT8150777 INV/ZIT8150777 INV/ZIT8150777"),
+  dhl("2026-10-30", -23887.6, "/OBO/DHL EXPRESS GERMANY GMBH/INV/ZIT8044246 INV/ZIT8044246 INV/ZIT8048169 INV/ZIT8048169 INV/ZIT8"),
+  dhl("2026-10-28", -24749.74, "RG.-Nr.. 26 33474 / Kundennr.. 180590"),
+  dhl("2026-10-01", 50, "Gutschrift ZIT9999999"),
+];
+const ezM = L.einfuhrZahlungen([
+  { id: "a", rechnung: "ZIT8150777" },
+  { id: "b", rechnung: "ZIT8044246" },
+  { id: "c", rechnung: "ZIT8150777, ZIT8150999" },
+  { id: "d", rechnung: "26 33474" },
+  { id: "e", rechnung: "ZIT9999999" },
+  { id: "f", rechnung: null },
+], ezB);
+check("ZIT gefunden: Betrag + Datum", [ezM.get("a").gefunden, ezM.get("a").betragEur, ezM.get("a").datum], [["ZIT8150777"], 7790.76, "2026-11-04"]);
+check("Gleiche ZIT an zwei Bestellungen = Sammelzahlung", [ezM.get("a").sammel, ezM.get("c").sammel], [true, true]);
+check("Fremde ZIT in der Abbuchung = Sammelzahlung", ezM.get("b").sammel, true);
+check("Teilweise gefunden", [ezM.get("c").gefunden, ezM.get("c").rechnungen.length], [["ZIT8150777"], 2]);
+check("Nummer mit Leerzeichen (Ungewitter)", [ezM.get("d").gefunden, ezM.get("d").sammel], [["2633474"], false]);
+check("Gutschrift zählt nicht", ezM.get("e").gefunden, []);
+check("Ohne Nummer kein Eintrag", ezM.has("f"), false);
+
+const ezVoll = { rechnungen: ["ZIT1"], gefunden: ["ZIT1"], betragEur: 8000, datum: "2026-10-17", sammel: false };
+const ezNichts = { rechnungen: ["ZIT1"], gefunden: [], betragEur: 0, datum: null, sammel: false };
+const pz1 = L.prognose(roh({ bestellungen: [best({ restUsd: 0, status: "shipped", einfuhrRechnung: "ZIT1", einfuhrZahlung: ezVoll })] }), E0);
+check("ZIT abgebucht: keine Einfuhrabgaben mehr, obwohl noch unterwegs", [pz1.ereignisse.filter((x) => x.art === "einfuhr").length, pz1.bestellungen[0].einfuhr], [0, null]);
+check("ZIT abgebucht: Abgleich an der Bestellung", [pz1.bestellungen[0].einfuhrRechnung, pz1.bestellungen[0].einfuhrZahlung.betragEur], ["ZIT1", 8000]);
+const pz2 = L.prognose(roh({ bestellungen: [best({ restUsd: 0, status: "stocked", eta: "2026-10-10", einfuhrZahlung: ezNichts })] }), E0);
+check("ZIT eingetragen, nicht abgebucht: bleibt trotz Eingelagert (am ersten Tag)", pz2.ereignisse.filter((x) => x.art === "einfuhr").map((x) => [x.datum, x.betrag]), [[pz2.start, -7600]]);
+const pz3 = L.prognose(roh({ bestellungen: [best({ restUsd: 0, status: "shipped", einfuhrZahlung: { rechnungen: ["ZIT1", "ZIT2"], gefunden: ["ZIT1"], betragEur: 3000, datum: "2026-10-17", sammel: false } })] }), E0);
+check("Teil abgebucht: nur der Rest bleibt", pz3.ereignisse.filter((x) => x.art === "einfuhr").map((x) => x.betrag), [-4600]);
+const pz4 = L.prognose(roh({ bestellungen: [best({ restUsd: 0, status: "shipped", einfuhrZahlung: { rechnungen: ["ZIT1", "ZIT2"], gefunden: ["ZIT1"], betragEur: 30000, datum: "2026-10-17", sammel: true } })] }), E0);
+check("Teil in Sammelzahlung: Anteil unbekannt → Schätzung bleibt", pz4.ereignisse.filter((x) => x.art === "einfuhr").map((x) => x.betrag), [-7600]);
+check("Ohne ZIT unverändert", L.prognose(roh({ bestellungen: [best({ restUsd: 0, status: "shipped" })] }), E0).ereignisse.filter((x) => x.art === "einfuhr").map((x) => x.betrag), [-7600]);
+
 // Echter Verlauf: rückwärts aus dem heutigen Stand
 const vb = (iban, datum, betrag, name = "X", intern = false) => ({ iban, datum, betrag, name, intern });
 const vBuchungen = [

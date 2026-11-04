@@ -17,14 +17,20 @@ const deDate = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.`;
 export default function LiquiditaetBadge({ p, groß = false, alsLink = true }: { p: BestellPrognose; groß?: boolean; alsLink?: boolean }) {
   const ampel: Ampel = p.bezahlt ? (p.einfuhr?.ampel ?? "ok") : p.ampel;
   const stil = AMPEL_STIL[ampel];
-  const einfuhr = p.einfuhr ? ` · Einfuhrabgaben ${eur(p.einfuhr.eust + p.einfuhr.zoll)} am ${deDate(p.einfuhr.datum)} (Konto danach ${eur(p.einfuhr.saldoDanach)})` : "";
+  const ez = p.einfuhrZahlung;
+  const einfuhrAbgebucht = !p.einfuhr && !!ez && ez.gefunden.length === ez.rechnungen.length;
+  const einfuhr = p.einfuhr
+    ? ` · Einfuhrabgaben ${eur(p.einfuhr.eust + p.einfuhr.zoll)} am ${deDate(p.einfuhr.datum)} (Konto danach ${eur(p.einfuhr.saldoDanach)})`
+    : einfuhrAbgebucht && ez?.datum
+      ? ` · Einfuhrabgaben abgebucht am ${deDate(ez.datum)} (${ez.sammel ? "Sammelzahlung " : ""}${eur(ez.betragEur)})`
+      : "";
   const title = p.bezahlt
     ? `Lieferant bezahlt${einfuhr}`
     : p.teilung
       ? `${p.teilung.anzahlungBezahlt ? "Anzahlung bezahlt" : `Anzahlung ${eur(p.teilung.anzahlungEur)} am ${deDate(p.teilung.anzahlungDatum)}`} · Rest ${eur(p.teilung.restEur)} am ${deDate(p.teilung.restDatum)} · Konto danach (knappster Stand) ${eur(p.saldoNachZahlung)}${einfuhr}`
       : `Zahlung ${eur(p.betragEur)} ${p.sofort ? "sofort fällig" : p.termin.verschoben ? `verschoben auf ${deDate(p.zahlDatum)}` : `ca. ${deDate(p.zahlDatum)} (versandbereit)`} · Konto danach ${eur(p.saldoNachZahlung)}${einfuhr}`;
   const text = p.bezahlt
-    ? `EUSt ${p.einfuhr ? eur(p.einfuhr.eust + p.einfuhr.zoll) : "—"}`
+    ? `EUSt ${p.einfuhr ? eur(p.einfuhr.eust + p.einfuhr.zoll) : einfuhrAbgebucht ? "bezahlt" : "—"}`
     : ampel === "luecke"
       ? `${stil.text} −${eur(p.fehlbetrag)}`
       : `${stil.text} ${p.sofort ? "jetzt" : deDate(p.zahlDatum)}`;

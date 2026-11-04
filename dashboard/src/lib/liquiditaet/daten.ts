@@ -6,6 +6,9 @@ import { readVerkaufsanalyse } from "@/lib/stock-sheets";
 import { createServiceClient } from "@/lib/supabase/server";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import {
+  einfuhrZahlungen,
+  rechnungsNummern,
+  type EinfuhrZahlung,
   kontoVerlauf,
   mitDefaults,
   parseFxKurs,
@@ -98,7 +101,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
   const { data: lieferant } = await sb.from("suppliers").select("id, default_lead_weeks").eq("name", "Amanda").maybeSingle();
   const amandaId = lieferant?.id ?? "00000000-0000-0000-0000-000000000000";
 
-  const [alleTx, posten, { data: orders }, { data: amanda }, kgVerbrauchMonat, { data: salden }, { data: amandaAnkuenfte }] = await Promise.all([
+  const [alleTx, posten, { data: orders }, { data: amanda }, kgVerbrauchMonat, { data: salden }, { data: amandaAnkuenfte }, { data: einfuhrNr }] = await Promise.all([
     selectAll<Tx>((from, to) =>
       sb.from("bank_transactions")
         .select("account_iban, booking_date, amount, kategorie, counterparty_name, purpose")
@@ -129,6 +132,8 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
       .not("status", "in", "(cancelled,hidden,manual,draft)")
       .gte("eta", plusTage(heute, -400))
       .lt("eta", heute),
+    // DHL-/Zoll-Rechnungsnummern (nicht in orders_with_totals)
+    sb.from("orders").select("id, einfuhr_rechnung").eq("supplier_id", amandaId).not("einfuhr_rechnung", "is", null),
   ]);
 
   const tx = alleTx.map((t) => ({ ...t, amount: Number(t.amount) })).filter((t) => istGeschaeftskonto(t.account_iban));
@@ -225,6 +230,11 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
   };
 
   // ── Bestellungen ──
+  const nrVon = new Map(((einfuhrNr ?? []) as Array<{ id: string; einfuhr_rechnung: string | null }>).map((o) => [o.id, o.einfuhr_rechnung]));
+  const ezVon = einfuhrZahlungen(
+    [...nrVon].map(([id, rechnung]) => ({ id, rechnung })),
+    alleTx.map((t) => ({ datum: t.booking_date, betrag: Number(t.amount), zweck: t.purpose })),
+  );
   const bestellungen: LiqBestellung[] = ((orders ?? []) as Array<Record<string, unknown>>)
     .map((o) => ({
       id: String(o.id),
@@ -235,9 +245,17 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
       restUsd: Math.max(0, Number(o.remaining_balance ?? 0)),
       importVatEur: o.import_vat == null ? null : Number(o.import_vat),
       kg: o.weight_kg == null ? null : Number(o.weight_kg),
+      einfuhrRechnung: nrVon.get(String(o.id)) ?? null,
+      einfuhrZahlung: ezVon.get(String(o.id)) ?? null,
     }))
-    // Angekommen/eingelagert + bezahlt = erledigt; unbezahlte Ware bleibt eine offene Schuld
-    .filter((b) => !(WARE_DA.includes(b.status) && b.restUsd <= 0.01))
+    // Angekommen/eingelagert + bezahlt = erledigt; unbezahlte Ware bleibt eine offene Schuld.
+    // Mit Rechnungsnummer bleibt sie, bis die Abgaben abgebucht sind (Umsätze reichen 200 Tage zurück,
+    // ältere Ankünfte gelten deshalb als erledigt).
+    .filter((b) => {
+      if (!(WARE_DA.includes(b.status) && b.restUsd <= 0.01)) return true;
+      const ez = b.einfuhrZahlung;
+      return !!ez && ez.gefunden.length < ez.rechnungen.length && !!b.eta && b.eta.slice(0, 10) >= plusTage(heute, -60);
+    })
     .sort((a, b) => (a.eta ?? "").localeCompare(b.eta ?? ""));
 
   // ── Ratenzahlung: Ebru komplett, sonst nur manuelle Positionen ──
@@ -458,3 +476,20 @@ export const ladePrognose = cache(async (): Promise<{ roh: LiqRohdaten; einstell
   const [roh, einstellungen] = await Promise.all([ladeRohdaten(sb), ladeEinstellungen(sb)]);
   return { roh, einstellungen, ergebnis: prognose(roh, einstellungen) };
 });
+
+/** DHL-/Zoll-Rechnungsnummer einer Bestellung + Abgleich mit dem Konto (für die Bestellseite). */
+export async function ladeEinfuhrRechnung(orderId: string, sb: Sb = createServiceClient()): Promise<{ rechnung: string | null; zahlung: EinfuhrZahlung | null }> {
+  const { data } = await sb.from("orders").select("einfuhr_rechnung").eq("id", orderId).maybeSingle();
+  const rechnung = (data?.einfuhr_rechnung as string | null | undefined) ?? null;
+  const nr = rechnungsNummern(rechnung);
+  if (!nr.length) return { rechnung, zahlung: null };
+  // Nummern bestehen nur aus A-Z/0-9 → sicher im or()-Filter
+  const { data: tx, error } = await sb
+    .from("bank_transactions")
+    .select("booking_date, amount, purpose")
+    .lt("amount", 0)
+    .or(nr.map((n) => `purpose.ilike.%${n}%`).join(","));
+  if (error) throw new Error(error.message);
+  const buchungen = (tx ?? []).map((t) => ({ datum: t.booking_date as string, betrag: Number(t.amount), zweck: t.purpose as string | null }));
+  return { rechnung, zahlung: einfuhrZahlungen([{ id: orderId, rechnung }], buchungen).get(orderId) ?? null };
+}

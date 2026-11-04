@@ -8,6 +8,7 @@ import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import { LIQ_DEFAULTS, prognose, zahlGruppe, type Ereignis, type LiqEinstellungen, type LiqRohdaten, type VerlaufTag, type ZahlGruppe } from "@/lib/liquiditaet/rechnung";
 import { SYMBOLE, TerminSymbol, symbolTyp, type SymbolTyp } from "./termin-symbol";
 import { AMPEL_STIL } from "../../orders/liquiditaet-badge";
+import EinfuhrRechnung from "./einfuhr-rechnung";
 import ZahlTermin, { type TerminEntwurf } from "./zahl-termin";
 import { saveLiquiditaetEinstellungen, setZahlTermin } from "@/lib/actions/liquiditaet";
 
@@ -556,7 +557,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
                         <span className="text-neutral-400"> (EUSt {eur(b.einfuhr.eust)}{b.einfuhr.zoll ? ` + Zoll ${eur(b.einfuhr.zoll)}` : ""})</span>
                         <div className={b.einfuhr.saldoDanach < 0 ? "text-red-700 font-medium" : "text-neutral-500"}>Konto danach {eur(b.einfuhr.saldoDanach)}</div>
                       </>
-                    ) : "—"}
+                    ) : b.einfuhrZahlung ? null : "—"}
+                    <EinfuhrRechnung orderId={b.orderId} rechnung={b.einfuhrRechnung} zahlung={b.einfuhrZahlung} />
                   </td>
                 </tr>
               ))}
@@ -569,6 +571,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           sobald eine Zahlung an der Bestellung eingetragen ist, gilt die Anzahlung als bezahlt. Betrag = offener Rest in USD ÷ {p.fx.toLocaleString("de-DE", { maximumFractionDigits: 4 })} USD/€
           ({p.fxQuelle === "auto" ? `Kurs eurer letzten Auslandsüberweisung${roh.fxAuto ? ` vom ${deDate(roh.fxAuto.datum)}` : ""}` : p.fxQuelle === "manuell" ? "manuell" : "Standard"}).
           Die EUSt holt ihr über die USt-Voranmeldung zurück — das ist unten bei der Umsatzsteuer eingerechnet; der Zoll nicht.
+          Einfuhrabgaben sind geschätzt und zählen ohne Rechnungsnummer, bis die Ware angekommen ist. Mit DHL-Rechnungsnummer (ZIT…) zählt das Konto:
+          Sobald die Nummer im Verwendungszweck einer Abbuchung steht, gelten sie als bezahlt — vorher bleiben sie drin, auch wenn die Ware schon eingelagert ist.
         </p>
       </Card>
 
