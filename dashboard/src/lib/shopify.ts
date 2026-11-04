@@ -2575,3 +2575,38 @@ export async function fetchAllSalonVariants(force = false): Promise<SalonPickabl
 }
 
 
+
+/**
+ * Viele Barcodes auf einmal → Produkt-/Variantenname (für die Fehlscan-
+ * Auswertung der Pack-Statistik). Gebündelt per OR-Query in Paketen à 40,
+ * statt einer Shopify-Abfrage pro Barcode. Unbekannte Codes fehlen im Ergebnis.
+ */
+export async function lookupTitlesByBarcodes(
+  barcodes: string[],
+): Promise<Record<string, { productTitle: string; variantTitle: string | null }>> {
+  const clean = Array.from(new Set(barcodes.map((b) => b.trim()).filter((b) => /^[A-Za-z0-9-]{4,}$/.test(b))));
+  const out: Record<string, { productTitle: string; variantTitle: string | null }> = {};
+  for (let i = 0; i < clean.length; i += 40) {
+    const chunk = clean.slice(i, i + 40);
+    const q = chunk.map((b) => `barcode:${b}`).join(" OR ");
+    const res = await shopifyGraphQL<{
+      productVariants: { edges: { node: { barcode: string | null; title: string | null; product: { title: string } } }[] };
+    }>(
+      `query byBarcodes($q: String!) {
+        productVariants(first: 100, query: $q) {
+          edges { node { barcode title product { title } } }
+        }
+      }`,
+      { q },
+    );
+    for (const e of res.data?.productVariants.edges ?? []) {
+      const bc = e.node.barcode?.trim();
+      if (!bc || !chunk.includes(bc) || out[bc]) continue;
+      out[bc] = {
+        productTitle: e.node.product.title,
+        variantTitle: e.node.title && e.node.title !== "Default Title" ? e.node.title : null,
+      };
+    }
+  }
+  return out;
+}

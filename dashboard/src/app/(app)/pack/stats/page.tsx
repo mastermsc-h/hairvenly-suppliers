@@ -6,6 +6,7 @@ import StatsChart from "./stats-chart";
 import ResetStatsButton from "./reset-button";
 import Link from "next/link";
 import { classifyItem, type ItemKind } from "@/lib/item-classify";
+import { lookupTitlesByBarcodes } from "@/lib/shopify";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +48,7 @@ export default async function StatsPage({
   type ScanRow = {
     status: string;
     scan_method: string;
+    scanned_barcode: string;
     matched_title: string | null;
     scanned_at: string;
     profiles: { display_name: string | null; username: string | null } | null;
@@ -57,7 +59,7 @@ export default async function StatsPage({
     const { data: page } = await supabase
       .from("pack_scans")
       .select(
-        "status, scan_method, matched_title, scanned_at, profiles:scanned_by(display_name, username), pack_sessions:session_id(order_name)",
+        "status, scan_method, scanned_barcode, matched_title, scanned_at, profiles:scanned_by(display_name, username), pack_sessions:session_id(order_name)",
       )
       .gte("scanned_at", fromIso)
       .order("scanned_at", { ascending: true })
@@ -112,13 +114,43 @@ export default async function StatsPage({
     .sort((a, b) => b.count - a.count);
 
   // Häufigste Mismatches (was wird oft falsch gegriffen)
-  const mismatchByTitle = new Map<string, number>();
-  for (const s of scans ?? []) {
-    if (s.status === "mismatch") {
-      const title = s.matched_title ?? "(unbekannter Barcode)";
-      mismatchByTitle.set(title, (mismatchByTitle.get(title) ?? 0) + 1);
-    }
+  // Fehlscans: In der DB steht nur der GESCANNTE Barcode (er passte zu keiner
+  // Position, daher kein matched_title). Früher wurde nach matched_title
+  // gruppiert → alles landete in EINER Zeile "(unbekannter Barcode)".
+  // Jetzt pro Barcode sammeln und den Artikel in Shopify nachschlagen.
+  const mismatchByCode = new Map<
+    string,
+    { count: number; last: string; people: Map<string, number>; orders: Set<string> }
+  >();
+  for (const s of scans) {
+    if (s.status !== "mismatch") continue;
+    const code = (s.scanned_barcode ?? "").trim() || "(leer)";
+    const who = s.profiles?.display_name || s.profiles?.username || "—";
+    const e = mismatchByCode.get(code) ?? { count: 0, last: s.scanned_at, people: new Map(), orders: new Set() };
+    e.count++;
+    if (s.scanned_at > e.last) e.last = s.scanned_at;
+    e.people.set(who, (e.people.get(who) ?? 0) + 1);
+    if (s.pack_sessions?.order_name) e.orders.add(s.pack_sessions.order_name);
+    mismatchByCode.set(code, e);
   }
+  let codeTitles: Record<string, { productTitle: string; variantTitle: string | null }> = {};
+  try {
+    codeTitles = await lookupTitlesByBarcodes(Array.from(mismatchByCode.keys()));
+  } catch {
+    // Shopify nicht erreichbar → Seite trotzdem anzeigen, nur ohne Namen
+  }
+  const mismatchLabel = (code: string): { name: string; known: boolean; hint: string | null } => {
+    const t = codeTitles[code];
+    if (t) return { name: t.variantTitle ? `${t.productTitle} · ${t.variantTitle}` : t.productTitle, known: true, hint: null };
+    // Hairvenly-Barcodes sind 8-stellig — kürzer = abgebrochener/vertippter Scan
+    if (!/^\d{8,}$/.test(code)) return { name: `„${code}"`, known: false, hint: "abgeschnitten / Tippfehler" };
+    return { name: `„${code}"`, known: false, hint: "Barcode nicht in Shopify" };
+  };
+  const mismatchRows = Array.from(mismatchByCode.entries())
+    .map(([code, e]) => ({ code, ...e, ...mismatchLabel(code) }))
+    .sort((a, b) => b.count - a.count);
+  const mismatchByTitle = new Map<string, number>();
+  for (const r of mismatchRows) mismatchByTitle.set(r.name, (mismatchByTitle.get(r.name) ?? 0) + r.count);
   const topMismatches = Array.from(mismatchByTitle.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10);
@@ -302,6 +334,84 @@ export default async function StatsPage({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Fehlscans im Detail: welcher Artikel wurde fälschlich gescannt, von wem,
+          in welcher Bestellung. Barcodes in Shopify nachgeschlagen. */}
+      <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+          <div className="text-xs font-medium text-neutral-600 uppercase tracking-wide flex items-center gap-1">
+            <AlertTriangle size={14} className="text-red-500" /> Fehlscans im Detail (falscher Artikel)
+          </div>
+          <div className="text-sm">
+            <span className="font-bold text-red-700">{mismatchScans}</span>
+            <span className="text-neutral-500"> Fehlscans · {mismatchRows.length} verschiedene Codes</span>
+          </div>
+        </div>
+        <p className="text-xs text-neutral-500 mb-3 leading-relaxed">
+          Gescannt wurde ein Artikel, der in dieser Bestellung nicht vorkommt. Er wurde nicht gezählt — das System hat
+          den Fehlgriff abgefangen. Häufen sich einzelne Artikel, liegen sie vermutlich verwechselbar nebeneinander im Lager.
+        </p>
+        {mismatchRows.length === 0 ? (
+          <div className="text-sm text-emerald-700">Keine Fehlscans im Zeitraum. 🎉</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs uppercase tracking-wide text-neutral-500 border-b border-neutral-200">
+                  <th className="text-left py-2 font-medium">Gescannter Artikel</th>
+                  <th className="text-right py-2 font-medium">Anzahl</th>
+                  <th className="text-left py-2 pl-4 font-medium">Wer</th>
+                  <th className="text-left py-2 pl-4 font-medium">Zuletzt</th>
+                  <th className="text-left py-2 pl-4 font-medium">In Bestellung</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mismatchRows.map((r, idx) => (
+                  <tr key={r.code} className={`border-b border-neutral-100 align-top ${idx % 2 === 1 ? "bg-neutral-50/40" : ""}`}>
+                    <td className="py-2 pr-2">
+                      <div className={r.known ? "text-neutral-800" : "text-neutral-500"}>{r.name}</div>
+                      <div className="text-[11px] text-neutral-400 font-mono">
+                        {r.known ? `EAN ${r.code}` : r.hint}
+                      </div>
+                    </td>
+                    <td className="py-2 text-right font-bold text-red-700">{r.count}</td>
+                    <td className="py-2 pl-4 text-neutral-700 whitespace-nowrap">
+                      {Array.from(r.people.entries())
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([w, n]) => `${w} (${n})`)
+                        .join(", ")}
+                    </td>
+                    <td className="py-2 pl-4 text-neutral-500 whitespace-nowrap">
+                      {new Date(r.last).toLocaleDateString("de-DE", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "2-digit",
+                        timeZone: "Europe/Berlin",
+                      })}
+                    </td>
+                    <td className="py-2 pl-4">
+                      <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                        {Array.from(r.orders)
+                          .slice(0, 6)
+                          .map((o) => (
+                            <Link
+                              key={o}
+                              href={`/pack/archive/${o.replace(/^#/, "")}`}
+                              className="text-blue-700 hover:underline text-xs"
+                            >
+                              {o}
+                            </Link>
+                          ))}
+                        {r.orders.size > 6 && <span className="text-xs text-neutral-400">+{r.orders.size - 6}</span>}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Manuell bestätigte Extensions — hier wurde die Barcode-Kontrolle
