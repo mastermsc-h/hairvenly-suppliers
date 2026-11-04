@@ -88,6 +88,10 @@ export interface LiqEinstellungen {
   paypalEinrechnen: boolean;
   /** Amanda-Anzahlung: Rest so viele Tage nach der Anzahlung (Vorschlag im Terminfeld). */
   restNachAnzahlungTage: number;
+  /** Künftige Ebru-Nachbestellungen (wöchentlich) als Schätzung: Rechnung bei Versand → hinten in die Raten, Einfuhrabgaben bei Ankunft. */
+  ebruNachbestellungenEinrechnen: boolean;
+  ebruNachbestellKgMonat: number | null; // null = Ø Bestellungen der letzten 6 Monate
+  ebruUsdProKg: number | null; // null = Ø der letzten Bestellungen
 }
 
 export interface LiqRatenRegel {
@@ -155,6 +159,9 @@ export const LIQ_DEFAULTS: LiqEinstellungen = {
   paypalEinrechnen: true,
   // User 03.11.2026: nach einer Anzahlung bleiben 4 Wochen für den Rest
   restNachAnzahlungTage: 28,
+  ebruNachbestellungenEinrechnen: false,
+  ebruNachbestellKgMonat: null,
+  ebruUsdProKg: null,
 };
 
 export function mitDefaults(e: Partial<LiqEinstellungen> | null | undefined): LiqEinstellungen {
@@ -175,6 +182,22 @@ export interface LiqBestellung {
   /** Eingetragene DHL-/Zoll-Rechnungsnummer(n) — Rohtext wie im Feld. */
   einfuhrRechnung?: string | null;
   /** Abgleich der Rechnungsnummern mit den Kontoumsätzen (nur wenn welche eingetragen sind). */
+  einfuhrZahlung?: EinfuhrZahlung | null;
+}
+
+/** Lieferung eines Ratenlieferanten (Ebru): Einfuhrabgaben bei Ankunft, bezahlt wird über die Raten. */
+export interface LiqEinfuhrPosten {
+  id: string;
+  label: string;
+  lieferant: string;
+  status: string;
+  eta: string | null;
+  /** Rechnungs- bzw. geschätzter Warenwert (USD). */
+  warenUsd: number;
+  importVatEur: number | null;
+  /** Noch keine Rechnung (in Produktion) — Warenwert geschätzt. */
+  geschaetzt: boolean;
+  einfuhrRechnung?: string | null;
   einfuhrZahlung?: EinfuhrZahlung | null;
 }
 
@@ -248,6 +271,8 @@ export interface LiqManuellePosition {
   /** Datum der Position (Bestell-/Rechnungsdatum) — Frist läuft ab hier. */
   datum: string;
   restUsd: number;
+  /** Noch keine Rechnung (Ware in Produktion / Nachbestellung): Betrag und Datum geschätzt. */
+  geschaetzt?: boolean;
 }
 
 /** Von Hand verschobener Zahltermin — nur Planung, Rechnung und Saldo bleiben unberührt. */
@@ -304,8 +329,13 @@ export interface LiqRohdaten {
   ratenPositionen?: LiqManuellePosition[];
   /** Letzte tatsächliche Zahlung je Lieferant (aus den Kontoumsätzen), YYYY-MM-DD. */
   letzteZahlung?: Record<string, string>;
-  /** Ratenlieferanten: Ware in Produktion ohne Rechnung (geschätzt, USD) — noch nicht im Plan. */
+  /** Ratenlieferanten: Ware in Produktion ohne Rechnung und ohne Ankunftsdatum (USD) — nicht im Plan. */
   ratenKommendUsd?: Record<string, number>;
+  /** Lieferungen der Ratenlieferanten (Ebru), deren Einfuhrabgaben noch kommen. Fehlt das Feld,
+   *  zählt deren EUSt wie früher nur als Ø in der USt (alte Rohdaten). */
+  einfuhrAndere?: LiqEinfuhrPosten[];
+  /** Bestellrhythmus Ebru (für die Nachbestell-Schätzung). */
+  ebruNachbestellung?: { lieferant: string; kgProMonatAuto: number; usdProKgAuto: number; leadWochen: number } | null;
   verschiebungen?: LiqVerschiebungen;
   steuern: {
     /** Vergangene Monate: gezahlte USt-VA (+) bzw. Erstattung (−) und im Monat gezahlte EUSt. */
@@ -493,10 +523,27 @@ export interface PrognoseErgebnis {
   tage: Array<{ datum: string; saldo: number }>;
   ereignisse: Ereignis[];
   bestellungen: BestellPrognose[];
+  /** Ebru-Lieferungen mit ihren Einfuhrabgaben (Zahlung an den Lieferanten läuft über die Raten). */
+  einfuhrAndere: EinfuhrPrognose[];
+  /** Für die Ebru-Nachbestell-Schätzung verwendete kg/Monat. */
+  ebruNachbestellKgMonat: number;
   tiefpunkt: { datum: string; saldo: number };
   /** Tiefpunkt, wenn andere Lieferanten (Ø) zusätzlich eingerechnet würden — als Warnung. */
   tiefpunktMitAnderen: { datum: string; saldo: number };
   hinweise: string[];
+}
+
+export interface EinfuhrPrognose {
+  orderId: string;
+  label: string;
+  lieferant: string;
+  status: string;
+  eta: string | null;
+  warenUsd: number;
+  geschaetzt: boolean;
+  einfuhr: { datum: string; eust: number; zoll: number; saldoDanach: number; ampel: Ampel } | null;
+  einfuhrRechnung: string | null;
+  einfuhrZahlung: EinfuhrZahlung | null;
 }
 
 /** Ware ist angekommen: Einfuhrabgaben sind erledigt, ein offener Rest ist sofort fällig. */
@@ -527,6 +574,8 @@ interface Plan {
   bestellInfo: Map<string, { zahlDatum: string; sofort: boolean; termin: TerminStand; usd: number; eur: number; einfuhr: { datum: string; eust: number; zoll: number } | null; teilung: Teilung | null }>;
   hinweise: string[];
   nachbestellKgMonat: number;
+  ebruNachbestellKgMonat: number;
+  einfuhrAndere: Map<string, { datum: string; eust: number; zoll: number } | null>;
   eustAndereMonat: number;
   ustIstSchnitt: number | null;
 }
@@ -537,7 +586,7 @@ export interface Rate {
   von: number;
   datum: string;
   usd: number;
-  positionen: Array<{ id: string; label: string; usd: number }>;
+  positionen: Array<{ id: string; label: string; usd: number; geschaetzt?: boolean }>;
   /** Nur die nächste Rate (nr 1) lässt sich verschieben. */
   termin?: TerminStand;
 }
@@ -604,7 +653,7 @@ export function ratenplan(
         const teil = Math.min(offen[kopf].rest, rate - usd);
         usd += teil;
         offen[kopf].rest -= teil;
-        pos.push({ id: offen[kopf].id, label: offen[kopf].label, usd: r2(teil) });
+        pos.push({ id: offen[kopf].id, label: offen[kopf].label, usd: r2(teil), ...(offen[kopf].geschaetzt ? { geschaetzt: true } : {}) });
         if (offen[kopf].rest <= 0.005) kopf++;
       }
       raten.push({ lieferant, nr: raten.length + 1, von: 0, datum, usd: r2(usd), positionen: pos, termin });
@@ -632,6 +681,25 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     const zoll = warenwert * (e.zollSatz / 100);
     const eust = importVatEur ?? (warenwert + zoll) * (e.eustSatz / 100);
     return { zoll: r2(zoll), eust: r2(eust) };
+  };
+
+  // Einfuhrabgaben einer Lieferung: ohne Rechnungsnummer bis die Ware angekommen ist (Status). Mit
+  // Rechnungsnummer zählt das Konto — erst die Abbuchung erledigt sie, auch wenn die Ware schon eingelagert ist.
+  const planeEinfuhr = (b: { id: string; label: string; status: string; eta: string | null; warenUsd: number; importVatEur: number | null; einfuhrZahlung?: EinfuhrZahlung | null }) => {
+    const ez = b.einfuhrZahlung ?? null;
+    const ezErledigt = !!ez && ez.gefunden.length === ez.rechnungen.length;
+    if (ezErledigt || (WARE_DA.includes(b.status) && !ez) || b.warenUsd <= 0) return null;
+    const ab = einfuhrFuer(b.warenUsd, b.importVatEur);
+    // Teil schon abgebucht (mehrere Rechnungen): nur der Rest; bei Sammelzahlungen ist der Anteil unbekannt
+    const summe = ab.eust + ab.zoll;
+    const schon = ez && !ez.sammel ? Math.min(ez.betragEur, summe) : 0;
+    const f = summe > 0 ? 1 - schon / summe : 0;
+    const rest = { eust: r2(ab.eust * f), zoll: r2(ab.zoll * f) };
+    if (rest.eust + rest.zoll <= 0.005) return null;
+    const datum = amStart(b.eta ?? start);
+    ereignisse.push({ datum, betrag: -r2(rest.eust + rest.zoll), art: "einfuhr", label: `Einfuhrabgaben ${b.label}`, orderId: b.id });
+    eustProMonat[monatVon(datum)] = (eustProMonat[monatVon(datum)] ?? 0) + rest.eust;
+    return { datum, ...rest };
   };
 
   // 1) Amanda-Bestellungen: Zahlung bei "versandbereit" (≈ Ankunft − X Tage), Einfuhrabgaben bei Ankunft
@@ -681,31 +749,52 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     if (!bezahlt && !teilung) {
       ereignisse.push({ datum: zahlDatum, betrag: -eur, art: "lieferant", label: b.label, orderId: b.id, sofort, verschoben: t.verschoben });
     }
-    // Einfuhrabgaben: ohne Rechnungsnummer bis die Ware angekommen ist (Status). Mit Rechnungsnummer
-    // zählt das Konto — erst die Abbuchung erledigt sie, auch wenn die Ware schon eingelagert ist.
-    let einfuhr: { datum: string; eust: number; zoll: number } | null = null;
-    const ez = b.einfuhrZahlung ?? null;
-    const ezErledigt = !!ez && ez.gefunden.length === ez.rechnungen.length;
-    if (!ezErledigt && (!WARE_DA.includes(b.status) || ez) && (b.invoiceUsd ?? 0) > 0) {
-      const ab = einfuhrFuer(b.invoiceUsd ?? 0, b.importVatEur);
-      // Teil schon abgebucht (mehrere Rechnungen): nur der Rest; bei Sammelzahlungen ist der Anteil unbekannt
-      const summe = ab.eust + ab.zoll;
-      const schon = ez && !ez.sammel ? Math.min(ez.betragEur, summe) : 0;
-      const f = summe > 0 ? 1 - schon / summe : 0;
-      const rest = { eust: r2(ab.eust * f), zoll: r2(ab.zoll * f) };
-      if (rest.eust + rest.zoll > 0.005) {
-        const datum = amStart(b.eta ?? start);
-        einfuhr = { datum, ...rest };
-        ereignisse.push({ datum, betrag: -r2(rest.eust + rest.zoll), art: "einfuhr", label: `Einfuhrabgaben ${b.label}`, orderId: b.id });
-        eustProMonat[monatVon(datum)] = (eustProMonat[monatVon(datum)] ?? 0) + rest.eust;
-      }
-    }
+    const einfuhr = planeEinfuhr({ ...b, warenUsd: b.invoiceUsd ?? 0 });
     const termin = { regelDatum: t.regelDatum, verschoben: t.verschoben, notiz: t.notiz, abgelaufenAm: t.abgelaufenAm };
     bestellInfo.set(b.id, { zahlDatum, sofort, termin, usd: b.restUsd, eur, einfuhr, teilung });
   }
 
+  // 1a) Ebru-Lieferungen: Einfuhrabgaben bei Ankunft (die Ware selbst läuft über die Raten).
+  //     Mit dem Lieferanten-Ø aus der Bank stecken sie schon dort drin → dann nicht einzeln.
+  const ebruEinzeln = roh.einfuhrAndere !== undefined && !e.andereLieferantenEinrechnen;
+  const einfuhrAndere: Plan["einfuhrAndere"] = new Map();
+  if (ebruEinzeln) {
+    for (const b of roh.einfuhrAndere ?? []) {
+      if (b.eta && b.eta < start && !WARE_DA.includes(b.status) && b.geschaetzt) {
+        hinweise.push(`${b.label}: Ankunft ${deKurz(b.eta)} ist vorbei, Status noch „in Produktion“ — Einfuhrabgaben und Rechnung als sofort angenommen. Status/Ankunft prüfen.`);
+      }
+      einfuhrAndere.set(b.id, planeEinfuhr(b));
+    }
+  }
+
+  // 1a') Künftige Ebru-Nachbestellungen (Schätzung): wöchentlich ab nächstem Montag, Rechnung bei Versand
+  const ebruNb = roh.ebruNachbestellung ?? null;
+  const ebruNachbestellKgMonat = e.ebruNachbestellKgMonat ?? ebruNb?.kgProMonatAuto ?? 0;
+  const nbPositionen: LiqManuellePosition[] = [];
+  if (e.ebruNachbestellungenEinrechnen && ebruNb && ebruEinzeln) {
+    const usdKg = e.ebruUsdProKg ?? ebruNb.usdProKgAuto;
+    const kgWoche = (ebruNachbestellKgMonat * 12) / 52;
+    if (kgWoche <= 0 || usdKg <= 0) hinweise.push("Ebru-Nachbestellungen: keine kg/Monat oder kein Preis pro kg — nicht eingerechnet.");
+    else {
+      let d = start;
+      while (new Date(`${d}T12:00:00Z`).getUTCDay() !== 1) d = plusTage(d, 1);
+      for (; d <= ende; d = plusTage(d, 7)) {
+        const usd = r2(kgWoche * usdKg);
+        const ankunft = plusTage(d, ebruNb.leadWochen * 7);
+        const rechnung = plusTage(ankunft, -e.zahlungVorAnkunftTage);
+        const label = `Nachbestellung ~${kgWoche.toFixed(1)} kg (bestellt ${deKurz(d)})`;
+        if (rechnung <= ende) nbPositionen.push({ id: `nb-ebru-${d}`, label, lieferant: ebruNb.lieferant, datum: rechnung, restUsd: usd, geschaetzt: true });
+        if (ankunft <= ende) {
+          const ab = einfuhrFuer(usd, null);
+          ereignisse.push({ datum: ankunft, betrag: -r2(ab.eust + ab.zoll), art: "einfuhr", label: `Einfuhrabgaben Ebru-Nachbestellung ${deKurz(d)}`, schaetzung: true });
+          eustProMonat[monatVon(ankunft)] = (eustProMonat[monatVon(ankunft)] ?? 0) + ab.eust;
+        }
+      }
+    }
+  }
+
   // 1b) Ratenzahlung (Ebru: alle offenen Rechnungen; andere Lieferanten: nur manuelle Positionen)
-  const ratenPos = (roh.ratenPositionen ?? roh.manuellePositionen ?? []).filter((p) => p.restUsd > 0.01);
+  const ratenPos = [...(roh.ratenPositionen ?? roh.manuellePositionen ?? []), ...nbPositionen].filter((p) => p.restUsd > 0.01);
   for (const r of ratenplan(ratenPos, roh.letzteZahlung ?? {}, e, start, roh.verschiebungen?.raten)) {
     const hinweis = r.termin ? terminHinweis(`${r.lieferant} nächste Rate`, { ...r.termin, datum: r.datum }, ende) : null;
     if (hinweis) hinweise.push(hinweis);
@@ -713,7 +802,8 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       datum: r.datum,
       betrag: -r2(r.usd / fx),
       art: "manuell",
-      label: `${r.lieferant} Rate ${r.nr}/${r.von} · ${r.usd.toLocaleString("de-DE", { maximumFractionDigits: 0 })} $ (${r.positionen.map((x) => x.label).join(", ")})`,
+      label: `${r.lieferant} Rate ${r.nr}/${r.von} · ${r.usd.toLocaleString("de-DE", { maximumFractionDigits: 0 })} $ (${r.positionen.map((x) => (x.geschaetzt ? `≈ ${x.label}` : x.label)).join(", ")})`,
+      ...(r.positionen.some((x) => x.geschaetzt) ? { schaetzung: true } : {}),
       orderIds: r.positionen.map((x) => x.id),
       sofort: !r.termin?.verschoben && r.datum <= start,
       verschoben: r.termin?.verschoben,
@@ -787,7 +877,8 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     for (let i = 0; i < 24; i++, m = naechsterMonat(m)) {
       const faellig = faelligkeit("ust_va", m);
       if (!faellig || faellig > ende) break;
-      const eustAndere = m >= aktMonat ? eustAndereMonat : 0;
+      // Ebru einzeln geplant → deren EUSt steckt schon in eustProMonat, kein Ø obendrauf
+      const eustAndere = m >= aktMonat && !ebruEinzeln ? eustAndereMonat : 0;
       const si = sollInfo(roh, `ust_va|${m}`);
       const soll = si.soll;
       const betrag = soll !== undefined ? r2(soll) : r2(ustBasis + (ustZusatz[m] ?? 0) - (eustProMonat[m] ?? 0) - eustAndere);
@@ -856,7 +947,7 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
 
   // Innerhalb eines Tages: Eingänge vor Ausgängen, sonst stabil
   ereignisse.sort((a, b) => a.datum.localeCompare(b.datum) || Math.sign(b.betrag) - Math.sign(a.betrag));
-  return { start, ende, fx, fxQuelle, ereignisse, ustBasis, eustAndereMonat, ustIstSchnitt, bestellInfo, hinweise, nachbestellKgMonat };
+  return { start, ende, fx, fxQuelle, ereignisse, ustBasis, eustAndereMonat, ustIstSchnitt, bestellInfo, hinweise, nachbestellKgMonat, ebruNachbestellKgMonat, einfuhrAndere };
 }
 
 function simuliere(
@@ -943,6 +1034,26 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
     });
   }
 
+  const einfuhrAndere: EinfuhrPrognose[] = [];
+  for (const b of roh.einfuhrAndere ?? []) {
+    if (!plan.einfuhrAndere.has(b.id)) continue;
+    const ab = plan.einfuhrAndere.get(b.id) ?? null;
+    const ev = ab ? plan.ereignisse.find((x) => x.orderId === b.id && x.art === "einfuhr") : undefined;
+    const saldo = ev ? sim.nachEreignis.get(ev) ?? startSaldo : null;
+    einfuhrAndere.push({
+      orderId: b.id,
+      label: b.label,
+      lieferant: b.lieferant,
+      status: b.status,
+      eta: b.eta,
+      warenUsd: b.warenUsd,
+      geschaetzt: b.geschaetzt,
+      einfuhr: ab && saldo !== null ? { ...ab, saldoDanach: r2(saldo), ampel: ampelFuer(saldo, e.puffer) } : null,
+      einfuhrRechnung: b.einfuhrRechnung ?? null,
+      einfuhrZahlung: b.einfuhrZahlung ?? null,
+    });
+  }
+
   return {
     start: plan.start,
     fx: plan.fx,
@@ -959,6 +1070,8 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
     tage: sim.tage,
     ereignisse: plan.ereignisse,
     bestellungen,
+    einfuhrAndere,
+    ebruNachbestellKgMonat: plan.ebruNachbestellKgMonat,
     tiefpunkt: sim.tiefpunkt,
     tiefpunktMitAnderen: simAndere.tiefpunkt,
     hinweise: plan.hinweise,

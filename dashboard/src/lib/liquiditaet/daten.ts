@@ -18,6 +18,7 @@ import {
   prognose,
   tageZwischen,
   type LiqBestellung,
+  type LiqEinfuhrPosten,
   type LiqEinstellungen,
   type LiqManuellePosition,
   type LiqRohdaten,
@@ -133,7 +134,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
       .gte("eta", plusTage(heute, -400))
       .lt("eta", heute),
     // DHL-/Zoll-Rechnungsnummern (nicht in orders_with_totals)
-    sb.from("orders").select("id, einfuhr_rechnung").eq("supplier_id", amandaId).not("einfuhr_rechnung", "is", null),
+    sb.from("orders").select("id, einfuhr_rechnung").not("einfuhr_rechnung", "is", null),
   ]);
 
   const tx = alleTx.map((t) => ({ ...t, amount: Number(t.amount) })).filter((t) => istGeschaeftskonto(t.account_iban));
@@ -259,10 +260,19 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     .sort((a, b) => (a.eta ?? "").localeCompare(b.eta ?? ""));
 
   // ── Ratenzahlung: Ebru komplett, sonst nur manuelle Positionen ──
-  const [{ ratenPositionen, letzteZahlung, ratenKommendUsd }, verschiebungen] = await Promise.all([
+  const [{ ratenPositionen, letzteZahlung, ratenKommendUsd, lieferungen, ebruNachbestellung }, verschiebungen] = await Promise.all([
     ladeRatenDaten(sb, await ladeEinstellungen(sb)),
     ladeVerschiebungen(sb),
   ]);
+  // Ebru-Lieferungen: Einfuhrabgaben bis zur Ankunft bzw. bis die eingetragene Rechnung abgebucht ist
+  const einfuhrAndere: LiqEinfuhrPosten[] = lieferungen
+    .map((b) => ({ ...b, einfuhrRechnung: nrVon.get(b.id) ?? null, einfuhrZahlung: ezVon.get(b.id) ?? null }))
+    .filter((b) => {
+      if (!WARE_DA.includes(b.status)) return true;
+      const ez = b.einfuhrZahlung;
+      return !!ez && ez.gefunden.length < ez.rechnungen.length && !!b.eta && b.eta >= plusTage(heute, -60);
+    })
+    .sort((a, b) => (a.eta ?? "").localeCompare(b.eta ?? ""));
 
   // ── Nachbestellung (Schätzung aus dem eigenen Bestellrhythmus) ──
   const hist = (amanda ?? []) as Array<{ order_date: string | null; invoice_total: number | null; weight_kg: number | null }>;
@@ -295,6 +305,8 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     ratenPositionen,
     letzteZahlung,
     ratenKommendUsd,
+    einfuhrAndere,
+    ebruNachbestellung,
     verschiebungen,
     steuern: {
       ustHistorie,
@@ -338,32 +350,82 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
 export async function ladeRatenDaten(
   sb: Sb,
   einstellungen: LiqEinstellungen,
-): Promise<{ ratenPositionen: LiqManuellePosition[]; letzteZahlung: Record<string, string>; ratenKommendUsd: Record<string, number> }> {
-  const [{ data: offeneRows }, { data: alleSup }] = await Promise.all([
+): Promise<{
+  ratenPositionen: LiqManuellePosition[];
+  letzteZahlung: Record<string, string>;
+  ratenKommendUsd: Record<string, number>;
+  lieferungen: Array<Omit<LiqEinfuhrPosten, "einfuhrRechnung" | "einfuhrZahlung">>;
+  ebruNachbestellung: LiqRohdaten["ebruNachbestellung"];
+}> {
+  const heute = heuteBerlin();
+  const [{ data: offeneRows }, { data: alleSup }, { data: lieferRows }] = await Promise.all([
     sb.from("orders_with_totals")
-      .select("id, label, status, tracking_number, order_date, created_at, remaining_balance, supplier_id")
+      .select("id, label, status, tracking_number, order_date, created_at, eta, remaining_balance, supplier_id")
       .not("status", "in", "(draft,cancelled,hidden)")
       .gt("remaining_balance", 0.01),
-    sb.from("suppliers").select("id, name"),
+    sb.from("suppliers").select("id, name, default_lead_weeks"),
+    // Lieferungen der letzten 12 Monate: Einfuhrabgaben + Bestellrhythmus/Preis für die Nachbestell-Schätzung
+    sb.from("orders_with_totals")
+      .select("id, label, status, order_date, eta, invoice_effective, invoice_is_estimated, import_vat, weight_kg, supplier_id")
+      .not("status", "in", "(draft,cancelled,manual)")
+      .gte("order_date", plusTage(heute, -365)),
   ]);
   const supName = new Map((alleSup ?? []).map((x) => [x.id as string, String(x.name)]));
+  const istRaten = (name: string) => einstellungen.ratenLieferanten.some((r) => r.name && name.toLowerCase().includes(r.name.toLowerCase()));
   const ratenPositionen: LiqManuellePosition[] = [];
   const ratenKommendUsd: Record<string, number> = {};
   for (const m of (offeneRows ?? []) as Array<Record<string, unknown>>) {
     const lieferantName = supName.get(m.supplier_id as string) ?? "Lieferant";
-    const hatRegel = einstellungen.ratenLieferanten.some((r) => r.name && lieferantName.toLowerCase().includes(r.name.toLowerCase()));
+    const hatRegel = istRaten(lieferantName);
     const bucket = debtBucket({ status: m.status as OrderStatus });
-    if (hatRegel && bucket === "upcoming") {
+    const eta = m.eta ? String(m.eta).slice(0, 10) : null;
+    // Ware in Produktion: Rechnung kommt beim Versand (≈ Ankunft − X Tage) → geschätzt hinten in die Raten
+    if (hatRegel && bucket === "upcoming" && !eta) {
       ratenKommendUsd[lieferantName] = (ratenKommendUsd[lieferantName] ?? 0) + Number(m.remaining_balance ?? 0);
+      continue;
     }
-    if (!(m.status === "manual" || (hatRegel && bucket === "due"))) continue;
+    const geschaetzt = hatRegel && bucket === "upcoming";
+    if (!(m.status === "manual" || (hatRegel && bucket === "due") || geschaetzt)) continue;
     ratenPositionen.push({
       id: String(m.id),
       label: String(m.label ?? ""),
       lieferant: lieferantName,
-      datum: String(m.order_date ?? String(m.created_at).slice(0, 10)),
+      datum: geschaetzt ? plusTage(eta as string, -einstellungen.zahlungVorAnkunftTage) : String(m.order_date ?? String(m.created_at).slice(0, 10)),
       restUsd: Number(m.remaining_balance ?? 0),
+      ...(geschaetzt ? { geschaetzt: true } : {}),
     });
+  }
+
+  type Lief = { id: string; label: string | null; status: string; order_date: string | null; eta: string | null; invoice_effective: number | null; invoice_is_estimated: boolean | null; import_vat: number | null; weight_kg: number | null; supplier_id: string };
+  const ratenLief = ((lieferRows ?? []) as Lief[]).filter((o) => istRaten(supName.get(o.supplier_id) ?? ""));
+  const lieferungen = ratenLief
+    .filter((o) => o.status !== "hidden" && Number(o.invoice_effective ?? 0) > 0)
+    .map((o) => ({
+      id: o.id,
+      label: String(o.label ?? ""),
+      lieferant: supName.get(o.supplier_id) ?? "Lieferant",
+      status: o.status,
+      eta: o.eta ? String(o.eta).slice(0, 10) : null,
+      warenUsd: Number(o.invoice_effective),
+      importVatEur: o.import_vat == null ? null : Number(o.import_vat),
+      geschaetzt: debtBucket({ status: o.status as OrderStatus }) === "upcoming",
+    }));
+  // Rhythmus: Bestellungen (auch ausgeblendete, die in Sammelrechnungen aufgegangen sind) der letzten
+  // 6 Monate — 6 statt 3 Monate, damit der Black-Friday-Vorrat die Schätzung nicht aufbläht
+  const erste = einstellungen.ratenLieferanten[0];
+  const ebruSup = erste ? (alleSup ?? []).find((x) => String(x.name).toLowerCase().includes(erste.name.toLowerCase())) : undefined;
+  let ebruNachbestellung: LiqRohdaten["ebruNachbestellung"] = null;
+  if (ebruSup) {
+    const eigene = ratenLief.filter((o) => o.supplier_id === ebruSup.id && Number(o.weight_kg ?? 0) > 0);
+    const kg180 = eigene.filter((o) => (o.order_date ?? "") >= plusTage(heute, -182)).reduce((s, o) => s + Number(o.weight_kg), 0);
+    const mitPreis = eigene.filter((o) => o.status !== "hidden" && Number(o.invoice_effective ?? 0) > 0);
+    const kgPreis = mitPreis.reduce((s, o) => s + Number(o.weight_kg), 0);
+    ebruNachbestellung = {
+      lieferant: String(ebruSup.name),
+      kgProMonatAuto: Math.round((kg180 / 6) * 10) / 10,
+      usdProKgAuto: kgPreis > 0 ? Math.round(mitPreis.reduce((s, o) => s + Number(o.invoice_effective), 0) / kgPreis) : 0,
+      leadWochen: Number(ebruSup.default_lead_weeks ?? 8),
+    };
   }
   // Letzte echte Zahlung je Lieferant: jüngste Abbuchung an den Empfänger laut Kontoumsätzen
   const letzteZahlung: Record<string, string> = {};
@@ -382,7 +444,7 @@ export async function ladeRatenDaten(
       if (data?.booking_date) letzteZahlung[lieferantName] = String(data.booking_date).slice(0, 10);
     }),
   );
-  return { ratenPositionen, letzteZahlung, ratenKommendUsd };
+  return { ratenPositionen, letzteZahlung, ratenKommendUsd, lieferungen, ebruNachbestellung };
 }
 
 /** Von Hand verschobene Zahltermine (Tabelle liquiditaet_verschiebung). */

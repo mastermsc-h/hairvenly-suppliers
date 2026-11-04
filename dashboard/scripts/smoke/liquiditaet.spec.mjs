@@ -326,6 +326,43 @@ check("Verlauf: Tage ohne Gruppenzahlung ohne Feld", "zahlungen" in vg.find((t) 
 check("Termin-Gruppen", ["lieferant", "nachbestellung", "manuell", "einfuhr", "steuer", "aktion"].map((art) => L.zahlGruppe({ art })), ["amanda", "amanda", "ebru", "einfuhr", "steuern", null]);
 check("Konto ohne Buchungen → kein Verlauf statt falscher Summe", L.kontoVerlauf(vBuchungen, [...vKonten, { iban: "C", saldo: 5 }], "2026-10-06"), []);
 
+// Ebru: Ware in Produktion als geschätzte Rechnung hinten in den Raten
+const pg = L.prognose(roh({
+  ratenPositionen: [mp({ id: "a", label: "A", restUsd: 40000 }), mp({ id: "g", label: "G", datum: "2026-11-03", restUsd: 20000, geschaetzt: true })],
+  letzteZahlung: { "Ebru (CN + TR)": "2026-10-19" },
+}), E0).ereignisse.filter((x) => x.art === "manuell");
+check("Geschätzte Position reiht sich hinten ein", pg.map((x) => [x.datum, !!x.schaetzung]), [["2026-11-02", false], ["2026-11-17", true]]);
+check("Geschätzte Position im Label mit ≈", pg[1].label.includes("(≈ G)"), true);
+
+// Ebru-Lieferungen: Einfuhrabgaben bei Ankunft
+const ea = (o) => ({ id: "e1", label: "China X", lieferant: "Ebru (CN + TR)", status: "in_production", eta: "2026-11-20", warenUsd: 50000, importVatEur: null, geschaetzt: true, ...o });
+const einf = (pp) => pp.ereignisse.filter((x) => x.art === "einfuhr").map((x) => [x.datum, x.betrag]);
+const pe1 = L.prognose(roh({ einfuhrAndere: [ea({})] }), E0);
+check("Ebru-Einfuhr am Ankunftstag", einf(pe1), [["2026-11-20", -7600]]);
+check("Ebru-Einfuhr im Ergebnis", [pe1.einfuhrAndere[0].einfuhr.eust, pe1.einfuhrAndere[0].geschaetzt], [7600, true]);
+const pe2 = L.prognose(roh({ einfuhrAndere: [ea({ eta: "2026-10-01" })] }), E0);
+check("Ankunft vorbei, noch in Produktion: sofort + Hinweis", [einf(pe2), pe2.hinweise.some((h) => h.includes("China X"))], [[["2026-10-17", -7600]], true]);
+check("Eingelagert ohne Rechnungsnr.: keine Abgaben", einf(L.prognose(roh({ einfuhrAndere: [ea({ status: "stocked" })] }), E0)), []);
+check("Eingelagert, Zoll-Rechnung noch offen: Abgaben bleiben", einf(L.prognose(roh({ einfuhrAndere: [ea({ status: "stocked", eta: "2026-10-10", einfuhrZahlung: ezNichts })] }), E0)), [["2026-10-17", -7600]]);
+check("Zoll-Rechnung abgebucht: keine Abgaben", einf(L.prognose(roh({ einfuhrAndere: [ea({ einfuhrZahlung: ezVoll })] }), E0)), []);
+check("Mit Lieferanten-Ø: Ebru-Einfuhr nicht einzeln (sonst doppelt)", einf(L.prognose(roh({ einfuhrAndere: [ea({})] }), { ...E0, andereLieferantenEinrechnen: true })), []);
+// USt: Ebru einzeln geplant → kein Ø-EUSt der anderen Lieferanten mehr obendrauf
+const ustEbru = (extra) => L.prognose(roh({ ...extra, steuern: { ustHistorie: [{ monat: "2026-08", ust: 20000, eust: 2000 }], ustErledigtBis: "2026-08", eustBezahlt: {}, lstLetzte: [], lstErledigtBis: null, estLetzte: null, gewstLetzte: null, quartaleErledigt: [] } }), { ...E0, horizontTage: 120 })
+  .ereignisse.find((x) => x.label === "USt-VA 2026-10").betrag;
+check("USt Okt alt: Basis − Ø EUSt andere", ustEbru({}), -20000);
+check("USt Okt mit Ebru einzeln: ohne Ø", ustEbru({ einfuhrAndere: [] }), -22000);
+check("USt Nov mit Ebru-Ankunft: deren EUSt verrechnet", L.prognose(roh({ einfuhrAndere: [ea({})], steuern: { ustHistorie: [{ monat: "2026-08", ust: 20000, eust: 2000 }], ustErledigtBis: "2026-08", eustBezahlt: {}, lstLetzte: [], lstErledigtBis: null, estLetzte: null, gewstLetzte: null, quartaleErledigt: [] } }), { ...E0, horizontTage: 120 }).ereignisse.find((x) => x.label === "USt-VA 2026-11").betrag, -14400);
+
+// Ebru-Nachbestellungen (Schätzung)
+const nb = { lieferant: "Ebru (CN + TR)", kgProMonatAuto: 130 / 3, usdProKgAuto: 1000, leadWochen: 8 };
+const pnb = L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: nb }), { ...E0, ebruNachbestellungenEinrechnen: true });
+check("Ebru-Nachbestellung: Einfuhr bei Ankunft (bestellt Mo 19.10. + 8 Wochen)", pnb.ereignisse.filter((x) => x.label.includes("Ebru-Nachbestellung")).map((x) => [x.datum, x.betrag, x.schaetzung]), [["2026-12-14", -1520, true]]);
+check("Ebru-Nachbestellung: kg/Monat im Ergebnis", Math.round(pnb.ebruNachbestellKgMonat * 10) / 10, 43.3);
+check("Ebru-Nachbestellung aus: nichts", L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: nb }), E0).ereignisse.length, 0);
+const pnb2 = L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: nb }), { ...E0, ebruNachbestellungenEinrechnen: true, horizontTage: 120 });
+check("Ebru-Nachbestellung: Rechnung reiht sich als geschätzte Rate ein", pnb2.ereignisse.filter((x) => x.art === "manuell").every((x) => x.schaetzung && x.label.includes("≈ Nachbestellung")), true);
+check("Ebru-Nachbestellung: es gibt Raten", pnb2.ereignisse.some((x) => x.art === "manuell"), true);
+
 // Defaults
 check("Defaults vollständig", Object.keys(L.mitDefaults({})).length, Object.keys(L.LIQ_DEFAULTS).length);
 

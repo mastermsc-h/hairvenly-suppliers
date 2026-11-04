@@ -56,7 +56,7 @@ const GRUPPEN: Array<{ key: ZahlGruppe; name: string; typ: SymbolTyp }> = [
 ];
 
 /** Offene Lieferantenschulden nach einem Tag (EUR); Einfuhrabgaben nur zur Info, nicht in der Summe. */
-type Schulden = { amanda: number; raten: number; einfuhr: number; summe: number };
+type Schulden = { amanda: number; raten: number; ratenGeschaetzt: number; einfuhr: number; summe: number };
 
 /** Eine Zeile der Zahlungsliste unter dem Diagramm. */
 type ZahlZeile = { datum: string; gruppe: ZahlGruppe; label: string; betrag: number; bezahlt: boolean; ev?: Ereignis };
@@ -228,14 +228,17 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
   // Verbleibende Lieferantenschulden nach einem Tag: heute offen − bis dahin geplante Zahlungen
   const schuldenNach = useMemo(() => {
     const amandaOffen = p.bestellungen.filter((b) => !b.bezahlt).reduce((s, b) => s + b.betragEur, 0);
-    const ratenOffen = (roh.ratenPositionen ?? roh.manuellePositionen ?? []).reduce((s, x) => s + Math.max(0, x.restUsd), 0) / p.fx;
+    const ratenPos = roh.ratenPositionen ?? roh.manuellePositionen ?? [];
+    const ratenOffen = ratenPos.reduce((s, x) => s + Math.max(0, x.restUsd), 0) / p.fx;
+    // Raten zahlen die ältesten Rechnungen zuerst ab → die geschätzten (in Produktion) bleiben am längsten offen
+    const geschaetztOffen = ratenPos.filter((x) => x.geschaetzt).reduce((s, x) => s + Math.max(0, x.restUsd), 0) / p.fx;
     const einfuhrOffen = p.ereignisse.filter((x) => x.art === "einfuhr").reduce((s, x) => s - x.betrag, 0);
     return (datum: string): Schulden | null => {
       if (datum < p.start) return null;
       const bis = (art: Ereignis["art"]) => p.ereignisse.filter((x) => x.art === art && x.datum <= datum).reduce((s, x) => s - x.betrag, 0);
       const amanda = Math.max(0, amandaOffen - bis("lieferant"));
       const raten = Math.max(0, ratenOffen - bis("manuell"));
-      return { amanda, raten, einfuhr: Math.max(0, einfuhrOffen - bis("einfuhr")), summe: amanda + raten };
+      return { amanda, raten, ratenGeschaetzt: Math.min(raten, geschaetztOffen), einfuhr: Math.max(0, einfuhrOffen - bis("einfuhr")), summe: amanda + raten };
     };
   }, [p, roh]);
   const pinSchulden = pin ? schuldenNach(pin.datum) : null;
@@ -267,6 +270,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
   const setAktion = (patch: Partial<NonNullable<LiqEinstellungen["aktion"]>>) =>
     e.aktion && set("aktion", { ...e.aktion, ...patch });
   const offenAmanda = p.bestellungen.filter((b) => !b.bezahlt).reduce((s, b) => s + b.betragEur, 0);
+  const ebruGeschaetztUsd = (roh.ratenPositionen ?? []).filter((x) => x.geschaetzt).reduce((s, x) => s + x.restUsd, 0);
+  const einfuhrAndereSumme = p.einfuhrAndere.reduce((s, b) => s + (b.einfuhr ? b.einfuhr.eust + b.einfuhr.zoll : 0), 0);
   const einfuhrSumme = p.bestellungen.reduce((s, b) => s + (b.einfuhr ? b.einfuhr.eust + b.einfuhr.zoll : 0), 0);
 
   return (
@@ -302,7 +307,9 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           <AlertTriangle size={18} className="shrink-0 mt-0.5" />
           <div>
             <b>Ebru ist über den Ratenplan eingerechnet:</b> {manuellRaten.length} Raten ({eur(-manuellRaten.reduce((s, x) => s + x.betrag, 0))}) vom{" "}
-            {deDate(manuellRaten[0].datum)} bis {deDate(manuellRaten[manuellRaten.length - 1].datum)} für alle offenen Rechnungen.
+            {deDate(manuellRaten[0].datum)} bis {deDate(manuellRaten[manuellRaten.length - 1].datum)} für alle offenen Rechnungen
+            {ebruGeschaetztUsd > 0 && <> und die Ware in Produktion (≈ {usd(ebruGeschaetztUsd)}, Rechnung geschätzt beim Versand — reiht sich hinten ein)</>}.
+            {" "}Einfuhrabgaben der Ebru-Lieferungen stehen einzeln bei Ankunft (Tabelle unten).
             {Object.entries(roh.ratenKommendUsd ?? {}).filter(([, v]) => v > 0).map(([l, v]) => (
               <span key={l}>
                 {" "}Noch nicht enthalten: {l.split(" ")[0]}-Ware in Produktion ≈ {usd(v)} — die Rechnung kommt erst beim Versand, dann reiht sie sich automatisch hinten ein.
@@ -533,7 +540,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           Täglich: + Ø Einnahmen − Ø laufende Abgänge. Stufen = Lieferantenzahlungen, Einfuhrabgaben und Steuertermine; die Marken oben zeigen,
           wann welche Steuer abgeht (Maus darüber für Details). Ein Klick auf einen Termin im Diagramm hält die Liste fest, von dort springst du zum Eintrag.
           Mit dem Pfeil nach links siehst du die Vergangenheit: echter Kontostand der Sparkasse am Tagesende{verlauf[0] ? ` ab ${deDate(verlauf[0].datum)}` : ""}, ohne PayPal.
-          Die lila gestrichelte Linie ab dem angeklickten Tag zeigt die danach noch offenen Lieferantenschulden (Amanda + Ebru/Raten, ohne künftige Nachbestellungen).
+          Die lila gestrichelte Linie ab dem angeklickten Tag zeigt die danach noch offenen Lieferantenschulden (Amanda + Ebru/Raten inkl. ≈ Ware in Produktion, ohne künftige Nachbestellungen).
         </p>
       </Card>
 
@@ -613,6 +620,55 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           Sobald die Nummer im Verwendungszweck einer Abbuchung steht, gelten sie als bezahlt — vorher bleiben sie drin, auch wenn die Ware schon eingelagert ist.
         </p>
       </Card>
+
+      {/* Ebru-Lieferungen: Einfuhrabgaben bei Ankunft (die Ware selbst läuft über die Raten) */}
+      {p.einfuhrAndere.length > 0 && (
+        <Card title={`Ebru-Lieferungen — Einfuhrabgaben ${eur(einfuhrAndereSumme)}`} accent="border-l-orange-500">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-neutral-200">
+                  <Th>Lieferung</Th>
+                  <Th>Status</Th>
+                  <Th>Ankunft</Th>
+                  <Th right>Warenwert</Th>
+                  <Th>Einfuhrabgaben bei Ankunft</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {p.einfuhrAndere.map((b) => (
+                  <tr key={b.orderId} id={`bestellung-${b.orderId}`} className={`border-b border-neutral-100 align-top ${zeileCls(`bestellung-${b.orderId}`)}`}>
+                    <td className="py-2 pr-2">
+                      <Link href={`/orders/${b.orderId}`} className="font-medium text-neutral-900 hover:underline">{b.label}</Link>
+                    </td>
+                    <td className="py-2 pr-2 text-xs text-neutral-600">{STATUS[b.status] ?? b.status}</td>
+                    <td className="py-2 pr-2 tabular-nums text-neutral-600">{b.eta ? deDate(b.eta) : "—"}</td>
+                    <td className="py-2 pr-2 text-right tabular-nums whitespace-nowrap">
+                      {b.geschaetzt ? "≈ " : ""}{usd(b.warenUsd)}
+                      {b.geschaetzt && <div className="text-xs text-neutral-400">noch ohne Rechnung</div>}
+                    </td>
+                    <td className="py-2 pr-2 text-xs tabular-nums">
+                      {b.einfuhr ? (
+                        <>
+                          {deDate(b.einfuhr.datum)}: {eur(b.einfuhr.eust + b.einfuhr.zoll)}
+                          <span className="text-neutral-400"> (EUSt {eur(b.einfuhr.eust)}{b.einfuhr.zoll ? ` + Zoll ${eur(b.einfuhr.zoll)}` : ""})</span>
+                          <div className={b.einfuhr.saldoDanach < 0 ? "text-red-700 font-medium" : "text-neutral-500"}>Konto danach {eur(b.einfuhr.saldoDanach)}</div>
+                        </>
+                      ) : b.einfuhrZahlung ? null : "—"}
+                      <EinfuhrRechnung orderId={b.orderId} rechnung={b.einfuhrRechnung} zahlung={b.einfuhrZahlung} art="zoll" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs text-neutral-500">
+            Bezahlt wird die Ware über den Ebru-Ratenplan; hier stehen nur Zoll und EUSt bei Ankunft, geschätzt aus dem Warenwert (≈ = noch keine Rechnung,
+            Warenwert aus der Bestellung). Trag die Rechnungsnummer des Verzollers ein (z.B. Ungewitter „26 33474“ oder DHL „ZIT…“) — sobald sie auf dem Konto
+            abgebucht ist, fallen die Abgaben aus der Vorschau.
+          </p>
+        </Card>
+      )}
 
       {/* Termine */}
       <Card title="Weitere Termine im Zeitraum" accent="border-l-red-500">
@@ -715,6 +771,14 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           <Zeile l="Für Nachbestellungen gerechnet" r={`${p.nachbestellKgMonat.toLocaleString("de-DE", { maximumFractionDigits: 1 })} kg / Monat${e.nachbestellKgMonat ? " (manuell)" : roh.nachbestellung.kgVerbrauchMonat ? " (= Verbrauch)" : ""}`} />
           <Zeile l="Ø Einkaufspreis" r={`${usd(roh.nachbestellung.usdProKgAuto)} / kg`} />
           <Zeile l="Lieferzeit" r={`${roh.nachbestellung.leadWochen} Wochen`} />
+          {roh.ebruNachbestellung && (
+            <>
+              <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mt-3 mb-1">Ebru-Bestellungen</div>
+              <Zeile l="Bestellt Ø letzte 6 Monate" r={`${roh.ebruNachbestellung.kgProMonatAuto.toLocaleString("de-DE")} kg / Monat`} />
+              <Zeile l="Ø Einkaufspreis" r={`${usd(roh.ebruNachbestellung.usdProKgAuto)} / kg`} />
+              <Zeile l="Lieferzeit" r={`${roh.ebruNachbestellung.leadWochen} Wochen`} />
+            </>
+          )}
           {verbrauch?.stand && <p className="mt-2 text-xs text-neutral-400">Verkaufsanalyse: {verbrauch.stand}</p>}
         </Card>
       </div>
@@ -797,6 +861,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           <div className="space-y-2 pt-5">
             <Schalter label="Ebru/andere Lieferanten (Ø aus Bank)" checked={e.andereLieferantenEinrechnen} onChange={(v) => set("andereLieferantenEinrechnen", v)} />
             <Schalter label="Künftige Amanda-Nachbestellungen (Schätzung)" checked={e.nachbestellungenEinrechnen} onChange={(v) => set("nachbestellungenEinrechnen", v)} />
+            <Schalter label="Künftige Ebru-Nachbestellungen (Schätzung)" checked={e.ebruNachbestellungenEinrechnen} onChange={(v) => set("ebruNachbestellungenEinrechnen", v)} />
           </div>
           {e.nachbestellungenEinrechnen && (
             <>
@@ -807,6 +872,17 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
                 onChange={(v) => set("nachbestellKgMonat", v)}
               />
               <Feld label={`USD pro kg (leer = ${roh.nachbestellung.usdProKgAuto})`} value={e.usdProKg} optional onChange={(v) => set("usdProKg", v)} />
+            </>
+          )}
+          {e.ebruNachbestellungenEinrechnen && (
+            <>
+              <Feld
+                label={`Ebru kg/Monat (leer = Ø Bestellungen ${roh.ebruNachbestellung?.kgProMonatAuto ?? 0})`}
+                value={e.ebruNachbestellKgMonat}
+                optional
+                onChange={(v) => set("ebruNachbestellKgMonat", v)}
+              />
+              <Feld label={`Ebru USD pro kg (leer = ${roh.ebruNachbestellung?.usdProKgAuto ?? 0})`} value={e.ebruUsdProKg} optional onChange={(v) => set("ebruUsdProKg", v)} />
             </>
           )}
         </div>
@@ -1081,6 +1157,12 @@ function TagPopup({
             <span>Ebru / Raten</span>
             <span className="tabular-nums">{eur(schulden.raten)}</span>
           </div>
+          {schulden.ratenGeschaetzt > 0.5 && (
+            <div className="flex justify-between text-neutral-400">
+              <span>davon ≈ Ware in Produktion (noch ohne Rechnung)</span>
+              <span className="tabular-nums">{eur(schulden.ratenGeschaetzt)}</span>
+            </div>
+          )}
           {Object.entries(kommendUsd).filter(([, v]) => v > 0).map(([l, v]) => (
             <div key={l} className="text-neutral-400">
               noch ohne Rechnung: {l.split(" ")[0]}-Ware in Produktion ≈ {usd(v)}

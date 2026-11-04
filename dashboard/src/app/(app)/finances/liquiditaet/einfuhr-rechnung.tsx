@@ -12,7 +12,18 @@ const eur = (n: number) => n.toLocaleString("de-DE", { minimumFractionDigits: 2,
  * DHL-/Zoll-Rechnungsnummer (ZIT…) an der Bestellung. Steht sie im Verwendungszweck einer
  * Abbuchung, sind die Einfuhrabgaben bezahlt und fallen aus der Vorschau.
  */
-export default function EinfuhrRechnung({ orderId, rechnung, zahlung }: { orderId: string; rechnung: string | null; zahlung: EinfuhrZahlung | null }) {
+export default function EinfuhrRechnung({
+  orderId,
+  rechnung,
+  zahlung,
+  art = "dhl",
+}: {
+  orderId: string;
+  rechnung: string | null;
+  zahlung: EinfuhrZahlung | null;
+  /** "zoll" = beliebiger Verzoller (Ungewitter, DHL …), sonst DHL-ZIT. */
+  art?: "dhl" | "zoll";
+}) {
   const [offen, setOffen] = useState(false);
   const [wert, setWert] = useState(rechnung ?? "");
   const [busy, setBusy] = useState(false);
@@ -36,7 +47,7 @@ export default function EinfuhrRechnung({ orderId, rechnung, zahlung }: { orderI
           maxLength={300}
           onChange={(ev) => setWert(ev.target.value)}
           onKeyDown={(ev) => ev.key === "Enter" && !busy && speichern(wert)}
-          placeholder="z.B. ZIT8150777"
+          placeholder={art === "zoll" ? "z.B. 26 33474 oder ZIT8150777" : "z.B. ZIT8150777"}
           className="w-full rounded-lg border border-neutral-300 bg-white px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
         />
         <div className="text-neutral-500">Mehrere mit Komma trennen.</div>
@@ -62,7 +73,7 @@ export default function EinfuhrRechnung({ orderId, rechnung, zahlung }: { orderI
   if (!rechnung) {
     return (
       <button onClick={() => setOffen(true)} className="mt-1 inline-flex items-center gap-0.5 text-xs text-neutral-500 hover:text-neutral-900">
-        <Plus size={11} /> DHL-Rechnung (ZIT)
+        <Plus size={11} /> {art === "zoll" ? "Zoll-Rechnung (Ungewitter/DHL)" : "DHL-Rechnung (ZIT)"}
       </button>
     );
   }
