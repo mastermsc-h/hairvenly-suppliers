@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
-import { Area, Bar, CartesianGrid, ComposedChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import { LIQ_DEFAULTS, prognose, zahlGruppe, type Ereignis, type LiqEinstellungen, type LiqRohdaten, type VerlaufTag, type ZahlGruppe } from "@/lib/liquiditaet/rechnung";
 import { SYMBOLE, TerminSymbol, symbolTyp, type SymbolTyp } from "./termin-symbol";
@@ -54,6 +54,9 @@ const GRUPPEN: Array<{ key: ZahlGruppe; name: string; typ: SymbolTyp }> = [
   { key: "einfuhr", name: "Einfuhrabgaben", typ: "einfuhr" },
   { key: "steuern", name: "Steuern", typ: "ust" },
 ];
+
+/** Offene Lieferantenschulden nach einem Tag (EUR); Einfuhrabgaben nur zur Info, nicht in der Summe. */
+type Schulden = { amanda: number; raten: number; einfuhr: number; summe: number };
 
 /** Eine Zeile der Zahlungsliste unter dem Diagramm. */
 type ZahlZeile = { datum: string; gruppe: ZahlGruppe; label: string; betrag: number; bezahlt: boolean; ev?: Ereignis };
@@ -222,6 +225,24 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
 
   const zeileCls = (id: string) => `transition-colors duration-500 ${markiert === id ? "bg-amber-100" : ""}`;
   const pinTag = pin ? chartData.find((d) => d.datum === pin.datum) : undefined;
+  // Verbleibende Lieferantenschulden nach einem Tag: heute offen − bis dahin geplante Zahlungen
+  const schuldenNach = useMemo(() => {
+    const amandaOffen = p.bestellungen.filter((b) => !b.bezahlt).reduce((s, b) => s + b.betragEur, 0);
+    const ratenOffen = (roh.ratenPositionen ?? roh.manuellePositionen ?? []).reduce((s, x) => s + Math.max(0, x.restUsd), 0) / p.fx;
+    const einfuhrOffen = p.ereignisse.filter((x) => x.art === "einfuhr").reduce((s, x) => s - x.betrag, 0);
+    return (datum: string): Schulden | null => {
+      if (datum < p.start) return null;
+      const bis = (art: Ereignis["art"]) => p.ereignisse.filter((x) => x.art === art && x.datum <= datum).reduce((s, x) => s - x.betrag, 0);
+      const amanda = Math.max(0, amandaOffen - bis("lieferant"));
+      const raten = Math.max(0, ratenOffen - bis("manuell"));
+      return { amanda, raten, einfuhr: Math.max(0, einfuhrOffen - bis("einfuhr")), summe: amanda + raten };
+    };
+  }, [p, roh]);
+  const pinSchulden = pin ? schuldenNach(pin.datum) : null;
+  const chartAnzeige = useMemo(
+    () => (pin && pin.datum >= p.start ? chartData.map((t) => (t.datum >= pin.datum ? { ...t, schuld: schuldenNach(t.datum)?.summe } : t)) : chartData),
+    [chartData, pin, p.start, schuldenNach],
+  );
   const fensterVon = chartData[0]?.datum ?? p.start;
   const fensterBis = chartData.at(-1)?.datum ?? p.start;
   const zahlListe: ZahlZeile[] = zeigen.length
@@ -408,7 +429,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
         </div>
         <div className="relative cursor-pointer [&_*:focus]:outline-none" style={{ width: "100%", height: 300 }}>
           <ResponsiveContainer>
-            <ComposedChart data={chartData} margin={{ top: 12, right: 8, left: 8, bottom: 0 }} onClick={diagrammKlick}>
+            <ComposedChart data={chartAnzeige} margin={{ top: 12, right: 8, left: 8, bottom: 0 }} onClick={diagrammKlick}>
               <CartesianGrid stroke="#f3f4f6" />
               <XAxis dataKey="datum" tick={{ fontSize: 11, fill: "#737373" }} tickFormatter={(d) => `${String(d).slice(8, 10)}.${String(d).slice(5, 7)}.`} minTickGap={24} />
               <YAxis tick={{ fontSize: 11, fill: "#737373" }} tickFormatter={(v) => `${Math.round(v / 1000)}k`} width={44} />
@@ -420,6 +441,18 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
                   tickFormatter={(v) => `${Math.round(v / 1000)}k`}
                   width={44}
                   label={{ value: "Zahlungen (Balken)", angle: 90, position: "insideRight", fontSize: 10, fill: "#a3a3a3", dx: 6 }}
+                />
+              )}
+              {/* Eigene Achse, damit die Schuldensumme die Kontostand-Kurve nicht flach drückt */}
+              {pinSchulden && (
+                <YAxis
+                  yAxisId="s"
+                  orientation="right"
+                  domain={[0, "auto"]}
+                  tick={{ fontSize: 10, fill: "#7c3aed" }}
+                  tickFormatter={(v) => `${Math.round(v / 1000)}k`}
+                  width={44}
+                  label={{ value: "offene Schulden", angle: 90, position: "insideRight", fontSize: 10, fill: "#7c3aed", dx: 6 }}
                 />
               )}
               <Tooltip
@@ -454,6 +487,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
               <ReferenceLine y={e.puffer} stroke="#d97706" strokeDasharray="4 4" label={{ value: "Reserve", position: "insideTopRight", fontSize: 10, fill: "#d97706" }} />
               <Area type="stepAfter" dataKey="ist" stroke="#737373" fill="#f5f5f5" strokeWidth={2} isAnimationActive={false} />
               <Area type="stepAfter" dataKey="saldo" stroke="#2563eb" fill="#dbeafe" strokeWidth={2} isAnimationActive={false} />
+              {/* Ab dem angeklickten Tag: was an Lieferanten danach noch offen ist */}
+              {pinSchulden && <Line yAxisId="s" type="stepAfter" dataKey="schuld" stroke="#7c3aed" strokeWidth={2} strokeDasharray="6 4" dot={false} activeDot={false} isAnimationActive={false} />}
               {/* Zahlungen als Balken (rechte Achse): bezahlt blass, geplant kräftig */}
               {GRUPPEN.filter((g) => zeigen.includes(g.key)).flatMap((g) => [
                 <Bar key={`b_${g.key}`} yAxisId="z" dataKey={`b_${g.key}`} stackId="z" fill={SYMBOLE[g.typ].farbe} fillOpacity={0.4} maxBarSize={10} isAnimationActive={false} />,
@@ -477,6 +512,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
               saldo={pinTag.saldo ?? pinTag.ist ?? 0}
               ereignisse={pinTag.ev}
               tag={pinTag}
+              schulden={pinSchulden}
+              kommendUsd={roh.ratenKommendUsd}
               x={pin.x}
               onSchliessen={() => setPin(null)}
               onWaehlen={springeZu}
@@ -496,6 +533,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           Täglich: + Ø Einnahmen − Ø laufende Abgänge. Stufen = Lieferantenzahlungen, Einfuhrabgaben und Steuertermine; die Marken oben zeigen,
           wann welche Steuer abgeht (Maus darüber für Details). Ein Klick auf einen Termin im Diagramm hält die Liste fest, von dort springst du zum Eintrag.
           Mit dem Pfeil nach links siehst du die Vergangenheit: echter Kontostand der Sparkasse am Tagesende{verlauf[0] ? ` ab ${deDate(verlauf[0].datum)}` : ""}, ohne PayPal.
+          Die lila gestrichelte Linie ab dem angeklickten Tag zeigt die danach noch offenen Lieferantenschulden (Amanda + Ebru/Raten, ohne künftige Nachbestellungen).
         </p>
       </Card>
 
@@ -969,6 +1007,8 @@ function TagPopup({
   saldo,
   ereignisse,
   tag,
+  schulden,
+  kommendUsd = {},
   x,
   onSchliessen,
   onWaehlen,
@@ -977,6 +1017,9 @@ function TagPopup({
   saldo: number;
   ereignisse: Ereignis[];
   tag: DiagrammTag;
+  schulden: Schulden | null;
+  /** Ratenlieferanten: Ware in Produktion ohne Rechnung (USD) — noch nicht in den Schulden. */
+  kommendUsd?: Record<string, number>;
   x: number;
   onSchliessen: () => void;
   onWaehlen: (ev: Ereignis) => void;
@@ -1024,6 +1067,33 @@ function TagPopup({
           </button>
         ))}
       </div>
+      {schulden && (
+        <div className="mt-1 border-t border-neutral-100 px-1 pt-1.5">
+          <div className="flex justify-between font-semibold text-violet-800">
+            <span>Danach noch offen</span>
+            <span className="tabular-nums">{eur(schulden.summe)}</span>
+          </div>
+          <div className="flex justify-between text-neutral-600">
+            <span>Amanda</span>
+            <span className="tabular-nums">{eur(schulden.amanda)}</span>
+          </div>
+          <div className="flex justify-between text-neutral-600">
+            <span>Ebru / Raten</span>
+            <span className="tabular-nums">{eur(schulden.raten)}</span>
+          </div>
+          {Object.entries(kommendUsd).filter(([, v]) => v > 0).map(([l, v]) => (
+            <div key={l} className="text-neutral-400">
+              noch ohne Rechnung: {l.split(" ")[0]}-Ware in Produktion ≈ {usd(v)}
+            </div>
+          ))}
+          {schulden.einfuhr > 0.5 && (
+            <div className="flex justify-between text-neutral-400">
+              <span>dazu Einfuhrabgaben (geschätzt)</span>
+              <span className="tabular-nums">{eur(schulden.einfuhr)}</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
