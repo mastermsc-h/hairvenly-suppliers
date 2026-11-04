@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { BarChart3, Users, Camera, AlertTriangle, RotateCcw, Clock, Package2 } from "lucide-react";
 import StatsChart from "./stats-chart";
 import ResetStatsButton from "./reset-button";
+import Link from "next/link";
+import { classifyItem, type ItemKind } from "@/lib/item-classify";
 
 export const dynamic = "force-dynamic";
 
@@ -39,11 +41,31 @@ export default async function StatsPage({
     .in("status", ["verified", "shipped"])
     .gte("finished_at", fromIso);
 
-  // Scans im Zeitraum (alle Status)
-  const { data: scans } = await supabase
-    .from("pack_scans")
-    .select("status, scan_method, matched_title, scanned_at")
-    .gte("scanned_at", fromIso);
+  // Scans im Zeitraum (alle Status) — PAGINIERT: Supabase liefert pro Abfrage
+  // max. 1000 Zeilen. Vorher wurden bei längeren Zeiträumen (z.B. 365 Tage)
+  // alle Kennzahlen dieser Seite still abgeschnitten.
+  type ScanRow = {
+    status: string;
+    scan_method: string;
+    matched_title: string | null;
+    scanned_at: string;
+    profiles: { display_name: string | null; username: string | null } | null;
+    pack_sessions: { order_name: string } | null;
+  };
+  const scans: ScanRow[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data: page } = await supabase
+      .from("pack_scans")
+      .select(
+        "status, scan_method, matched_title, scanned_at, profiles:scanned_by(display_name, username), pack_sessions:session_id(order_name)",
+      )
+      .gte("scanned_at", fromIso)
+      .order("scanned_at", { ascending: true })
+      .range(from, from + 999);
+    const rows = (page ?? []) as unknown as ScanRow[];
+    scans.push(...rows);
+    if (rows.length < 1000) break;
+  }
 
   const totalSessions = sessions?.length ?? 0;
   const totalScans = scans?.length ?? 0;
@@ -100,6 +122,34 @@ export default async function StatsPage({
   const topMismatches = Array.from(mismatchByTitle.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10);
+
+  // Manuelle Bestätigungen nach Art (zentrale Regel aus item-classify.ts).
+  // "manual" umfasst den Knopf "manuell bestätigen" UND den Zubehör-Code.
+  // Bei Extensions ist das kritisch: der Barcode-Scan prüft Farbe/Länge/
+  // Methode — manuelles Bestätigen umgeht genau diese Kontrolle.
+  const manualByKind: Record<ItemKind, number> = { extension: 0, accessory: 0, care: 0, digital: 0 };
+  const manualExt = new Map<
+    string,
+    { count: number; last: string; people: Map<string, number>; orders: Set<string> }
+  >();
+  const manualExtByPerson = new Map<string, number>();
+  for (const s of scans) {
+    if (s.scan_method !== "manual" || s.status !== "match") continue;
+    const title = s.matched_title ?? "(ohne Titel)";
+    const kind = classifyItem({ title });
+    manualByKind[kind]++;
+    if (kind !== "extension") continue;
+    const who = s.profiles?.display_name || s.profiles?.username || "—";
+    manualExtByPerson.set(who, (manualExtByPerson.get(who) ?? 0) + 1);
+    const e = manualExt.get(title) ?? { count: 0, last: s.scanned_at, people: new Map(), orders: new Set() };
+    e.count++;
+    if (s.scanned_at > e.last) e.last = s.scanned_at;
+    e.people.set(who, (e.people.get(who) ?? 0) + 1);
+    if (s.pack_sessions?.order_name) e.orders.add(s.pack_sessions.order_name);
+    manualExt.set(title, e);
+  }
+  const manualExtRows = Array.from(manualExt.entries()).sort((a, b) => b[1].count - a[1].count);
+  const manualExtPeople = Array.from(manualExtByPerson.entries()).sort((a, b) => b[1] - a[1]);
 
   // Bestellungen pro Tag (für Chart)
   const dayBuckets = new Map<string, number>();
@@ -162,7 +212,7 @@ export default async function StatsPage({
         <KPI
           label="Manuell bestätigt"
           value={matchScans > 0 ? `${((manualConfirms / matchScans) * 100).toFixed(0)}%` : "—"}
-          sub={`${manualConfirms} von ${matchScans} Matches`}
+          sub={`${manualConfirms} von ${matchScans} Matches · davon ${manualByKind.extension} Extensions`}
           icon={<Camera size={18} className="text-amber-500" />}
         />
       </div>
@@ -241,9 +291,110 @@ export default async function StatsPage({
                 cls="text-amber-700"
                 icon={<RotateCcw size={12} />}
               />
+              <div className="mt-1.5 ml-4 pl-3 border-l-2 border-neutral-200 space-y-1 text-xs">
+                <Row label="davon Extensions (Barcode umgangen)" value={manualByKind.extension} cls="text-red-700 font-semibold" />
+                <Row label="davon Zubehör (inkl. Zubehör-Code)" value={manualByKind.accessory} cls="text-neutral-600" />
+                <Row label="davon Pflege" value={manualByKind.care} cls="text-neutral-600" />
+                {manualByKind.digital > 0 && (
+                  <Row label="davon Digital/Schulung" value={manualByKind.digital} cls="text-neutral-600" />
+                )}
+              </div>
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Manuell bestätigte Extensions — hier wurde die Barcode-Kontrolle
+          (Farbe/Länge/Methode) umgangen. Pro Produkt: wie oft, wer, wann, wo. */}
+      <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+          <div className="text-xs font-medium text-neutral-600 uppercase tracking-wide flex items-center gap-1">
+            <AlertTriangle size={14} className="text-red-500" /> Manuell bestätigte Extensions
+          </div>
+          <div className="text-sm">
+            <span className="font-bold text-red-700">{manualByKind.extension}</span>
+            <span className="text-neutral-500"> von {manualConfirms} manuellen Bestätigungen</span>
+          </div>
+        </div>
+        <p className="text-xs text-neutral-500 mb-3 leading-relaxed">
+          Bei Extensions prüft der Barcode-Scan Farbe, Länge und Methode. Diese Positionen wurden per Klick
+          bestätigt — die Prüfung wurde also umgangen. Zubehör und Pflege (inkl. Zubehör-Code) sind hier
+          bewusst nicht enthalten.
+        </p>
+
+        {manualExtRows.length === 0 ? (
+          <div className="text-sm text-emerald-700">Im Zeitraum wurden alle Extensions per Barcode bestätigt. 🎉</div>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {manualExtPeople.map(([who, n]) => (
+                <span
+                  key={who}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-50 border border-red-200 text-xs"
+                >
+                  <span className="font-medium text-neutral-800">{who}</span>
+                  <span className="font-bold text-red-700">{n}×</span>
+                </span>
+              ))}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs uppercase tracking-wide text-neutral-500 border-b border-neutral-200">
+                    <th className="text-left py-2 font-medium">Produkt</th>
+                    <th className="text-right py-2 font-medium">Anzahl</th>
+                    <th className="text-left py-2 pl-4 font-medium">Wer</th>
+                    <th className="text-left py-2 pl-4 font-medium">Zuletzt</th>
+                    <th className="text-left py-2 pl-4 font-medium">Bestellungen</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {manualExtRows.map(([title, e], idx) => (
+                    <tr
+                      key={title}
+                      className={`border-b border-neutral-100 align-top ${idx % 2 === 1 ? "bg-neutral-50/40" : ""}`}
+                    >
+                      <td className="py-2 pr-2 text-neutral-800">{title}</td>
+                      <td className="py-2 text-right font-bold text-red-700">{e.count}</td>
+                      <td className="py-2 pl-4 text-neutral-700 whitespace-nowrap">
+                        {Array.from(e.people.entries())
+                          .sort((a, b) => b[1] - a[1])
+                          .map(([w, n]) => `${w} (${n})`)
+                          .join(", ")}
+                      </td>
+                      <td className="py-2 pl-4 text-neutral-500 whitespace-nowrap">
+                        {new Date(e.last).toLocaleDateString("de-DE", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "2-digit",
+                          timeZone: "Europe/Berlin",
+                        })}
+                      </td>
+                      <td className="py-2 pl-4">
+                        <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                          {Array.from(e.orders)
+                            .slice(0, 6)
+                            .map((o) => (
+                              <Link
+                                key={o}
+                                href={`/pack/archive/${o.replace(/^#/, "")}`}
+                                className="text-blue-700 hover:underline text-xs"
+                              >
+                                {o}
+                              </Link>
+                            ))}
+                          {e.orders.size > 6 && (
+                            <span className="text-xs text-neutral-400">+{e.orders.size - 6}</span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
