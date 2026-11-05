@@ -47,6 +47,26 @@ export interface OrderMeta {
   positionsAllLinked: boolean;
 }
 
+/**
+ * Browser-taugliche Teilmenge von OrderMeta. OrderMeta selbst darf NIE als
+ * Prop an eine Client-Komponente gehen: `titleIndex` enthält Funktionen, die
+ * React nicht serialisieren kann (→ Seite lädt nicht). Die `?: never`-Felder
+ * lassen den Compiler ein volles OrderMeta an dieser Stelle ablehnen.
+ */
+export type ClientOrderMeta = Pick<OrderMeta, "id" | "trackingNumber" | "trackingUrl" | "status" | "eta"> & {
+  titleIndex?: never;
+  itemEtasByShopify?: never;
+  itemEtasByProductId?: never;
+};
+
+export function toClientOrderMeta(map: Record<string, OrderMeta>): Record<string, ClientOrderMeta> {
+  const out: Record<string, ClientOrderMeta> = {};
+  for (const [name, m] of Object.entries(map)) {
+    out[name] = { id: m.id, trackingNumber: m.trackingNumber, trackingUrl: m.trackingUrl, status: m.status, eta: m.eta };
+  }
+  return out;
+}
+
 /** Statuses where the order is considered archived and should be hidden everywhere. */
 export const ARCHIVED_STATUS = new Set(["stocked", "cancelled", "hidden", "manual"]);
 

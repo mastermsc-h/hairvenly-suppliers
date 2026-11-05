@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { Search, AlertTriangle, AlertCircle, Truck, Package, ExternalLink } from "lucide-react";
 import type { AlertProduct } from "@/lib/stock-sheets";
-import type { OrderMeta } from "@/lib/order-name-map";
+import type { ClientOrderMeta } from "@/lib/order-name-map";
 import SyncBadge from "./sync-badge";
 
 type AlertMode = "zero" | "critical" | "transit";
@@ -25,7 +25,7 @@ interface Props {
    * Map from stock-sheet order name (e.g. "Amanda 07.04.2026") to order meta
    * (id + tracking). Used to link badges and display tracking info.
    */
-  orderIdByName?: Record<string, OrderMeta>;
+  orderIdByName?: Record<string, ClientOrderMeta>;
 }
 
 type QuickFilter = "all" | "no_order" | "has_order" | "kritisch" | "niedrig" | "akut" | "knapp" | "ladenhueter";
@@ -486,7 +486,7 @@ function AlertSection({
   items: AlertProduct[];
   accent: "blue" | "green";
   mode: AlertMode;
-  orderIdByName?: Record<string, OrderMeta>;
+  orderIdByName?: Record<string, ClientOrderMeta>;
 }) {
   const headerBg = accent === "blue" ? "bg-blue-600" : "bg-green-700";
 

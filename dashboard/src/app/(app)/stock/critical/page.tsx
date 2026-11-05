@@ -1,7 +1,7 @@
 import { requireProfile } from "@/lib/auth";
 import { t, type Locale } from "@/lib/i18n";
 import { readDashboardAlerts, readTopseller, enrichAlertsWithTier } from "@/lib/stock-sheets";
-import { fetchOrderIdByName } from "@/lib/order-name-map";
+import { fetchOrderIdByName, toClientOrderMeta } from "@/lib/order-name-map";
 import { filterArchivedFromStock, overrideEtaFromDb } from "@/lib/filter-archived-orders";
 import AlertsClient from "../alerts-client";
 
@@ -28,7 +28,7 @@ export default async function CriticalStockPage() {
       subtitle={t(locale, "stock.subtitle.critical")}
       mode="critical"
       lastUpdated={lastUpdated}
-      orderIdByName={orderIdByName}
+      orderIdByName={toClientOrderMeta(orderIdByName)}
     />
   );
 }
