@@ -548,6 +548,12 @@ export interface EinfuhrPrognose {
 
 /** Ware ist angekommen: Einfuhrabgaben sind erledigt, ein offener Rest ist sofort fällig. */
 export const WARE_DA = ["delivered", "stocked"];
+/** Ware ist unterwegs oder da — erst ab hier kommen Zoll-/DHL-Rechnungen. */
+const VERSENDET = ["shipped", "in_customs", ...WARE_DA];
+/** Noch nicht versendete Ware mit überholtem Datum: Versand frühestens in so vielen Tagen. */
+export const VERSAND_FRUEHESTENS_TAGE = 7;
+/** Ebru: Rechnung des Verzollers (Carl Ungewitter) ~2–3 Tage nach Versand. */
+export const ZOLL_NACH_VERSAND_TAGE = 3;
 const SOFORT_STATUS = ["ready_to_ship", "shipped", "in_customs", ...WARE_DA];
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -685,7 +691,18 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
 
   // Einfuhrabgaben einer Lieferung: ohne Rechnungsnummer bis die Ware angekommen ist (Status). Mit
   // Rechnungsnummer zählt das Konto — erst die Abbuchung erledigt sie, auch wenn die Ware schon eingelagert ist.
-  const planeEinfuhr = (b: { id: string; label: string; status: string; eta: string | null; warenUsd: number; importVatEur: number | null; einfuhrZahlung?: EinfuhrZahlung | null }) => {
+  // Termin: Amanda (DHL-ZIT) bei Ankunft; Ebru (Ungewitter) wenige Tage nach Versand, Versand = Ankunft − Vorlauf
+  // wie bei der Ebru-Rechnung. Noch nicht versendete Ware mit überholtem Datum kann nicht heute ankommen →
+  // Versand/Ankunft frühestens in VERSAND_FRUEHESTENS_TAGE.
+  const einfuhrDatum = (b: { status: string; eta: string | null }, termin: "ankunft" | "versand") => {
+    // Schon versendet: echter Versandtag liegt zurück → keine Untergrenze außer heute
+    const frueh = VERSENDET.includes(b.status) ? "" : plusTage(start, VERSAND_FRUEHESTENS_TAGE);
+    const max = (a: string, c: string) => (a > c ? a : c);
+    if (termin === "ankunft") return amStart(max(b.eta ?? start, frueh));
+    const versand = max(b.eta ? plusTage(b.eta, -e.zahlungVorAnkunftTage) : start, frueh);
+    return amStart(plusTage(versand, ZOLL_NACH_VERSAND_TAGE));
+  };
+  const planeEinfuhr = (b: { id: string; label: string; status: string; eta: string | null; warenUsd: number; importVatEur: number | null; einfuhrZahlung?: EinfuhrZahlung | null }, termin: "ankunft" | "versand") => {
     const ez = b.einfuhrZahlung ?? null;
     const ezErledigt = !!ez && ez.gefunden.length === ez.rechnungen.length;
     if (ezErledigt || (WARE_DA.includes(b.status) && !ez) || b.warenUsd <= 0) return null;
@@ -696,7 +713,7 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     const f = summe > 0 ? 1 - schon / summe : 0;
     const rest = { eust: r2(ab.eust * f), zoll: r2(ab.zoll * f) };
     if (rest.eust + rest.zoll <= 0.005) return null;
-    const datum = amStart(b.eta ?? start);
+    const datum = einfuhrDatum(b, termin);
     ereignisse.push({ datum, betrag: -r2(rest.eust + rest.zoll), art: "einfuhr", label: `Einfuhrabgaben ${b.label}`, orderId: b.id });
     eustProMonat[monatVon(datum)] = (eustProMonat[monatVon(datum)] ?? 0) + rest.eust;
     return { datum, ...rest };
@@ -749,21 +766,22 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     if (!bezahlt && !teilung) {
       ereignisse.push({ datum: zahlDatum, betrag: -eur, art: "lieferant", label: b.label, orderId: b.id, sofort, verschoben: t.verschoben });
     }
-    const einfuhr = planeEinfuhr({ ...b, warenUsd: b.invoiceUsd ?? 0 });
+    const einfuhr = planeEinfuhr({ ...b, warenUsd: b.invoiceUsd ?? 0 }, "ankunft");
     const termin = { regelDatum: t.regelDatum, verschoben: t.verschoben, notiz: t.notiz, abgelaufenAm: t.abgelaufenAm };
     bestellInfo.set(b.id, { zahlDatum, sofort, termin, usd: b.restUsd, eur, einfuhr, teilung });
   }
 
-  // 1a) Ebru-Lieferungen: Einfuhrabgaben bei Ankunft (die Ware selbst läuft über die Raten).
+  // 1a) Ebru-Lieferungen: Einfuhrabgaben kurz nach Versand (Ungewitter), die Ware selbst läuft über die Raten.
   //     Mit dem Lieferanten-Ø aus der Bank stecken sie schon dort drin → dann nicht einzeln.
   const ebruEinzeln = roh.einfuhrAndere !== undefined && !e.andereLieferantenEinrechnen;
   const einfuhrAndere: Plan["einfuhrAndere"] = new Map();
   if (ebruEinzeln) {
     for (const b of roh.einfuhrAndere ?? []) {
-      if (b.eta && b.eta < start && !WARE_DA.includes(b.status) && b.geschaetzt) {
-        hinweise.push(`${b.label}: Ankunft ${deKurz(b.eta)} ist vorbei, Status noch „in Produktion“ — Einfuhrabgaben und Rechnung als sofort angenommen. Status/Ankunft prüfen.`);
+      const ab = planeEinfuhr(b, "versand");
+      if (b.eta && b.eta < start && !VERSENDET.includes(b.status)) {
+        hinweise.push(`${b.label}: Ankunft ${deKurz(b.eta)} ist vorbei, aber noch nicht versendet — Versand frühestens in ${VERSAND_FRUEHESTENS_TAGE} Tagen angenommen${ab ? `, Einfuhrabgaben ca. ${deKurz(ab.datum)}` : ""}. Bitte Ankunftsdatum an der Bestellung aktualisieren.`);
       }
-      einfuhrAndere.set(b.id, planeEinfuhr(b));
+      einfuhrAndere.set(b.id, ab);
     }
   }
 
@@ -784,10 +802,12 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
         const rechnung = plusTage(ankunft, -e.zahlungVorAnkunftTage);
         const label = `Nachbestellung ~${kgWoche.toFixed(1)} kg (bestellt ${deKurz(d)})`;
         if (rechnung <= ende) nbPositionen.push({ id: `nb-ebru-${d}`, label, lieferant: ebruNb.lieferant, datum: rechnung, restUsd: usd, geschaetzt: true });
-        if (ankunft <= ende) {
+        // Verzoller-Rechnung kurz nach Versand (Versand = Rechnung von Ebru)
+        const zoll = plusTage(rechnung, ZOLL_NACH_VERSAND_TAGE);
+        if (zoll <= ende) {
           const ab = einfuhrFuer(usd, null);
-          ereignisse.push({ datum: ankunft, betrag: -r2(ab.eust + ab.zoll), art: "einfuhr", label: `Einfuhrabgaben Ebru-Nachbestellung ${deKurz(d)}`, schaetzung: true });
-          eustProMonat[monatVon(ankunft)] = (eustProMonat[monatVon(ankunft)] ?? 0) + ab.eust;
+          ereignisse.push({ datum: zoll, betrag: -r2(ab.eust + ab.zoll), art: "einfuhr", label: `Einfuhrabgaben Ebru-Nachbestellung ${deKurz(d)}`, schaetzung: true });
+          eustProMonat[monatVon(zoll)] = (eustProMonat[monatVon(zoll)] ?? 0) + ab.eust;
         }
       }
     }

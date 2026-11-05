@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
 import { Area, Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
-import { LIQ_DEFAULTS, prognose, zahlGruppe, type Ereignis, type LiqEinstellungen, type LiqRohdaten, type VerlaufTag, type ZahlGruppe } from "@/lib/liquiditaet/rechnung";
+import { LIQ_DEFAULTS, VERSAND_FRUEHESTENS_TAGE, ZOLL_NACH_VERSAND_TAGE, prognose, zahlGruppe, type Ereignis, type LiqEinstellungen, type LiqRohdaten, type VerlaufTag, type ZahlGruppe } from "@/lib/liquiditaet/rechnung";
 import { SYMBOLE, TerminSymbol, symbolTyp, type SymbolTyp } from "./termin-symbol";
 import { AMPEL_STIL } from "../../orders/liquiditaet-badge";
 import EinfuhrRechnung from "./einfuhr-rechnung";
@@ -309,7 +309,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
             <b>Ebru ist über den Ratenplan eingerechnet:</b> {manuellRaten.length} Raten ({eur(-manuellRaten.reduce((s, x) => s + x.betrag, 0))}) vom{" "}
             {deDate(manuellRaten[0].datum)} bis {deDate(manuellRaten[manuellRaten.length - 1].datum)} für alle offenen Rechnungen
             {ebruGeschaetztUsd > 0 && <> und die Ware in Produktion (≈ {usd(ebruGeschaetztUsd)}, Rechnung geschätzt beim Versand — reiht sich hinten ein)</>}.
-            {" "}Einfuhrabgaben der Ebru-Lieferungen stehen einzeln bei Ankunft (Tabelle unten).
+            {" "}Einfuhrabgaben der Ebru-Lieferungen stehen einzeln kurz nach dem Versand (Tabelle unten).
             {Object.entries(roh.ratenKommendUsd ?? {}).filter(([, v]) => v > 0).map(([l, v]) => (
               <span key={l}>
                 {" "}Noch nicht enthalten: {l.split(" ")[0]}-Ware in Produktion ≈ {usd(v)} — die Rechnung kommt erst beim Versand, dann reiht sie sich automatisch hinten ein.
@@ -616,12 +616,12 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           sobald eine Zahlung an der Bestellung eingetragen ist, gilt die Anzahlung als bezahlt. Betrag = offener Rest in USD ÷ {p.fx.toLocaleString("de-DE", { maximumFractionDigits: 4 })} USD/€
           ({p.fxQuelle === "auto" ? `Kurs eurer letzten Auslandsüberweisung${roh.fxAuto ? ` vom ${deDate(roh.fxAuto.datum)}` : ""}` : p.fxQuelle === "manuell" ? "manuell" : "Standard"}).
           Die EUSt holt ihr über die USt-Voranmeldung zurück — das ist unten bei der Umsatzsteuer eingerechnet; der Zoll nicht.
-          Einfuhrabgaben sind geschätzt und zählen ohne Rechnungsnummer, bis die Ware angekommen ist. Mit DHL-Rechnungsnummer (ZIT…) zählt das Konto:
+          Einfuhrabgaben sind geschätzt, fällig bei Ankunft (noch nicht versendete Ware mit überholtem Datum: frühestens in {VERSAND_FRUEHESTENS_TAGE} Tagen), und zählen ohne Rechnungsnummer, bis die Ware angekommen ist. Mit DHL-Rechnungsnummer (ZIT…) zählt das Konto:
           Sobald die Nummer im Verwendungszweck einer Abbuchung steht, gelten sie als bezahlt — vorher bleiben sie drin, auch wenn die Ware schon eingelagert ist.
         </p>
       </Card>
 
-      {/* Ebru-Lieferungen: Einfuhrabgaben bei Ankunft (die Ware selbst läuft über die Raten) */}
+      {/* Ebru-Lieferungen: Einfuhrabgaben kurz nach Versand (die Ware selbst läuft über die Raten) */}
       {p.einfuhrAndere.length > 0 && (
         <Card title={`Ebru-Lieferungen — Einfuhrabgaben ${eur(einfuhrAndereSumme)}`} accent="border-l-orange-500">
           <div className="overflow-x-auto">
@@ -632,7 +632,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
                   <Th>Status</Th>
                   <Th>Ankunft</Th>
                   <Th right>Warenwert</Th>
-                  <Th>Einfuhrabgaben bei Ankunft</Th>
+                  <Th>Einfuhrabgaben (Ungewitter)</Th>
                 </tr>
               </thead>
               <tbody>
@@ -663,8 +663,9 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
             </table>
           </div>
           <p className="mt-3 text-xs text-neutral-500">
-            Bezahlt wird die Ware über den Ebru-Ratenplan; hier stehen nur Zoll und EUSt bei Ankunft, geschätzt aus dem Warenwert (≈ = noch keine Rechnung,
-            Warenwert aus der Bestellung). Trag die Rechnungsnummer des Verzollers ein (z.B. Ungewitter „26 33474“ oder DHL „ZIT…“) — sobald sie auf dem Konto
+            Bezahlt wird die Ware über den Ebru-Ratenplan; hier stehen nur Zoll und EUSt, geschätzt aus dem Warenwert (≈ = noch keine Rechnung,
+            Warenwert aus der Bestellung). Termin: Die Rechnung von Carl Ungewitter kommt ~{ZOLL_NACH_VERSAND_TAGE} Tage nach dem Versand, Versand = Ankunft − {e.zahlungVorAnkunftTage} Tage.
+            Ist die Ankunft vorbei, die Ware aber noch nicht versendet, wird der Versand frühestens in {VERSAND_FRUEHESTENS_TAGE} Tagen angenommen — dann bitte das Ankunftsdatum an der Bestellung aktualisieren. Trag die Rechnungsnummer des Verzollers ein (z.B. Ungewitter „26 33474“ oder DHL „ZIT…“) — sobald sie auf dem Konto
             abgebucht ist, fallen die Abgaben aus der Vorschau.
           </p>
         </Card>

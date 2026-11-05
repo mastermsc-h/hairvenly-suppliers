@@ -338,10 +338,14 @@ check("Geschätzte Position im Label mit ≈", pg[1].label.includes("(≈ G)"), 
 const ea = (o) => ({ id: "e1", label: "China X", lieferant: "Ebru (CN + TR)", status: "in_production", eta: "2026-11-20", warenUsd: 50000, importVatEur: null, geschaetzt: true, ...o });
 const einf = (pp) => pp.ereignisse.filter((x) => x.art === "einfuhr").map((x) => [x.datum, x.betrag]);
 const pe1 = L.prognose(roh({ einfuhrAndere: [ea({})] }), E0);
-check("Ebru-Einfuhr am Ankunftstag", einf(pe1), [["2026-11-20", -7600]]);
+check("Ebru-Einfuhr 3 Tage nach Versand (Versand = Ankunft − 7)", einf(pe1), [["2026-11-16", -7600]]);
 check("Ebru-Einfuhr im Ergebnis", [pe1.einfuhrAndere[0].einfuhr.eust, pe1.einfuhrAndere[0].geschaetzt], [7600, true]);
 const pe2 = L.prognose(roh({ einfuhrAndere: [ea({ eta: "2026-10-01" })] }), E0);
-check("Ankunft vorbei, noch in Produktion: sofort + Hinweis", [einf(pe2), pe2.hinweise.some((h) => h.includes("China X"))], [[["2026-10-17", -7600]], true]);
+check("Ankunft vorbei, noch nicht versendet: Versand frühestens +7, Zoll +3, mit Hinweis", [einf(pe2), pe2.hinweise.some((h) => h.includes("China X") && h.includes("noch nicht versendet"))], [[["2026-10-27", -7600]], true]);
+check("Ankunft vorbei, versendet: Ungewitter-Rechnung sofort", einf(L.prognose(roh({ einfuhrAndere: [ea({ eta: "2026-10-01", status: "shipped" })] }), E0)), [["2026-10-17", -7600]]);
+check("Ankunft bald, noch in Produktion: nicht vor Versand +7 +3", einf(L.prognose(roh({ einfuhrAndere: [ea({ eta: "2026-10-20" })] }), E0)), [["2026-10-27", -7600]]);
+check("Amanda: Ankunft vorbei, noch versandbereit → Einfuhr frühestens in 7 Tagen", L.prognose(roh({ bestellungen: [best({ restUsd: 0, status: "ready_to_ship", eta: "2026-10-01" })] }), E0).bestellungen[0].einfuhr.datum, "2026-10-24");
+check("Amanda: Ankunft vorbei, versendet → Einfuhr sofort", L.prognose(roh({ bestellungen: [best({ restUsd: 0, status: "shipped", eta: "2026-10-01" })] }), E0).bestellungen[0].einfuhr.datum, "2026-10-17");
 check("Eingelagert ohne Rechnungsnr.: keine Abgaben", einf(L.prognose(roh({ einfuhrAndere: [ea({ status: "stocked" })] }), E0)), []);
 check("Eingelagert, Zoll-Rechnung noch offen: Abgaben bleiben", einf(L.prognose(roh({ einfuhrAndere: [ea({ status: "stocked", eta: "2026-10-10", einfuhrZahlung: ezNichts })] }), E0)), [["2026-10-17", -7600]]);
 check("Zoll-Rechnung abgebucht: keine Abgaben", einf(L.prognose(roh({ einfuhrAndere: [ea({ einfuhrZahlung: ezVoll })] }), E0)), []);
@@ -356,7 +360,7 @@ check("USt Nov mit Ebru-Ankunft: deren EUSt verrechnet", L.prognose(roh({ einfuh
 // Ebru-Nachbestellungen (Schätzung)
 const nb = { lieferant: "Ebru (CN + TR)", kgProMonatAuto: 130 / 3, usdProKgAuto: 1000, leadWochen: 8 };
 const pnb = L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: nb }), { ...E0, ebruNachbestellungenEinrechnen: true });
-check("Ebru-Nachbestellung: Einfuhr bei Ankunft (bestellt Mo 19.10. + 8 Wochen)", pnb.ereignisse.filter((x) => x.label.includes("Ebru-Nachbestellung")).map((x) => [x.datum, x.betrag, x.schaetzung]), [["2026-12-14", -1520, true]]);
+check("Ebru-Nachbestellung: Einfuhr 3 Tage nach Versand (bestellt Mo 19.10. + 8 Wochen − 7 + 3)", pnb.ereignisse.filter((x) => x.label.includes("Ebru-Nachbestellung")).map((x) => [x.datum, x.betrag, x.schaetzung]), [["2026-12-10", -1520, true]]);
 check("Ebru-Nachbestellung: kg/Monat im Ergebnis", Math.round(pnb.ebruNachbestellKgMonat * 10) / 10, 43.3);
 check("Ebru-Nachbestellung aus: nichts", L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: nb }), E0).ereignisse.length, 0);
 const pnb2 = L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: nb }), { ...E0, ebruNachbestellungenEinrechnen: true, horizontTage: 120 });
