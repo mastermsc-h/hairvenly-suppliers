@@ -449,7 +449,7 @@ export async function createSalonEmployee(input: {
   color?: string;
 }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   await requireProfile();
-  if (!/^\d{4,6}$/.test(input.pin)) return { ok: false, error: "PIN: 4-6 Ziffern" };
+  if (!/^\d{6}$/.test(input.pin)) return { ok: false, error: "PIN: genau 6 Ziffern" };
   if (!input.name.trim()) return { ok: false, error: "Name fehlt" };
 
   const supabase = await createClient();
@@ -458,6 +458,7 @@ export async function createSalonEmployee(input: {
     .insert({ name: input.name.trim(), pin: input.pin, color: input.color ?? null, active: true })
     .select("id")
     .single();
+  if (error?.code === "23505") return { ok: false, error: "Diese PIN ist schon vergeben" };
   if (error || !data) return { ok: false, error: error?.message ?? "Insert fehlgeschlagen" };
   revalidatePath("/salon-admin/mitarbeiter");
   return { ok: true, id: data.id };
@@ -485,12 +486,16 @@ export async function updateSalonEmployee(input: {
   color?: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   await requireProfile();
-  if (!/^\d{4,6}$/.test(input.pin)) return { ok: false, error: "PIN: 4-6 Ziffern" };
   const supabase = await createClient();
+  // Neue PINs immer 6-stellig; eine alte 4-stellige darf beim Umbenennen stehen bleiben
+  const { data: alt } = await supabase.from("salon_employees").select("pin").eq("id", input.id).maybeSingle();
+  const unveraendert = alt?.pin === input.pin;
+  if (!unveraendert && !/^\d{6}$/.test(input.pin)) return { ok: false, error: "PIN: genau 6 Ziffern" };
   const { error } = await supabase
     .from("salon_employees")
     .update({ name: input.name.trim(), pin: input.pin, color: input.color ?? null })
     .eq("id", input.id);
+  if (error?.code === "23505") return { ok: false, error: "Diese PIN ist schon vergeben" };
   if (error) return { ok: false, error: error.message };
   revalidatePath("/salon-admin/mitarbeiter");
   return { ok: true };

@@ -55,6 +55,10 @@ export async function updateSession(request: NextRequest) {
     // wird durch den signierten, 2h gültigen Session-Token geschützt (kein
     // Login am Handy nötig). Nur Foto-Upload möglich, keine Bestelldaten.
     path.startsWith("/pack-foto/") ||
+    // Einnahmen-Erfassung am Mitarbeiter-Handy/iPad: ohne Login, geschützt durch das
+    // Geräte-Cookie (QR-Freischaltung durch den Admin) + 6-stellige PIN je Eintrag.
+    path === "/salon/einnahme" ||
+    path.startsWith("/salon/koppeln/") ||
     // Web-App-Manifeste (PWA/Homescreen) muessen ohne Login abrufbar sein —
     // iOS/Browser laden sie teils ohne Cookies; sie enthalten keine Geheimnisse.
     path.endsWith(".webmanifest") ||

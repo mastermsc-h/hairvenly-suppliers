@@ -22,6 +22,8 @@ interface Employee {
   id: string;
   name: string;
   color: string | null;
+  /** Länge der PIN (4 alt, 6 neu) — erst bei voller Länge prüfen */
+  pinLen: number;
 }
 
 const TILE_COLORS = [
@@ -93,10 +95,10 @@ export default function OutClient({ employees }: { employees: Employee[] }) {
   }
 
   function onPinDigit(d: string) {
-    if (pin.length >= 6) return;
+    if (!employee || pin.length >= employee.pinLen) return;
     const next = pin + d;
     setPin(next);
-    if (next.length >= 4 && employee && product) {
+    if (next.length === employee.pinLen && product) {
       start(async () => {
         const res = await recordEntnahme({
           barcode: product.barcode || null,
@@ -199,7 +201,7 @@ export default function OutClient({ employees }: { employees: Employee[] }) {
             <div className="text-xl text-neutral-400">{employee.name}</div>
             <div className="text-2xl font-bold mt-1">PIN eingeben</div>
             <div className="mt-4 flex gap-3 justify-center">
-              {Array.from({ length: 6 }).map((_, i) => (
+              {Array.from({ length: employee.pinLen }).map((_, i) => (
                 <div
                   key={i}
                   className={`w-5 h-5 rounded-full border-2 ${i < pin.length ? "bg-white border-white" : "border-neutral-600"}`}

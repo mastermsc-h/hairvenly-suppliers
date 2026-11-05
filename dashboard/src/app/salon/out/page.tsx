@@ -11,9 +11,10 @@ export default async function SalonOutPage() {
   const svc = createServiceClient();
   const { data: employees } = await svc
     .from("salon_employees")
-    .select("id, name, color")
+    .select("id, name, color, pin")
     .eq("active", true)
     .order("name");
 
-  return <OutClient employees={(employees ?? []).map((e) => ({ id: e.id, name: e.name, color: e.color }))} />;
+  // Die PIN selbst geht nicht an den Browser, nur ihre Länge
+  return <OutClient employees={(employees ?? []).map((e) => ({ id: e.id, name: e.name, color: e.color, pinLen: String(e.pin ?? "").length || 6 }))} />;
 }

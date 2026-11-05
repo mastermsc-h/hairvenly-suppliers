@@ -170,6 +170,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                     { href: "/salon-admin", label: t(locale, "nav.salon.overview"), exact: true },
                     { href: "/salon-admin/statistik", label: t(locale, "nav.salon.stats") },
                     { href: "/salon-admin/mitarbeiter", label: t(locale, "nav.salon.employees") },
+                    ...(profile.role === "admin"
+                      ? [{ href: "/salon-admin/einnahmen", label: t(locale, "nav.salon.income") }]
+                      : []),
                   ]}
                 />
               </>

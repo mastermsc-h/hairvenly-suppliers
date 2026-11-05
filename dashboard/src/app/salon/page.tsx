@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Euro } from "lucide-react";
 import { isSalonDevicePaired } from "@/lib/salon/auth";
 import PairForm from "./pair-form";
 
@@ -27,7 +27,7 @@ export default async function SalonHomePage() {
         </div>
       </header>
 
-      <main className="flex-1 grid grid-cols-2 gap-4 p-4">
+      <main className="flex-1 grid grid-cols-2 grid-rows-[2fr_1fr] gap-4 p-4">
         <Link
           href="/salon/out"
           className="rounded-3xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 transition flex flex-col items-center justify-center gap-6 shadow-2xl"
@@ -44,6 +44,17 @@ export default async function SalonHomePage() {
           <ArrowDownToLine size={120} strokeWidth={1.5} />
           <div className="text-5xl font-bold tracking-tight">Zurueckgeben</div>
           <div className="text-base text-emerald-100">Pack oder Reste</div>
+        </Link>
+
+        <Link
+          href="/salon/einnahme"
+          className="col-span-2 rounded-3xl bg-amber-500 hover:bg-amber-400 active:bg-amber-600 transition flex items-center justify-center gap-6 shadow-2xl text-neutral-950"
+        >
+          <Euro size={72} strokeWidth={1.5} />
+          <div>
+            <div className="text-4xl font-bold tracking-tight">Einnahme erfassen</div>
+            <div className="text-base text-amber-950/70">Verkauf oder Dienstleistung — mit deiner PIN</div>
+          </div>
         </Link>
       </main>
 

@@ -85,9 +85,12 @@ export default function EmployeeManager({ employees }: { employees: Emp[] }) {
                       onClick={() => setShowPin((s) => ({ ...s, [e.id]: !s[e.id] }))}
                       className="flex items-center gap-2 text-neutral-700 hover:text-neutral-900"
                     >
-                      <span className="font-mono">{showPin[e.id] ? e.pin : "••••"}</span>
+                      <span className="font-mono">{showPin[e.id] ? e.pin : "••••••"}</span>
                       {showPin[e.id] ? <EyeOff size={14} /> : <Eye size={14} />}
                     </button>
+                    {e.pin.length !== 6 && (
+                      <div className="mt-1 text-xs text-amber-700">alte {e.pin.length}-stellige PIN — für Einnahmen neue 6-stellige vergeben</div>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {e.color && <div className={`${e.color} w-6 h-6 rounded`} />}
@@ -151,15 +154,21 @@ function NewEmployeeForm({ onDone }: { onDone: () => void }) {
           />
         </div>
         <div>
-          <label className="text-xs font-medium text-neutral-600 uppercase tracking-wide">PIN (4-6 Ziffern)</label>
-          <input
-            value={pin}
-            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
-            inputMode="numeric"
-            pattern="\d{4,6}"
-            required
-            className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 outline-none font-mono"
-          />
+          <label className="text-xs font-medium text-neutral-600 uppercase tracking-wide">PIN (6 Ziffern)</label>
+          <div className="mt-1 flex gap-2">
+            <input
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              inputMode="numeric"
+              pattern="\d{6}"
+              maxLength={6}
+              required
+              className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 outline-none font-mono"
+            />
+            <button type="button" onClick={() => setPin(zufallsPin())} className="text-xs text-neutral-600 hover:text-neutral-900 whitespace-nowrap">
+              Zufall
+            </button>
+          </div>
         </div>
       </div>
       <div>
@@ -230,10 +239,14 @@ function EditRow({ emp, onCancel, onSaved }: { emp: Emp; onCancel: () => void; o
       <td className="px-4 py-2">
         <input
           value={pin}
-          onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+          onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
           inputMode="numeric"
+          maxLength={6}
           className="w-24 rounded border border-neutral-300 px-2 py-1 text-sm font-mono"
         />
+        <button type="button" onClick={() => setPin(zufallsPin())} className="ml-2 text-xs text-neutral-600 hover:text-neutral-900">
+          Zufall
+        </button>
       </td>
       <td className="px-4 py-2">
         <select
@@ -280,4 +293,11 @@ function ToggleActive({ id, active }: { id: string; active: boolean }) {
       {active ? "Deaktivieren" : "Aktivieren"}
     </button>
   );
+}
+
+/** 6-stellige Zufalls-PIN (keine führende Null, damit sie nirgends abgeschnitten wird). */
+function zufallsPin(): string {
+  const a = new Uint32Array(1);
+  crypto.getRandomValues(a);
+  return String(100000 + (a[0] % 900000));
 }
