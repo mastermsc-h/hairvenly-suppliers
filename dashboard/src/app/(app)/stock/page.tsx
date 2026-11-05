@@ -4,6 +4,7 @@ import { t, type Locale } from "@/lib/i18n";
 import { readDashboardAlerts, readInventorySheet, readTopseller } from "@/lib/stock-sheets";
 import { fetchOrderIdByName } from "@/lib/order-name-map";
 import { filterArchivedFromStock, filterArchivedFromTopseller } from "@/lib/filter-archived-orders";
+import { buildCriticalStock } from "@/lib/stock-critical";
 import StockOverviewClient, { type InsightProduct, type StockSnapshot } from "./stock-overview";
 
 export const revalidate = 60;
@@ -36,6 +37,14 @@ export default async function StockIndexPage() {
     kritisch: filterArchivedFromStock(alertsRaw.kritisch, orderIdByName),
   };
   const topseller = { ...topsellerRaw, sections: filterArchivedFromTopseller(topsellerRaw.sections, orderIdByName) };
+  // Gleiche Reichweiten-Logik wie /stock/critical (Zähler = Handlungsbedarf)
+  const { actionCount: kritischCount } = buildCriticalStock({
+    alerts: alertsRaw,
+    wellig: wellig.rows,
+    glatt: glatt.rows,
+    topseller: topsellerRaw.sections,
+    orderIdByName,
+  });
 
   // Build insights from topseller data
   const insights = buildInsights(topseller.sections);
@@ -96,7 +105,7 @@ export default async function StockIndexPage() {
         welligZero,
         glattZero,
         nullbestandCount: alerts.nullbestand.length,
-        kritischCount: alerts.kritisch.length,
+        kritischCount,
         unterwegsCount: alerts.unterwegs.length,
         welligCollections: welligByCollection,
         glattCollections: glattByCollection,

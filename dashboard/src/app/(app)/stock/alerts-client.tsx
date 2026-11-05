@@ -6,6 +6,7 @@ import { Search, AlertTriangle, AlertCircle, Truck, Package, ExternalLink } from
 import type { AlertProduct } from "@/lib/stock-sheets";
 import type { ClientOrderMeta } from "@/lib/order-name-map";
 import SyncBadge from "./sync-badge";
+import { needsAction, LOW_STOCK_G, CRIT_STATUS_ORDER, type CritStatus } from "@/lib/stock-criticality";
 
 type AlertMode = "zero" | "critical" | "transit";
 
@@ -28,7 +29,7 @@ interface Props {
   orderIdByName?: Record<string, ClientOrderMeta>;
 }
 
-type QuickFilter = "all" | "no_order" | "has_order" | "kritisch" | "niedrig" | "akut" | "knapp" | "ladenhueter";
+type QuickFilter = "all" | "action" | "no_order" | "has_order" | "akut" | "luecke" | "knapp" | "ladenhueter" | "low600";
 
 const QUICK_FILTERS: Record<AlertMode, { key: QuickFilter; label: string; description: string }[]> = {
   zero: [
@@ -37,24 +38,21 @@ const QUICK_FILTERS: Record<AlertMode, { key: QuickFilter; label: string; descri
     { key: "has_order", label: "Bestellt", description: "Bestellung unterwegs" },
   ],
   critical: [
-    { key: "all", label: "Alle", description: "" },
-    { key: "akut", label: "Akut (Reichweite < Lieferzeit)", description: "" },
-    { key: "knapp", label: "Knapp (< 1.5× Lieferzeit)", description: "" },
-    { key: "ladenhueter", label: "Ladenhüter (0 Verkauf 90T)", description: "" },
-    { key: "kritisch", label: "< 300g", description: "" },
-    { key: "niedrig", label: "< 600g", description: "" },
-    { key: "no_order", label: "Ohne Bestellung", description: "" },
+    { key: "action", label: "Handlungsbedarf", description: "Akut + Lücke + Knapp" },
+    { key: "akut", label: "Akut", description: "Lager + unterwegs reicht nicht bis zur nächstmöglichen Lieferung" },
+    { key: "luecke", label: "Lücke vor Ankunft", description: "Lager ist leer, bevor die Bestellung ankommt" },
+    { key: "knapp", label: "Knapp", description: "Reicht weniger als 1,5× Lieferzeit" },
+    { key: "no_order", label: "Ohne Bestellung", description: "Handlungsbedarf und nichts bestellt" },
+    { key: "ladenhueter", label: "Ladenhüter", description: "Unter 600 g, aber 0 Verkauf in 90 Tagen — nicht nachbestellen" },
+    { key: "low600", label: "Alle < 600g", description: "Alte Liste: jedes Produkt unter 600 g, egal wie lange es reicht" },
   ],
   transit: [
     { key: "all", label: "Alle", description: "" },
   ],
 };
 
-/** Ladenhüter = kritischer Bestand, aber seit 90 Tagen kein einziger Verkauf.
- *  Muss NICHT nachbestellt werden — der niedrige Bestand ist hier egal. */
-function isLadenhueter(d: AlertProduct): boolean {
-  return d.verkauft90d !== undefined && (d.verkauft90d ?? 0) === 0 && (d.verkauft30d ?? 0) === 0;
-}
+const statusOf = (d: AlertProduct): CritStatus => d.crit?.status ?? "unbekannt";
+const isAction = (d: AlertProduct): boolean => !!d.crit && needsAction(d, d.crit);
 
 type Tier = "TOP7" | "MID" | "REST" | "KAUM";
 const ALL_TIERS: Tier[] = ["TOP7", "MID", "REST", "KAUM"];
@@ -75,51 +73,10 @@ const TIER_LABEL: Record<Tier, string> = {
 
 const TIER_ORDER: Record<Tier | "UNKNOWN", number> = { TOP7: 0, MID: 1, REST: 2, UNKNOWN: 3, KAUM: 4 };
 
-// Lieferzeit pro Qualität (in Tagen). Konservative Defaults — Eyfel TR ist
-// schneller (14 Tage) wird aber selten genutzt, China-Default schützt mehr.
-const LEAD_TIME_DAYS: Record<"wellig" | "glatt", number> = {
-  glatt: 42, // Amanda 6 Wochen
-  wellig: 56, // Eyfel/China 8 Wochen
-};
-
-// Berechnet Reichweite in Tagen aus Velocity. Nutzt den höheren Wert aus
-// 30T- und 90T-Geschwindigkeit — Trending-Up-Produkte werden so eher als
-// kritisch erkannt.
-function calcReichweite(d: AlertProduct): {
-  daily: number | null;
-  range: number | null;
-  rangeWithOrder: number | null;
-  leadTime: number;
-} {
-  const leadTime = LEAD_TIME_DAYS[d.sheetKey];
-  const v30 = (d.verkauft30d ?? 0) / 30;
-  const v90 = (d.verkauft90d ?? 0) / 90;
-  const daily = Math.max(v30, v90);
-  if (daily <= 0) return { daily: null, range: null, rangeWithOrder: null, leadTime };
-  return {
-    daily,
-    range: Math.round(d.lagerG / daily),
-    rangeWithOrder: Math.round((d.lagerG + d.unterwegsG) / daily),
-    leadTime,
-  };
-}
-
-// Kritikalität auf Basis Reichweite + Bestellung.
-// "akut" = Reichweite (auch mit Bestellung) reicht nicht bis nächste Lieferung möglich wäre
-// "knapp" = Reichweite mit Bestellung knapp über Lieferzeit
-// "ok"    = Reichweite reicht
-function rangeStatus(d: AlertProduct): "akut" | "knapp" | "ok" | "unbekannt" {
-  const { rangeWithOrder, range, leadTime, daily } = calcReichweite(d);
-  if (daily === null) return "unbekannt";
-  if (rangeWithOrder === null || range === null) return "unbekannt";
-  if (rangeWithOrder < leadTime) return "akut";
-  if (rangeWithOrder < leadTime * 1.5) return "knapp";
-  return "ok";
-}
-
 export default function AlertsClient({ data, title, subtitle, mode, lastUpdated, orderIdByName }: Props) {
   const [query, setQuery] = useState("");
-  const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
+  const defaultFilter: QuickFilter = mode === "critical" ? "action" : "all";
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>(defaultFilter);
   const [activeTiers, setActiveTiers] = useState<Set<Tier | "UNKNOWN">>(new Set([...ALL_TIERS, "UNKNOWN"]));
   const config = MODE_CONFIG[mode];
   const filters = QUICK_FILTERS[mode];
@@ -167,6 +124,22 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
     );
   };
 
+  const matchQuick = (d: AlertProduct, f: QuickFilter): boolean => {
+    switch (f) {
+      case "all": return true;
+      case "action": return isAction(d);
+      case "no_order": return d.unterwegsG <= 0 && (mode !== "critical" || isAction(d));
+      case "has_order": return d.unterwegsG > 0;
+      case "akut":
+      case "luecke":
+      case "knapp":
+      case "ladenhueter": return statusOf(d) === f;
+      case "low600": return d.lagerG < LOW_STOCK_G;
+    }
+  };
+  // Grundmenge des aktiven Schnellfilters — Basis für KPIs und Rang-Zähler
+  const scope = data.filter((d) => matchQuick(d, quickFilter));
+
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const filterFn = (d: AlertProduct) => {
     // Text search
@@ -175,13 +148,7 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
       if (!words.every((w) => combined.includes(w))) return false;
     }
     // Quick filter
-    if (quickFilter === "no_order" && d.unterwegsG !== 0) return false;
-    if (quickFilter === "has_order" && d.unterwegsG <= 0) return false;
-    if (quickFilter === "kritisch" && !((d.stufe === "kritisch") || d.lagerG < 300)) return false;
-    if (quickFilter === "niedrig" && !(d.lagerG >= 300 && d.lagerG < 600)) return false;
-    if (quickFilter === "akut" && rangeStatus(d) !== "akut") return false;
-    if (quickFilter === "knapp" && rangeStatus(d) !== "knapp") return false;
-    if (quickFilter === "ladenhueter" && !isLadenhueter(d)) return false;
+    if (!matchQuick(d, quickFilter)) return false;
     // Tier filter (critical mode)
     if (mode === "critical" && hasAnyTier && !allTiersActive) {
       if (!activeTiers.has(tierKey(d))) return false;
@@ -196,19 +163,16 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
     return true;
   };
 
-  const statusOrder: Record<ReturnType<typeof rangeStatus>, number> = {
-    akut: 0, knapp: 1, ok: 2, unbekannt: 3,
-  };
   const sortFn = (a: AlertProduct, b: AlertProduct) => {
     if (mode !== "critical") return 0;
-    // Sort: akute Reichweite zuerst, dann Tier (TOP7 vor REST/KAUM),
+    // Sort: akut → Lücke → knapp, dann Tier (TOP7 vor REST/KAUM),
     // innerhalb gleicher Bucket: kürzere Reichweite zuerst.
-    const statusDiff = statusOrder[rangeStatus(a)] - statusOrder[rangeStatus(b)];
+    const statusDiff = CRIT_STATUS_ORDER[statusOf(a)] - CRIT_STATUS_ORDER[statusOf(b)];
     if (statusDiff !== 0) return statusDiff;
     const tierDiff = TIER_ORDER[tierKey(a)] - TIER_ORDER[tierKey(b)];
     if (tierDiff !== 0) return tierDiff;
-    const ra = calcReichweite(a).rangeWithOrder ?? Number.MAX_SAFE_INTEGER;
-    const rb = calcReichweite(b).rangeWithOrder ?? Number.MAX_SAFE_INTEGER;
+    const ra = a.crit?.rangeWithOrder ?? Number.MAX_SAFE_INTEGER;
+    const rb = b.crit?.rangeWithOrder ?? Number.MAX_SAFE_INTEGER;
     if (ra !== rb) return ra - rb;
     return a.lagerG - b.lagerG;
   };
@@ -217,9 +181,6 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
   const wellig = filtered.filter((d) => d.sheetKey === "wellig");
   const glatt = filtered.filter((d) => d.sheetKey === "glatt");
 
-  // Counts for filter badges
-  const noOrderCount = data.filter((d) => d.unterwegsG === 0).length;
-  const hasOrderCount = data.filter((d) => d.unterwegsG > 0).length;
 
   return (
     <div className="p-4 md:p-8 space-y-6 max-w-7xl">
@@ -233,14 +194,16 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
 
       <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {(() => {
-          const welligItems = data.filter((d) => d.sheetKey === "wellig");
-          const glattItems = data.filter((d) => d.sheetKey === "glatt");
+          // Kritisch: KPIs zählen den aktiven Schnellfilter (Standard: Handlungsbedarf)
+          const kpiItems = mode === "critical" ? scope : data;
+          const welligItems = kpiItems.filter((d) => d.sheetKey === "wellig");
+          const glattItems = kpiItems.filter((d) => d.sheetKey === "glatt");
           // Pick relevant kg metric per mode:
           //   transit / zero  → kg unterwegs (für zero-stock: Nachschub)
           //   critical        → kg Lager (aktueller Restbestand)
           const useLagerKg = mode === "critical";
           const valueFor = (d: AlertProduct) => (useLagerKg ? d.lagerG : d.unterwegsG);
-          const totalKg = data.reduce((s, d) => s + valueFor(d), 0) / 1000;
+          const totalKg = kpiItems.reduce((s, d) => s + valueFor(d), 0) / 1000;
           const welligKg = welligItems.reduce((s, d) => s + valueFor(d), 0) / 1000;
           const glattKg = glattItems.reduce((s, d) => s + valueFor(d), 0) / 1000;
           const kgLabel = useLagerKg ? "kg Lager" : "kg unterwegs";
@@ -248,7 +211,7 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
             <>
               <KpiCard
                 label="Gesamt"
-                value={data.length.toString()}
+                value={kpiItems.length.toString()}
                 sub={`${totalKg.toFixed(2)} ${kgLabel}`}
                 icon={config.icon}
                 color="rose"
@@ -287,29 +250,24 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
         {filters.length > 1 && (
           <div className="flex flex-wrap gap-2">
             {filters.map((f) => {
-              const count =
-                f.key === "all" ? data.length :
-                f.key === "no_order" ? noOrderCount :
-                f.key === "has_order" ? hasOrderCount :
-                f.key === "kritisch" ? data.filter((d) => d.lagerG < 300).length :
-                f.key === "niedrig" ? data.filter((d) => d.lagerG >= 300 && d.lagerG < 600).length :
-                f.key === "akut" ? data.filter((d) => rangeStatus(d) === "akut").length :
-                f.key === "knapp" ? data.filter((d) => rangeStatus(d) === "knapp").length :
-                f.key === "ladenhueter" ? data.filter(isLadenhueter).length :
-                0;
+              const count = data.filter((d) => matchQuick(d, f.key)).length;
               const isAkut = f.key === "akut";
               const isKnapp = f.key === "knapp";
+              const isLuecke = f.key === "luecke";
               return (
                 <button
                   key={f.key}
                   onClick={() => setQuickFilter(f.key)}
+                  title={f.description || undefined}
                   className={`px-3 py-2 rounded-lg text-sm font-medium transition inline-flex items-center gap-1.5 ${
                     quickFilter === f.key
                       ? isAkut ? "bg-red-600 text-white"
+                        : isLuecke ? "bg-violet-600 text-white"
                         : isKnapp ? "bg-orange-500 text-white"
                         : f.key === "no_order" ? "bg-red-600 text-white"
                         : "bg-neutral-900 text-white"
                       : isAkut ? "bg-red-50 text-red-700 hover:bg-red-100 border border-red-200"
+                        : isLuecke ? "bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200"
                         : isKnapp ? "bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200"
                         : f.key === "no_order" ? "bg-red-50 text-red-700 hover:bg-red-100 border border-red-200"
                         : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
@@ -338,7 +296,7 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
           </button>
           {ALL_TIERS.map((tier) => {
             const active = activeTiers.has(tier);
-            const count = data.filter((d) => tierKey(d) === tier).length;
+            const count = scope.filter((d) => tierKey(d) === tier).length;
             return (
               <button
                 key={tier}
@@ -353,7 +311,7 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
               </button>
             );
           })}
-          {data.some((d) => !d.tier) && (
+          {scope.some((d) => !d.tier) && (
             <button
               onClick={() => toggleTier("UNKNOWN")}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition inline-flex items-center gap-1 ${
@@ -362,7 +320,7 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
               title="Kein Verkaufsrang im Topseller-Tab gefunden"
             >
               ohne Rang
-              <span className="opacity-60">({data.filter((d) => !d.tier).length})</span>
+              <span className="opacity-60">({scope.filter((d) => !d.tier).length})</span>
             </button>
           )}
         </div>
@@ -432,10 +390,10 @@ export default function AlertsClient({ data, title, subtitle, mode, lastUpdated,
       )}
 
       {/* Filtered count indicator */}
-      {(quickFilter !== "all" || (!allOrdersActive && mode === "transit")) && (
+      {(quickFilter !== defaultFilter || (!allOrdersActive && mode === "transit")) && (
         <div className="text-sm text-neutral-500">
           {filtered.length} von {data.length} Produkten angezeigt
-          <button onClick={() => { setQuickFilter("all"); setActiveOrders(new Set(allOrderNames)); }} className="ml-2 text-indigo-600 hover:text-indigo-800 font-medium">Filter zurücksetzen</button>
+          <button onClick={() => { setQuickFilter(defaultFilter); setActiveOrders(new Set(allOrderNames)); }} className="ml-2 text-indigo-600 hover:text-indigo-800 font-medium">Filter zurücksetzen</button>
         </div>
       )}
 
@@ -500,10 +458,11 @@ function AlertSection({
       {/* Mobile */}
       <div className="md:hidden divide-y divide-neutral-100">
         {items.map((item, i) => {
-          const status = mode === "critical" ? rangeStatus(item) : "ok";
+          const status = mode === "critical" ? statusOf(item) : "ok";
           return (
           <div key={i} className={`px-3 py-2 ${
             mode === "critical" && status === "akut" ? "bg-red-50/50" :
+            mode === "critical" && status === "luecke" ? "bg-violet-50/50" :
             mode === "critical" && status === "knapp" ? "bg-orange-50/40" :
             item.tier === "KAUM" ? "opacity-60" : ""
           }`}>
@@ -586,7 +545,7 @@ function AlertSection({
               {mode === "critical" && <th className="px-2 py-1.5 font-medium">Rang</th>}
               {mode === "critical" && <th className="px-2 py-1.5 font-medium text-right" title="Verkauf letzte 30 Tage">30T</th>}
               {mode === "critical" && <th className="px-2 py-1.5 font-medium text-right" title="Verkauf letzte 90 Tage">90T</th>}
-              {mode === "critical" && <th className="px-2 py-1.5 font-medium text-right" title="Reichweite in Tagen inkl. Bestellung — verglichen mit Lieferzeit">Reichw.</th>}
+              {mode === "critical" && <th className="px-2 py-1.5 font-medium text-right" title="Reichweite des Lagers in Tagen (+ Tage durch Bestellungen) — verglichen mit Lieferzeit und Ankunft">Reichw.</th>}
               <th className="px-2 py-1.5 font-medium text-right">Lager</th>
               <th className="px-2 py-1.5 font-medium text-right">Unterwegs</th>
               <th className="px-2 py-1.5 font-medium">Bestellungen</th>
@@ -596,12 +555,13 @@ function AlertSection({
             {items.map((item, i) => {
               const tier = item.tier;
               const isKaum = tier === "KAUM";
-              const status = mode === "critical" ? rangeStatus(item) : "ok";
+              const status = mode === "critical" ? statusOf(item) : "ok";
               return (
               <tr
                 key={i}
                 className={`hover:bg-indigo-100 hover:shadow-[inset_3px_0_0_0_rgb(79_70_229)] transition ${
                   mode === "critical" && status === "akut" ? "bg-red-50/50" :
+                  mode === "critical" && status === "luecke" ? "bg-violet-50/50" :
                   mode === "critical" && status === "knapp" ? "bg-orange-50/40" :
                   mode === "critical" && tier === "TOP7" && item.lagerG < 600 ? "bg-yellow-50/40" :
                   mode === "critical" && item.stufe === "kritisch" && !isKaum ? "bg-orange-50/30" :
@@ -731,40 +691,45 @@ function VerkaufCell({ value }: { value: number | undefined }) {
 }
 
 function ReichweiteBadge({ item, compact = false }: { item: AlertProduct; compact?: boolean }) {
-  const { daily, range, rangeWithOrder, leadTime } = calcReichweite(item);
-  if (daily === null || range === null || rangeWithOrder === null) {
-    // Kein Verbrauch messbar. Wenn Topseller-Daten da sind und 90T = 0:
-    // klar als Ladenhüter labeln — kritischer Bestand ohne Verkauf muss
-    // NICHT nachbestellt werden.
-    if (isLadenhueter(item)) {
-      return (
-        <span
-          className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-neutral-100 text-neutral-500"
-          title="Seit 90 Tagen kein Verkauf — Nachbestellung nicht nötig"
-        >
-          Ladenhüter
-        </span>
-      );
-    }
-    return <span className="text-neutral-300 text-[10px]">–</span>;
+  const c = item.crit;
+  if (!c) return <span className="text-neutral-300 text-[10px]">–</span>;
+  if (c.status === "ladenhueter") {
+    return (
+      <span
+        className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-neutral-100 text-neutral-500"
+        title="Seit 90 Tagen kein Verkauf — Nachbestellung nicht nötig"
+      >
+        Ladenhüter
+      </span>
+    );
   }
-  const status = rangeStatus(item);
+  if (c.daily === null || c.range === null || c.rangeWithOrder === null) {
+    return <span className="text-neutral-300 text-[10px]" title="Keine Verkaufszahlen gefunden">–</span>;
+  }
   const color =
-    status === "akut" ? "bg-red-100 text-red-700" :
-    status === "knapp" ? "bg-orange-100 text-orange-700" :
+    c.status === "akut" ? "bg-red-100 text-red-700" :
+    c.status === "luecke" ? "bg-violet-100 text-violet-700" :
+    c.status === "knapp" ? "bg-orange-100 text-orange-700" :
     "bg-emerald-50 text-emerald-700";
-  // Show range + range incl. order if they differ
-  const orderInfo = item.unterwegsG > 0 ? ` (+${rangeWithOrder - range})` : "";
+  const orderInfo = item.unterwegsG > 0 ? ` (+${c.rangeWithOrder - c.range})` : "";
   const tooltip =
-    `Reichweite: ${range} Tage` +
-    (item.unterwegsG > 0 ? ` / ${rangeWithOrder} Tage inkl. Bestellung` : "") +
-    ` · Lieferzeit: ${leadTime} Tage · Verbrauch: ${daily.toFixed(1)}g/Tag`;
+    `Lager reicht ${c.range} Tage` +
+    (item.unterwegsG > 0 ? ` · mit Bestellungen ${c.rangeWithOrder} Tage` : "") +
+    (c.daysToEta !== null ? ` · erste Ankunft in ${c.daysToEta} Tagen` : "") +
+    ` · Lieferzeit ${c.leadTime} Tage · Verbrauch ${c.daily.toFixed(1)} g/Tag`;
   return (
-    <span
-      className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${color}`}
-      title={tooltip}
-    >
-      {compact ? `${range}T${orderInfo}` : `${range}T${orderInfo}`}
+    <span className="inline-flex items-center gap-1 justify-end flex-wrap">
+      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${color}`} title={tooltip}>
+        {c.range}T{orderInfo}
+      </span>
+      {c.gapDays !== null && (
+        <span
+          className={`inline-flex px-1.5 py-0.5 rounded-full font-semibold bg-violet-600 text-white ${compact ? "text-[9px]" : "text-[10px]"}`}
+          title={`Lager leer in ~${c.range} Tagen, Bestellung kommt in ~${c.daysToEta} Tagen → ca. ${c.gapDays} Tage ausverkauft`}
+        >
+          {c.gapDays}T leer
+        </span>
+      )}
     </span>
   );
 }

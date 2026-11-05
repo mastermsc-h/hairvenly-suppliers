@@ -1,8 +1,7 @@
 import { requireProfile } from "@/lib/auth";
 import { t, type Locale } from "@/lib/i18n";
-import { readDashboardAlerts, readTopseller, enrichAlertsWithTier } from "@/lib/stock-sheets";
-import { fetchOrderIdByName, toClientOrderMeta } from "@/lib/order-name-map";
-import { filterArchivedFromStock, overrideEtaFromDb } from "@/lib/filter-archived-orders";
+import { toClientOrderMeta } from "@/lib/order-name-map";
+import { loadCriticalStock } from "@/lib/stock-critical";
 import AlertsClient from "../alerts-client";
 
 export const revalidate = 120;
@@ -12,14 +11,8 @@ export default async function CriticalStockPage() {
   if (!profile.is_admin) return <div className="p-8 text-neutral-500">Nur für Admins.</div>;
   const locale = (profile.language ?? "de") as Locale;
 
-  const [{ kritisch, lastUpdated }, { sections: topseller }, orderIdByName] = await Promise.all([
-    readDashboardAlerts(),
-    readTopseller(),
-    fetchOrderIdByName(),
-  ]);
-
-  const enriched = enrichAlertsWithTier(kritisch, topseller);
-  const data = filterArchivedFromStock(enriched, orderIdByName);
+  const { items, lastUpdated, orderIdByName } = await loadCriticalStock();
+  const data = items;
 
   return (
     <AlertsClient

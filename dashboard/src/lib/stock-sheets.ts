@@ -1,6 +1,7 @@
 import { google } from "googleapis";
 import { readFileSync } from "fs";
 import path from "path";
+import type { StockAssessment } from "./stock-criticality";
 
 // ── Auth (shared with google-sheets.ts) ────────────────────────
 
@@ -84,6 +85,8 @@ export interface AlertProduct {
   verkauft30d?: number;
   verkauft90d?: number;
   ziel?: number;
+  /** Reichweiten-Bewertung (nur Kritisch-Ansicht), siehe stock-criticality.ts */
+  crit?: StockAssessment;
 }
 
 export interface VerkaufsanalyseRow {

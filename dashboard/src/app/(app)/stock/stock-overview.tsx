@@ -116,7 +116,7 @@ export default function StockOverviewClient({ stats, locale, history = [] }: { s
           label="Kritischer Bestand"
           count={stats.kritischCount}
           color="orange"
-          description="Produkte unter 600g"
+          description="Reicht nicht bis zur nächsten Lieferung"
         />
         <AlertCard
           href="/stock/transit"
