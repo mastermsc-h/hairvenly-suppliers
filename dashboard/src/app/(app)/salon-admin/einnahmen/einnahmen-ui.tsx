@@ -2,9 +2,138 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Save, Smartphone } from "lucide-react";
-import { einnahmeArtSpeichern, einnahmeStornoAdmin, einnahmenKopplungsLink } from "@/lib/actions/salon-einnahmen";
-import { BEREICH_LABEL, type Bereich, type EinnahmeArt } from "@/lib/salon/einnahmen";
+import { Pencil, Plus, Save, Smartphone, X } from "lucide-react";
+import { einnahmeAdminSpeichern, einnahmeArtSpeichern, einnahmeStornoAdmin, einnahmenKopplungsLink } from "@/lib/actions/salon-einnahmen";
+import { BEREICH_LABEL, berlinLokal, type Bereich, type EinnahmeArt } from "@/lib/salon/einnahmen";
+
+export interface MitarbeiterOption {
+  id: string;
+  name: string;
+  active: boolean;
+}
+
+/** Bestehender Eintrag zum Bearbeiten (zeitpunkt = Bremer Ortszeit "YYYY-MM-DDTHH:mm"). */
+export interface EintragEdit {
+  id: string;
+  employeeId: string;
+  artId: string | null;
+  artName: string;
+  bereich: Bereich;
+  betrag: number;
+  zeitpunkt: string;
+  notiz: string | null;
+}
+
+type DialogProps = { mitarbeiter: MitarbeiterOption[]; arten: EinnahmeArt[] };
+
+/** Knopf „Einnahme nachtragen" (Admin am Rechner, ohne PIN). */
+export function NeueEinnahmeKnopf(props: DialogProps) {
+  const [offen, setOffen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOffen(true)} className="flex items-center gap-2 bg-neutral-900 text-white font-medium rounded-lg px-4 py-2 text-sm">
+        <Plus size={16} /> Einnahme nachtragen
+      </button>
+      {offen && <EinnahmeDialog {...props} eintrag={null} onClose={() => setOffen(false)} />}
+    </>
+  );
+}
+
+export function BearbeitenKnopf(props: DialogProps & { eintrag: EintragEdit }) {
+  const [offen, setOffen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOffen(true)} className="inline-flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-900 mr-3">
+        <Pencil size={12} /> Bearbeiten
+      </button>
+      {offen && <EinnahmeDialog {...props} onClose={() => setOffen(false)} />}
+    </>
+  );
+}
+
+function EinnahmeDialog({ mitarbeiter, arten, eintrag, onClose }: DialogProps & { eintrag: EintragEdit | null; onClose: () => void }) {
+  const [employeeId, setEmployeeId] = useState(eintrag?.employeeId ?? "");
+  const [artId, setArtId] = useState(eintrag?.artId ?? "");
+  const [betrag, setBetrag] = useState(eintrag ? eintrag.betrag.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "");
+  const [zeitpunkt, setZeitpunkt] = useState(eintrag?.zeitpunkt ?? berlinLokal(new Date()));
+  const [notiz, setNotiz] = useState(eintrag?.notiz ?? "");
+  const [fehler, setFehler] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const router = useRouter();
+
+  // Inaktive nur zeigen, wenn der Eintrag sie schon verwendet
+  const maOptionen = mitarbeiter.filter((m) => m.active || m.id === eintrag?.employeeId);
+  const artOptionen = arten.filter((a) => a.aktiv || a.id === eintrag?.artId);
+  // Art des Eintrags existiert nicht mehr in der Liste → Schnappschuss als eigene Option behalten
+  const artFehlt = eintrag && !artOptionen.some((a) => a.id === eintrag.artId);
+
+  function speichern() {
+    setFehler(null);
+    start(async () => {
+      const r = await einnahmeAdminSpeichern({ id: eintrag?.id, employeeId, artId, betrag, zeitpunkt, notiz });
+      if (!r.ok) return setFehler(r.error);
+      router.refresh();
+      onClose();
+    });
+  }
+
+  const feld = "mt-1 block w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm normal-case font-normal tracking-normal";
+  const label = "block text-xs font-medium text-neutral-600 uppercase tracking-wide";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl p-5 space-y-4 text-left" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold">{eintrag ? "Eintrag bearbeiten" : "Einnahme nachtragen"}</h3>
+          <button onClick={onClose} className="p-1 text-neutral-400 hover:text-neutral-900" aria-label="Schließen"><X size={18} /></button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className={label}>
+            Mitarbeiter
+            <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={feld}>
+              <option value="">— auswählen —</option>
+              {maOptionen.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}{m.active ? "" : " (inaktiv)"}</option>
+              ))}
+            </select>
+          </label>
+          <label className={label}>
+            Art
+            <select value={artId} onChange={(e) => setArtId(e.target.value)} className={feld}>
+              <option value="">— auswählen —</option>
+              {artFehlt && <option value={eintrag.artId ?? ""}>{eintrag.artName} ({BEREICH_LABEL[eintrag.bereich]}, bisher)</option>}
+              {(["verkauf", "salon"] as Bereich[]).map((b) => (
+                <optgroup key={b} label={BEREICH_LABEL[b]}>
+                  {artOptionen.filter((a) => a.bereich === b).map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}{a.aktiv ? "" : " (deaktiviert)"}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+          <label className={label}>
+            Betrag (€)
+            <input value={betrag} onChange={(e) => setBetrag(e.target.value.replace(/[^\d.,]/g, ""))} inputMode="decimal" placeholder="0,00" className={`${feld} tabular-nums`} />
+          </label>
+          <label className={label}>
+            Datum & Uhrzeit
+            <input type="datetime-local" value={zeitpunkt} onChange={(e) => setZeitpunkt(e.target.value)} className={feld} />
+          </label>
+        </div>
+        <label className={label}>
+          Notiz
+          <textarea value={notiz} onChange={(e) => setNotiz(e.target.value)} maxLength={500} rows={2} placeholder="z.B. 100g Bondings 1B" className={feld} />
+        </label>
+        {fehler && <div className="text-sm text-rose-600">{fehler}</div>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-neutral-600 hover:bg-neutral-100">Abbrechen</button>
+          <button onClick={speichern} disabled={pending || !employeeId || artId === ""} className="flex items-center gap-2 bg-neutral-900 text-white font-medium rounded-lg px-4 py-2 text-sm disabled:opacity-50">
+            <Save size={14} /> {pending ? "Speichere …" : "Speichern"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function StornoKnopf({ id, storniert }: { id: string; storniert: boolean }) {
   const [pending, start] = useTransition();

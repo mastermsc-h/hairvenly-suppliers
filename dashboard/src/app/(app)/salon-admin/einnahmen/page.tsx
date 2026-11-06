@@ -4,6 +4,7 @@ import { requireEinnahmenAdmin } from "@/lib/actions/salon-einnahmen";
 import {
   BEREICH_LABEL,
   berlinDatum,
+  berlinLokal,
   berlinLokalZuIso,
   berlinZeit,
   summiere,
@@ -11,7 +12,7 @@ import {
   type EinnahmeArt,
   type EinnahmeZeile,
 } from "@/lib/salon/einnahmen";
-import { ArtenVerwaltung, HandyFreischalten, StornoKnopf } from "./einnahmen-ui";
+import { ArtenVerwaltung, BearbeitenKnopf, HandyFreischalten, NeueEinnahmeKnopf, StornoKnopf, type MitarbeiterOption } from "./einnahmen-ui";
 
 export const dynamic = "force-dynamic";
 
@@ -45,12 +46,14 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
   type Row = {
     id: string; employee_id: string; art_name: string; bereich: Bereich; betrag: number; zeitpunkt: string;
     notiz: string | null; storniert_am: string | null; storniert_von: "mitarbeiter" | "admin" | null;
+    art_id: string | null; erfasst_von: "mitarbeiter" | "admin"; geaendert_am: string | null;
+    original: { betrag: number; art_name: string; zeitpunkt: string; notiz: string | null } | null;
   };
   const rows: Row[] = [];
   for (let ab = 0; ; ab += 1000) {
     let q = svc
       .from("salon_einnahmen")
-      .select("id, employee_id, art_name, bereich, betrag, zeitpunkt, notiz, storniert_am, storniert_von")
+      .select("id, employee_id, art_name, bereich, betrag, zeitpunkt, notiz, storniert_am, storniert_von, art_id, erfasst_von, geaendert_am, original")
       .gte("zeitpunkt", vonIso)
       .lt("zeitpunkt", bisIso)
       .order("zeitpunkt", { ascending: false })
@@ -69,6 +72,10 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
   const namen = new Map((emps ?? []).map((e) => [e.id, e.name as string]));
   const altePins = (emps ?? []).filter((e) => e.active && String(e.pin ?? "").length !== 6).map((e) => e.name as string);
   const arten: EinnahmeArt[] = (artRows ?? []).map((a) => ({ ...a, bereich: a.bereich as Bereich }));
+  const maOptionen: MitarbeiterOption[] = (emps ?? []).map((e) => ({ id: e.id, name: e.name, active: e.active }));
+  const rowById = new Map(rows.map((r) => [r.id, r]));
+  const originalText = (o: NonNullable<Row["original"]>) =>
+    `Ursprünglich vom Mitarbeiter: ${eur(Number(o.betrag))} · ${o.art_name} · ${deDatum(berlinDatum(o.zeitpunkt))} ${berlinZeit(o.zeitpunkt)}${o.notiz ? ` · ${o.notiz}` : ""}`;
 
   const zeilen: EinnahmeZeile[] = rows.map((r) => ({
     id: r.id,
@@ -110,9 +117,10 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
         <div>
           <h1 className="text-2xl font-semibold">Einnahmen Laden & Salon</h1>
           <p className="text-sm text-neutral-500">
-            Von den Mitarbeitern am iPad/iPhone erfasst (<span className="font-mono">/salon/einnahme</span>, mit PIN)
+            Von den Mitarbeitern am iPad/iPhone erfasst (<span className="font-mono">/salon/einnahme</span>, mit PIN) — hier kannst du nachtragen, korrigieren und stornieren
           </p>
         </div>
+        <NeueEinnahmeKnopf mitarbeiter={maOptionen} arten={arten} />
       </div>
 
       <HandyFreischalten />
@@ -313,11 +321,40 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
                       </span>
                       {z.artName}
                     </td>
-                    <td className="py-2 px-2 text-neutral-600 max-w-xs">{z.notiz}</td>
+                    <td className="py-2 px-2 text-neutral-600 max-w-xs">
+                      {z.notiz}
+                      {(() => {
+                        const r = rowById.get(z.id)!;
+                        if (r.erfasst_von === "admin") return <div className="text-[11px] text-neutral-400">von dir nachgetragen{r.geaendert_am ? ", geändert" : ""}</div>;
+                        if (r.geaendert_am)
+                          return (
+                            <div className="text-[11px] text-amber-700" title={r.original ? originalText(r.original) : undefined}>
+                              von dir geändert {deDatum(berlinDatum(r.geaendert_am))}{r.original ? ` · vorher ${eur(Number(r.original.betrag))}` : ""}
+                            </div>
+                          );
+                        return null;
+                      })()}
+                    </td>
                     <td className={`py-2 px-2 text-right tabular-nums font-medium whitespace-nowrap ${z.storniertAm ? "line-through" : ""}`}>{eur(z.betrag)}</td>
                     <td className="py-2 pl-2 text-right whitespace-nowrap">
                       {z.storniertAm && (
                         <span className="mr-2 text-xs">storniert ({z.storniertVon === "admin" ? "du" : "Mitarbeiter"})</span>
+                      )}
+                      {!z.storniertAm && (
+                        <BearbeitenKnopf
+                          mitarbeiter={maOptionen}
+                          arten={arten}
+                          eintrag={{
+                            id: z.id,
+                            employeeId: z.employeeId,
+                            artId: rowById.get(z.id)!.art_id,
+                            artName: z.artName,
+                            bereich: z.bereich,
+                            betrag: z.betrag,
+                            zeitpunkt: berlinLokal(z.zeitpunkt),
+                            notiz: z.notiz,
+                          }}
+                        />
                       )}
                       <StornoKnopf id={z.id} storniert={!!z.storniertAm} />
                     </td>

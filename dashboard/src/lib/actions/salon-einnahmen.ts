@@ -8,6 +8,7 @@ import { isSalonDevicePaired } from "@/lib/salon/auth";
 import { mintKopplungToken } from "@/lib/salon/kopplung-token";
 import type { FeatureKey } from "@/lib/types";
 import {
+  ADMIN_MAX_TAGE_ZURUECK,
   berlinDatum,
   berlinLokalZuIso,
   darfMitarbeiterStornieren,
@@ -160,6 +161,77 @@ export async function einnahmeStornoAdmin(id: string, storniert: boolean): Promi
     .from("salon_einnahmen")
     .update(storniert ? { storniert_am: new Date().toISOString(), storniert_von: "admin" } : { storniert_am: null, storniert_von: null })
     .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/salon-admin/einnahmen");
+  return { ok: true };
+}
+
+/** Admin am Rechner: Einnahme nachtragen (ohne id) oder korrigieren (mit id) — ohne PIN. */
+export async function einnahmeAdminSpeichern(input: {
+  id?: string;
+  employeeId: string;
+  artId: string;
+  betrag: string;
+  /** Bremer Ortszeit "YYYY-MM-DDTHH:mm" */
+  zeitpunkt: string;
+  notiz: string;
+}): Promise<Ergebnis<object>> {
+  await requireEinnahmenAdmin();
+  const svc = createServiceClient();
+  const betrag = parseBetrag(input.betrag);
+  const zeitpunktIso = berlinLokalZuIso(input.zeitpunkt);
+  const notiz = input.notiz.trim() || null;
+  const fehler = pruefeEinnahme({ betrag, zeitpunktIso, notiz }, new Date(), ADMIN_MAX_TAGE_ZURUECK);
+  if (fehler) return { ok: false, error: fehler };
+  const { data: ma } = await svc.from("salon_employees").select("id").eq("id", input.employeeId).maybeSingle();
+  if (!ma) return { ok: false, error: "Bitte einen Mitarbeiter auswählen" };
+
+  let alt: {
+    employee_id: string; art_id: string | null; art_name: string; bereich: string; betrag: number;
+    zeitpunkt: string; notiz: string | null; original: unknown; erfasst_von: string;
+  } | null = null;
+  if (input.id) {
+    const { data } = await svc
+      .from("salon_einnahmen")
+      .select("employee_id, art_id, art_name, bereich, betrag, zeitpunkt, notiz, original, erfasst_von")
+      .eq("id", input.id)
+      .maybeSingle();
+    if (!data) return { ok: false, error: "Eintrag nicht gefunden" };
+    alt = data;
+  }
+
+  // Unveränderte Art behält ihren Schnappschuss (auch wenn die Art inzwischen umbenannt/deaktiviert ist)
+  let art: { id: string | null; name: string; bereich: string };
+  if (alt && input.artId === (alt.art_id ?? "")) {
+    art = { id: alt.art_id, name: alt.art_name, bereich: alt.bereich };
+  } else {
+    const { data } = await svc.from("salon_einnahme_arten").select("id, name, bereich").eq("id", input.artId).maybeSingle();
+    if (!data) return { ok: false, error: "Bitte eine Art auswählen" };
+    art = data;
+  }
+
+  const werte = {
+    employee_id: input.employeeId,
+    art_id: art.id,
+    art_name: art.name,
+    bereich: art.bereich,
+    betrag,
+    zeitpunkt: zeitpunktIso,
+    notiz,
+  };
+  const { error } = alt
+    ? await svc
+        .from("salon_einnahmen")
+        .update({
+          ...werte,
+          geaendert_am: new Date().toISOString(),
+          // Erste Korrektur einer Mitarbeiter-Eingabe: deren Stand festhalten
+          ...(alt.original == null && alt.erfasst_von === "mitarbeiter"
+            ? { original: { employee_id: alt.employee_id, art_name: alt.art_name, bereich: alt.bereich, betrag: Number(alt.betrag), zeitpunkt: alt.zeitpunkt, notiz: alt.notiz } }
+            : {}),
+        })
+        .eq("id", input.id!)
+    : await svc.from("salon_einnahmen").insert({ ...werte, erfasst_von: "admin" });
   if (error) return { ok: false, error: error.message };
   revalidatePath("/salon-admin/einnahmen");
   return { ok: true };

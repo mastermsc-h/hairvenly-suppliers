@@ -27,6 +27,8 @@ export interface EinnahmeZeile {
 
 /** Wie weit zurück Mitarbeiter ein Datum setzen dürfen (vergessene Einträge). */
 export const MAX_TAGE_ZURUECK = 31;
+/** Admin am Rechner darf auch ältere Einträge nachtragen/korrigieren. */
+export const ADMIN_MAX_TAGE_ZURUECK = 3660;
 
 const TZ = "Europe/Berlin";
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -77,14 +79,18 @@ export function parseBetrag(text: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Prüft eine Eingabe am Gerät; gibt die Fehlermeldung zurück oder null. */
-export function pruefeEinnahme(e: { betrag: number | null; zeitpunktIso: string | null; notiz: string | null }, jetzt: Date): string | null {
+/** Prüft eine Eingabe (Gerät oder Admin); gibt die Fehlermeldung zurück oder null. */
+export function pruefeEinnahme(
+  e: { betrag: number | null; zeitpunktIso: string | null; notiz: string | null },
+  jetzt: Date,
+  maxTageZurueck: number = MAX_TAGE_ZURUECK,
+): string | null {
   if (e.betrag == null || e.betrag <= 0) return "Bitte einen Betrag eingeben";
   if (e.betrag >= 100000) return "Betrag zu hoch";
   if (!e.zeitpunktIso) return "Datum/Uhrzeit ungültig";
   const t = new Date(e.zeitpunktIso).getTime();
   if (t > jetzt.getTime() + 5 * 60000) return "Datum/Uhrzeit liegt in der Zukunft";
-  if (t < jetzt.getTime() - MAX_TAGE_ZURUECK * 86400000) return `Höchstens ${MAX_TAGE_ZURUECK} Tage zurück`;
+  if (t < jetzt.getTime() - maxTageZurueck * 86400000) return `Höchstens ${maxTageZurueck} Tage zurück`;
   if (e.notiz && e.notiz.length > 500) return "Notiz zu lang (max. 500 Zeichen)";
   return null;
 }

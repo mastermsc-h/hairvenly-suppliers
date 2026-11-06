@@ -3,7 +3,7 @@ import { requireProfile, hasFeature } from "@/lib/auth";
 import { signOut } from "@/lib/actions/auth";
 import { t, type Locale } from "@/lib/i18n";
 import type { FeatureKey } from "@/lib/types";
-import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings, Truck, Globe2, Bot, Scissors, CalendarDays, HeartPulse } from "lucide-react";
+import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings, Truck, Globe2, Bot, Scissors, CalendarDays, HeartPulse, Wallet } from "lucide-react";
 import SidebarGroup from "./sidebar-group";
 import ChatbotInboxBadge from "./chatbot-inbox-badge";
 import LanguageSwitcher from "./language-switcher";
@@ -170,11 +170,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                     { href: "/salon-admin", label: t(locale, "nav.salon.overview"), exact: true },
                     { href: "/salon-admin/statistik", label: t(locale, "nav.salon.stats") },
                     { href: "/salon-admin/mitarbeiter", label: t(locale, "nav.salon.employees") },
-                    ...(profile.role === "admin"
-                      ? [{ href: "/salon-admin/einnahmen", label: t(locale, "nav.salon.income") }]
-                      : []),
                   ]}
                 />
+              </>
+            )}
+
+            {/* Einnahmen Laden & Salon — eigener Punkt, nur der echte Admin */}
+            {profile.role === "admin" && (
+              <>
+                <div className="border-t border-neutral-200 my-2" />
+                <NavLink href="/salon-admin/einnahmen" icon={<Wallet size={16} />} label={t(locale, "nav.income")} />
               </>
             )}
 

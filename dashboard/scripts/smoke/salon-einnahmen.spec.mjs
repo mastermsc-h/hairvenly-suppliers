@@ -49,6 +49,8 @@ check("Gültig", E.pruefeEinnahme({ betrag: 100, zeitpunktIso: "2026-11-05T12:00
 check("Betrag fehlt", E.pruefeEinnahme({ betrag: null, zeitpunktIso: "2026-11-05T12:00:00Z", notiz: null }, jetzt) !== null, true);
 check("Zukunft", E.pruefeEinnahme({ betrag: 10, zeitpunktIso: "2026-11-05T14:00:00Z", notiz: null }, jetzt) !== null, true);
 check("Zu alt", E.pruefeEinnahme({ betrag: 10, zeitpunktIso: "2026-09-01T12:00:00Z", notiz: null }, jetzt) !== null, true);
+check("Admin darf älter", E.pruefeEinnahme({ betrag: 10, zeitpunktIso: "2026-09-01T12:00:00Z", notiz: null }, jetzt, E.ADMIN_MAX_TAGE_ZURUECK), null);
+check("Admin: Zukunft trotzdem nicht", E.pruefeEinnahme({ betrag: 10, zeitpunktIso: "2026-11-05T14:00:00Z", notiz: null }, jetzt, E.ADMIN_MAX_TAGE_ZURUECK) !== null, true);
 
 // Storno
 check("Eigener Eintrag von heute", E.darfMitarbeiterStornieren({ employeeId: "a", storniertAm: null, erfasstAm: "2026-11-05T08:00:00Z" }, "a", jetzt), true);
