@@ -395,6 +395,22 @@ check("Eigene Nummer eingetragen: keine Vermutung", L.prognose(zbRoh({}, { einfu
 const pvE = L.prognose(roh({ einfuhrAndere: [ea({ status: "shipped", versandAm: "2026-10-15" })], zollBuchungen: [{ datum: "2026-10-17", betragEur: 9000, nummern: ["26 33474"], art: "ungewitter" }] }), E0);
 check("Ebru: Ungewitter-Abbuchung nach Versand verrechnet", [einf(pvE), pvE.einfuhrAndere[0].einfuhrVermutung.nummern], [[], ["26 33474"]]);
 
+// Eingetragene Zahlungen, die das Konto noch nicht zeigt (06.11.2026: 3 Amanda-Anzahlungen, Bank erst nach 1–3 Tagen)
+check("USD aus Verwendungszweck", [L.usdImZweck("FXP/261029BIC DHBKHKHHXXXUSD12190,03 1,10810INVOICE"), L.usdImZweck("EMPF. CN BETRAG. USD       -6.142,00KURS."), L.usdImZweck("SEPA")], [[12190.03], [6142], []]);
+const zt = (o) => ({ datum: "2026-10-16", betrag: -10000, zweck: "FXP/x BIC DHBKHKHHXXXUSD13000,00 1,11", kategorie: "aus_wareneinkauf", ...o });
+const zu = (o) => ({ id: "z", datum: "2026-10-16", usd: 13000, ...o });
+check("Zahlung mit passender Abbuchung: nicht unterwegs", L.zahlungenOhneAbbuchung([zu({})], [zt({})], "2026-10-18").length, 0);
+check("Zahlung ohne Abbuchung: unterwegs", L.zahlungenOhneAbbuchung([zu({})], [zt({ zweck: "USD12999,00" })], "2026-10-18").map((z) => z.id), ["z"]);
+check("Gebühren-Zeile mit gleichem USD-Betrag zählt nicht", L.zahlungenOhneAbbuchung([zu({})], [zt({ betrag: -22.5, kategorie: "aus_bank", zweck: "GEBUEHRENUSD 13000,00" })], "2026-10-18").length, 1);
+check("Zwei gleiche Zahlungen, eine Abbuchung: eine bleibt unterwegs", L.zahlungenOhneAbbuchung([zu({ id: "a" }), zu({ id: "b" })], [zt({})], "2026-10-18").length, 1);
+check("Ältere Zahlung (>10 Tage): nicht mehr unterwegs", L.zahlungenOhneAbbuchung([zu({ datum: "2026-10-01" })], [], "2026-10-18").length, 0);
+const pun = L.prognose(roh({ zahlungenUnterwegs: [{ id: "z", orderId: "x", label: "Amanda 03.08.2026", lieferant: "Amanda", datum: "2026-10-16", usd: 12500, art: "amanda" }] }), E0);
+check("Unterwegs: heute abgezogen", pun.ereignisse.filter((x) => x.unterwegs).map((x) => [x.datum, x.betrag, x.art]), [["2026-10-17", -10000, "lieferant"]]);
+check("Unterwegs: senkt den Tiefpunkt", pun.tiefpunkt.saldo < L.prognose(roh(), E0).tiefpunkt.saldo, true);
+const pun2 = L.prognose(roh({ bestellungen: [best({ id: "x" })], zahlungenUnterwegs: [{ id: "z", orderId: "x", label: "B", lieferant: "Amanda", datum: "2026-10-16", usd: 5000, art: "amanda" }] }), E0);
+check("Unterwegs: Ampel/Termin der Bestellung unverändert", pun2.bestellungen[0].zahlDatum, L.prognose(roh({ bestellungen: [best({ id: "x" })] }), E0).bestellungen[0].zahlDatum);
+check("Unterwegs Ebru: als Raten-Abgang", L.prognose(roh({ zahlungenUnterwegs: [{ id: "z", orderId: "y", label: "EHL1", lieferant: "Ebru (CN + TR)", datum: "2026-10-16", usd: 12500, art: "raten" }] }), E0).ereignisse.filter((x) => x.unterwegs).map((x) => [x.art, x.ratenLieferant]), [["manuell", "Ebru (CN + TR)"]]);
+
 // Defaults
 check("Defaults vollständig", Object.keys(L.mitDefaults({})).length, Object.keys(L.LIQ_DEFAULTS).length);
 

@@ -176,7 +176,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
   }, [p]);
   // Aktions-Eingänge (ein Eintrag pro Tag) im Terminkalender zu einer Zeile zusammenfassen
   const aktionEv = p.ereignisse.filter((x) => x.art === "aktion");
-  const manuellRaten = p.ereignisse.filter((x) => x.art === "manuell");
+  const manuellRaten = p.ereignisse.filter((x) => x.art === "manuell" && !x.unterwegs);
   // Größte Abgänge bis zum Tiefpunkt (für den Warnhinweis)
   const ursachen = useMemo(() => {
     const NAMEN: Record<string, string> = { lieferant: "Amanda", manuell: "Ebru-Raten", einfuhr: "Einfuhrabgaben", steuer: "Steuern", nachbestellung: "Amanda-Nachbestellungen" };
@@ -204,6 +204,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
 
   /** Wo ein Termin auf der Seite steht und welches Terminfeld sich dabei öffnet. */
   function zielVon(ev: Ereignis): { id: string; oeffnen?: string } {
+    if (ev.unterwegs) return { id: `bestellung-${ev.orderId}` };
     if (ev.art === "lieferant") return { id: `bestellung-${ev.orderId}`, oeffnen: `bestellung:${ev.orderId}` };
     if (ev.art === "einfuhr" && ev.orderId) return { id: `bestellung-${ev.orderId}` };
     if (ev.art === "manuell") {
@@ -235,7 +236,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
     const einfuhrOffen = p.ereignisse.filter((x) => x.art === "einfuhr").reduce((s, x) => s - x.betrag, 0);
     return (datum: string): Schulden | null => {
       if (datum < p.start) return null;
-      const bis = (art: Ereignis["art"]) => p.ereignisse.filter((x) => x.art === art && x.datum <= datum).reduce((s, x) => s - x.betrag, 0);
+      // Zahlungen "unterwegs" sind schon von der Schuld abgezogen (Rest an der Bestellung) — nicht doppelt
+      const bis = (art: Ereignis["art"]) => p.ereignisse.filter((x) => x.art === art && !x.unterwegs && x.datum <= datum).reduce((s, x) => s - x.betrag, 0);
       const amanda = Math.max(0, amandaOffen - bis("lieferant"));
       const raten = Math.max(0, ratenOffen - bis("manuell"));
       return { amanda, raten, ratenGeschaetzt: Math.min(raten, geschaetztOffen), einfuhr: Math.max(0, einfuhrOffen - bis("einfuhr")), summe: amanda + raten };

@@ -8,6 +8,7 @@ import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import {
   einfuhrZahlungen,
   offeneZollBuchungen,
+  zahlungenOhneAbbuchung,
   rechnungsNummern,
   type EinfuhrZahlung,
   kontoVerlauf,
@@ -299,6 +300,26 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     [...nrVon.values()],
   );
 
+  // ── Eingetragene Lieferanten-Zahlungen, die noch nicht auf dem Konto stehen (Amanda + Ratenlieferanten) ──
+  const { data: zahlRows } = await sb
+    .from("payments")
+    .select("id, order_id, amount, paid_at, method, orders!inner(label, supplier_id, suppliers(name))")
+    .gte("paid_at", plusTage(heute, -10));
+  const ratenNamen = (await ladeEinstellungen(sb)).ratenLieferanten.map((r) => r.name.toLowerCase()).filter(Boolean);
+  const zahlungenUnterwegs = zahlungenOhneAbbuchung(
+    ((zahlRows ?? []) as unknown as Array<{ id: string; order_id: string; amount: number; paid_at: string; method: string | null; orders: { label: string | null; supplier_id: string; suppliers: { name: string } | null } }>)
+      // Nur Überweisungen vom Geschäftskonto — PayPal/bar/Karte erscheinen nie als Auslandsüberweisung
+      .filter((z) => !/paypal|bar\b|cash|wise|karte|kredit/i.test(z.method ?? ""))
+      .map((z) => {
+        const lieferant = z.orders.suppliers?.name ?? "";
+        const art = z.orders.supplier_id === amandaId ? "amanda" : ratenNamen.some((n) => lieferant.toLowerCase().includes(n)) ? "raten" : null;
+        return { id: z.id, orderId: z.order_id, label: String(z.orders.label ?? ""), lieferant, datum: String(z.paid_at).slice(0, 10), usd: Number(z.amount), art };
+      })
+      .filter((z): z is typeof z & { art: "amanda" | "raten" } => z.art !== null),
+    alleTx.map((t) => ({ datum: t.booking_date, betrag: Number(t.amount), zweck: t.purpose, kategorie: t.kategorie })),
+    heute,
+  );
+
   // ── Nachbestellung (Schätzung aus dem eigenen Bestellrhythmus) ──
   const hist = (amanda ?? []) as Array<{ order_date: string | null; invoice_total: number | null; weight_kg: number | null }>;
   const kg90 = hist.filter((h) => (h.order_date ?? "") >= plusTage(heute, -90)).reduce((s, h) => s + Number(h.weight_kg ?? 0), 0);
@@ -333,6 +354,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     einfuhrAndere,
     ebruNachbestellung,
     zollBuchungen,
+    zahlungenUnterwegs,
     verschiebungen,
     steuern: {
       ustHistorie,

@@ -358,6 +358,47 @@ export function zollVermutungen(
   return out;
 }
 
+/** Lieferanten-Zahlung, an der Bestellung eingetragen, deren Abbuchung (noch) fehlt. */
+export interface ZahlungUnterwegs {
+  id: string;
+  orderId: string;
+  label: string;
+  lieferant: string;
+  /** Zahldatum laut Eintrag. */
+  datum: string;
+  usd: number;
+  art: "amanda" | "raten";
+}
+
+/** USD-Beträge aus dem Verwendungszweck einer Auslandsüberweisung ("USD29646,07", "USD  -6.142,00"). */
+export function usdImZweck(zweck: string | null): number[] {
+  return [...(zweck ?? "").matchAll(/USD\s*-?\s*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})/gi)].map((m) => Number(m[1].replace(/\./g, "").replace(",", ".")));
+}
+
+/**
+ * Eingetragene Zahlungen der letzten `tage` Tage ohne passende Abbuchung: Wareneinkauf-Abbuchung mit
+ * demselben USD-Betrag ab 5 Tage vor dem Zahldatum. Jede Abbuchung deckt nur eine Zahlung. Die Bank
+ * zeigt Auslandsüberweisungen erst nach 1–3 Tagen — bis dahin zählt die Zahlung als "unterwegs".
+ */
+export function zahlungenOhneAbbuchung<T extends { datum: string; usd: number }>(
+  zahlungen: T[],
+  buchungen: Array<{ datum: string; betrag: number; zweck: string | null; kategorie: string | null }>,
+  heute: string,
+  tage = 10,
+): T[] {
+  const abb = buchungen.filter((t) => t.betrag < 0 && t.kategorie === "aus_wareneinkauf").map((t) => ({ datum: t.datum, usd: usdImZweck(t.zweck) }));
+  const benutzt = new Set<number>();
+  return [...zahlungen]
+    .filter((z) => z.datum >= plusTage(heute, -tage) && z.usd > 0)
+    .sort((a, b) => a.datum.localeCompare(b.datum))
+    .filter((z) => {
+      const i = abb.findIndex((t, j) => !benutzt.has(j) && t.datum >= plusTage(z.datum, -5) && t.usd.some((u) => Math.abs(u - z.usd) < 0.01));
+      if (i < 0) return true;
+      benutzt.add(i);
+      return false;
+    });
+}
+
 /** Manuelle Position (Status "manual"): Rechnung ohne Warenbewegung, z.B. Sammelrechnung. */
 export interface LiqManuellePosition {
   id: string;
@@ -433,6 +474,8 @@ export interface LiqRohdaten {
   ebruNachbestellung?: { lieferant: string; kgProMonatAuto: number; usdProKgAuto: number; leadWochen: number } | null;
   /** Abbuchungen von DHL (ZIT) / Ungewitter, deren Nummer an keiner Bestellung steht. */
   zollBuchungen?: ZollBuchung[];
+  /** An Bestellungen eingetragene Lieferanten-Zahlungen, die noch nicht auf dem Konto stehen. */
+  zahlungenUnterwegs?: ZahlungUnterwegs[];
   verschiebungen?: LiqVerschiebungen;
   steuern: {
     /** Vergangene Monate: gezahlte USt-VA (+) bzw. Erstattung (−) und im Monat gezahlte EUSt. */
@@ -560,6 +603,8 @@ export interface Ereignis {
   naechsteRate?: TerminStand & { lieferant: string };
   /** Bestellung in Anzahlung + Rest geteilt. */
   teil?: "anzahlung" | "rest";
+  /** An der Bestellung als bezahlt eingetragen, aber noch nicht auf dem Konto — keine offene Schuld mehr. */
+  unterwegs?: boolean;
 }
 
 export type Ampel = "ok" | "knapp" | "luecke";
@@ -838,6 +883,20 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     eustProMonat[monatVon(datum)] = (eustProMonat[monatVon(datum)] ?? 0) + rest.eust;
     return { datum, ...rest };
   };
+
+  // 0) Eingetragene Zahlungen, die das Konto noch nicht zeigt: Rest der Bestellung ist schon kleiner,
+  //    der Kontostand aber noch nicht → heute abziehen, bis die Abbuchung kommt.
+  for (const z of roh.zahlungenUnterwegs ?? []) {
+    ereignisse.push({
+      datum: amStart(z.datum),
+      betrag: -r2(z.usd / fx),
+      art: z.art === "amanda" ? "lieferant" : "manuell",
+      label: `${z.label} · bezahlt ${deKurz(z.datum)}, noch nicht auf dem Konto`,
+      orderId: z.orderId,
+      ...(z.art === "raten" ? { ratenLieferant: z.lieferant } : {}),
+      unterwegs: true,
+    });
+  }
 
   // 1) Amanda-Bestellungen: Zahlung bei "versandbereit" (≈ Ankunft − X Tage), Einfuhrabgaben bei Ankunft
   for (const b of roh.bestellungen) {
@@ -1146,7 +1205,7 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
     const info = plan.bestellInfo.get(b.id);
     if (!info) continue;
     // Bei Anzahlung + Rest zählt die knappere der beiden Zahlungen
-    const zahlEvs = plan.ereignisse.filter((x) => x.orderId === b.id && x.art === "lieferant");
+    const zahlEvs = plan.ereignisse.filter((x) => x.orderId === b.id && x.art === "lieferant" && !x.unterwegs);
     const einfEv = plan.ereignisse.find((x) => x.orderId === b.id && x.art === "einfuhr");
     const saldoNach = zahlEvs.length ? Math.min(...zahlEvs.map((x) => sim.nachEreignis.get(x) ?? startSaldo)) : startSaldo;
     const ampel = zahlEvs.length ? ampelFuer(saldoNach, e.puffer) : "ok";
