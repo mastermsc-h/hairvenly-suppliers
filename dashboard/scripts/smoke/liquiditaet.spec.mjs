@@ -367,6 +367,34 @@ const pnb2 = L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: nb }), { ..
 check("Ebru-Nachbestellung: Rechnung reiht sich als geschätzte Rate ein", pnb2.ereignisse.filter((x) => x.art === "manuell").every((x) => x.schaetzung && x.label.includes("≈ Nachbestellung")), true);
 check("Ebru-Nachbestellung: es gibt Raten", pnb2.ereignisse.some((x) => x.art === "manuell"), true);
 
+// Nicht zugeordnete Verzoller-Abbuchungen (06.11.2026: ZIT8150777 abgebucht, an keiner Bestellung → doppelt gezählt)
+const zb = (o) => ({ datum: "2026-10-16", betrag: -8000, zweck: "/OBO/DHL EXPRESS GERMANY GMBH/INV/ZIT8150777 INV/ZIT8150777", gegenpartei: "DHL AG", kategorie: "st_eust", ...o });
+const offen = L.offeneZollBuchungen([
+  zb({}),
+  zb({ zweck: "/OBO/DHL EXPRESS GERMANY GMBH/INV/ZIT8000001", betrag: -500 }),
+  zb({ zweck: "RG.-Nr.. 26 33474 / Kundennr.. 180590 / Hairvenly", gegenpartei: "Carl Ungewitter Trinidad Lake", betrag: -2000 }),
+  zb({ kategorie: "aus_versand", zweck: "/OBO/DHL PAKET GMBH/ZIT8999999" }),
+  zb({ betrag: 100 }),
+], ["zit 8000001"]);
+check("Offene Zoll-Buchungen: ZIT + Ungewitter, eingetragene/fremde/Gutschrift raus", offen.map((b) => [b.art, b.nummern, b.betragEur]), [["dhl", ["ZIT8150777"], 8000], ["ungewitter", ["26 33474"], 2000]]);
+const zv = L.zollVermutungen(
+  [{ id: "a", art: "dhl", versandAm: "2026-10-10", eur: 5000 }, { id: "b", art: "dhl", versandAm: "2026-10-12", eur: 4000 }, { id: "c", art: "dhl", versandAm: "2026-10-20", eur: 1000 }, { id: "d", art: "ungewitter", versandAm: "2026-10-01", eur: 1000 }],
+  [{ datum: "2026-10-16", betragEur: 8000, nummern: ["ZIT1"], art: "dhl" }],
+);
+check("Vermutung: älteste Sendung zuerst, Abbuchung deckt mehrere", [zv.get("a"), zv.get("b")].map((v) => [v.anteilEur, v.vollstaendig, v.betragEur]), [[5000, true, 8000], [3000, false, 8000]]);
+check("Vermutung: Abbuchung vor dem Versand / anderer Verzoller zählt nicht", [zv.has("c"), zv.has("d")], [false, false]);
+check("Vermutung: Abbuchung am Versandtag zählt nicht", L.zollVermutungen([{ id: "a", art: "dhl", versandAm: "2026-10-16", eur: 5000 }], [{ datum: "2026-10-16", betragEur: 8000, nummern: ["ZIT1"], art: "dhl" }]).size, 0);
+const zbRoh = (o, b = {}) => roh({ bestellungen: [best({ restUsd: 0, status: "shipped", versandAm: "2026-10-15", ...b })], zollBuchungen: [{ datum: "2026-10-16", betragEur: 8000, nummern: ["ZIT8150777"], art: "dhl" }], ...o });
+const pzv = L.prognose(zbRoh({}), E0);
+check("Abgebucht nach Versand, nicht zugeordnet: keine Einfuhr mehr in der Vorschau", [pzv.ereignisse.filter((x) => x.art === "einfuhr").length, pzv.bestellungen[0].einfuhr, pzv.bestellungen[0].einfuhrVermutung.nummern], [0, null, ["ZIT8150777"]]);
+check("Kleinere Abbuchung: nur der Rest bleibt", L.prognose(zbRoh({ zollBuchungen: [{ datum: "2026-10-16", betragEur: 3000, nummern: ["ZIT1"], art: "dhl" }] }), E0).ereignisse.filter((x) => x.art === "einfuhr").map((x) => x.betrag), [-4600]);
+check("Schalter aus: Schätzung bleibt", L.prognose(zbRoh({}), { ...E0, zollAbbuchungenVerrechnen: false }).ereignisse.filter((x) => x.art === "einfuhr").map((x) => x.betrag), [-7600]);
+check("Ohne Versandtag: keine Vermutung", L.prognose(zbRoh({}, { versandAm: null }), E0).ereignisse.filter((x) => x.art === "einfuhr").map((x) => x.betrag), [-7600]);
+check("Noch nicht versendet: keine Vermutung", L.prognose(zbRoh({}, { status: "ready_to_ship" }), E0).bestellungen[0].einfuhrVermutung, null);
+check("Eigene Nummer eingetragen: keine Vermutung", L.prognose(zbRoh({}, { einfuhrRechnung: "ZIT7777777", einfuhrZahlung: ezNichts }), E0).bestellungen[0].einfuhrVermutung, null);
+const pvE = L.prognose(roh({ einfuhrAndere: [ea({ status: "shipped", versandAm: "2026-10-15" })], zollBuchungen: [{ datum: "2026-10-17", betragEur: 9000, nummern: ["26 33474"], art: "ungewitter" }] }), E0);
+check("Ebru: Ungewitter-Abbuchung nach Versand verrechnet", [einf(pvE), pvE.einfuhrAndere[0].einfuhrVermutung.nummern], [[], ["26 33474"]]);
+
 // Defaults
 check("Defaults vollständig", Object.keys(L.mitDefaults({})).length, Object.keys(L.LIQ_DEFAULTS).length);
 

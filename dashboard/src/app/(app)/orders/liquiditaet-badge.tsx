@@ -18,12 +18,15 @@ export default function LiquiditaetBadge({ p, groß = false, alsLink = true }: {
   const ampel: Ampel = p.bezahlt ? (p.einfuhr?.ampel ?? "ok") : p.ampel;
   const stil = AMPEL_STIL[ampel];
   const ez = p.einfuhrZahlung;
-  const einfuhrAbgebucht = !p.einfuhr && !!ez && ez.gefunden.length === ez.rechnungen.length;
+  const vm = p.einfuhrVermutung;
+  const einfuhrAbgebucht = !p.einfuhr && ((!!ez && ez.gefunden.length === ez.rechnungen.length) || !!vm?.vollstaendig);
   const einfuhr = p.einfuhr
     ? ` · Einfuhrabgaben ${eur(p.einfuhr.eust + p.einfuhr.zoll)} am ${deDate(p.einfuhr.datum)} (Konto danach ${eur(p.einfuhr.saldoDanach)})`
     : einfuhrAbgebucht && ez?.datum
       ? ` · Einfuhrabgaben abgebucht am ${deDate(ez.datum)} (${ez.sammel ? "Sammelzahlung " : ""}${eur(ez.betragEur)})`
-      : "";
+      : einfuhrAbgebucht && vm
+        ? ` · Einfuhrabgaben wahrscheinlich abgebucht am ${deDate(vm.datum)} (${vm.nummern.join(", ") || "ohne Nummer"}, ${eur(vm.betragEur)})`
+        : "";
   const title = p.bezahlt
     ? `Lieferant bezahlt${einfuhr}`
     : p.teilung

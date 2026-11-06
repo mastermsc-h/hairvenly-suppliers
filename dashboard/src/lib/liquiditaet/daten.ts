@@ -7,6 +7,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import {
   einfuhrZahlungen,
+  offeneZollBuchungen,
   rechnungsNummern,
   type EinfuhrZahlung,
   kontoVerlauf,
@@ -274,6 +275,30 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     })
     .sort((a, b) => (a.eta ?? "").localeCompare(b.eta ?? ""));
 
+  // ── Versandtag verschickter Ware (Statusverlauf) + Verzoller-Abbuchungen ohne zugeordnete Bestellung ──
+  const unterwegsIds = [...bestellungen, ...einfuhrAndere].filter((b) => b.status === "shipped" || b.status === "in_customs").map((b) => b.id);
+  if (unterwegsIds.length) {
+    const { data: ev } = await sb
+      .from("order_events")
+      .select("order_id, created_at, meta")
+      .eq("event_type", "status_change")
+      .in("order_id", unterwegsIds)
+      .order("created_at", { ascending: true });
+    // Erster Wechsel auf "versendet" bzw. "beim Zoll" (deutsche Zeit)
+    const versandAm = new Map<string, string>();
+    for (const x of (ev ?? []) as Array<{ order_id: string; created_at: string; meta: { to?: string } | null }>) {
+      if (versandAm.has(x.order_id) || !["shipped", "in_customs"].includes(x.meta?.to ?? "")) continue;
+      versandAm.set(x.order_id, new Date(x.created_at).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }));
+    }
+    for (const b of [...bestellungen, ...einfuhrAndere]) b.versandAm = versandAm.get(b.id) ?? null;
+  }
+  const zollBuchungen = offeneZollBuchungen(
+    alleTx
+      .filter((t) => t.booking_date >= plusTage(heute, -60))
+      .map((t) => ({ datum: t.booking_date, betrag: Number(t.amount), zweck: t.purpose, gegenpartei: t.counterparty_name, kategorie: t.kategorie })),
+    [...nrVon.values()],
+  );
+
   // ── Nachbestellung (Schätzung aus dem eigenen Bestellrhythmus) ──
   const hist = (amanda ?? []) as Array<{ order_date: string | null; invoice_total: number | null; weight_kg: number | null }>;
   const kg90 = hist.filter((h) => (h.order_date ?? "") >= plusTage(heute, -90)).reduce((s, h) => s + Number(h.weight_kg ?? 0), 0);
@@ -307,6 +332,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     ratenKommendUsd,
     einfuhrAndere,
     ebruNachbestellung,
+    zollBuchungen,
     verschiebungen,
     steuern: {
       ustHistorie,

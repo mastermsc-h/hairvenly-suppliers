@@ -90,6 +90,8 @@ export interface LiqEinstellungen {
   restNachAnzahlungTage: number;
   /** Künftige Ebru-Nachbestellungen (wöchentlich) als Schätzung: Rechnung bei Versand → hinten in die Raten, Einfuhrabgaben bei Ankunft. */
   ebruNachbestellungenEinrechnen: boolean;
+  /** Abbuchungen von DHL (ZIT) / Ungewitter ohne zugeordnete Bestellung gegen die Einfuhr-Schätzung verschickter Ware verrechnen. */
+  zollAbbuchungenVerrechnen: boolean;
   ebruNachbestellKgMonat: number | null; // null = Ø Bestellungen der letzten 6 Monate
   ebruUsdProKg: number | null; // null = Ø der letzten Bestellungen
 }
@@ -160,6 +162,8 @@ export const LIQ_DEFAULTS: LiqEinstellungen = {
   // User 03.11.2026: nach einer Anzahlung bleiben 4 Wochen für den Rest
   restNachAnzahlungTage: 28,
   ebruNachbestellungenEinrechnen: false,
+  // User 06.11.2026: schon abgebuchte, aber nicht zugeordnete ZIT-Rechnungen nicht doppelt rechnen
+  zollAbbuchungenVerrechnen: true,
   ebruNachbestellKgMonat: null,
   ebruUsdProKg: null,
 };
@@ -183,6 +187,8 @@ export interface LiqBestellung {
   einfuhrRechnung?: string | null;
   /** Abgleich der Rechnungsnummern mit den Kontoumsätzen (nur wenn welche eingetragen sind). */
   einfuhrZahlung?: EinfuhrZahlung | null;
+  /** Tag, an dem der Status auf "versendet"/"beim Zoll" gesetzt wurde (Statusverlauf). */
+  versandAm?: string | null;
 }
 
 /** Lieferung eines Ratenlieferanten (Ebru): Einfuhrabgaben bei Ankunft, bezahlt wird über die Raten. */
@@ -199,6 +205,7 @@ export interface LiqEinfuhrPosten {
   geschaetzt: boolean;
   einfuhrRechnung?: string | null;
   einfuhrZahlung?: EinfuhrZahlung | null;
+  versandAm?: string | null;
 }
 
 // ── Einfuhrabgaben ↔ Kontoumsatz ────────────────────────────────────────────
@@ -258,6 +265,94 @@ export function einfuhrZahlungen(
       betragEur: r2(liste.reduce((s, t) => s - t.betrag, 0)),
       datum: liste.length ? liste.map((t) => t.datum).sort().at(-1)! : null,
       sammel: liste.some(fremd),
+    });
+  }
+  return out;
+}
+
+/** Abbuchung eines Verzollers (DHL Express: ZIT-Rechnung, Carl Ungewitter: RG.-Nr.), noch keiner Bestellung zugeordnet. */
+export interface ZollBuchung {
+  datum: string;
+  betragEur: number;
+  /** Rechnungsnummern wie im Verwendungszweck ("ZIT8150777", "26 33474"). */
+  nummern: string[];
+  art: "dhl" | "ungewitter";
+}
+
+/** Vermutlich schon bezahlte Einfuhrabgaben: nicht zugeordnete Abbuchungen nach dem Versand. */
+export interface EinfuhrVermutung {
+  nummern: string[];
+  /** Letzte der verrechneten Abbuchungen. */
+  datum: string;
+  /** Summe der verrechneten Abbuchungen (ganz). */
+  betragEur: number;
+  /** Davon gegen diese Bestellung verrechnet. */
+  anteilEur: number;
+  /** Deckt die ganze Schätzung. */
+  vollstaendig: boolean;
+}
+
+/**
+ * Verzoller-Abbuchungen, deren Rechnungsnummer an keiner Bestellung eingetragen ist. Eine Abbuchung,
+ * in der irgendeine eingetragene Nummer vorkommt, fällt ganz raus (Anteil bei Sammelzahlungen unbekannt).
+ */
+export function offeneZollBuchungen(
+  buchungen: Array<{ datum: string; betrag: number; zweck: string | null; gegenpartei: string | null; kategorie: string | null }>,
+  eingetragen: Array<string | null | undefined>,
+): ZollBuchung[] {
+  const nummern = eingetragen.flatMap((t) => rechnungsNummern(t));
+  const out: ZollBuchung[] = [];
+  for (const t of buchungen) {
+    if (t.betrag >= 0 || t.kategorie !== "st_eust" || !t.zweck) continue;
+    const n = nurZeichen(t.zweck);
+    if (nummern.some((nr) => n.includes(nr))) continue;
+    const zit = [...new Set(n.match(/ZIT\d{5,}/g) ?? [])];
+    if (zit.length) {
+      out.push({ datum: t.datum, betragEur: r2(-t.betrag), nummern: zit, art: "dhl" });
+      continue;
+    }
+    if (/ungewitter/i.test(t.gegenpartei ?? "")) {
+      const rg = t.zweck.match(/RG\.?-?\s*NR\.*\s*([\d][\d ]{3,}\d)/i)?.[1]?.trim();
+      out.push({ datum: t.datum, betragEur: r2(-t.betrag), nummern: rg ? [rg] : [], art: "ungewitter" });
+    }
+  }
+  return out.sort((a, b) => a.datum.localeCompare(b.datum));
+}
+
+/**
+ * Ordnet nicht zugeordnete Verzoller-Abbuchungen verschickter Ware zu: älteste Sendung zuerst, nur
+ * Abbuchungen nach dem Versandtag (bis `fensterTage` danach) und vom passenden Verzoller. Eine
+ * Abbuchung kann mehrere Sendungen decken (DHL fasst zusammen), jeder Euro wird nur einmal verrechnet.
+ */
+export function zollVermutungen(
+  kandidaten: Array<{ id: string; art: ZollBuchung["art"]; versandAm: string; eur: number }>,
+  buchungen: ZollBuchung[],
+  fensterTage = 30,
+): Map<string, EinfuhrVermutung> {
+  const rest = buchungen.map((b) => b.betragEur);
+  const out = new Map<string, EinfuhrVermutung>();
+  const sortiert = [...kandidaten].sort((a, b) => a.versandAm.localeCompare(b.versandAm) || a.id.localeCompare(b.id));
+  for (const k of sortiert) {
+    let offen = k.eur;
+    const genutzt: number[] = [];
+    let anteil = 0;
+    buchungen.forEach((b, i) => {
+      if (offen <= 0.005 || rest[i] <= 0.005 || b.art !== k.art) return;
+      // Erst nach dem Versandtag — am selben Tag kann noch keine Zoll-Rechnung abgebucht sein
+      if (b.datum <= k.versandAm || b.datum > plusTage(k.versandAm, fensterTage)) return;
+      const nimm = Math.min(rest[i], offen);
+      rest[i] = r2(rest[i] - nimm);
+      offen = r2(offen - nimm);
+      anteil = r2(anteil + nimm);
+      genutzt.push(i);
+    });
+    if (!genutzt.length) continue;
+    out.set(k.id, {
+      nummern: [...new Set(genutzt.flatMap((i) => buchungen[i].nummern))],
+      datum: genutzt.map((i) => buchungen[i].datum).sort().at(-1)!,
+      betragEur: r2(genutzt.reduce((s, i) => s + buchungen[i].betragEur, 0)),
+      anteilEur: anteil,
+      vollstaendig: offen <= 0.005,
     });
   }
   return out;
@@ -336,6 +431,8 @@ export interface LiqRohdaten {
   einfuhrAndere?: LiqEinfuhrPosten[];
   /** Bestellrhythmus Ebru (für die Nachbestell-Schätzung). */
   ebruNachbestellung?: { lieferant: string; kgProMonatAuto: number; usdProKgAuto: number; leadWochen: number } | null;
+  /** Abbuchungen von DHL (ZIT) / Ungewitter, deren Nummer an keiner Bestellung steht. */
+  zollBuchungen?: ZollBuchung[];
   verschiebungen?: LiqVerschiebungen;
   steuern: {
     /** Vergangene Monate: gezahlte USt-VA (+) bzw. Erstattung (−) und im Monat gezahlte EUSt. */
@@ -486,6 +583,8 @@ export interface BestellPrognose {
   /** Eingetragene DHL-/Zoll-Rechnungsnummer(n) (Rohtext) und ihr Abgleich mit dem Konto. */
   einfuhrRechnung: string | null;
   einfuhrZahlung: EinfuhrZahlung | null;
+  /** Ohne eingetragene Nummer: vermutlich passende Abbuchung nach dem Versand (verrechnet). */
+  einfuhrVermutung: EinfuhrVermutung | null;
   /** Geplante Anzahlung + Rest; null = ganzer Betrag auf einmal. */
   teilung: Teilung | null;
 }
@@ -544,6 +643,7 @@ export interface EinfuhrPrognose {
   einfuhr: { datum: string; eust: number; zoll: number; saldoDanach: number; ampel: Ampel } | null;
   einfuhrRechnung: string | null;
   einfuhrZahlung: EinfuhrZahlung | null;
+  einfuhrVermutung: EinfuhrVermutung | null;
 }
 
 /** Ware ist angekommen: Einfuhrabgaben sind erledigt, ein offener Rest ist sofort fällig. */
@@ -582,6 +682,7 @@ interface Plan {
   nachbestellKgMonat: number;
   ebruNachbestellKgMonat: number;
   einfuhrAndere: Map<string, { datum: string; eust: number; zoll: number } | null>;
+  vermutungen: Map<string, EinfuhrVermutung>;
   eustAndereMonat: number;
   ustIstSchnitt: number | null;
 }
@@ -691,6 +792,24 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
 
   // Einfuhrabgaben einer Lieferung: ohne Rechnungsnummer bis die Ware angekommen ist (Status). Mit
   // Rechnungsnummer zählt das Konto — erst die Abbuchung erledigt sie, auch wenn die Ware schon eingelagert ist.
+  // Schon abgebuchte, aber nicht zugeordnete Verzoller-Rechnungen: gegen verschickte Ware ohne Nummer
+  // verrechnen (sonst steckt der Betrag im Kontostand UND als Zahlung "heute" in der Vorschau).
+  const UNTERWEGS = ["shipped", "in_customs"];
+  const ebruEinzelnVorab = roh.einfuhrAndere !== undefined && !e.andereLieferantenEinrechnen;
+  const vermutungen = new Map<string, EinfuhrVermutung>();
+  if (e.zollAbbuchungenVerrechnen && roh.zollBuchungen?.length) {
+    const kand = (b: { id: string; status: string; versandAm?: string | null; einfuhrRechnung?: string | null; importVatEur: number | null }, usd: number, art: ZollBuchung["art"]) => {
+      if (!UNTERWEGS.includes(b.status) || !b.versandAm || rechnungsNummern(b.einfuhrRechnung).length || usd <= 0) return [];
+      const ab = einfuhrFuer(usd, b.importVatEur);
+      return [{ id: b.id, art, versandAm: b.versandAm, eur: r2(ab.eust + ab.zoll) }];
+    };
+    const kandidaten = [
+      ...roh.bestellungen.flatMap((b) => kand(b, b.invoiceUsd ?? 0, "dhl")),
+      ...(ebruEinzelnVorab ? roh.einfuhrAndere ?? [] : []).flatMap((b) => kand(b, b.warenUsd, "ungewitter")),
+    ];
+    for (const [id, v] of zollVermutungen(kandidaten, roh.zollBuchungen)) vermutungen.set(id, v);
+  }
+
   // Termin: Amanda (DHL-ZIT) bei Ankunft; Ebru (Ungewitter) wenige Tage nach Versand, Versand = Ankunft − Vorlauf
   // wie bei der Ebru-Rechnung. Noch nicht versendete Ware mit überholtem Datum kann nicht heute ankommen →
   // Versand/Ankunft frühestens in VERSAND_FRUEHESTENS_TAGE.
@@ -709,7 +828,8 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     const ab = einfuhrFuer(b.warenUsd, b.importVatEur);
     // Teil schon abgebucht (mehrere Rechnungen): nur der Rest; bei Sammelzahlungen ist der Anteil unbekannt
     const summe = ab.eust + ab.zoll;
-    const schon = ez && !ez.sammel ? Math.min(ez.betragEur, summe) : 0;
+    const vm = vermutungen.get(b.id);
+    const schon = ez && !ez.sammel ? Math.min(ez.betragEur, summe) : vm ? Math.min(vm.anteilEur, summe) : 0;
     const f = summe > 0 ? 1 - schon / summe : 0;
     const rest = { eust: r2(ab.eust * f), zoll: r2(ab.zoll * f) };
     if (rest.eust + rest.zoll <= 0.005) return null;
@@ -967,7 +1087,7 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
 
   // Innerhalb eines Tages: Eingänge vor Ausgängen, sonst stabil
   ereignisse.sort((a, b) => a.datum.localeCompare(b.datum) || Math.sign(b.betrag) - Math.sign(a.betrag));
-  return { start, ende, fx, fxQuelle, ereignisse, ustBasis, eustAndereMonat, ustIstSchnitt, bestellInfo, hinweise, nachbestellKgMonat, ebruNachbestellKgMonat, einfuhrAndere };
+  return { start, ende, fx, fxQuelle, ereignisse, ustBasis, eustAndereMonat, ustIstSchnitt, bestellInfo, hinweise, nachbestellKgMonat, ebruNachbestellKgMonat, einfuhrAndere, vermutungen };
 }
 
 function simuliere(
@@ -1050,6 +1170,7 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
         : null,
       einfuhrRechnung: b.einfuhrRechnung ?? null,
       einfuhrZahlung: b.einfuhrZahlung ?? null,
+      einfuhrVermutung: plan.vermutungen.get(b.id) ?? null,
       teilung: info.teilung,
     });
   }
@@ -1071,6 +1192,7 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
       einfuhr: ab && saldo !== null ? { ...ab, saldoDanach: r2(saldo), ampel: ampelFuer(saldo, e.puffer) } : null,
       einfuhrRechnung: b.einfuhrRechnung ?? null,
       einfuhrZahlung: b.einfuhrZahlung ?? null,
+      einfuhrVermutung: plan.vermutungen.get(b.id) ?? null,
     });
   }
 

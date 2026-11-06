@@ -34,7 +34,7 @@ import PushToShopifyButton from "./push-to-shopify-button";
 import LiquiditaetBadge from "../liquiditaet-badge";
 import { ladeEinfuhrRechnung, ladePrognose } from "@/lib/liquiditaet/daten";
 import EinfuhrRechnung from "../../finances/liquiditaet/einfuhr-rechnung";
-import type { BestellPrognose } from "@/lib/liquiditaet/rechnung";
+import type { BestellPrognose, EinfuhrPrognose, EinfuhrVermutung } from "@/lib/liquiditaet/rechnung";
 
 export default async function OrderDetailPage({
   params,
@@ -109,12 +109,18 @@ export default async function OrderDetailPage({
   // Liquiditäts-Ampel (Finanzen): nie für Lieferanten; ein Fehler darf die Seite nicht brechen
   let liq: BestellPrognose | null = null;
   let einfuhrRe: Awaited<ReturnType<typeof ladeEinfuhrRechnung>> | null = null;
+  let einfuhrVermutung: EinfuhrVermutung | null = null;
   if (hasFeature(profile, "finances") && !isSupplier) {
     try {
-      [liq, einfuhrRe] = await Promise.all([
-        ladePrognose().then((x) => x.ergebnis.bestellungen.find((b) => b.orderId === o.id) ?? null),
+      let andere: EinfuhrPrognose | null = null;
+      [[liq, andere], einfuhrRe] = await Promise.all([
+        ladePrognose().then((x) => [
+          x.ergebnis.bestellungen.find((b) => b.orderId === o.id) ?? null,
+          x.ergebnis.einfuhrAndere.find((b) => b.orderId === o.id) ?? null,
+        ] as const),
         ladeEinfuhrRechnung(o.id),
       ]);
+      einfuhrVermutung = liq?.einfuhrVermutung ?? andere?.einfuhrVermutung ?? null;
     } catch (e) {
       console.error("[order] Liquiditätsvorschau", e);
     }
@@ -431,7 +437,7 @@ export default async function OrderDetailPage({
                   <div className="flex justify-between gap-2">
                     <span className="text-neutral-600">DHL-/Zoll-Rechnung</span>
                     <div className="text-right">
-                      <EinfuhrRechnung orderId={o.id} rechnung={einfuhrRe.rechnung} zahlung={einfuhrRe.zahlung} />
+                      <EinfuhrRechnung orderId={o.id} rechnung={einfuhrRe.rechnung} zahlung={einfuhrRe.zahlung} vermutung={einfuhrVermutung} />
                     </div>
                   </div>
                 )}

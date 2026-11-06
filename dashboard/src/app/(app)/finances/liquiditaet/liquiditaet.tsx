@@ -602,8 +602,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
                         <span className="text-neutral-400"> (EUSt {eur(b.einfuhr.eust)}{b.einfuhr.zoll ? ` + Zoll ${eur(b.einfuhr.zoll)}` : ""})</span>
                         <div className={b.einfuhr.saldoDanach < 0 ? "text-red-700 font-medium" : "text-neutral-500"}>Konto danach {eur(b.einfuhr.saldoDanach)}</div>
                       </>
-                    ) : b.einfuhrZahlung ? null : "—"}
-                    <EinfuhrRechnung orderId={b.orderId} rechnung={b.einfuhrRechnung} zahlung={b.einfuhrZahlung} />
+                    ) : b.einfuhrZahlung || b.einfuhrVermutung ? null : "—"}
+                    <EinfuhrRechnung orderId={b.orderId} rechnung={b.einfuhrRechnung} zahlung={b.einfuhrZahlung} vermutung={b.einfuhrVermutung} />
                   </td>
                 </tr>
               ))}
@@ -618,6 +618,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           Die EUSt holt ihr über die USt-Voranmeldung zurück — das ist unten bei der Umsatzsteuer eingerechnet; der Zoll nicht.
           Einfuhrabgaben sind geschätzt, fällig bei Ankunft (noch nicht versendete Ware mit überholtem Datum: frühestens in {VERSAND_FRUEHESTENS_TAGE} Tagen), und zählen ohne Rechnungsnummer, bis die Ware angekommen ist. Mit DHL-Rechnungsnummer (ZIT…) zählt das Konto:
           Sobald die Nummer im Verwendungszweck einer Abbuchung steht, gelten sie als bezahlt — vorher bleiben sie drin, auch wenn die Ware schon eingelagert ist.
+          Ohne Nummer: Bucht DHL nach dem Versand eine ZIT-Rechnung ab, die an keiner Bestellung steht, wird sie mit der ältesten verschickten Bestellung verrechnet
+          („wahrscheinlich bezahlt“ — mit „Zuordnen“ bestätigen), damit sie nicht doppelt zählt (schon im Kontostand und noch als Zahlung).
         </p>
       </Card>
 
@@ -654,8 +656,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
                           <span className="text-neutral-400"> (EUSt {eur(b.einfuhr.eust)}{b.einfuhr.zoll ? ` + Zoll ${eur(b.einfuhr.zoll)}` : ""})</span>
                           <div className={b.einfuhr.saldoDanach < 0 ? "text-red-700 font-medium" : "text-neutral-500"}>Konto danach {eur(b.einfuhr.saldoDanach)}</div>
                         </>
-                      ) : b.einfuhrZahlung ? null : "—"}
-                      <EinfuhrRechnung orderId={b.orderId} rechnung={b.einfuhrRechnung} zahlung={b.einfuhrZahlung} art="zoll" />
+                      ) : b.einfuhrZahlung || b.einfuhrVermutung ? null : "—"}
+                      <EinfuhrRechnung orderId={b.orderId} rechnung={b.einfuhrRechnung} zahlung={b.einfuhrZahlung} vermutung={b.einfuhrVermutung} art="zoll" />
                     </td>
                   </tr>
                 ))}
@@ -863,6 +865,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
             <Schalter label="Ebru/andere Lieferanten (Ø aus Bank)" checked={e.andereLieferantenEinrechnen} onChange={(v) => set("andereLieferantenEinrechnen", v)} />
             <Schalter label="Künftige Amanda-Nachbestellungen (Schätzung)" checked={e.nachbestellungenEinrechnen} onChange={(v) => set("nachbestellungenEinrechnen", v)} />
             <Schalter label="Künftige Ebru-Nachbestellungen (Schätzung)" checked={e.ebruNachbestellungenEinrechnen} onChange={(v) => set("ebruNachbestellungenEinrechnen", v)} />
+            <Schalter label="Nicht zugeordnete DHL-/Ungewitter-Abbuchungen nach Versand verrechnen" checked={e.zollAbbuchungenVerrechnen} onChange={(v) => set("zollAbbuchungenVerrechnen", v)} />
           </div>
           {e.nachbestellungenEinrechnen && (
             <>

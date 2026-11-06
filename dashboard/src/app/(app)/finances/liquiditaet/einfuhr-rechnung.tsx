@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Check, Loader2, Pencil, Plus } from "lucide-react";
-import type { EinfuhrZahlung } from "@/lib/liquiditaet/rechnung";
+import type { EinfuhrVermutung, EinfuhrZahlung } from "@/lib/liquiditaet/rechnung";
 import { setEinfuhrRechnung } from "@/lib/actions/liquiditaet";
 
 const deDate = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(2, 4)}`;
@@ -16,11 +16,14 @@ export default function EinfuhrRechnung({
   orderId,
   rechnung,
   zahlung,
+  vermutung = null,
   art = "dhl",
 }: {
   orderId: string;
   rechnung: string | null;
   zahlung: EinfuhrZahlung | null;
+  /** Nicht zugeordnete Abbuchung nach dem Versand, schon gegen die Schätzung verrechnet. */
+  vermutung?: EinfuhrVermutung | null;
   /** "zoll" = beliebiger Verzoller (Ungewitter, DHL …), sonst DHL-ZIT. */
   art?: "dhl" | "zoll";
 }) {
@@ -64,6 +67,33 @@ export default function EinfuhrRechnung({
           )}
           <button onClick={() => { setWert(rechnung ?? ""); setFehler(null); setOffen(false); }} disabled={busy} className="text-neutral-500 hover:underline disabled:opacity-50">
             Abbrechen
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!rechnung && vermutung) {
+    const nr = vermutung.nummern.join(", ");
+    return (
+      <div className="mt-1 text-xs">
+        <div
+          className="text-emerald-700"
+          title="Diese Abbuchung kam nach dem Versand und steht an keiner Bestellung — sie ist gegen die Schätzung verrechnet, damit sie nicht doppelt zählt."
+        >
+          ≈ wahrscheinlich bezahlt: {nr || "Abbuchung"} am {deDate(vermutung.datum)} ({eur(vermutung.betragEur)})
+          {!vermutung.vollstaendig && <span className="text-amber-700"> · deckt {eur(vermutung.anteilEur)}, Rest offen</span>}
+        </div>
+        {fehler && <div className="text-red-700">{fehler}</div>}
+        <div className="flex items-center gap-2">
+          {nr && (
+            <button onClick={() => speichern(nr)} disabled={busy} className="inline-flex items-center gap-1 font-medium text-neutral-900 hover:underline disabled:opacity-50">
+              {busy && <Loader2 size={11} className="animate-spin" />}
+              Zuordnen
+            </button>
+          )}
+          <button onClick={() => setOffen(true)} disabled={busy} className="text-neutral-500 hover:text-neutral-900 disabled:opacity-50">
+            andere Nummer
           </button>
         </div>
       </div>
