@@ -25,12 +25,25 @@ function daysAgo(n: number): Date {
 export default async function StatsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ days?: string }>;
+  searchParams: Promise<{ days?: string; extSort?: string; misSort?: string }>;
 }) {
   const profile = await requireProfile();
   if (!hasFeature(profile, "shipping")) redirect("/");
   const sp = await searchParams;
   const days = Math.max(1, Math.min(365, parseInt(sp.days ?? "30", 10) || 30));
+  // Sortierung der Detail-Tabellen per URL (bleibt beim Neuladen, kein Client-JS):
+  // "count" = häufigste zuerst (Standard), "last" = zuletzt passiert zuerst.
+  type SortKey = "count" | "last";
+  const extSort: SortKey = sp.extSort === "last" ? "last" : "count";
+  const misSort: SortKey = sp.misSort === "last" ? "last" : "count";
+  const sortHref = (table: "ext" | "mis", key: SortKey) => {
+    const q = new URLSearchParams({ days: String(days) });
+    const e = table === "ext" ? key : extSort;
+    const m = table === "mis" ? key : misSort;
+    if (e !== "count") q.set("extSort", e);
+    if (m !== "count") q.set("misSort", m);
+    return `/pack/stats?${q.toString()}#${table === "ext" ? "manuell-extensions" : "fehlscans"}`;
+  };
 
   const supabase = await createClient();
   const fromIso = daysAgo(days).toISOString();
@@ -148,9 +161,11 @@ export default async function StatsPage({
   };
   const mismatchRows = Array.from(mismatchByCode.entries())
     .map(([code, e]) => ({ code, ...e, ...mismatchLabel(code) }))
-    .sort((a, b) => b.count - a.count);
+    .sort((a, b) => (misSort === "last" ? b.last.localeCompare(a.last) : b.count - a.count || b.last.localeCompare(a.last)));
+  // Top-10-Karte bleibt nach Häufigkeit, unabhängig von der Tabellen-Sortierung
+  const mismatchByCount = [...mismatchRows].sort((a, b) => b.count - a.count);
   const mismatchByTitle = new Map<string, number>();
-  for (const r of mismatchRows) mismatchByTitle.set(r.name, (mismatchByTitle.get(r.name) ?? 0) + r.count);
+  for (const r of mismatchByCount) mismatchByTitle.set(r.name, (mismatchByTitle.get(r.name) ?? 0) + r.count);
   const topMismatches = Array.from(mismatchByTitle.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10);
@@ -180,7 +195,9 @@ export default async function StatsPage({
     if (s.pack_sessions?.order_name) e.orders.add(s.pack_sessions.order_name);
     manualExt.set(title, e);
   }
-  const manualExtRows = Array.from(manualExt.entries()).sort((a, b) => b[1].count - a[1].count);
+  const manualExtRows = Array.from(manualExt.entries()).sort((a, b) =>
+    extSort === "last" ? b[1].last.localeCompare(a[1].last) : b[1].count - a[1].count || b[1].last.localeCompare(a[1].last),
+  );
   const manualExtPeople = Array.from(manualExtByPerson.entries()).sort((a, b) => b[1] - a[1]);
 
   // Bestellungen pro Tag (für Chart)
@@ -217,7 +234,7 @@ export default async function StatsPage({
           {[7, 30, 90, 365].map((d) => (
             <a
               key={d}
-              href={`/pack/stats?days=${d}`}
+              href={`/pack/stats?days=${d}${extSort !== "count" ? `&extSort=${extSort}` : ""}${misSort !== "count" ? `&misSort=${misSort}` : ""}`}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${
                 d === days
                   ? "bg-neutral-900 text-white border-neutral-900"
@@ -338,7 +355,7 @@ export default async function StatsPage({
 
       {/* Fehlscans im Detail: welcher Artikel wurde fälschlich gescannt, von wem,
           in welcher Bestellung. Barcodes in Shopify nachgeschlagen. */}
-      <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
+      <div id="fehlscans" className="scroll-mt-4 bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
         <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
           <div className="text-xs font-medium text-neutral-600 uppercase tracking-wide flex items-center gap-1">
             <AlertTriangle size={14} className="text-red-500" /> Fehlscans im Detail (falscher Artikel)
@@ -360,9 +377,13 @@ export default async function StatsPage({
               <thead>
                 <tr className="text-xs uppercase tracking-wide text-neutral-500 border-b border-neutral-200">
                   <th className="text-left py-2 font-medium">Gescannter Artikel</th>
-                  <th className="text-right py-2 font-medium">Anzahl</th>
+                  <th className="text-right py-2 font-medium">
+                    <SortLink href={sortHref("mis", "count")} active={misSort === "count"}>Anzahl</SortLink>
+                  </th>
                   <th className="text-left py-2 pl-4 font-medium">Wer</th>
-                  <th className="text-left py-2 pl-4 font-medium">Zuletzt</th>
+                  <th className="text-left py-2 pl-4 font-medium">
+                    <SortLink href={sortHref("mis", "last")} active={misSort === "last"}>Zuletzt</SortLink>
+                  </th>
                   <th className="text-left py-2 pl-4 font-medium">In Bestellung</th>
                 </tr>
               </thead>
@@ -416,7 +437,7 @@ export default async function StatsPage({
 
       {/* Manuell bestätigte Extensions — hier wurde die Barcode-Kontrolle
           (Farbe/Länge/Methode) umgangen. Pro Produkt: wie oft, wer, wann, wo. */}
-      <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
+      <div id="manuell-extensions" className="scroll-mt-4 bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
         <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
           <div className="text-xs font-medium text-neutral-600 uppercase tracking-wide flex items-center gap-1">
             <AlertTriangle size={14} className="text-red-500" /> Manuell bestätigte Extensions
@@ -452,9 +473,13 @@ export default async function StatsPage({
                 <thead>
                   <tr className="text-xs uppercase tracking-wide text-neutral-500 border-b border-neutral-200">
                     <th className="text-left py-2 font-medium">Produkt</th>
-                    <th className="text-right py-2 font-medium">Anzahl</th>
+                    <th className="text-right py-2 font-medium">
+                    <SortLink href={sortHref("ext", "count")} active={extSort === "count"}>Anzahl</SortLink>
+                  </th>
                     <th className="text-left py-2 pl-4 font-medium">Wer</th>
-                    <th className="text-left py-2 pl-4 font-medium">Zuletzt</th>
+                    <th className="text-left py-2 pl-4 font-medium">
+                    <SortLink href={sortHref("ext", "last")} active={extSort === "last"}>Zuletzt</SortLink>
+                  </th>
                     <th className="text-left py-2 pl-4 font-medium">Bestellungen</th>
                   </tr>
                 </thead>
@@ -507,6 +532,19 @@ export default async function StatsPage({
         )}
       </div>
     </div>
+  );
+}
+
+function SortLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      className={`inline-flex items-center gap-1 hover:text-neutral-900 ${active ? "text-neutral-900 font-semibold" : ""}`}
+      title="Sortieren"
+    >
+      {children}
+      <span className={active ? "" : "text-neutral-300"}>↓</span>
+    </a>
   );
 }
 
