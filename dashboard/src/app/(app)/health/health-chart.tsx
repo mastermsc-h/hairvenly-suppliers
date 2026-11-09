@@ -153,7 +153,7 @@ function Tipp({ active, payload }: { active?: boolean; payload?: Array<{ payload
       {zeile(FARBE.lager, "Lager", m.kg != null ? `${num1(m.kg)} kg` : "unbekannt")}
       {zeile(FARBE.konten, m.paypalEur == null ? "Konten (ohne PayPal)" : "Konten", eur(m.kontenEur))}
       {zeile(FARBE.schulden, "Schulden", eur(m.schuldenEur))}
-      {zeile(null, "· Lieferanten fällig", eur(m.lieferantenEur))}
+      {zeile(null, "· Lieferanten (Ware da)", eur(m.lieferantenEur))}
       {zeile(null, "· Steuern offen", eur(m.steuernEur))}
       {m.ergaenzungenEur !== 0 && zeile(null, "· Ergänzungen", eur(m.ergaenzungenEur))}
       <div className="border-t border-neutral-100 mt-1 pt-1">{zeile(null, "HY-Score", m.score != null ? num1(m.score) : "—", true)}</div>

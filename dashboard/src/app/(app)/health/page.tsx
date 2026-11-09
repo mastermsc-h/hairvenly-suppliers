@@ -38,7 +38,7 @@ export default async function HealthPage() {
   });
 
   const snapshots = (snapshotsData ?? []) as HealthSnapshot[];
-  const { konten, lieferanten, steuern, ergaenzungen, kommend, fx, kontenStand } = h.details;
+  const { konten, lieferanten, steuern, ergaenzungen, kommend, unterwegs, fx, kontenStand } = h.details;
 
   // HY-Score: kg + Konten(T€) − Schulden(T€) — alles live
   const moneyK = h.kontenEur / 1000;
@@ -161,12 +161,15 @@ export default async function HealthPage() {
         <div className="inline-flex items-start gap-1.5">
           <Info size={13} className="mt-0.5 shrink-0 text-neutral-400" />
           <span>
-            <strong>Nicht im HY-Score:</strong> {kommend.anzahl} Bestellungen in Produktion, Restbetrag {usd(kommend.usd)} ≈ {eur(kommend.eur)}.
-            Die Ware ist auch noch nicht im Lager — sobald sie versandt ist, zählen kg und Schuld gemeinsam.
+            <strong>Nicht im HY-Score:</strong> {kommend.anzahl} Bestellungen in Produktion, Restbetrag {usd(kommend.usd)} ≈ {eur(kommend.eur)}
+            {unterwegs && unterwegs.anzahl > 0 && (
+              <>; {unterwegs.anzahl} unterwegs (versandt/im Zoll), Restbetrag {usd(unterwegs.usd)} ≈ {eur(unterwegs.eur)}</>
+            )}
+            . Die Ware ist noch nicht im Lager — sobald sie angekommen ist, zählen kg und Schuld gemeinsam.
           </span>
         </div>
         <div className="pl-5">
-          Lieferanten-Schulden = Restbetrag aller Bestellungen ab „Versandt“ plus Sammelrechnungen, umgerechnet mit {fx.kurs.toLocaleString("de-DE", { maximumFractionDigits: 4 })} USD/€
+          Lieferanten-Schulden = Restbetrag der angekommenen Bestellungen (zugestellt/eingelagert) plus Sammelrechnungen (EHL = Ware im Lager), umgerechnet mit {fx.kurs.toLocaleString("de-DE", { maximumFractionDigits: 4 })} USD/€
           {fx.quelle === "auto" ? ` (letzte Auslandsüberweisung, ${datum(fx.datum)})` : fx.quelle === "manuell" ? " (aus der Liquiditätsvorschau)" : " (Standard)"}.
           Steuern = im Steuer-Ledger eingetragenes Soll ohne Zahlung.
         </div>

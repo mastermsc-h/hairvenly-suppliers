@@ -6,11 +6,9 @@
 //   Schulden = Lieferanten "fällig" laut order-debt (Ware unterwegs/da, Sammelrechnungen)
 //            + offene Steuer-Soll-Posten (eingetragen, noch nicht bezahlt, Zeitraum begonnen)
 //            + manuelle Ergänzungen (weitere Schulden, Steuer-Rückstellung)
-// Bestellungen in Produktion zählen bewusst NICHT: deren kg sind auch noch nicht im Lager.
+// Schuld zählt erst, wenn die Ware da ist (ihre kg also auch im Lager stecken) — siehe hyBucket.
 import { createServiceClient } from "@/lib/supabase/server";
-import { debtBucket } from "@/lib/order-debt";
 import { mitDefaults, parseFxKurs } from "@/lib/liquiditaet/rechnung";
-import type { OrderStatus } from "@/lib/types";
 
 type Sb = ReturnType<typeof createServiceClient>;
 
@@ -38,6 +36,8 @@ export interface HealthDetails {
   steuern: HealthSchuld[];
   ergaenzungen: HealthErgaenzungen;
   kommend: { usd: number; eur: number; anzahl: number };
+  /** Versandt / im Zoll — Ware noch nicht da, zählt nicht (ältere Einträge haben das Feld nicht). */
+  unterwegs?: { usd: number; eur: number; anzahl: number };
   fx: { kurs: number; quelle: "manuell" | "auto" | "standard"; datum: string | null };
   kontenStand: string | null;
 }
@@ -71,6 +71,25 @@ const STEUER_NAMEN: Record<string, string> = {
 };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Einordnung für den HY-Score (strenger als order-debt "due"):
+ *   schuld    → Ware ist angekommen: zugestellt, eingelagert, oder Sammelrechnung (manual).
+ *               Ebru stellt EHL-Sammelrechnungen erst aus, wenn die Ware im Lager ist.
+ *   unterwegs → versandt / im Zoll: Schuld ja, aber Ware (kg) noch nicht im Lager
+ *   kommend   → bestellt / in Produktion
+ *   none      → Entwurf, storniert, ausgeblendet
+ */
+export type HyBucket = "schuld" | "unterwegs" | "kommend" | "none";
+const HY_ANGEKOMMEN = new Set(["delivered", "stocked", "manual"]);
+const HY_UNTERWEGS = new Set(["shipped", "in_customs"]);
+const HY_NICHT = new Set(["draft", "cancelled", "hidden"]);
+export function hyBucket(status: string): HyBucket {
+  if (HY_NICHT.has(status)) return "none";
+  if (HY_ANGEKOMMEN.has(status)) return "schuld";
+  if (HY_UNTERWEGS.has(status)) return "unterwegs";
+  return "kommend";
+}
 
 /** Kennzahl-Formel (User-Definition): kg + Konten/1000 − Schulden/1000. */
 export function healthScore(stockKg: number, kontenEur: number, schuldenEur: number): number {
@@ -189,15 +208,19 @@ export async function berechneHealth(
   // ── Lieferanten: fällig zählt, in Produktion nur zur Info ──
   const proLieferant = new Map<string, number>();
   const kommend = { usd: 0, eur: 0, anzahl: 0 };
+  const unterwegs = { usd: 0, eur: 0, anzahl: 0 };
   for (const o of (orders ?? []) as Array<{ status: string; remaining_balance: number; suppliers: { name: string } | { name: string }[] | null }>) {
     const usd = Number(o.remaining_balance);
     const sup = Array.isArray(o.suppliers) ? o.suppliers[0] : o.suppliers;
-    const bucket = debtBucket({ status: o.status as OrderStatus });
-    if (bucket === "due") proLieferant.set(sup?.name ?? "Lieferant", (proLieferant.get(sup?.name ?? "Lieferant") ?? 0) + usd);
-    else if (bucket === "upcoming") { kommend.usd += usd; kommend.anzahl++; }
+    const bucket = hyBucket(o.status);
+    if (bucket === "schuld") proLieferant.set(sup?.name ?? "Lieferant", (proLieferant.get(sup?.name ?? "Lieferant") ?? 0) + usd);
+    else if (bucket === "unterwegs") { unterwegs.usd += usd; unterwegs.anzahl++; }
+    else if (bucket === "kommend") { kommend.usd += usd; kommend.anzahl++; }
   }
   kommend.usd = r2(kommend.usd);
   kommend.eur = r2(kommend.usd / fx.kurs);
+  unterwegs.usd = r2(unterwegs.usd);
+  unterwegs.eur = r2(unterwegs.usd / fx.kurs);
   const lieferanten: HealthSchuld[] = [...proLieferant.entries()]
     .map(([name, usd]) => ({ name, usd: r2(usd), eur: r2(usd / fx.kurs) }))
     .sort((a, b) => b.eur - a.eur);
@@ -215,7 +238,7 @@ export async function berechneHealth(
     steuernEur,
     ergaenzungenEur,
     schuldenEur: r2(lieferantenEur + steuernEur + ergaenzungenEur),
-    details: { konten, lieferanten, steuern, ergaenzungen, kommend, fx, kontenStand },
+    details: { konten, lieferanten, steuern, ergaenzungen, kommend, unterwegs, fx, kontenStand },
   };
 }
 
@@ -428,7 +451,7 @@ export async function ladeHealthVerlauf(
     let usd = 0;
     for (const o of orders) {
       const st = statusAm(o, evByOrder.get(o.id) ?? [], d);
-      if (!st || debtBucket({ status: st as OrderStatus }) !== "due") continue;
+      if (!st || hyBucket(st) !== "schuld") continue;
       const bezahlt = payments.filter((p) => p.order_id === o.id && String(p.paid_at).slice(0, 10) <= d).reduce((s, p) => s + Number(p.amount), 0);
       usd += Math.max(0, Number(o.invoice_effective ?? 0) - bezahlt);
     }
