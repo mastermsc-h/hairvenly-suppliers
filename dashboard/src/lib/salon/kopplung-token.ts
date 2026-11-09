@@ -10,11 +10,14 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
  */
 const TTL_MS = 15 * 60 * 1000;
 
-function sign(payload: string): string {
+function schluessel(): Buffer {
   const base = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!base) throw new Error("SUPABASE_SERVICE_ROLE_KEY fehlt");
-  const key = createHash("sha256").update(`${base}:salon-kopplung-v1`).digest();
-  return createHmac("sha256", key).update(payload).digest("base64url");
+  return createHash("sha256").update(`${base}:salon-kopplung-v1`).digest();
+}
+
+function sign(payload: string): string {
+  return createHmac("sha256", schluessel()).update(payload).digest("base64url");
 }
 
 export function mintKopplungToken(issuerId: string): string {
@@ -37,4 +40,32 @@ export function verifyKopplungToken(token: string): { issuerId: string; exp: num
   } catch {
     return null;
   }
+}
+
+/**
+ * Kurzer Freischalt-Code zum Abtippen — für die Home-Bildschirm-App, die auf iOS
+ * eigene Cookies hat und den QR-Link (öffnet Safari) deshalb nicht mitbekommt.
+ * Zustandslos wie ein TOTP: HMAC über das 15-Minuten-Fenster; gültig sind das
+ * aktuelle und das vorige Fenster (also 15–30 Min.). Raten wird in der Action gebremst.
+ */
+const CODE_ZEICHEN = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // ohne 0/O/1/I
+const CODE_LAENGE = 8;
+
+function codeFuerFenster(fenster: number): string {
+  const h = createHmac("sha256", schluessel()).update(`kopplung-code.${fenster}`).digest();
+  let code = "";
+  for (let i = 0; i < CODE_LAENGE; i++) code += CODE_ZEICHEN[h[i] & 31];
+  return code;
+}
+
+export function aktuellerKopplungsCode(): string {
+  const c = codeFuerFenster(Math.floor(Date.now() / TTL_MS));
+  return `${c.slice(0, 4)}-${c.slice(4)}`;
+}
+
+export function pruefeKopplungsCode(eingabe: string): boolean {
+  const norm = eingabe.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (norm.length !== CODE_LAENGE) return false;
+  const jetzt = Math.floor(Date.now() / TTL_MS);
+  return [jetzt, jetzt - 1].some((f) => timingSafeEqual(Buffer.from(codeFuerFenster(f)), Buffer.from(norm)));
 }

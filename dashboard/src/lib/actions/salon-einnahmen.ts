@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireFeature } from "@/lib/auth";
-import { isSalonDevicePaired } from "@/lib/salon/auth";
-import { mintKopplungToken } from "@/lib/salon/kopplung-token";
+import { isSalonDevicePaired, pairSalonDevice } from "@/lib/salon/auth";
+import { aktuellerKopplungsCode, mintKopplungToken, pruefeKopplungsCode } from "@/lib/salon/kopplung-token";
 import type { FeatureKey } from "@/lib/types";
 import {
   ADMIN_MAX_TAGE_ZURUECK,
@@ -42,12 +42,38 @@ export interface EinnahmenSitzung {
 // Sperre gegen Durchprobieren: so viele Fehlversuche in diesem Zeitfenster (alle Geräte zusammen)
 const SPERRE_FEHLVERSUCHE = 10;
 const SPERRE_MINUTEN = 10;
+// Fehlversuche beim Freischalt-Code zählen getrennt (sperren nicht die PIN-Eingabe)
+const KOPPLUNG_ZWECK = "kopplung";
+
+/** Gerät per Code aus dem Admin-Dashboard freischalten (öffentlich, für die Home-Bildschirm-App). */
+export async function geraetMitCodeFreischalten(code: string): Promise<Ergebnis<object>> {
+  const svc = createServiceClient();
+  const seit = new Date(Date.now() - SPERRE_MINUTEN * 60000).toISOString();
+  const { count } = await svc
+    .from("salon_pin_versuche")
+    .select("id", { count: "exact", head: true })
+    .eq("ok", false)
+    .eq("zweck", KOPPLUNG_ZWECK)
+    .gte("created_at", seit);
+  if ((count ?? 0) >= SPERRE_FEHLVERSUCHE) return { ok: false, error: `Zu viele falsche Codes — bitte ${SPERRE_MINUTEN} Minuten warten` };
+  if (!pruefeKopplungsCode(code)) {
+    await svc.from("salon_pin_versuche").insert({ ok: false, zweck: KOPPLUNG_ZWECK });
+    return { ok: false, error: "Code falsch oder abgelaufen" };
+  }
+  await pairSalonDevice();
+  return { ok: true };
+}
 
 async function mitarbeiterPerPin(svc: Svc, pin: string, zweck: string): Promise<Ergebnis<{ ma: { id: string; name: string; color: string | null } }>> {
   if (!(await isSalonDevicePaired())) return { ok: false, error: "Gerät nicht freigeschaltet" };
   if (!/^\d{6}$/.test(pin)) return { ok: false, error: "PIN: 6 Ziffern" };
   const seit = new Date(Date.now() - SPERRE_MINUTEN * 60000).toISOString();
-  const { count } = await svc.from("salon_pin_versuche").select("id", { count: "exact", head: true }).eq("ok", false).gte("created_at", seit);
+  const { count } = await svc
+    .from("salon_pin_versuche")
+    .select("id", { count: "exact", head: true })
+    .eq("ok", false)
+    .neq("zweck", KOPPLUNG_ZWECK)
+    .gte("created_at", seit);
   if ((count ?? 0) >= SPERRE_FEHLVERSUCHE) return { ok: false, error: `Zu viele falsche PINs — bitte ${SPERRE_MINUTEN} Minuten warten` };
   const { data, error } = await svc.from("salon_employees").select("id, name, color").eq("pin", pin).eq("active", true).maybeSingle();
   if (error) return { ok: false, error: error.message };
@@ -253,7 +279,7 @@ export async function einnahmeArtSpeichern(input: { id?: string; name: string; b
 }
 
 /** QR-Link (15 Min. gültig), der ein Handy/iPad für die Einnahmen-Erfassung freischaltet. */
-export async function einnahmenKopplungsLink(): Promise<Ergebnis<{ path: string }>> {
+export async function einnahmenKopplungsLink(): Promise<Ergebnis<{ path: string; code: string }>> {
   const profile = await requireEinnahmenAdmin();
-  return { ok: true, path: `/salon/koppeln/${mintKopplungToken(profile.id)}` };
+  return { ok: true, path: `/salon/koppeln/${mintKopplungToken(profile.id)}`, code: aktuellerKopplungsCode() };
 }

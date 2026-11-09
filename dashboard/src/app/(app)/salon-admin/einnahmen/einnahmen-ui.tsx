@@ -242,6 +242,7 @@ function ArtZeile({ art, onFertig }: { art: EinnahmeArt | null; onFertig?: () =>
 /** QR-Code zum Freischalten eines Mitarbeiter-Handys (15 Min. gültig). */
 export function HandyFreischalten() {
   const [url, setUrl] = useState<string | null>(null);
+  const [code, setCode] = useState<string | null>(null);
   const [fehler, setFehler] = useState<string | null>(null);
   const [pending, start] = useTransition();
   return (
@@ -258,6 +259,7 @@ export function HandyFreischalten() {
               const r = await einnahmenKopplungsLink();
               if (!r.ok) return setFehler(r.error);
               setUrl(window.location.origin + r.path);
+              setCode(r.code);
             })
           }
           className="flex items-center gap-2 rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
@@ -270,9 +272,15 @@ export function HandyFreischalten() {
         <div className="mt-4 flex flex-wrap items-center gap-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={`/api/qr?size=220&text=${encodeURIComponent(url)}`} alt="QR-Code zum Freischalten" width={220} height={220} className="rounded-lg border border-neutral-200" />
-          <div className="text-sm text-neutral-600 max-w-md space-y-1">
-            <div>Mit der Kamera des Handys scannen — es öffnet sich die Einnahmen-Erfassung, danach mit der eigenen PIN anmelden.</div>
-            <div className="text-xs text-neutral-500">Gilt 15 Minuten und kann in der Zeit für mehrere Handys benutzt werden. Danach in Safari „Zum Home-Bildschirm“.</div>
+          <div className="text-sm text-neutral-600 max-w-md space-y-2">
+            <div><b>Safari:</b> mit der Kamera scannen — es öffnet sich die Einnahmen-Erfassung, danach mit der eigenen PIN anmelden.</div>
+            {code && (
+              <div>
+                <b>App auf dem Home-Bildschirm:</b> dort „Gerät nicht freigeschaltet“ → diesen Code eingeben:
+                <div className="mt-1 font-mono text-2xl font-bold tracking-widest text-neutral-900">{code}</div>
+              </div>
+            )}
+            <div className="text-xs text-neutral-500">QR und Code gelten 15 Minuten und können in der Zeit für mehrere Geräte benutzt werden.</div>
           </div>
         </div>
       )}
