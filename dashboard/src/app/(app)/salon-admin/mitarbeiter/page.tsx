@@ -11,7 +11,7 @@ export default async function SalonEmployeesPage() {
   const svc = createServiceClient();
   const { data } = await svc
     .from("salon_employees")
-    .select("id, name, pin, color, active")
+    .select("id, name, pin, color, active, einnahmen_erlaubt")
     .order("name");
   return (
     <div className="p-4 md:p-6">
@@ -26,6 +26,7 @@ export default async function SalonEmployeesPage() {
           pin: e.pin,
           color: e.color,
           active: e.active,
+          einnahmen: !!e.einnahmen_erlaubt,
         }))}
       />
     </div>

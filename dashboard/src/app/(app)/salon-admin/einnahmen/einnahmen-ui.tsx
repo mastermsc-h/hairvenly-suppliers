@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Plus, Save, Smartphone, X } from "lucide-react";
-import { einnahmeAdminSpeichern, einnahmeArtSpeichern, einnahmeStornoAdmin, einnahmenKopplungsLink } from "@/lib/actions/salon-einnahmen";
+import { einnahmeAdminSpeichern, einnahmeArtSpeichern, einnahmeStornoAdmin, einnahmenKopplungsLink, einnahmenZugangSetzen } from "@/lib/actions/salon-einnahmen";
 import { BEREICH_LABEL, berlinLokal, type Bereich, type EinnahmeArt } from "@/lib/salon/einnahmen";
 
 export interface MitarbeiterOption {
@@ -88,7 +88,7 @@ function EinnahmeDialog({ mitarbeiter, arten, eintrag, onClose }: DialogProps & 
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className={label}>
-            Mitarbeiter
+            Wer hat sie gemacht?
             <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={feld}>
               <option value="">— auswählen —</option>
               {maOptionen.map((m) => (
@@ -153,6 +153,47 @@ export function StornoKnopf({ id, storniert }: { id: string; storniert: boolean 
     >
       {pending ? "…" : storniert ? "Wiederherstellen" : "Stornieren"}
     </button>
+  );
+}
+
+/** Wer sich in der Einnahmen-App mit seiner PIN anmelden darf. */
+export function ZugangVerwaltung({ mitarbeiter }: { mitarbeiter: { id: string; name: string; erlaubt: boolean }[] }) {
+  const [pending, start] = useTransition();
+  const [fehler, setFehler] = useState<string | null>(null);
+  const router = useRouter();
+  const erlaubt = mitarbeiter.filter((m) => m.erlaubt);
+  return (
+    <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-600 mb-1">Zugang zur Einnahmen-App</h2>
+      <p className="text-xs text-neutral-500 mb-3">
+        Nur angehakte Mitarbeiter können sich mit ihrer PIN anmelden ({erlaubt.length ? erlaubt.map((m) => m.name).join(", ") : "niemand"}).
+        „Ware entnehmen“ am Salon-iPad gilt weiter für alle.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {mitarbeiter.map((m) => (
+          <label
+            key={m.id}
+            className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm cursor-pointer ${m.erlaubt ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-200 text-neutral-600"} ${pending ? "opacity-60" : ""}`}
+          >
+            <input
+              type="checkbox"
+              checked={m.erlaubt}
+              disabled={pending}
+              onChange={(e) =>
+                start(async () => {
+                  setFehler(null);
+                  const r = await einnahmenZugangSetzen(m.id, e.target.checked);
+                  if (!r.ok) setFehler(r.error);
+                  router.refresh();
+                })
+              }
+            />
+            {m.name}
+          </label>
+        ))}
+      </div>
+      {fehler && <div className="mt-2 text-sm text-rose-600">{fehler}</div>}
+    </div>
   );
 }
 

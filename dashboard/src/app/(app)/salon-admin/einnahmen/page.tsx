@@ -12,7 +12,7 @@ import {
   type EinnahmeArt,
   type EinnahmeZeile,
 } from "@/lib/salon/einnahmen";
-import { ArtenVerwaltung, BearbeitenKnopf, HandyFreischalten, NeueEinnahmeKnopf, StornoKnopf, type MitarbeiterOption } from "./einnahmen-ui";
+import { ArtenVerwaltung, BearbeitenKnopf, HandyFreischalten, NeueEinnahmeKnopf, StornoKnopf, ZugangVerwaltung, type MitarbeiterOption } from "./einnahmen-ui";
 
 export const dynamic = "force-dynamic";
 
@@ -46,14 +46,14 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
   type Row = {
     id: string; employee_id: string; art_name: string; bereich: Bereich; betrag: number; zeitpunkt: string;
     notiz: string | null; storniert_am: string | null; storniert_von: "mitarbeiter" | "admin" | null;
-    art_id: string | null; erfasst_von: "mitarbeiter" | "admin"; geaendert_am: string | null;
+    art_id: string | null; erfasst_von: "mitarbeiter" | "admin"; geaendert_am: string | null; erfasst_durch: string | null;
     original: { betrag: number; art_name: string; zeitpunkt: string; notiz: string | null } | null;
   };
   const rows: Row[] = [];
   for (let ab = 0; ; ab += 1000) {
     let q = svc
       .from("salon_einnahmen")
-      .select("id, employee_id, art_name, bereich, betrag, zeitpunkt, notiz, storniert_am, storniert_von, art_id, erfasst_von, geaendert_am, original")
+      .select("id, employee_id, art_name, bereich, betrag, zeitpunkt, notiz, storniert_am, storniert_von, art_id, erfasst_von, geaendert_am, original, erfasst_durch")
       .gte("zeitpunkt", vonIso)
       .lt("zeitpunkt", bisIso)
       .order("zeitpunkt", { ascending: false })
@@ -66,13 +66,15 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
   }
 
   const [{ data: emps }, { data: artRows }] = await Promise.all([
-    svc.from("salon_employees").select("id, name, active, pin").order("name"),
+    svc.from("salon_employees").select("id, name, active, pin, einnahmen_erlaubt").order("name"),
     svc.from("salon_einnahme_arten").select("id, name, bereich, sortierung, aktiv").order("sortierung").order("name"),
   ]);
   const namen = new Map((emps ?? []).map((e) => [e.id, e.name as string]));
-  const altePins = (emps ?? []).filter((e) => e.active && String(e.pin ?? "").length !== 6).map((e) => e.name as string);
+  const altePins = (emps ?? []).filter((e) => e.active && e.einnahmen_erlaubt && String(e.pin ?? "").length !== 6).map((e) => e.name as string);
   const arten: EinnahmeArt[] = (artRows ?? []).map((a) => ({ ...a, bereich: a.bereich as Bereich }));
+  // Einnahmeperson: alle aktiven Mitarbeiter (die App-Berechtigung betrifft nur, wer erfassen darf)
   const maOptionen: MitarbeiterOption[] = (emps ?? []).map((e) => ({ id: e.id, name: e.name, active: e.active }));
+  const zugang = (emps ?? []).filter((e) => e.active).map((e) => ({ id: e.id, name: e.name as string, erlaubt: !!e.einnahmen_erlaubt }));
   const rowById = new Map(rows.map((r) => [r.id, r]));
   const originalText = (o: NonNullable<Row["original"]>) =>
     `Ursprünglich vom Mitarbeiter: ${eur(Number(o.betrag))} · ${o.art_name} · ${deDatum(berlinDatum(o.zeitpunkt))} ${berlinZeit(o.zeitpunkt)}${o.notiz ? ` · ${o.notiz}` : ""}`;
@@ -162,7 +164,7 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
             Mitarbeiter
             <select name="ma" defaultValue={maFilter ?? ""} className="mt-1 block rounded-lg border border-neutral-300 px-3 py-2 text-sm normal-case">
               <option value="">Alle</option>
-              {(emps ?? []).map((e) => (
+              {maOptionen.map((e) => (
                 <option key={e.id} value={e.id}>{e.name}{e.active ? "" : " (inaktiv)"}</option>
               ))}
             </select>
@@ -325,11 +327,13 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
                       {z.notiz}
                       {(() => {
                         const r = rowById.get(z.id)!;
+                        const durch = r.erfasst_durch && r.erfasst_durch !== r.employee_id ? namen.get(r.erfasst_durch) : null;
+                        if (durch && !r.geaendert_am) return <div className="text-[11px] text-neutral-400">erfasst von {durch}</div>;
                         if (r.erfasst_von === "admin") return <div className="text-[11px] text-neutral-400">von dir nachgetragen{r.geaendert_am ? ", geändert" : ""}</div>;
                         if (r.geaendert_am)
                           return (
                             <div className="text-[11px] text-amber-700" title={r.original ? originalText(r.original) : undefined}>
-                              von dir geändert {deDatum(berlinDatum(r.geaendert_am))}{r.original ? ` · vorher ${eur(Number(r.original.betrag))}` : ""}
+                              {durch ? `erfasst von ${durch}, ` : ""}von dir geändert {deDatum(berlinDatum(r.geaendert_am))}{r.original ? ` · vorher ${eur(Number(r.original.betrag))}` : ""}
                             </div>
                           );
                         return null;
@@ -365,6 +369,8 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
           </div>
         )}
       </div>
+
+      <ZugangVerwaltung mitarbeiter={zugang} />
 
       <ArtenVerwaltung arten={arten} />
     </div>

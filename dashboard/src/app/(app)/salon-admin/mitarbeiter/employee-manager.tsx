@@ -15,6 +15,7 @@ interface Emp {
   pin: string;
   color: string | null;
   active: boolean;
+  einnahmen: boolean;
 }
 
 const COLORS = [
@@ -79,7 +80,10 @@ export default function EmployeeManager({ employees }: { employees: Emp[] }) {
                 />
               ) : (
                 <tr key={e.id} className="border-t border-neutral-100">
-                  <td className="px-4 py-3 font-medium">{e.name}</td>
+                  <td className="px-4 py-3 font-medium">
+                    {e.name}
+                    {e.einnahmen && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">Einnahmen</span>}
+                  </td>
                   <td className="px-4 py-3">
                     <button
                       onClick={() => setShowPin((s) => ({ ...s, [e.id]: !s[e.id] }))}
@@ -88,7 +92,7 @@ export default function EmployeeManager({ employees }: { employees: Emp[] }) {
                       <span className="font-mono">{showPin[e.id] ? e.pin : "••••••"}</span>
                       {showPin[e.id] ? <EyeOff size={14} /> : <Eye size={14} />}
                     </button>
-                    {e.pin.length !== 6 && (
+                    {e.einnahmen && e.pin.length !== 6 && (
                       <div className="mt-1 text-xs text-amber-700">alte {e.pin.length}-stellige PIN — für Einnahmen neue 6-stellige vergeben</div>
                     )}
                   </td>

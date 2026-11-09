@@ -95,6 +95,7 @@ function Formular({
   onHeute: (h: EigeneEinnahme[]) => void;
   onAbmelden: () => void;
 }) {
+  const [fuerId, setFuerId] = useState<string | null>(null);
   const [artId, setArtId] = useState<string | null>(null);
   const [betrag, setBetrag] = useState("");
   const [zeitpunkt, setZeitpunkt] = useState(() => berlinLokal(new Date()));
@@ -122,6 +123,7 @@ function Formular({
   }, [zeitGeaendert]);
 
   const art = sitzung.arten.find((a) => a.id === artId) ?? null;
+  const fuer = sitzung.alle.find((m) => m.id === fuerId) ?? null;
   const gruppen: Bereich[] = ["verkauf", "salon"];
   const aktiveHeute = sitzung.heute.filter((h) => !h.storniert);
   const summeHeute = aktiveHeute.reduce((s, h) => s + h.betrag, 0);
@@ -130,12 +132,14 @@ function Formular({
     aktiv();
     setFehler(null);
     setGespeichert(null);
+    if (!fuerId) return setFehler("Bitte auswählen, wer die Einnahme gemacht hat");
     if (!artId) return setFehler("Bitte eine Art auswählen");
     start(async () => {
-      const r = await einnahmeErfassen({ pin, artId, betrag, zeitpunkt, notiz });
+      const r = await einnahmeErfassen({ pin, fuerId, artId, betrag, zeitpunkt, notiz });
       if (!r.ok) return setFehler(r.error);
       onHeute(r.heute);
-      setGespeichert(`${betrag.trim()} € · ${art?.name ?? ""}`);
+      setGespeichert(`${betrag.trim()} € · ${art?.name ?? ""} · ${fuer?.name ?? ""}`);
+      setFuerId(null);
       setArtId(null);
       setBetrag("");
       setNotiz("");
@@ -167,6 +171,26 @@ function Formular({
             <Check size={20} className="text-emerald-400" /> Gespeichert: {gespeichert}
           </div>
         )}
+
+        <div>
+          <div className="text-xs uppercase tracking-widest text-neutral-500 mb-2">Wer hat die Einnahme gemacht?</div>
+          <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+            {sitzung.alle.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => {
+                  aktiv();
+                  setFuerId(m.id);
+                }}
+                className={`rounded-xl px-2 py-3 font-semibold transition active:scale-95 ${
+                  fuerId === m.id ? "bg-amber-500 text-neutral-950 ring-2 ring-white" : "bg-neutral-800 hover:bg-neutral-700"
+                }`}
+              >
+                {m.name}
+              </button>
+            ))}
+          </div>
+        </div>
 
         {gruppen.map((g) => {
           const arten = sitzung.arten.filter((a) => a.bereich === g);
@@ -244,7 +268,7 @@ function Formular({
         </button>
 
         <div>
-          <div className="text-xs uppercase tracking-widest text-neutral-500 mb-2">Deine Einträge heute</div>
+          <div className="text-xs uppercase tracking-widest text-neutral-500 mb-2">Von dir heute erfasst</div>
           {sitzung.heute.length === 0 ? (
             <div className="text-neutral-500 text-sm">Noch nichts erfasst.</div>
           ) : (
@@ -253,7 +277,9 @@ function Formular({
                 <div key={h.id} className={`flex items-center gap-3 px-4 py-3 ${h.storniert ? "opacity-50" : ""}`}>
                   <div className="text-sm text-neutral-400 tabular-nums w-12">{berlinZeit(h.zeitpunkt)}</div>
                   <div className="flex-1 min-w-0">
-                    <div className={`font-medium ${h.storniert ? "line-through" : ""}`}>{h.artName}</div>
+                    <div className={`font-medium ${h.storniert ? "line-through" : ""}`}>
+                      {h.fuerName} <span className="text-neutral-400 font-normal">· {h.artName}</span>
+                    </div>
                     {h.notiz && <div className="text-xs text-neutral-400 truncate">{h.notiz}</div>}
                   </div>
                   <div className={`tabular-nums font-semibold ${h.storniert ? "line-through" : ""}`}>{eur(h.betrag)}</div>

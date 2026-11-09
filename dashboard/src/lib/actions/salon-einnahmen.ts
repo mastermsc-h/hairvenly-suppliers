@@ -24,6 +24,8 @@ type Ergebnis<T> = ({ ok: true } & T) | { ok: false; error: string };
 /** Eigener Eintrag, wie ihn der Mitarbeiter am Gerät sieht. */
 export interface EigeneEinnahme {
   id: string;
+  /** Wer die Einnahme gemacht hat (kann ein anderer sein als der Erfassende) */
+  fuerName: string;
   artName: string;
   bereich: Bereich;
   betrag: number;
@@ -33,8 +35,13 @@ export interface EigeneEinnahme {
   stornierbar: boolean;
 }
 
+type MaKurz = { id: string; name: string; color: string | null };
+
 export interface EinnahmenSitzung {
-  mitarbeiter: { id: string; name: string; color: string | null };
+  /** Angemeldet (hat die Einnahmen-Berechtigung) */
+  mitarbeiter: MaKurz;
+  /** Auswahl „Wer hat die Einnahme gemacht?“ — alle aktiven Mitarbeiter */
+  alle: MaKurz[];
   arten: EinnahmeArt[];
   heute: EigeneEinnahme[];
 }
@@ -75,7 +82,14 @@ async function mitarbeiterPerPin(svc: Svc, pin: string, zweck: string): Promise<
     .neq("zweck", KOPPLUNG_ZWECK)
     .gte("created_at", seit);
   if ((count ?? 0) >= SPERRE_FEHLVERSUCHE) return { ok: false, error: `Zu viele falsche PINs — bitte ${SPERRE_MINUTEN} Minuten warten` };
-  const { data, error } = await svc.from("salon_employees").select("id, name, color").eq("pin", pin).eq("active", true).maybeSingle();
+  // Nur freigeschaltete Mitarbeiter; andere PINs (nur „Ware entnehmen“) gelten hier als unbekannt
+  const { data, error } = await svc
+    .from("salon_employees")
+    .select("id, name, color")
+    .eq("pin", pin)
+    .eq("active", true)
+    .eq("einnahmen_erlaubt", true)
+    .maybeSingle();
   if (error) return { ok: false, error: error.message };
   if (!data) {
     await svc.from("salon_pin_versuche").insert({ ok: false, zweck });
@@ -91,20 +105,26 @@ async function ladeArten(svc: Svc, nurAktive: boolean): Promise<EinnahmeArt[]> {
   return (data ?? []).map((a) => ({ id: a.id, name: a.name, bereich: a.bereich as Bereich, sortierung: a.sortierung, aktiv: a.aktiv }));
 }
 
-/** Heute erfasste Einträge des Mitarbeiters (auch stornierte, damit nichts „verschwindet"). */
+async function aktiveMitarbeiter(svc: Svc): Promise<MaKurz[]> {
+  const { data } = await svc.from("salon_employees").select("id, name, color").eq("active", true).order("name");
+  return data ?? [];
+}
+
+/** Heute vom Angemeldeten erfasste Einträge (auch stornierte, damit nichts „verschwindet"). */
 async function heuteVon(svc: Svc, employeeId: string): Promise<EigeneEinnahme[]> {
   const jetzt = new Date();
   const seit = new Date(jetzt.getTime() - 36 * 3600000).toISOString();
   const { data } = await svc
     .from("salon_einnahmen")
-    .select("id, art_name, bereich, betrag, zeitpunkt, notiz, storniert_am, created_at")
-    .eq("employee_id", employeeId)
+    .select("id, employee_id, art_name, bereich, betrag, zeitpunkt, notiz, storniert_am, created_at, salon_employees!salon_einnahmen_employee_id_fkey(name)")
+    .eq("erfasst_durch", employeeId)
     .gte("created_at", seit)
     .order("created_at", { ascending: false });
   return (data ?? [])
     .filter((r) => berlinDatum(r.created_at) === berlinDatum(jetzt))
     .map((r) => ({
       id: r.id,
+      fuerName: (r.salon_employees as unknown as { name: string } | null)?.name ?? "?",
       artName: r.art_name,
       bereich: r.bereich as Bereich,
       betrag: Number(r.betrag),
@@ -120,12 +140,14 @@ export async function einnahmenAnmelden(pin: string): Promise<Ergebnis<{ sitzung
   const svc = createServiceClient();
   const r = await mitarbeiterPerPin(svc, pin, "einnahme_login");
   if (!r.ok) return r;
-  const [arten, heute] = await Promise.all([ladeArten(svc, true), heuteVon(svc, r.ma.id)]);
-  return { ok: true, sitzung: { mitarbeiter: r.ma, arten, heute } };
+  const [arten, heute, alle] = await Promise.all([ladeArten(svc, true), heuteVon(svc, r.ma.id), aktiveMitarbeiter(svc)]);
+  return { ok: true, sitzung: { mitarbeiter: r.ma, alle, arten, heute } };
 }
 
 export async function einnahmeErfassen(input: {
   pin: string;
+  /** Mitarbeiter, der die Einnahme gemacht hat */
+  fuerId: string;
   artId: string;
   betrag: string;
   /** Bremer Ortszeit "YYYY-MM-DDTHH:mm" */
@@ -142,8 +164,11 @@ export async function einnahmeErfassen(input: {
   if (fehler) return { ok: false, error: fehler };
   const { data: art } = await svc.from("salon_einnahme_arten").select("id, name, bereich").eq("id", input.artId).eq("aktiv", true).maybeSingle();
   if (!art) return { ok: false, error: "Bitte eine Art auswählen" };
+  const { data: fuer } = await svc.from("salon_employees").select("id").eq("id", input.fuerId).eq("active", true).maybeSingle();
+  if (!fuer) return { ok: false, error: "Bitte auswählen, wer die Einnahme gemacht hat" };
   const { error } = await svc.from("salon_einnahmen").insert({
-    employee_id: r.ma.id,
+    employee_id: fuer.id,
+    erfasst_durch: r.ma.id,
     art_id: art.id,
     art_name: art.name,
     bereich: art.bereich,
@@ -161,8 +186,9 @@ export async function einnahmeStornierenMitarbeiter(input: { pin: string; id: st
   const svc = createServiceClient();
   const r = await mitarbeiterPerPin(svc, input.pin, "einnahme_storno");
   if (!r.ok) return r;
-  const { data: z } = await svc.from("salon_einnahmen").select("employee_id, storniert_am, created_at").eq("id", input.id).maybeSingle();
-  if (!z || !darfMitarbeiterStornieren({ employeeId: z.employee_id, storniertAm: z.storniert_am, erfasstAm: z.created_at }, r.ma.id, new Date())) {
+  const { data: z } = await svc.from("salon_einnahmen").select("erfasst_durch, storniert_am, created_at").eq("id", input.id).maybeSingle();
+  // „Eigene“ = selbst erfasste (nicht: für einen selbst erfasste)
+  if (!z || !z.erfasst_durch || !darfMitarbeiterStornieren({ employeeId: z.erfasst_durch, storniertAm: z.storniert_am, erfasstAm: z.created_at }, r.ma.id, new Date())) {
     return { ok: false, error: "Nur eigene Einträge von heute können storniert werden" };
   }
   const { error } = await svc.from("salon_einnahmen").update({ storniert_am: new Date().toISOString(), storniert_von: "mitarbeiter" }).eq("id", input.id);
@@ -260,6 +286,17 @@ export async function einnahmeAdminSpeichern(input: {
     : await svc.from("salon_einnahmen").insert({ ...werte, erfasst_von: "admin" });
   if (error) return { ok: false, error: error.message };
   revalidatePath("/salon-admin/einnahmen");
+  return { ok: true };
+}
+
+/** Admin: Mitarbeiter für die Einnahmen-App freischalten/sperren („Ware entnehmen“ bleibt unberührt). */
+export async function einnahmenZugangSetzen(employeeId: string, erlaubt: boolean): Promise<Ergebnis<object>> {
+  await requireEinnahmenAdmin();
+  const svc = createServiceClient();
+  const { error } = await svc.from("salon_employees").update({ einnahmen_erlaubt: erlaubt }).eq("id", employeeId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/salon-admin/einnahmen");
+  revalidatePath("/salon-admin/mitarbeiter");
   return { ok: true };
 }
 
