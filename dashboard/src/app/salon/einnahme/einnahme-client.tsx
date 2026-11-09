@@ -10,7 +10,7 @@ import {
   type EigeneEinnahme,
   type EinnahmenSitzung,
 } from "@/lib/actions/salon-einnahmen";
-import { BEREICH_LABEL, berlinLokal, berlinZeit, type Bereich } from "@/lib/salon/einnahmen";
+import { BEREICH_LABEL, EINNAHME_BEREICHE, berlinLokal, berlinZeit, type Bereich } from "@/lib/salon/einnahmen";
 
 const eur = (n: number) => n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 /** Geteiltes iPad: nach so langer Untätigkeit zurück zur PIN */
@@ -54,7 +54,7 @@ export default function EinnahmeClient({ zurueck }: { zurueck: boolean }) {
             <ArrowLeft size={24} />
           </Link>
         )}
-        <div className="text-lg font-semibold flex-1">Einnahme erfassen</div>
+        <div className="text-lg font-semibold flex-1">Einnahmen & Ausgaben</div>
         {sitzung && (
           <button onClick={abmelden} className="flex items-center gap-2 rounded-lg bg-neutral-800 px-3 py-2 text-sm hover:bg-neutral-700">
             <LogOut size={16} /> Fertig
@@ -95,6 +95,7 @@ function Formular({
   onHeute: (h: EigeneEinnahme[]) => void;
   onAbmelden: () => void;
 }) {
+  const [modus, setModus] = useState<"einnahme" | "ausgabe">("einnahme");
   const [fuerId, setFuerId] = useState<string | null>(null);
   const [artId, setArtId] = useState<string | null>(null);
   const [betrag, setBetrag] = useState("");
@@ -124,21 +125,30 @@ function Formular({
 
   const art = sitzung.arten.find((a) => a.id === artId) ?? null;
   const fuer = sitzung.alle.find((m) => m.id === fuerId) ?? null;
-  const gruppen: Bereich[] = ["verkauf", "salon"];
+  const ausgabe = modus === "ausgabe";
+  const gruppen: Bereich[] = ausgabe ? ["ausgabe"] : EINNAHME_BEREICHE;
   const aktiveHeute = sitzung.heute.filter((h) => !h.storniert);
-  const summeHeute = aktiveHeute.reduce((s, h) => s + h.betrag, 0);
+  const einnahmenHeute = aktiveHeute.filter((h) => h.bereich !== "ausgabe").reduce((s, h) => s + h.betrag, 0);
+  const ausgabenHeute = aktiveHeute.filter((h) => h.bereich === "ausgabe").reduce((s, h) => s + h.betrag, 0);
+
+  function wechsle(m: "einnahme" | "ausgabe") {
+    aktiv();
+    setModus(m);
+    setArtId(null);
+    setFehler(null);
+  }
 
   function speichern() {
     aktiv();
     setFehler(null);
     setGespeichert(null);
-    if (!fuerId) return setFehler("Bitte auswählen, wer die Einnahme gemacht hat");
+    if (!fuerId) return setFehler(ausgabe ? "Bitte auswählen, wer das Geld ausgegeben hat" : "Bitte auswählen, wer die Einnahme gemacht hat");
     if (!artId) return setFehler("Bitte eine Art auswählen");
     start(async () => {
       const r = await einnahmeErfassen({ pin, fuerId, artId, betrag, zeitpunkt, notiz });
       if (!r.ok) return setFehler(r.error);
       onHeute(r.heute);
-      setGespeichert(`${betrag.trim()} € · ${art?.name ?? ""} · ${fuer?.name ?? ""}`);
+      setGespeichert(`${ausgabe ? "Ausgabe" : "Einnahme"} ${betrag.trim()} € · ${art?.name ?? ""} · ${fuer?.name ?? ""}`);
       setFuerId(null);
       setArtId(null);
       setBetrag("");
@@ -163,7 +173,24 @@ function Formular({
       <div className="max-w-2xl w-full mx-auto p-4 md:p-6 space-y-6">
         <div className="flex items-baseline justify-between gap-3">
           <div className="text-2xl font-bold">Hallo {sitzung.mitarbeiter.name}</div>
-          <div className="text-sm text-neutral-400">Heute: {eur(summeHeute)}</div>
+          <div className="text-sm text-neutral-400 text-right">
+            Heute: {eur(einnahmenHeute)}
+            {ausgabenHeute > 0 && <span className="text-rose-400"> · Ausgaben {eur(ausgabenHeute)}</span>}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 rounded-2xl bg-neutral-900 p-1">
+          {(["einnahme", "ausgabe"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => wechsle(m)}
+              className={`rounded-xl py-3 text-lg font-bold transition ${
+                modus === m ? (m === "einnahme" ? "bg-emerald-600 text-white" : "bg-rose-600 text-white") : "text-neutral-400 hover:text-white"
+              }`}
+            >
+              {m === "einnahme" ? "Einnahme" : "Ausgabe"}
+            </button>
+          ))}
         </div>
 
         {gespeichert && (
@@ -173,7 +200,9 @@ function Formular({
         )}
 
         <div>
-          <div className="text-xs uppercase tracking-widest text-neutral-500 mb-2">Wer hat die Einnahme gemacht?</div>
+          <div className="text-xs uppercase tracking-widest text-neutral-500 mb-2">
+            {ausgabe ? "Wer hat das Geld ausgegeben?" : "Wer hat die Einnahme gemacht?"}
+          </div>
           <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
             {sitzung.alle.map((m) => (
               <button
@@ -208,7 +237,7 @@ function Formular({
                     }}
                     className={`rounded-xl px-3 py-4 text-left font-semibold transition active:scale-95 ${
                       artId === a.id
-                        ? g === "verkauf" ? "bg-sky-600 ring-2 ring-white" : "bg-rose-600 ring-2 ring-white"
+                        ? g === "verkauf" ? "bg-sky-600 ring-2 ring-white" : g === "salon" ? "bg-violet-600 ring-2 ring-white" : "bg-rose-600 ring-2 ring-white"
                         : "bg-neutral-800 hover:bg-neutral-700"
                     }`}
                   >
@@ -252,7 +281,7 @@ function Formular({
             onChange={(e) => setNotiz(e.target.value)}
             maxLength={500}
             rows={2}
-            placeholder="z.B. 100g Bondings 1B"
+            placeholder={ausgabe ? "z.B. Kaffee + Milch (Rossmann)" : "z.B. 100g Bondings 1B"}
             className="mt-1 w-full rounded-xl border-2 border-neutral-700 px-4 py-3 text-base focus:outline-none focus:border-amber-400"
           />
         </label>
@@ -262,9 +291,11 @@ function Formular({
         <button
           onClick={speichern}
           disabled={pending}
-          className="w-full rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 py-5 text-2xl font-bold disabled:opacity-50"
+          className={`w-full rounded-2xl py-5 text-2xl font-bold disabled:opacity-50 ${
+            ausgabe ? "bg-rose-600 hover:bg-rose-500 active:bg-rose-700" : "bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700"
+          }`}
         >
-          {pending ? "Speichere …" : "Speichern"}
+          {pending ? "Speichere …" : ausgabe ? "Ausgabe speichern" : "Einnahme speichern"}
         </button>
 
         <div>
@@ -282,7 +313,10 @@ function Formular({
                     </div>
                     {h.notiz && <div className="text-xs text-neutral-400 truncate">{h.notiz}</div>}
                   </div>
-                  <div className={`tabular-nums font-semibold ${h.storniert ? "line-through" : ""}`}>{eur(h.betrag)}</div>
+                  <div className={`tabular-nums font-semibold ${h.storniert ? "line-through" : ""} ${h.bereich === "ausgabe" ? "text-rose-400" : ""}`}>
+                    {h.bereich === "ausgabe" ? "− " : ""}
+                    {eur(h.betrag)}
+                  </div>
                   {h.storniert ? (
                     <span className="text-xs text-neutral-500 w-24 text-right">storniert</span>
                   ) : h.stornierbar ? (

@@ -52,8 +52,8 @@ export default async function SalonHomePage() {
         >
           <Euro size={72} strokeWidth={1.5} />
           <div>
-            <div className="text-4xl font-bold tracking-tight">Einnahme erfassen</div>
-            <div className="text-base text-amber-950/70">Verkauf oder Dienstleistung — mit deiner PIN</div>
+            <div className="text-4xl font-bold tracking-tight">Einnahme / Ausgabe</div>
+            <div className="text-base text-amber-950/70">Verkauf, Dienstleistung oder Barausgabe — mit PIN</div>
           </div>
         </Link>
       </main>

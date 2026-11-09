@@ -1,7 +1,10 @@
-// Freestyle-Einnahmen (Laden + Salon) — reine Logik ohne DB, getestet in scripts/smoke/salon-einnahmen.spec.mjs.
+// Freestyle-Einnahmen und -Ausgaben (Laden + Salon) — reine Logik ohne DB, getestet in scripts/smoke/salon-einnahmen.spec.mjs.
 
-export type Bereich = "verkauf" | "salon";
-export const BEREICH_LABEL: Record<Bereich, string> = { verkauf: "Verkauf", salon: "Salon" };
+/** verkauf/salon = Einnahmen, ausgabe = Geld raus (z.B. bar bezahlter Einkauf) */
+export type Bereich = "verkauf" | "salon" | "ausgabe";
+export const BEREICH_LABEL: Record<Bereich, string> = { verkauf: "Verkauf", salon: "Salon", ausgabe: "Ausgabe" };
+export const ALLE_BEREICHE: Bereich[] = ["verkauf", "salon", "ausgabe"];
+export const EINNAHME_BEREICHE: Bereich[] = ["verkauf", "salon"];
 
 export interface EinnahmeArt {
   id: string;
@@ -101,9 +104,13 @@ export function darfMitarbeiterStornieren(z: { employeeId: string; storniertAm: 
 }
 
 export interface Summen {
+  /** Einnahmen (Verkauf + Salon) */
   gesamt: number;
   verkauf: number;
   salon: number;
+  ausgaben: number;
+  /** Einnahmen − Ausgaben */
+  saldo: number;
   anzahl: number;
 }
 export interface MitarbeiterSumme extends Summen {
@@ -112,17 +119,23 @@ export interface MitarbeiterSumme extends Summen {
 }
 export interface TagSumme extends Summen {
   datum: string;
+  /** Einnahmen je Mitarbeiter (ohne Ausgaben) */
   proMitarbeiter: Record<string, number>;
 }
 
-const leer = (): Summen => ({ gesamt: 0, verkauf: 0, salon: 0, anzahl: 0 });
+const leer = (): Summen => ({ gesamt: 0, verkauf: 0, salon: 0, ausgaben: 0, saldo: 0, anzahl: 0 });
 function addiere(s: Summen, z: EinnahmeZeile) {
-  s.gesamt = r2(s.gesamt + z.betrag);
-  s[z.bereich] = r2(s[z.bereich] + z.betrag);
+  if (z.bereich === "ausgabe") {
+    s.ausgaben = r2(s.ausgaben + z.betrag);
+  } else {
+    s.gesamt = r2(s.gesamt + z.betrag);
+    s[z.bereich] = r2(s[z.bereich] + z.betrag);
+  }
+  s.saldo = r2(s.gesamt - s.ausgaben);
   s.anzahl += 1;
 }
 
-/** Summen gesamt, je Mitarbeiter (absteigend) und je Bremer Kalendertag (neueste zuerst). Stornierte zählen nicht. */
+/** Summen gesamt, je Mitarbeiter (nach Einnahmen absteigend) und je Bremer Kalendertag (neueste zuerst). Stornierte zählen nicht. */
 export function summiere(zeilen: EinnahmeZeile[]): { summe: Summen; proMitarbeiter: MitarbeiterSumme[]; proTag: TagSumme[] } {
   const summe = leer();
   const ma = new Map<string, MitarbeiterSumme>();
@@ -136,12 +149,12 @@ export function summiere(zeilen: EinnahmeZeile[]): { summe: Summen; proMitarbeit
     const d = berlinDatum(z.zeitpunkt);
     const t = tage.get(d) ?? { ...leer(), datum: d, proMitarbeiter: {} };
     addiere(t, z);
-    t.proMitarbeiter[z.employeeId] = r2((t.proMitarbeiter[z.employeeId] ?? 0) + z.betrag);
+    if (z.bereich !== "ausgabe") t.proMitarbeiter[z.employeeId] = r2((t.proMitarbeiter[z.employeeId] ?? 0) + z.betrag);
     tage.set(d, t);
   }
   return {
     summe,
-    proMitarbeiter: [...ma.values()].sort((a, b) => b.gesamt - a.gesamt || a.name.localeCompare(b.name)),
+    proMitarbeiter: [...ma.values()].sort((a, b) => b.gesamt - a.gesamt || b.ausgaben - a.ausgaben || a.name.localeCompare(b.name)),
     proTag: [...tage.values()].sort((a, b) => b.datum.localeCompare(a.datum)),
   };
 }

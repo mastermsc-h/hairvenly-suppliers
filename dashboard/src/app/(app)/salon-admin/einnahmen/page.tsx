@@ -36,7 +36,7 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
   const monatsAnfang = `${heute.slice(0, 7)}-01`;
   const von = istDatum(sp.von) ?? monatsAnfang;
   const bis = istDatum(sp.bis) ?? heute;
-  const bereich: Bereich | null = sp.bereich === "verkauf" || sp.bereich === "salon" ? sp.bereich : null;
+  const bereich: Bereich | null = sp.bereich === "verkauf" || sp.bereich === "salon" || sp.bereich === "ausgabe" ? sp.bereich : null;
   const maFilter = sp.ma && /^[0-9a-f-]{36}$/.test(sp.ma) ? sp.ma : null;
 
   const svc = createServiceClient();
@@ -117,7 +117,7 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Einnahmen Laden & Salon</h1>
+          <h1 className="text-2xl font-semibold">Einnahmen & Ausgaben Laden & Salon</h1>
           <p className="text-sm text-neutral-500">
             Von den Mitarbeitern am iPad/iPhone erfasst (<span className="font-mono">/salon/einnahme</span>, mit PIN) — hier kannst du nachtragen, korrigieren und stornieren
           </p>
@@ -155,9 +155,10 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
           <label className="text-xs font-medium text-neutral-600 uppercase tracking-wide">
             Bereich
             <select name="bereich" defaultValue={bereich ?? ""} className="mt-1 block rounded-lg border border-neutral-300 px-3 py-2 text-sm normal-case">
-              <option value="">Salon + Verkauf</option>
+              <option value="">Alles</option>
               <option value="verkauf">Nur Verkauf</option>
               <option value="salon">Nur Salon</option>
+              <option value="ausgabe">Nur Ausgaben</option>
             </select>
           </label>
           <label className="text-xs font-medium text-neutral-600 uppercase tracking-wide">
@@ -179,17 +180,18 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
       </div>
 
       {/* Summen */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
-          { label: bereich ? `Gesamt (${BEREICH_LABEL[bereich]})` : "Gesamt", wert: eur(summe.gesamt), href: link({ bereich: undefined }) },
-          { label: "Verkauf", wert: eur(summe.verkauf), href: link({ bereich: "verkauf" }) },
-          { label: "Salon", wert: eur(summe.salon), href: link({ bereich: "salon" }) },
-          { label: "Einträge", wert: String(summe.anzahl), sub: stornoAnzahl ? `+ ${stornoAnzahl} storniert` : undefined },
+          { label: "Einnahmen", wert: eur(summe.gesamt), href: link({ bereich: undefined }) },
+          { label: "davon Verkauf", wert: eur(summe.verkauf), href: link({ bereich: "verkauf" }) },
+          { label: "davon Salon", wert: eur(summe.salon), href: link({ bereich: "salon" }) },
+          { label: "Ausgaben", wert: summe.ausgaben ? `− ${eur(summe.ausgaben)}` : eur(0), href: link({ bereich: "ausgabe" }), farbe: "text-rose-700" },
+          { label: "Saldo", wert: eur(summe.saldo), sub: "Einnahmen − Ausgaben", farbe: summe.saldo < 0 ? "text-rose-700" : "text-emerald-700" },
         ].map((k) => {
           const inner = (
             <>
               <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">{k.label}</div>
-              <div className="mt-1 text-2xl font-semibold tabular-nums">{k.wert}</div>
+              <div className={`mt-1 text-2xl font-semibold tabular-nums ${k.farbe ?? ""}`}>{k.wert}</div>
               {k.sub && <div className="text-xs text-neutral-400">{k.sub}</div>}
             </>
           );
@@ -203,7 +205,8 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
       <p className="text-xs text-neutral-500 -mt-3">
         {deDatum(von)} – {deDatum(bis)}
         {maFilter ? ` · nur ${namen.get(maFilter) ?? "?"}` : ""}
-        {bereich ? ` · nur ${BEREICH_LABEL[bereich]}` : ""} · stornierte Einträge zählen nicht
+        {bereich ? ` · nur ${BEREICH_LABEL[bereich]}` : ""} · {summe.anzahl} Einträge
+        {stornoAnzahl ? ` (+ ${stornoAnzahl} storniert, zählen nicht)` : ""}
       </p>
 
       {/* Nach Mitarbeiter */}
@@ -219,7 +222,8 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
                   <th className="text-left py-2 pr-2">Mitarbeiter</th>
                   <th className="text-right py-2 px-2">Verkauf</th>
                   <th className="text-right py-2 px-2">Salon</th>
-                  <th className="text-right py-2 px-2">Gesamt</th>
+                  <th className="text-right py-2 px-2">Einnahmen</th>
+                  <th className="text-right py-2 px-2">Ausgaben</th>
                   <th className="text-right py-2 px-2">Einträge</th>
                   <th className="text-right py-2 pl-2">Anteil</th>
                 </tr>
@@ -233,6 +237,7 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
                     <td className="py-2 px-2 text-right tabular-nums">{eur(m.verkauf)}</td>
                     <td className="py-2 px-2 text-right tabular-nums">{eur(m.salon)}</td>
                     <td className="py-2 px-2 text-right tabular-nums font-semibold">{eur(m.gesamt)}</td>
+                    <td className="py-2 px-2 text-right tabular-nums text-rose-700">{m.ausgaben ? `− ${eur(m.ausgaben)}` : ""}</td>
                     <td className="py-2 px-2 text-right tabular-nums text-neutral-500">{m.anzahl}</td>
                     <td className="py-2 pl-2 text-right tabular-nums text-neutral-500">
                       {summe.gesamt > 0 ? `${Math.round((m.gesamt / summe.gesamt) * 100)} %` : "—"}
@@ -244,6 +249,7 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
                   <td className="py-2 px-2 text-right tabular-nums">{eur(summe.verkauf)}</td>
                   <td className="py-2 px-2 text-right tabular-nums">{eur(summe.salon)}</td>
                   <td className="py-2 px-2 text-right tabular-nums">{eur(summe.gesamt)}</td>
+                  <td className="py-2 px-2 text-right tabular-nums text-rose-700">{summe.ausgaben ? `− ${eur(summe.ausgaben)}` : ""}</td>
                   <td className="py-2 px-2 text-right tabular-nums text-neutral-500">{summe.anzahl}</td>
                   <td />
                 </tr>
@@ -264,7 +270,9 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
                   <th className="text-left py-2 pr-2">Tag</th>
                   {!bereich && <th className="text-right py-2 px-2">Verkauf</th>}
                   {!bereich && <th className="text-right py-2 px-2">Salon</th>}
-                  <th className="text-right py-2 px-2">Gesamt</th>
+                  <th className="text-right py-2 px-2">Einnahmen</th>
+                  {!bereich && <th className="text-right py-2 px-2">Ausgaben</th>}
+                  {!bereich && <th className="text-right py-2 px-2">Saldo</th>}
                   {maSpalten.length > 1 && maSpalten.map((m) => (
                     <th key={m.id} className="text-right py-2 px-2 normal-case font-medium whitespace-nowrap">{m.name}</th>
                   ))}
@@ -279,6 +287,8 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
                     {!bereich && <td className="py-2 px-2 text-right tabular-nums">{eur(t.verkauf)}</td>}
                     {!bereich && <td className="py-2 px-2 text-right tabular-nums">{eur(t.salon)}</td>}
                     <td className="py-2 px-2 text-right tabular-nums font-semibold">{eur(t.gesamt)}</td>
+                    {!bereich && <td className="py-2 px-2 text-right tabular-nums text-rose-700">{t.ausgaben ? `− ${eur(t.ausgaben)}` : ""}</td>}
+                    {!bereich && <td className="py-2 px-2 text-right tabular-nums">{eur(t.saldo)}</td>}
                     {maSpalten.length > 1 && maSpalten.map((m) => (
                       <td key={m.id} className="py-2 px-2 text-right tabular-nums text-neutral-600">
                         {t.proMitarbeiter[m.id] ? eur(t.proMitarbeiter[m.id]) : <span className="text-neutral-300">—</span>}
@@ -318,7 +328,7 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
                     </td>
                     <td className="py-2 px-2 whitespace-nowrap">{z.employeeName}</td>
                     <td className="py-2 px-2">
-                      <span className={`mr-1.5 rounded px-1.5 py-0.5 text-[10px] font-medium ${z.bereich === "verkauf" ? "bg-sky-100 text-sky-800" : "bg-rose-100 text-rose-800"}`}>
+                      <span className={`mr-1.5 rounded px-1.5 py-0.5 text-[10px] font-medium ${z.bereich === "verkauf" ? "bg-sky-100 text-sky-800" : z.bereich === "salon" ? "bg-violet-100 text-violet-800" : "bg-rose-100 text-rose-800"}`}>
                         {BEREICH_LABEL[z.bereich]}
                       </span>
                       {z.artName}
@@ -339,7 +349,10 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
                         return null;
                       })()}
                     </td>
-                    <td className={`py-2 px-2 text-right tabular-nums font-medium whitespace-nowrap ${z.storniertAm ? "line-through" : ""}`}>{eur(z.betrag)}</td>
+                    <td className={`py-2 px-2 text-right tabular-nums font-medium whitespace-nowrap ${z.storniertAm ? "line-through" : ""} ${z.bereich === "ausgabe" ? "text-rose-700" : ""}`}>
+                      {z.bereich === "ausgabe" ? "− " : ""}
+                      {eur(z.betrag)}
+                    </td>
                     <td className="py-2 pl-2 text-right whitespace-nowrap">
                       {z.storniertAm && (
                         <span className="mr-2 text-xs">storniert ({z.storniertVon === "admin" ? "du" : "Mitarbeiter"})</span>

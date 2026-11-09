@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Plus, Save, Smartphone, X } from "lucide-react";
 import { einnahmeAdminSpeichern, einnahmeArtSpeichern, einnahmeStornoAdmin, einnahmenKopplungsLink, einnahmenZugangSetzen } from "@/lib/actions/salon-einnahmen";
-import { BEREICH_LABEL, berlinLokal, type Bereich, type EinnahmeArt } from "@/lib/salon/einnahmen";
+import { ALLE_BEREICHE, BEREICH_LABEL, berlinLokal, type Bereich, type EinnahmeArt } from "@/lib/salon/einnahmen";
 
 export interface MitarbeiterOption {
   id: string;
@@ -32,7 +32,7 @@ export function NeueEinnahmeKnopf(props: DialogProps) {
   return (
     <>
       <button onClick={() => setOffen(true)} className="flex items-center gap-2 bg-neutral-900 text-white font-medium rounded-lg px-4 py-2 text-sm">
-        <Plus size={16} /> Einnahme nachtragen
+        <Plus size={16} /> Eintrag nachtragen
       </button>
       {offen && <EinnahmeDialog {...props} eintrag={null} onClose={() => setOffen(false)} />}
     </>
@@ -83,12 +83,12 @@ function EinnahmeDialog({ mitarbeiter, arten, eintrag, onClose }: DialogProps & 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl p-5 space-y-4 text-left" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold">{eintrag ? "Eintrag bearbeiten" : "Einnahme nachtragen"}</h3>
+          <h3 className="text-lg font-semibold">{eintrag ? "Eintrag bearbeiten" : "Einnahme / Ausgabe nachtragen"}</h3>
           <button onClick={onClose} className="p-1 text-neutral-400 hover:text-neutral-900" aria-label="Schließen"><X size={18} /></button>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className={label}>
-            Wer hat sie gemacht?
+            Mitarbeiter
             <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={feld}>
               <option value="">— auswählen —</option>
               {maOptionen.map((m) => (
@@ -101,8 +101,8 @@ function EinnahmeDialog({ mitarbeiter, arten, eintrag, onClose }: DialogProps & 
             <select value={artId} onChange={(e) => setArtId(e.target.value)} className={feld}>
               <option value="">— auswählen —</option>
               {artFehlt && <option value={eintrag.artId ?? ""}>{eintrag.artName} ({BEREICH_LABEL[eintrag.bereich]}, bisher)</option>}
-              {(["verkauf", "salon"] as Bereich[]).map((b) => (
-                <optgroup key={b} label={BEREICH_LABEL[b]}>
+              {ALLE_BEREICHE.map((b) => (
+                <optgroup key={b} label={b === "ausgabe" ? "Ausgabe (Geld raus)" : `Einnahme ${BEREICH_LABEL[b]}`}>
                   {artOptionen.filter((a) => a.bereich === b).map((a) => (
                     <option key={a.id} value={a.id}>{a.name}{a.aktiv ? "" : " (deaktiviert)"}</option>
                   ))}
@@ -203,7 +203,7 @@ export function ArtenVerwaltung({ arten }: { arten: EinnahmeArt[] }) {
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-600">Arten am iPad</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-600">Arten am iPad (Einnahmen & Ausgaben)</h2>
         {!neu && (
           <button onClick={() => setNeu(true)} className="flex items-center gap-1 text-sm text-neutral-700 hover:text-neutral-900">
             <Plus size={14} /> Neue Art
@@ -253,7 +253,7 @@ function ArtZeile({ art, onFertig }: { art: EinnahmeArt | null; onFertig?: () =>
         className="flex-1 min-w-48 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm"
       />
       <select value={bereich} onChange={(e) => setBereich(e.target.value as Bereich)} className="rounded-lg border border-neutral-300 px-2 py-1.5 text-sm">
-        {(["verkauf", "salon"] as Bereich[]).map((b) => (
+        {ALLE_BEREICHE.map((b) => (
           <option key={b} value={b}>{BEREICH_LABEL[b]}</option>
         ))}
       </select>
@@ -290,7 +290,7 @@ export function HandyFreischalten() {
     <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm text-neutral-600">
-          <b className="text-neutral-900">Erfassung am iPad/iPhone:</b> Salon-iPad → Kachel „Einnahme erfassen“. Für ein Handy einmal freischalten:
+          <b className="text-neutral-900">Erfassung am iPad/iPhone:</b> Salon-iPad → Kachel „Einnahme / Ausgabe“. Für ein Handy einmal freischalten:
         </div>
         <button
           disabled={pending}

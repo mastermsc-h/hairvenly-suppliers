@@ -5,6 +5,7 @@
  *  - Datum/Uhrzeit vom Gerät ist Bremer Ortszeit (Sommer-/Winterzeit) → UTC korrekt.
  *  - Tagessummen nach Bremer Kalendertag, nicht nach UTC (23:30 Uhr gehört zum selben Tag).
  *  - Stornierte Einträge zählen in keiner Summe.
+ *  - Ausgaben zählen nie als Einnahme; Saldo = Einnahmen − Ausgaben.
  *  - Mitarbeiter stornieren nur eigene Einträge vom selben Tag.
  *
  * Run:  node scripts/smoke/salon-einnahmen.spec.mjs
@@ -67,11 +68,15 @@ const s = E.summiere([
   z({ betrag: 999, storniertAm: "2026-11-05T11:00:00Z" }),
   z({ betrag: 50, zeitpunkt: "2026-11-05T22:30:00Z" }),
   z({ employeeId: "b", employeeName: "Tanja", bereich: "verkauf", betrag: 20, zeitpunkt: "2026-11-04T10:00:00Z" }),
+  z({ bereich: "ausgabe", betrag: 12.5, artName: "Getränke & Snacks" }),
+  z({ bereich: "ausgabe", betrag: 80, storniertAm: "2026-11-05T11:00:00Z" }),
 ]);
-check("Summe gesamt/verkauf/salon/anzahl (ohne Storno)", s.summe, { gesamt: 519.9, verkauf: 69.9, salon: 450, anzahl: 5 });
-check("Je Mitarbeiter absteigend", s.proMitarbeiter.map((m) => [m.name, m.gesamt, m.verkauf, m.salon]), [["Tanja", 320, 20, 300], ["Dana", 199.9, 49.9, 150]]);
-check("Je Tag (Bremer Datum, neueste zuerst)", s.proTag.map((t) => [t.datum, t.gesamt]), [["2026-11-05", 499.9], ["2026-11-04", 20]]);
-check("Tag × Mitarbeiter", s.proTag[0].proMitarbeiter, { a: 199.9, b: 300 });
+check("Summe (ohne Storno, Ausgaben getrennt)", s.summe, { gesamt: 519.9, verkauf: 69.9, salon: 450, ausgaben: 12.5, saldo: 507.4, anzahl: 6 });
+check("Je Mitarbeiter absteigend", s.proMitarbeiter.map((m) => [m.name, m.gesamt, m.verkauf, m.salon, m.ausgaben]), [["Tanja", 320, 20, 300, 0], ["Dana", 199.9, 49.9, 150, 12.5]]);
+check("Je Tag (Bremer Datum, neueste zuerst)", s.proTag.map((t) => [t.datum, t.gesamt, t.ausgaben, t.saldo]), [["2026-11-05", 499.9, 12.5, 487.4], ["2026-11-04", 20, 0, 20]]);
+check("Tag × Mitarbeiter nur Einnahmen", s.proTag[0].proMitarbeiter, { a: 199.9, b: 300 });
+const nurAusgabe = E.summiere([z({ bereich: "ausgabe", betrag: 30 })]);
+check("Nur Ausgabe → Saldo negativ", nurAusgabe.summe, { gesamt: 0, verkauf: 0, salon: 0, ausgaben: 30, saldo: -30, anzahl: 1 });
 
 console.log(`salon-einnahmen: PASS: ${pass} ok, ${fail} Fehler`);
 if (fail) { console.log(fails.join("\n")); process.exit(1); }
