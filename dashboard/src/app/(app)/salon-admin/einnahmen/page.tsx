@@ -12,7 +12,7 @@ import {
   type EinnahmeArt,
   type EinnahmeZeile,
 } from "@/lib/salon/einnahmen";
-import { ArtenVerwaltung, BearbeitenKnopf, HandyFreischalten, NeueEinnahmeKnopf, StornoKnopf, ZugangVerwaltung, type MitarbeiterOption } from "./einnahmen-ui";
+import { ArtenVerwaltung, BearbeitenKnopf, HandyFreischalten, NeuerEintragKnoepfe, StornoKnopf, ZugangVerwaltung, type MitarbeiterOption } from "./einnahmen-ui";
 
 export const dynamic = "force-dynamic";
 
@@ -122,7 +122,7 @@ export default async function EinnahmenPage({ searchParams }: { searchParams: Pr
             Von den Mitarbeitern am iPad/iPhone erfasst (<span className="font-mono">/salon/einnahme</span>, mit PIN) — hier kannst du nachtragen, korrigieren und stornieren
           </p>
         </div>
-        <NeueEinnahmeKnopf mitarbeiter={maOptionen} arten={arten} />
+        <NeuerEintragKnoepfe mitarbeiter={maOptionen} arten={arten} />
       </div>
 
       <HandyFreischalten />

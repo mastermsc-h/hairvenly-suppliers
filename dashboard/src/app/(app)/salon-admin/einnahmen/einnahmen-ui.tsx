@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Plus, Save, Smartphone, X } from "lucide-react";
 import { einnahmeAdminSpeichern, einnahmeArtSpeichern, einnahmeStornoAdmin, einnahmenKopplungsLink, einnahmenZugangSetzen } from "@/lib/actions/salon-einnahmen";
-import { ALLE_BEREICHE, BEREICH_LABEL, berlinLokal, type Bereich, type EinnahmeArt } from "@/lib/salon/einnahmen";
+import { ALLE_BEREICHE, BEREICH_LABEL, EINNAHME_BEREICHE, berlinLokal, type Bereich, type EinnahmeArt } from "@/lib/salon/einnahmen";
 
 export interface MitarbeiterOption {
   id: string;
@@ -25,17 +25,21 @@ export interface EintragEdit {
 }
 
 type DialogProps = { mitarbeiter: MitarbeiterOption[]; arten: EinnahmeArt[] };
+type Modus = "einnahme" | "ausgabe";
 
-/** Knopf „Einnahme nachtragen" (Admin am Rechner, ohne PIN). */
-export function NeueEinnahmeKnopf(props: DialogProps) {
-  const [offen, setOffen] = useState(false);
+/** Knöpfe „+ Einnahme" / „+ Ausgabe" (Admin am Rechner, ohne PIN). */
+export function NeuerEintragKnoepfe(props: DialogProps) {
+  const [modus, setModus] = useState<Modus | null>(null);
   return (
-    <>
-      <button onClick={() => setOffen(true)} className="flex items-center gap-2 bg-neutral-900 text-white font-medium rounded-lg px-4 py-2 text-sm">
-        <Plus size={16} /> Eintrag nachtragen
+    <div className="flex gap-2">
+      <button onClick={() => setModus("einnahme")} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg px-4 py-2 text-sm">
+        <Plus size={16} /> Einnahme
       </button>
-      {offen && <EinnahmeDialog {...props} eintrag={null} onClose={() => setOffen(false)} />}
-    </>
+      <button onClick={() => setModus("ausgabe")} className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white font-medium rounded-lg px-4 py-2 text-sm">
+        <Plus size={16} /> Ausgabe
+      </button>
+      {modus && <EinnahmeDialog {...props} eintrag={null} modus={modus} onClose={() => setModus(null)} />}
+    </div>
   );
 }
 
@@ -46,12 +50,18 @@ export function BearbeitenKnopf(props: DialogProps & { eintrag: EintragEdit }) {
       <button onClick={() => setOffen(true)} className="inline-flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-900 mr-3">
         <Pencil size={12} /> Bearbeiten
       </button>
-      {offen && <EinnahmeDialog {...props} onClose={() => setOffen(false)} />}
+      {offen && <EinnahmeDialog {...props} modus={props.eintrag.bereich === "ausgabe" ? "ausgabe" : "einnahme"} onClose={() => setOffen(false)} />}
     </>
   );
 }
 
-function EinnahmeDialog({ mitarbeiter, arten, eintrag, onClose }: DialogProps & { eintrag: EintragEdit | null; onClose: () => void }) {
+function EinnahmeDialog({
+  mitarbeiter,
+  arten,
+  eintrag,
+  modus,
+  onClose,
+}: DialogProps & { eintrag: EintragEdit | null; modus: Modus; onClose: () => void }) {
   const [employeeId, setEmployeeId] = useState(eintrag?.employeeId ?? "");
   const [artId, setArtId] = useState(eintrag?.artId ?? "");
   const [betrag, setBetrag] = useState(eintrag ? eintrag.betrag.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "");
@@ -64,6 +74,9 @@ function EinnahmeDialog({ mitarbeiter, arten, eintrag, onClose }: DialogProps & 
   // Inaktive nur zeigen, wenn der Eintrag sie schon verwendet
   const maOptionen = mitarbeiter.filter((m) => m.active || m.id === eintrag?.employeeId);
   const artOptionen = arten.filter((a) => a.aktiv || a.id === eintrag?.artId);
+  // Neu: nur die Arten des gewählten Typs; beim Bearbeiten alle (falls falsch zugeordnet)
+  const bereiche: Bereich[] = eintrag ? ALLE_BEREICHE : modus === "ausgabe" ? ["ausgabe"] : EINNAHME_BEREICHE;
+  const ausgabe = modus === "ausgabe";
   // Art des Eintrags existiert nicht mehr in der Liste → Schnappschuss als eigene Option behalten
   const artFehlt = eintrag && !artOptionen.some((a) => a.id === eintrag.artId);
 
@@ -83,12 +96,14 @@ function EinnahmeDialog({ mitarbeiter, arten, eintrag, onClose }: DialogProps & 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl p-5 space-y-4 text-left" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold">{eintrag ? "Eintrag bearbeiten" : "Einnahme / Ausgabe nachtragen"}</h3>
+          <h3 className={`text-lg font-semibold ${ausgabe ? "text-rose-700" : "text-emerald-700"}`}>
+            {eintrag ? (ausgabe ? "Ausgabe bearbeiten" : "Einnahme bearbeiten") : ausgabe ? "Ausgabe eintragen" : "Einnahme eintragen"}
+          </h3>
           <button onClick={onClose} className="p-1 text-neutral-400 hover:text-neutral-900" aria-label="Schließen"><X size={18} /></button>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className={label}>
-            Mitarbeiter
+            {ausgabe ? "Wer hat ausgegeben?" : "Wer hat sie gemacht?"}
             <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={feld}>
               <option value="">— auswählen —</option>
               {maOptionen.map((m) => (
@@ -101,7 +116,7 @@ function EinnahmeDialog({ mitarbeiter, arten, eintrag, onClose }: DialogProps & 
             <select value={artId} onChange={(e) => setArtId(e.target.value)} className={feld}>
               <option value="">— auswählen —</option>
               {artFehlt && <option value={eintrag.artId ?? ""}>{eintrag.artName} ({BEREICH_LABEL[eintrag.bereich]}, bisher)</option>}
-              {ALLE_BEREICHE.map((b) => (
+              {bereiche.map((b) => (
                 <optgroup key={b} label={b === "ausgabe" ? "Ausgabe (Geld raus)" : `Einnahme ${BEREICH_LABEL[b]}`}>
                   {artOptionen.filter((a) => a.bereich === b).map((a) => (
                     <option key={a.id} value={a.id}>{a.name}{a.aktiv ? "" : " (deaktiviert)"}</option>
@@ -121,12 +136,12 @@ function EinnahmeDialog({ mitarbeiter, arten, eintrag, onClose }: DialogProps & 
         </div>
         <label className={label}>
           Notiz
-          <textarea value={notiz} onChange={(e) => setNotiz(e.target.value)} maxLength={500} rows={2} placeholder="z.B. 100g Bondings 1B" className={feld} />
+          <textarea value={notiz} onChange={(e) => setNotiz(e.target.value)} maxLength={500} rows={2} placeholder={ausgabe ? "z.B. Kaffee + Milch (Rossmann)" : "z.B. 100g Bondings 1B"} className={feld} />
         </label>
         {fehler && <div className="text-sm text-rose-600">{fehler}</div>}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-neutral-600 hover:bg-neutral-100">Abbrechen</button>
-          <button onClick={speichern} disabled={pending || !employeeId || artId === ""} className="flex items-center gap-2 bg-neutral-900 text-white font-medium rounded-lg px-4 py-2 text-sm disabled:opacity-50">
+          <button onClick={speichern} disabled={pending || !employeeId || artId === ""} className={`flex items-center gap-2 text-white font-medium rounded-lg px-4 py-2 text-sm disabled:opacity-50 ${ausgabe ? "bg-rose-600 hover:bg-rose-700" : "bg-emerald-600 hover:bg-emerald-700"}`}>
             <Save size={14} /> {pending ? "Speichere …" : "Speichern"}
           </button>
         </div>
