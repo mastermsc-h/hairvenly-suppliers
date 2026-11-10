@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireFeature } from "@/lib/auth";
-import { LIQ_DEFAULTS, rechnungsNummern, type LiqEinstellungen } from "@/lib/liquiditaet/rechnung";
+import { LIQ_DEFAULTS, rateSchluessel, ratenVerschiebungenJetzt, rechnungsNummern, zerlegeRateSchluessel, type LiqEinstellungen, type LiqVerschiebung } from "@/lib/liquiditaet/rechnung";
 import { ladeEinstellungen, ladeRatenDaten } from "@/lib/liquiditaet/daten";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 
@@ -95,18 +95,14 @@ export async function setZahlTermin(input: {
     if (datum && input.restDatum < datum) return { ok: false, error: "Der Rest kann nicht vor der Anzahlung kommen" };
   }
   const sb = createServiceClient();
+  if (art === "rate") return setRatenTermin(sb, schluessel, datum, input.notiz ?? null);
 
   if (datum === null) {
     const { error } = await sb.from("liquiditaet_verschiebung").delete().eq("art", art).eq("schluessel", schluessel);
     if (error) return { ok: false, error: error.message };
   } else {
-    let letzteZahlung: string | null = null;
     let restBasis: number | null = null;
-    if (art === "rate") {
-      const daten = await ladeRatenDaten(sb, await ladeEinstellungen(sb));
-      if (!daten.ratenPositionen.some((x) => x.lieferant === schluessel)) return { ok: false, error: "Kein offener Ratenplan für diesen Lieferanten" };
-      letzteZahlung = daten.letzteZahlung[schluessel] ?? null;
-    } else {
+    {
       const { data, error } = await sb.from("orders_with_totals").select("id, remaining_balance").eq("id", schluessel).maybeSingle();
       if (error) return { ok: false, error: error.message };
       if (!data) return { ok: false, error: "Bestellung nicht gefunden" };
@@ -127,7 +123,7 @@ export async function setZahlTermin(input: {
         schluessel,
         datum,
         notiz: input.notiz?.trim().slice(0, 200) || null,
-        letzte_zahlung: letzteZahlung,
+        letzte_zahlung: null,
         anzahlung_usd: anzahlung,
         rest_datum: anzahlung !== null ? input.restDatum : null,
         rest_basis_usd: restBasis,
@@ -135,6 +131,46 @@ export async function setZahlTermin(input: {
       },
       { onConflict: "art,schluessel" },
     );
+    if (error) return { ok: false, error: error.message };
+  }
+  revalidatePath("/finances/liquiditaet");
+  revalidatePath("/orders");
+  return { ok: true };
+}
+
+/**
+ * Termin einer beliebigen Rate setzen/entfernen. Alle Verschiebungen des Lieferanten werden dabei auf
+ * die heutige Ratennummer und die letzte Bankzahlung umgeschrieben (bezahlte fallen weg), damit keine
+ * zwei Einträge auf dieselbe Rate zeigen.
+ */
+async function setRatenTermin(
+  sb: ReturnType<typeof createServiceClient>,
+  schluessel: string,
+  datum: string | null,
+  notiz: string | null,
+): Promise<{ ok: boolean; error?: string }> {
+  const { lieferant, nr } = zerlegeRateSchluessel(schluessel);
+  const daten = await ladeRatenDaten(sb, await ladeEinstellungen(sb));
+  if (!daten.ratenPositionen.some((x) => x.lieferant === lieferant)) return { ok: false, error: "Kein offener Ratenplan für diesen Lieferanten" };
+  const letzte = daten.letzteZahlung[lieferant] ?? null;
+  const { data: rows, error: e1 } = await sb.from("liquiditaet_verschiebung").select("schluessel, datum, notiz, letzte_zahlung").eq("art", "rate");
+  if (e1) return { ok: false, error: e1.message };
+  const eigene = ((rows ?? []) as Array<{ schluessel: string; datum: string; notiz: string | null; letzte_zahlung: string | null }>).filter(
+    (r) => zerlegeRateSchluessel(r.schluessel).lieferant === lieferant,
+  );
+  const alt: Record<string, LiqVerschiebung> = Object.fromEntries(eigene.map((r) => [r.schluessel, { datum: r.datum, notiz: r.notiz, basisZahlung: r.letzte_zahlung }]));
+  const jetzt = ratenVerschiebungenJetzt(alt, lieferant, daten.ratenZahlTage[lieferant], letzte);
+  jetzt.delete(nr);
+  const jetztIso = new Date().toISOString();
+  const zeile = (k: number, d: string, n: string | null) => ({ art: "rate", schluessel: rateSchluessel(lieferant, k), datum: d, notiz: n, letzte_zahlung: letzte, updated_at: jetztIso });
+  const neu = [...jetzt].map(([k, v]) => zeile(k, v.datum, v.notiz));
+  if (datum) neu.push(zeile(nr, datum, notiz?.trim().slice(0, 200) || null));
+  if (eigene.length) {
+    const { error } = await sb.from("liquiditaet_verschiebung").delete().eq("art", "rate").in("schluessel", eigene.map((r) => r.schluessel));
+    if (error) return { ok: false, error: error.message };
+  }
+  if (neu.length) {
+    const { error } = await sb.from("liquiditaet_verschiebung").insert(neu);
     if (error) return { ok: false, error: error.message };
   }
   revalidatePath("/finances/liquiditaet");

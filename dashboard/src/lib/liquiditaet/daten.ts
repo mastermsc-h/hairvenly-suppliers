@@ -262,7 +262,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     .sort((a, b) => (a.eta ?? "").localeCompare(b.eta ?? ""));
 
   // ── Ratenzahlung: Ebru komplett, sonst nur manuelle Positionen ──
-  const [{ ratenPositionen, letzteZahlung, ratenKommendUsd, lieferungen, ebruNachbestellung }, verschiebungen] = await Promise.all([
+  const [{ ratenPositionen, letzteZahlung, ratenZahlTage, ratenKommendUsd, lieferungen, ebruNachbestellung }, verschiebungen] = await Promise.all([
     ladeRatenDaten(sb, await ladeEinstellungen(sb)),
     ladeVerschiebungen(sb),
   ]);
@@ -350,6 +350,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     bestellungen,
     ratenPositionen,
     letzteZahlung,
+    ratenZahlTage,
     ratenKommendUsd,
     einfuhrAndere,
     ebruNachbestellung,
@@ -401,6 +402,8 @@ export async function ladeRatenDaten(
 ): Promise<{
   ratenPositionen: LiqManuellePosition[];
   letzteZahlung: Record<string, string>;
+  /** Zahltage laut Bank je Lieferant, neueste zuerst (für das Vorrücken verschobener Raten). */
+  ratenZahlTage: Record<string, string[]>;
   ratenKommendUsd: Record<string, number>;
   lieferungen: Array<Omit<LiqEinfuhrPosten, "einfuhrRechnung" | "einfuhrZahlung">>;
   ebruNachbestellung: LiqRohdaten["ebruNachbestellung"];
@@ -477,6 +480,7 @@ export async function ladeRatenDaten(
   }
   // Letzte echte Zahlung je Lieferant: jüngste Abbuchung an den Empfänger laut Kontoumsätzen
   const letzteZahlung: Record<string, string> = {};
+  const ratenZahlTage: Record<string, string[]> = {};
   await Promise.all(
     [...new Set(ratenPositionen.map((x) => x.lieferant))].map(async (lieferantName) => {
       const muster = ratenRegelFuer(lieferantName, einstellungen).bankMuster.trim();
@@ -487,12 +491,15 @@ export async function ladeRatenDaten(
         .lt("amount", 0)
         .ilike("counterparty_name", `%${muster}%`)
         .order("booking_date", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (data?.booking_date) letzteZahlung[lieferantName] = String(data.booking_date).slice(0, 10);
+        .limit(60);
+      const tage = [...new Set(((data ?? []) as Array<{ booking_date: string }>).map((x) => String(x.booking_date).slice(0, 10)))];
+      if (tage.length) {
+        letzteZahlung[lieferantName] = tage[0];
+        ratenZahlTage[lieferantName] = tage;
+      }
     }),
   );
-  return { ratenPositionen, letzteZahlung, ratenKommendUsd, lieferungen, ebruNachbestellung };
+  return { ratenPositionen, letzteZahlung, ratenZahlTage, ratenKommendUsd, lieferungen, ebruNachbestellung };
 }
 
 /** Von Hand verschobene Zahltermine (Tabelle liquiditaet_verschiebung). */
@@ -520,9 +527,9 @@ export async function ladeVerschiebungen(sb: Sb): Promise<LiqVerschiebungen> {
 export const ladeRatenTermine = cache(async (): Promise<Record<string, string[]>> => {
   const sb = createServiceClient();
   const e = await ladeEinstellungen(sb);
-  const [{ ratenPositionen, letzteZahlung }, verschiebungen] = await Promise.all([ladeRatenDaten(sb, e), ladeVerschiebungen(sb)]);
+  const [{ ratenPositionen, letzteZahlung, ratenZahlTage }, verschiebungen] = await Promise.all([ladeRatenDaten(sb, e), ladeVerschiebungen(sb)]);
   const termine: Record<string, string[]> = {};
-  for (const r of ratenplan(ratenPositionen, letzteZahlung, e, heuteBerlin(), verschiebungen.raten)) {
+  for (const r of ratenplan(ratenPositionen, letzteZahlung, e, heuteBerlin(), verschiebungen.raten, ratenZahlTage)) {
     for (const p of r.positionen) (termine[p.id] ??= []).push(r.datum);
   }
   return termine;

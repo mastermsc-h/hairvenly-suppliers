@@ -228,12 +228,21 @@ check("Bezahlte Bestellung ignoriert Verschiebung", [pvB.bestellungen[0].termin.
 const EB = "Ebru (CN + TR)";
 const rv = (raten, letzte = "2026-10-19") => L.prognose(roh({ ratenPositionen: [mp({ restUsd: 120000 })], letzteZahlung: { [EB]: letzte }, ...vs({}, raten) }), E0).ereignisse.filter((x) => x.art === "manuell");
 check("Rate verschoben: Folgeraten rutschen mit", rv({ [EB]: { datum: "2026-11-09", notiz: null, basisZahlung: "2026-10-19" } }).map((x) => x.datum), ["2026-11-09", "2026-11-23", "2026-12-07"]);
-check("Rate verschoben: nur die nächste trägt die Termin-Infos", rv({ [EB]: { datum: "2026-11-09", notiz: null, basisZahlung: "2026-10-19" } }).map((x) => [!!x.verschoben, !!x.naechsteRate]), [[true, true], [false, false], [false, false]]);
+check("Rate verschoben: alle Raten tragen Termin + Schlüssel", rv({ [EB]: { datum: "2026-11-09", notiz: null, basisZahlung: "2026-10-19" } }).map((x) => [!!x.verschoben, x.rateTermin.schluessel]), [[true, EB], [false, `${EB}#2`], [false, `${EB}#3`]]);
+// Beliebige Rate verschieben (User 10.11.2026)
+const rvZ = (raten, zahlTage) => L.prognose(roh({ ratenPositionen: [mp({ restUsd: 120000 })], letzteZahlung: { [EB]: "2026-10-19" }, ratenZahlTage: zahlTage, ...vs({}, raten) }), E0).ereignisse.filter((x) => x.art === "manuell");
+check("Rate 2 verschieben: Rate 1 bleibt, Folgeraten ab Rate 2", rvZ({ [`${EB}#2`]: { datum: "2026-11-25", notiz: null, basisZahlung: "2026-10-19" } }).map((x) => [x.datum, !!x.verschoben]), [["2026-11-02", false], ["2026-11-25", true], ["2026-12-09", false]]);
+check("Rate 2 + Rate 3 einzeln verschoben", rvZ({ [`${EB}#2`]: { datum: "2026-11-25", notiz: null, basisZahlung: "2026-10-19" }, [`${EB}#3`]: { datum: "2026-12-20", notiz: null, basisZahlung: "2026-10-19" } }).map((x) => x.datum), ["2026-11-02", "2026-11-25", "2026-12-20"]);
+check("Nach einer Bankzahlung rückt die Verschiebung vor (Rate 2 → Rate 1)", rvZ({ [`${EB}#2`]: { datum: "2026-11-25", notiz: null, basisZahlung: "2026-10-05" } }, { [EB]: ["2026-10-19", "2026-10-05"] }).map((x) => x.datum)[0], "2026-11-25");
+check("Verschobene Rate bezahlt: Verschiebung erledigt", rvZ({ [EB]: { datum: "2026-11-25", notiz: null, basisZahlung: "2026-10-05" } }, { [EB]: ["2026-10-19", "2026-10-05"] }).map((x) => x.datum), ["2026-11-02", "2026-11-16", "2026-11-30"]);
+check("Zwei Einträge für dieselbe Rate: der zuletzt geplante gilt", rvZ({ [`${EB}#3`]: { datum: "2026-12-30", notiz: null, basisZahlung: "2026-10-05" }, [`${EB}#2`]: { datum: "2026-11-25", notiz: null, basisZahlung: "2026-10-19" } }, { [EB]: ["2026-10-19", "2026-10-05"] }).map((x) => x.datum)[1], "2026-11-25");
+check("Ohne Zahltage-Liste: neuere Bankzahlung beendet auch Rate-2-Verschiebung", rvZ({ [`${EB}#2`]: { datum: "2026-11-25", notiz: null, basisZahlung: "2026-10-05" } }).map((x) => x.datum)[1], "2026-11-16");
+check("Schlüssel zerlegen", [L.zerlegeRateSchluessel(EB), L.zerlegeRateSchluessel(`${EB}#4`), L.rateSchluessel(EB, 1), L.rateSchluessel(EB, 2)], [{ lieferant: EB, nr: 1 }, { lieferant: EB, nr: 4 }, EB, `${EB}#2`]);
 check("Rate vorziehen geht auch", rv({ [EB]: { datum: "2026-10-26", notiz: null, basisZahlung: "2026-10-19" } }).map((x) => x.datum), ["2026-10-26", "2026-11-09", "2026-11-23"]);
 check("Neue Bankzahlung beendet die Verschiebung", rv({ [EB]: { datum: "2026-11-09", notiz: null, basisZahlung: "2026-10-05" } }).map((x) => x.datum), ["2026-11-02", "2026-11-16", "2026-11-30"]);
 check("Ohne Zahlungsstand: erste Bankzahlung beendet sie", rv({ [EB]: { datum: "2026-11-09", notiz: null, basisZahlung: null } }).map((x) => x.datum)[0], "2026-11-02");
 const rvA = rv({ [EB]: { datum: "2026-10-12", notiz: null, basisZahlung: "2026-10-19" } });
-check("Rate verstrichen, unbezahlt: sofort, Rest läuft ab heute", [rvA[0].datum, rvA[0].sofort, rvA[0].naechsteRate.abgelaufenAm, rvA[1].datum], ["2026-10-17", true, "2026-10-12", "2026-10-31"]);
+check("Rate verstrichen, unbezahlt: sofort, Rest läuft ab heute", [rvA[0].datum, rvA[0].sofort, rvA[0].rateTermin.abgelaufenAm, rvA[1].datum], ["2026-10-17", true, "2026-10-12", "2026-10-31"]);
 check("ratenplan: Bestell-Termine folgen der Verschiebung", L.ratenplan([mp({ id: "a", restUsd: 50000 })], { [EB]: "2026-10-19" }, L.mitDefaults({}), "2026-10-20", { [EB]: { datum: "2026-11-20", notiz: null, basisZahlung: "2026-10-19" } }).map((r) => r.datum), ["2026-11-20", "2026-12-04"]);
 check("Keine Verschiebungen (alte Rohdaten) ändern nichts", L.prognose(roh({ bestellungen: [bv] }), E0).bestellungen[0].termin, { regelDatum: "2026-10-17", verschoben: false, notiz: null, abgelaufenAm: null });
 

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
 import { Area, Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
-import { LIQ_DEFAULTS, VERSAND_FRUEHESTENS_TAGE, ZOLL_NACH_VERSAND_TAGE, prognose, zahlGruppe, type Ereignis, type LiqEinstellungen, type LiqRohdaten, type VerlaufTag, type ZahlGruppe } from "@/lib/liquiditaet/rechnung";
+import { LIQ_DEFAULTS, VERSAND_FRUEHESTENS_TAGE, ZOLL_NACH_VERSAND_TAGE, prognose, zahlGruppe, zerlegeRateSchluessel, type Ereignis, type LiqEinstellungen, type LiqRohdaten, type VerlaufTag, type ZahlGruppe } from "@/lib/liquiditaet/rechnung";
 import { SYMBOLE, TerminSymbol, symbolTyp, type SymbolTyp } from "./termin-symbol";
 import { AMPEL_STIL } from "../../orders/liquiditaet-badge";
 import EinfuhrRechnung from "./einfuhr-rechnung";
@@ -86,7 +86,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           restDatum: ent.restDatum ?? null,
           restBasisUsd: ent.anzahlungUsd ? (schonBezahlt ? alt.restBasisUsd : offen) : null,
         };
-      } else v.raten[id] = { datum: ent.datum, notiz: null, basisZahlung: roh.letzteZahlung?.[id] ?? null };
+      } else v.raten[id] = { datum: ent.datum, notiz: null, basisZahlung: roh.letzteZahlung?.[zerlegeRateSchluessel(id).lieferant] ?? null };
     }
     return { ...roh, verschiebungen: v };
   }, [roh, entwuerfe]);
@@ -209,7 +209,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
     if (ev.art === "einfuhr" && ev.orderId) return { id: `bestellung-${ev.orderId}` };
     if (ev.art === "manuell") {
       const lieferant = ev.ratenLieferant ?? "";
-      return { id: `rate-${manuellRaten.indexOf(ev)}`, oeffnen: `rate:${lieferant}` };
+      return { id: `rate-${manuellRaten.indexOf(ev)}`, oeffnen: `rate:${ev.rateTermin?.schluessel ?? lieferant}` };
     }
     return { id: terminId(ev) };
   }
@@ -821,14 +821,17 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
               Manuelle Positionen anderer Lieferanten: Raten à {usd(e.manuellRateUsd)}, erste {e.manuellFristTage} Tage nach Datum, dann alle {e.manuellAbstandTage} Tage.
               Älteste Rechnung zuerst; eine Rate kann den Rest der einen und den Anfang der nächsten abdecken.
             </p>
-            <p>Klick aufs Datum der nächsten Rate verschiebt sie, die folgenden Raten rutschen mit. Mit der nächsten Bankzahlung läuft die Verschiebung aus.</p>
+            <p>
+              Klick aufs Datum einer Rate verschiebt sie, die folgenden Raten rechnen ab ihr weiter. Mit jeder Bankzahlung rücken verschobene Raten
+              eins vor (aus Rate 3 wird Rate 2) — ist die verschobene Rate selbst bezahlt, ist die Verschiebung erledigt.
+            </p>
           </div>
           <div className="divide-y divide-neutral-100">
             {manuellRaten.map((r, i) => (
               <div key={i} id={`rate-${i}`} className={`flex items-center justify-between gap-3 py-1.5 text-sm ${zeileCls(`rate-${i}`)}`}>
                 <span className="text-neutral-500 min-w-24 shrink-0">
-                  {r.naechsteRate ? (
-                    <ZahlTermin datum={r.datum} sofort={!!r.sofort} termin={r.naechsteRate} {...terminProps("rate", r.naechsteRate.lieferant)} />
+                  {r.rateTermin ? (
+                    <ZahlTermin datum={r.datum} sofort={!!r.sofort} termin={r.rateTermin} {...terminProps("rate", r.rateTermin.schluessel)} />
                   ) : (
                     deDate(r.datum)
                   )}

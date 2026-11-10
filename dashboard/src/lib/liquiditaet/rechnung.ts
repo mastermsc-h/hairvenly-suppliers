@@ -427,7 +427,7 @@ export interface LiqVerschiebung {
 export interface LiqVerschiebungen {
   /** order id → Termin */
   bestellungen: Record<string, LiqVerschiebung>;
-  /** Lieferant → Termin der nächsten Rate (Folgeraten rutschen mit) */
+  /** Raten-Schlüssel (rateSchluessel: "Lieferant" = Rate 1, "Lieferant#3" = Rate 3 beim Planen) → Termin; Folgeraten rutschen mit */
   raten: Record<string, LiqVerschiebung>;
 }
 
@@ -477,6 +477,8 @@ export interface LiqRohdaten {
   /** An Bestellungen eingetragene Lieferanten-Zahlungen, die noch nicht auf dem Konto stehen. */
   zahlungenUnterwegs?: ZahlungUnterwegs[];
   verschiebungen?: LiqVerschiebungen;
+  /** Tage mit Bankzahlungen je Ratenlieferant (neueste zuerst) — verschobene Raten rücken danach vor. */
+  ratenZahlTage?: Record<string, string[]>;
   steuern: {
     /** Vergangene Monate: gezahlte USt-VA (+) bzw. Erstattung (−) und im Monat gezahlte EUSt. */
     ustHistorie: Array<{ monat: string; ust: number; eust: number }>;
@@ -599,8 +601,8 @@ export interface Ereignis {
   verschoben?: boolean;
   /** Ratenzahlung: an welchen Lieferanten. */
   ratenLieferant?: string;
-  /** Nächste Rate eines Lieferanten — nur diese lässt sich verschieben. */
-  naechsteRate?: TerminStand & { lieferant: string };
+  /** Rate eines Lieferanten: Termin + Schlüssel zum Verschieben. */
+  rateTermin?: TerminStand & { lieferant: string; schluessel: string };
   /** Bestellung in Anzahlung + Rest geteilt. */
   teil?: "anzahlung" | "rest";
   /** An der Bestellung als bezahlt eingetragen, aber noch nicht auf dem Konto — keine offene Schuld mehr. */
@@ -739,8 +741,9 @@ export interface Rate {
   datum: string;
   usd: number;
   positionen: Array<{ id: string; label: string; usd: number; geschaetzt?: boolean }>;
-  /** Nur die nächste Rate (nr 1) lässt sich verschieben. */
-  termin?: TerminStand;
+  termin: TerminStand;
+  /** Schlüssel zum Verschieben dieser Rate (rateSchluessel). */
+  schluessel: string;
 }
 
 /**
@@ -766,8 +769,9 @@ function terminHinweis(name: string, t: TerminStand & { datum: string }, ende: s
  * Termin = max(Rechnungsdatum + Frist, vorige Zahlung + Abstand, start) — "vorige Zahlung" ist
  * zuerst die letzte echte Bankzahlung, danach die jeweils vorige geplante Rate.
  * Eine Rate kann den Rest der einen und den Anfang der nächsten Rechnung abdecken.
- * Verschiebung gilt für die nächste Rate, die folgenden rechnen ab ihr weiter. Sie endet mit der
- * nächsten echten Bankzahlung.
+ * Jede Rate lässt sich verschieben, die folgenden rechnen ab ihr weiter. Mit jeder echten Bankzahlung
+ * seit dem Planen rückt eine Verschiebung eine Rate vor (aus Rate 3 wird Rate 2); die verschobene
+ * Rate selbst bezahlt → Verschiebung erledigt.
  */
 export function ratenplan(
   positionen: LiqManuellePosition[],
@@ -775,6 +779,7 @@ export function ratenplan(
   e: LiqEinstellungen,
   start: string,
   verschiebungen: Record<string, LiqVerschiebung> = {},
+  zahlTage: Record<string, string[]> = {},
 ): Rate[] {
   const out: Rate[] = [];
   const offenAlle = positionen.filter((p) => p.restUsd > 0.01);
@@ -787,18 +792,14 @@ export function ratenplan(
     const rate = Math.max(1, cfg.rateUsd);
     const raten: Rate[] = [];
     let letzte: string | null = letzteZahlung[lieferant] ?? null;
-    const v = verschiebungen[lieferant];
-    const vGueltig = v && (letzte ?? "") <= (v.basisZahlung ?? "") ? v : undefined;
+    const jetzt = ratenVerschiebungenJetzt(verschiebungen, lieferant, zahlTage[lieferant], letzte);
     for (let kopf = 0; kopf < offen.length && raten.length < 200; ) {
       const frueh: string = letzte ? plusTage(letzte, cfg.abstandTage) : offen[kopf].faellig;
       let datum: string = frueh > offen[kopf].faellig ? frueh : offen[kopf].faellig;
       if (datum < start) datum = start;
-      let termin: TerminStand | undefined;
-      if (raten.length === 0) {
-        const t = terminMit(datum, vGueltig, start);
-        datum = t.datum;
-        termin = { regelDatum: t.regelDatum, verschoben: t.verschoben, notiz: t.notiz, abgelaufenAm: t.abgelaufenAm };
-      }
+      const t = terminMit(datum, jetzt.get(raten.length + 1), start);
+      datum = t.datum;
+      const termin: TerminStand = { regelDatum: t.regelDatum, verschoben: t.verschoben, notiz: t.notiz, abgelaufenAm: t.abgelaufenAm };
       let usd = 0;
       const pos: Rate["positionen"] = [];
       while (kopf < offen.length && usd < rate - 0.005) {
@@ -808,10 +809,45 @@ export function ratenplan(
         pos.push({ id: offen[kopf].id, label: offen[kopf].label, usd: r2(teil), ...(offen[kopf].geschaetzt ? { geschaetzt: true } : {}) });
         if (offen[kopf].rest <= 0.005) kopf++;
       }
-      raten.push({ lieferant, nr: raten.length + 1, von: 0, datum, usd: r2(usd), positionen: pos, termin });
+      raten.push({ lieferant, nr: raten.length + 1, von: 0, datum, usd: r2(usd), positionen: pos, termin, schluessel: rateSchluessel(lieferant, raten.length + 1) });
       letzte = datum;
     }
     for (const r of raten) out.push({ ...r, von: raten.length });
+  }
+  return out;
+}
+
+/** Schlüssel einer Rate zum Verschieben: Rate 1 = Lieferantenname (wie früher), sonst "Lieferant#nr". */
+export function rateSchluessel(lieferant: string, nr: number): string {
+  return nr <= 1 ? lieferant : `${lieferant}#${nr}`;
+}
+
+export function zerlegeRateSchluessel(s: string): { lieferant: string; nr: number } {
+  const m = s.match(/^(.*)#(\d+)$/);
+  return m ? { lieferant: m[1], nr: Number(m[2]) } : { lieferant: s, nr: 1 };
+}
+
+/**
+ * Verschiebungen eines Lieferanten auf die heutige Ratennummer: jeder Zahltag nach dem Planen rückt
+ * eins vor, ≤ 0 = schon bezahlt. Ohne Zahltage-Liste gilt nur "keine neue Zahlung seit dem Planen".
+ * Zeigen zwei auf dieselbe Rate, gewinnt die zuletzt geplante.
+ */
+export function ratenVerschiebungenJetzt(
+  verschiebungen: Record<string, LiqVerschiebung>,
+  lieferant: string,
+  zahlTage: string[] | undefined,
+  letzte: string | null,
+): Map<number, LiqVerschiebung & { schluessel: string }> {
+  const out = new Map<number, LiqVerschiebung & { schluessel: string }>();
+  for (const [schluessel, v] of Object.entries(verschiebungen)) {
+    const k = zerlegeRateSchluessel(schluessel);
+    if (k.lieferant !== lieferant) continue;
+    const basis = v.basisZahlung ?? "";
+    const n = zahlTage ? new Set(zahlTage.filter((d) => d > basis)).size : (letzte ?? "") > basis ? Infinity : 0;
+    const nr = k.nr - n;
+    if (nr < 1) continue;
+    const alt = out.get(nr);
+    if (!alt || (alt.basisZahlung ?? "") < basis) out.set(nr, { ...v, schluessel });
   }
   return out;
 }
@@ -994,8 +1030,8 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
 
   // 1b) Ratenzahlung (Ebru: alle offenen Rechnungen; andere Lieferanten: nur manuelle Positionen)
   const ratenPos = [...(roh.ratenPositionen ?? roh.manuellePositionen ?? []), ...nbPositionen].filter((p) => p.restUsd > 0.01);
-  for (const r of ratenplan(ratenPos, roh.letzteZahlung ?? {}, e, start, roh.verschiebungen?.raten)) {
-    const hinweis = r.termin ? terminHinweis(`${r.lieferant} nächste Rate`, { ...r.termin, datum: r.datum }, ende) : null;
+  for (const r of ratenplan(ratenPos, roh.letzteZahlung ?? {}, e, start, roh.verschiebungen?.raten, roh.ratenZahlTage)) {
+    const hinweis = terminHinweis(`${r.lieferant} Rate ${r.nr}`, { ...r.termin, datum: r.datum }, ende);
     if (hinweis) hinweise.push(hinweis);
     ereignisse.push({
       datum: r.datum,
@@ -1004,10 +1040,10 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       label: `${r.lieferant} Rate ${r.nr}/${r.von} · ${r.usd.toLocaleString("de-DE", { maximumFractionDigits: 0 })} $ (${r.positionen.map((x) => (x.geschaetzt ? `≈ ${x.label}` : x.label)).join(", ")})`,
       ...(r.positionen.some((x) => x.geschaetzt) ? { schaetzung: true } : {}),
       orderIds: r.positionen.map((x) => x.id),
-      sofort: !r.termin?.verschoben && r.datum <= start,
-      verschoben: r.termin?.verschoben,
+      sofort: !r.termin.verschoben && r.datum <= start,
+      verschoben: r.termin.verschoben,
       ratenLieferant: r.lieferant,
-      naechsteRate: r.termin && { ...r.termin, lieferant: r.lieferant },
+      rateTermin: { ...r.termin, lieferant: r.lieferant, schluessel: r.schluessel },
     });
   }
   if (ratenPos.length && e.andereLieferantenEinrechnen) {
