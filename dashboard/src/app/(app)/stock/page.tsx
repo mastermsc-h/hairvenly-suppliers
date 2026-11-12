@@ -58,6 +58,7 @@ export default async function StockIndexPage() {
   }).items.filter((d) => d.deadKind === "tot" || (d.monthsCover ?? 0) > 24);
   const deadCount = dead.length;
   const deadKg = dead.reduce((s, d) => s + d.lagerG, 0) / 1000;
+  const deadEur = dead.reduce((s, d) => s + (d.valueEur ?? 0), 0);
 
   // Build insights from topseller data
   const insights = buildInsights(topseller.sections);
@@ -121,6 +122,7 @@ export default async function StockIndexPage() {
         kritischCount,
         deadCount,
         deadKg,
+        deadEur,
         unterwegsCount: alerts.unterwegs.length,
         welligCollections: welligByCollection,
         glattCollections: glattByCollection,

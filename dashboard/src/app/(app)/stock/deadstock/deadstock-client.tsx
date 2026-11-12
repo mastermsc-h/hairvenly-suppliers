@@ -21,6 +21,10 @@ interface Props {
 }
 
 const kg = (g: number) => (g / 1000).toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const eur = (v: number) => v.toLocaleString("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+const eurSum = (arr: { valueEur: number | null }[]) => arr.reduce((s, d) => s + (d.valueEur ?? 0), 0);
+/** Wert der bestellten Menge zum gleichen Grammpreis wie das Lager */
+const orderedEur = (d: DeadStockItem) => (d.valueEur !== null && d.lagerG > 0 ? (d.valueEur / d.lagerG) * d.unterwegsG : 0);
 
 export default function DeadStockClient({ items, recentlyAvailable, tooNew, noData, totalLagerKg, lastUpdated, orderIdByName }: Props) {
   const [minMonths, setMinMonths] = useState<(typeof MONTH_OPTIONS)[number]>(24);
@@ -43,11 +47,12 @@ export default function DeadStockClient({ items, recentlyAvailable, tooNew, noDa
     kind === "all" ? true : kind === "ordered" ? d.unterwegsG > 0 : d.deadKind === kind;
 
   const byCollection = useMemo(() => {
-    const m = new Map<string, { sheetKey: "wellig" | "glatt"; count: number; g: number }>();
+    const m = new Map<string, { sheetKey: "wellig" | "glatt"; count: number; g: number; eur: number }>();
     for (const d of base.filter(matchKind)) {
-      const e = m.get(d.collection) ?? { sheetKey: d.sheetKey, count: 0, g: 0 };
+      const e = m.get(d.collection) ?? { sheetKey: d.sheetKey, count: 0, g: 0, eur: 0 };
       e.count++;
       e.g += d.lagerG;
+      e.eur += d.valueEur ?? 0;
       m.set(d.collection, e);
     }
     return [...m.entries()].sort((a, b) => b[1].g - a[1].g);
@@ -67,6 +72,7 @@ export default function DeadStockClient({ items, recentlyAvailable, tooNew, noDa
   const wellig = filtered.filter((d) => d.sheetKey === "wellig");
   const glatt = filtered.filter((d) => d.sheetKey === "glatt");
   const baseKg = sum(base) / 1000;
+  const missingPrice = base.filter((d) => d.valueEur === null).length;
 
   return (
     <div className="p-4 md:p-8 space-y-6 max-w-7xl">
@@ -84,6 +90,7 @@ export default function DeadStockClient({ items, recentlyAvailable, tooNew, noDa
         <Kpi
           label="Gesamt"
           value={`${kg(sum(base))} kg`}
+          eur={eurSum(base)}
           sub={`${base.length} Produkte · ${totalLagerKg > 0 ? Math.round((baseKg / totalLagerKg) * 100) : 0}% vom Lager`}
           icon={<PackageX size={16} />}
           tone="neutral"
@@ -91,6 +98,7 @@ export default function DeadStockClient({ items, recentlyAvailable, tooNew, noDa
         <Kpi
           label="Tot"
           value={`${kg(sum(tot))} kg`}
+          eur={eurSum(tot)}
           sub={`${tot.length} Produkte · 0 g trotz Lieferbarkeit`}
           icon={<Skull size={16} />}
           tone="red"
@@ -98,6 +106,7 @@ export default function DeadStockClient({ items, recentlyAvailable, tooNew, noDa
         <Kpi
           label="Fast tot"
           value={`${kg(sum(fast))} kg`}
+          eur={eurSum(fast)}
           sub={`${fast.length} Produkte · Lager reicht > ${minMonths} Monate`}
           icon={<TrendingDown size={16} />}
           tone="amber"
@@ -105,6 +114,7 @@ export default function DeadStockClient({ items, recentlyAvailable, tooNew, noDa
         <Kpi
           label="Trotzdem bestellt"
           value={`${kg(ordered.reduce((s, d) => s + d.unterwegsG, 0))} kg`}
+          eur={ordered.reduce((s, d) => s + orderedEur(d), 0)}
           sub={`${ordered.length} Produkte mit Ware unterwegs`}
           icon={<Truck size={16} />}
           tone="violet"
@@ -177,7 +187,7 @@ export default function DeadStockClient({ items, recentlyAvailable, tooNew, noDa
                   : e.sheetKey === "wellig" ? "bg-blue-50 text-blue-800 border-blue-100 hover:bg-blue-100" : "bg-green-50 text-green-800 border-green-100 hover:bg-green-100"
               }`}
             >
-              {name} <span className="opacity-70">· {kg(e.g)} kg · {e.count}</span>
+              {name} <span className="opacity-70">· {kg(e.g)} kg · {eur(e.eur)} · {e.count}</span>
             </button>
           ))}
         </div>
@@ -186,6 +196,21 @@ export default function DeadStockClient({ items, recentlyAvailable, tooNew, noDa
       {wellig.length > 0 && <DeadSection label="Usbekisch Wellig" accent="blue" items={wellig} orderIdByName={orderIdByName} />}
       {glatt.length > 0 && <DeadSection label="Russisch Glatt" accent="green" items={glatt} orderIdByName={orderIdByName} />}
       {filtered.length === 0 && <div className="text-center py-12 text-neutral-400">Keine Produkte für diese Auswahl</div>}
+
+      {filtered.length > 0 && (
+        <section className="bg-neutral-900 text-white rounded-2xl shadow-sm px-4 py-3 flex flex-wrap items-baseline justify-between gap-2">
+          <span className="text-sm font-medium">
+            Gesamt{filtered.length !== base.length ? " (aktuelle Auswahl)" : ""} · {filtered.length} Produkte
+          </span>
+          <span className="flex items-baseline gap-4">
+            <span className="text-xl font-semibold tabular-nums">{kg(sum(filtered))} kg</span>
+            <span className="text-xl font-semibold tabular-nums text-emerald-300">{eur(eurSum(filtered))}</span>
+          </span>
+          {missingPrice > 0 && (
+            <span className="w-full text-[11px] text-neutral-400">{missingPrice} Produkte ohne Shopify-Preis sind im Wert nicht enthalten.</span>
+          )}
+        </section>
+      )}
 
       {recentlyAvailable.length > 0 && (
         <details className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
@@ -200,6 +225,7 @@ export default function DeadStockClient({ items, recentlyAvailable, tooNew, noDa
                   <th className="px-2 py-1.5 font-medium">Kollektion</th>
                   <th className="px-2 py-1.5 font-medium">Produkt</th>
                   <th className="px-2 py-1.5 font-medium text-right">Lager</th>
+                  <th className="px-2 py-1.5 font-medium text-right">VK-Wert</th>
                   <th className="px-2 py-1.5 font-medium text-right">Lieferbar</th>
                   <th className="px-2 py-1.5 font-medium text-right">Verkauft 90T</th>
                 </tr>
@@ -212,6 +238,7 @@ export default function DeadStockClient({ items, recentlyAvailable, tooNew, noDa
                       <td className="px-2 py-1 text-neutral-500 whitespace-nowrap">{d.collection}</td>
                       <td className="px-2 py-1 text-neutral-900 max-w-[320px] truncate" title={d.product}>{d.product}</td>
                       <td className="px-2 py-1 text-right whitespace-nowrap">{d.lagerG.toLocaleString("de-DE")} g</td>
+                      <td className="px-2 py-1 text-right whitespace-nowrap tabular-nums">{d.valueEur !== null ? eur(d.valueEur) : "–"}</td>
                       <td className="px-2 py-1 text-right text-neutral-600 whitespace-nowrap">{d.availDays} / 90 T</td>
                       <td className="px-2 py-1 text-right text-neutral-600 whitespace-nowrap">{d.sold90G.toLocaleString("de-DE")} g</td>
                     </tr>
@@ -247,6 +274,7 @@ function DeadSection({ label, accent, items, orderIdByName }: {
   orderIdByName: Record<string, ClientOrderMeta>;
 }) {
   const totalG = items.reduce((s, d) => s + d.lagerG, 0);
+  const totalEur = eurSum(items);
   return (
     <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
       <div className={`${accent === "blue" ? "bg-blue-600" : "bg-green-700"} text-white px-4 py-2.5 font-semibold text-sm flex justify-between`}>
@@ -254,7 +282,7 @@ function DeadSection({ label, accent, items, orderIdByName }: {
           {label}
           <span className="ml-2 font-normal opacity-80">({items.length} Produkte)</span>
         </span>
-        <span>{kg(totalG)} kg</span>
+        <span className="tabular-nums">{kg(totalG)} kg · {eur(totalEur)}</span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -264,6 +292,7 @@ function DeadSection({ label, accent, items, orderIdByName }: {
               <th className="px-2 py-1.5 font-medium">Produkt</th>
               <th className="px-2 py-1.5 font-medium">Status</th>
               <th className="px-2 py-1.5 font-medium text-right">Lager</th>
+              <th className="px-2 py-1.5 font-medium text-right" title="Lager × aktueller Shopify-Verkaufspreis">VK-Wert</th>
               <th className="px-2 py-1.5 font-medium text-right" title="Verkauft in den letzten 90 Tagen (Shopify-Bestellungen)">90T</th>
               <th className="px-2 py-1.5 font-medium text-right" title="An so vielen der letzten 90 Tage war das Produkt lieferbar">Lieferbar</th>
               <th className="px-2 py-1.5 font-medium text-right" title="So lange reicht das Lager beim Verkaufstempo der lieferbaren Tage">Reicht</th>
@@ -283,6 +312,7 @@ function DeadSection({ label, accent, items, orderIdByName }: {
                   )}
                 </td>
                 <td className="px-2 py-1 text-right font-semibold text-neutral-900 whitespace-nowrap">{d.lagerG.toLocaleString("de-DE")} g</td>
+                <td className="px-2 py-1 text-right text-neutral-700 whitespace-nowrap tabular-nums">{d.valueEur !== null ? eur(d.valueEur) : <span className="text-neutral-300" title="Kein Shopify-Preis gefunden">–</span>}</td>
                 <td className={`px-2 py-1 text-right ${d.sold90G ? "text-neutral-600" : "text-red-400 font-medium"}`}>{d.sold90G.toLocaleString("de-DE")} g</td>
                 <td className="px-2 py-1 text-right text-neutral-600 whitespace-nowrap">{d.availDays} / 90 T</td>
                 <td className="px-2 py-1 text-right text-neutral-600 whitespace-nowrap">
@@ -308,14 +338,22 @@ function DeadSection({ label, accent, items, orderIdByName }: {
               </tr>
             ))}
           </tbody>
+          <tfoot className="bg-neutral-50 border-t border-neutral-200">
+            <tr className="font-semibold text-neutral-900">
+              <td className="px-2 py-1.5" colSpan={3}>Summe {label} · {items.length} Produkte</td>
+              <td className="px-2 py-1.5 text-right whitespace-nowrap tabular-nums">{kg(totalG)} kg</td>
+              <td className="px-2 py-1.5 text-right whitespace-nowrap tabular-nums">{eur(totalEur)}</td>
+              <td colSpan={4} />
+            </tr>
+          </tfoot>
         </table>
       </div>
     </section>
   );
 }
 
-function Kpi({ label, value, sub, icon, tone }: {
-  label: string; value: string; sub: string; icon: React.ReactNode;
+function Kpi({ label, value, eur: eurValue, sub, icon, tone }: {
+  label: string; value: string; eur?: number; sub: string; icon: React.ReactNode;
   tone: "neutral" | "red" | "amber" | "violet";
 }) {
   const t = {
@@ -330,7 +368,10 @@ function Kpi({ label, value, sub, icon, tone }: {
         <div className="text-xs text-neutral-500 uppercase tracking-wide">{label}</div>
         <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${t}`}>{icon}</div>
       </div>
-      <div className="mt-2 text-2xl font-semibold text-neutral-900">{value}</div>
+      <div className="mt-2 flex items-baseline gap-2 flex-wrap">
+        <span className="text-2xl font-semibold text-neutral-900">{value}</span>
+        {eurValue !== undefined && <span className="text-base font-semibold text-emerald-700 tabular-nums">{eur(eurValue)}</span>}
+      </div>
       <div className="text-[11px] text-neutral-500 mt-0.5">{sub}</div>
     </div>
   );

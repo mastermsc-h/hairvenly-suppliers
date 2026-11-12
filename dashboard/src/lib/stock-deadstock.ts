@@ -38,6 +38,8 @@ export interface DeadStockItem extends AlertProduct {
   availDays: number;
   /** Verkauft (g) in den letzten 90 Tagen laut Tagesverkäufen. */
   sold90G: number;
+  /** Lager × aktueller Shopify-Verkaufspreis (EUR); null = Preis unbekannt. */
+  valueEur: number | null;
 }
 
 export interface RecentlyAvailableItem {
@@ -47,6 +49,7 @@ export interface RecentlyAvailableItem {
   lagerG: number;
   availDays: number;
   sold90G: number;
+  valueEur: number | null;
 }
 
 export interface DeadStockResult {
@@ -59,37 +62,61 @@ export interface DeadStockResult {
   totalLagerKg: number;
 }
 
-// ── Shopify-Anlagedatum ────────────────────────────────────────
+// ── Shopify: Anlagedatum + Verkaufspreise ─────────────────────
 
-const PRODUCT_AGES_QUERY = `
+const PRODUCT_META_QUERY = `
   query($after: String) {
-    products(first: 250, after: $after) {
+    products(first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
-      nodes { handle createdAt }
+      nodes { handle createdAt variants(first: 10) { nodes { title price } } }
     }
   }`;
 
-type AgesPage = {
-  products: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: { handle: string; createdAt: string }[] };
+type MetaPage = {
+  products: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    nodes: { handle: string; createdAt: string; variants: { nodes: { title: string; price: string }[] } }[];
+  };
 };
 
-/** handle → createdAt. Fehler → leere Map (Alter dann unbekannt, Produkt wird normal bewertet). */
-export async function fetchProductCreatedAt(): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
+export interface ShopifyProductMeta {
+  createdAt: string;
+  variants: { title: string; price: number }[];
+}
+
+/** handle → Anlagedatum + Varianten-Preise. Fehler → leere Map (Alter/Preis dann unbekannt). */
+export async function fetchProductMeta(): Promise<Map<string, ShopifyProductMeta>> {
+  const out = new Map<string, ShopifyProductMeta>();
   try {
     let after: string | null = null;
     for (let page = 0; page < 40; page++) {
-      const res: { data?: AgesPage } = await shopifyGraphQL<AgesPage>(PRODUCT_AGES_QUERY, { after }, { allowPartialErrors: true });
+      const res: { data?: MetaPage } = await shopifyGraphQL<MetaPage>(PRODUCT_META_QUERY, { after }, { allowPartialErrors: true });
       const d = res.data?.products;
       if (!d) break;
-      for (const n of d.nodes) out.set(n.handle, n.createdAt);
+      for (const n of d.nodes) {
+        out.set(n.handle, {
+          createdAt: n.createdAt,
+          variants: n.variants.nodes.map((v) => ({ title: v.title, price: Number(v.price) || 0 })),
+        });
+      }
       if (!d.pageInfo.hasNextPage) break;
       after = d.pageInfo.endCursor;
     }
   } catch {
-    // Seite bleibt nutzbar; nur der Neu-Ausschluss fehlt dann
+    // Seite bleibt nutzbar; nur Neu-Ausschluss und Preise fehlen dann
   }
   return out;
+}
+
+/** Preis einer Verkaufseinheit (= Stückgewicht im Sheet). Clip-ins: Variante mit passendem Gewicht. */
+function unitPrice(meta: ShopifyProductMeta | undefined, clipGrams: string | null): number | null {
+  if (!meta || meta.variants.length === 0) return null;
+  if (clipGrams) {
+    const v = meta.variants.find((x) => gramsOf(x.title) === clipGrams);
+    return v && v.price > 0 ? v.price : null;
+  }
+  // Ein Produkt = eine Verkaufseinheit; bei mehreren Varianten ist die Zuordnung unsicher → kein Preis
+  return meta.variants.length === 1 && meta.variants[0].price > 0 ? meta.variants[0].price : null;
 }
 
 // ── Verkäufe + Wareneingänge pro Tag ──────────────────────────
@@ -239,7 +266,7 @@ const handleFromUrl = (u: string | null | undefined) => (u ?? "").match(/\/produ
 
 export function buildDeadStock(
   input: StockCandidatesInput & {
-    createdAt: Map<string, string>;
+    products: Map<string, ShopifyProductMeta>;
     movements: DailyMovements;
     todayIso?: string;
     now?: number;
@@ -256,7 +283,8 @@ export function buildDeadStock(
   for (const c of buildStockCandidates(input)) {
     const { url, unitWeight, ...d } = c;
     const handle = handleFromUrl(url);
-    const created = handle ? input.createdAt.get(handle) : undefined;
+    const meta = handle ? input.products.get(handle) : undefined;
+    const created = meta?.createdAt;
     const ageDays = created ? Math.floor((now - Date.parse(created)) / 864e5) : null;
     if (ageDays !== null && ageDays < DEAD_WINDOW_DAYS) {
       tooNew.count++;
@@ -271,6 +299,8 @@ export function buildDeadStock(
     }
     const clip = /CLIP[\s-]?IN/i.test(d.collection);
     const key = clip && d.variant ? `${handle}|${d.variant}` : handle;
+    const price = unitPrice(meta, clip ? d.variant : null);
+    const valueEur = price !== null ? Math.round((d.lagerG / uw) * price * 100) / 100 : null;
     const { availDays, soldUnits } = reconstructAvailability({
       qtyNow: Math.round(d.lagerG / uw),
       unitWeight: uw,
@@ -281,18 +311,18 @@ export function buildDeadStock(
     });
     const sold90G = soldUnits * uw;
     if (availDays < MIN_AVAIL_DAYS) {
-      recentlyAvailable.push({ collection: d.collection, product: d.product, sheetKey: d.sheetKey, lagerG: d.lagerG, availDays, sold90G });
+      recentlyAvailable.push({ collection: d.collection, product: d.product, sheetKey: d.sheetKey, lagerG: d.lagerG, availDays, sold90G, valueEur });
       continue;
     }
     totalLagerG += d.lagerG;
     if (sold90G <= 0) {
-      items.push({ ...d, deadKind: "tot", monthsCover: null, ageDays, availDays, sold90G });
+      items.push({ ...d, deadKind: "tot", monthsCover: null, ageDays, availDays, sold90G, valueEur });
       continue;
     }
     const perMonth = (sold90G / availDays) * 30;
     const monthsCover = d.lagerG / perMonth;
     if (monthsCover > DEAD_MIN_MONTHS) {
-      items.push({ ...d, deadKind: "fasttot", monthsCover: Math.round(monthsCover * 10) / 10, ageDays, availDays, sold90G });
+      items.push({ ...d, deadKind: "fasttot", monthsCover: Math.round(monthsCover * 10) / 10, ageDays, availDays, sold90G, valueEur });
     }
   }
   items.sort((a, b) => b.lagerG - a.lagerG);
@@ -303,11 +333,11 @@ export function buildDeadStock(
 export async function loadDeadStockInputs() {
   const todayIso = berlinTodayIso();
   const since = new Date(Date.parse(todayIso) - (DEAD_WINDOW_DAYS + 1) * 864e5).toISOString().slice(0, 10);
-  const [createdAt, movements] = await Promise.all([
-    fetchProductCreatedAt(),
+  const [products, movements] = await Promise.all([
+    fetchProductMeta(),
     loadDailyMovements(createServiceClient(), since),
   ]);
-  return { createdAt, movements, todayIso };
+  return { products, movements, todayIso };
 }
 
 export async function loadDeadStock(): Promise<

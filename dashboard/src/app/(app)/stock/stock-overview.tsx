@@ -48,6 +48,7 @@ interface StockStats {
   kritischCount: number;
   deadCount: number;
   deadKg: number;
+  deadEur: number;
   unterwegsCount: number;
   welligCollections: CollectionStat[];
   glattCollections: CollectionStat[];
@@ -134,7 +135,7 @@ export default function StockOverviewClient({ stats, locale, history = [] }: { s
           label="Ladenhüter"
           count={stats.deadCount}
           color="slate"
-          description={`${stats.deadKg.toLocaleString("de-DE", { maximumFractionDigits: 1 })} kg, die (fast) nicht verkaufen — Sale-Kandidaten`}
+          description={`${stats.deadKg.toLocaleString("de-DE", { maximumFractionDigits: 1 })} kg · ${stats.deadEur.toLocaleString("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })} VK-Wert — Sale-Kandidaten`}
         />
       </section>
 
