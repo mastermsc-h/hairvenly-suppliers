@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { loadShopifyTitleIndex, type ShopifyTitleIndex } from "@/lib/shopify-product-link";
 
@@ -85,9 +86,12 @@ export function isArchived(meta: OrderMeta | undefined | null): boolean {
  *
  * Primary matching: by (supplier family + canonical date YYYY-MM-DD).
  * Separator-agnostic: accepts `.`, `-`, `/`, ` ` between date parts.
+ *
+ * `client`: ohne Login-Cookie (Cron) liefert der Default-Client wegen RLS
+ * keine Bestellungen → leere Map. Cron-Aufrufer reichen den Service-Client rein.
  */
-export async function fetchOrderIdByName(): Promise<Record<string, OrderMeta>> {
-  const supabase = await createClient();
+export async function fetchOrderIdByName(client?: SupabaseClient): Promise<Record<string, OrderMeta>> {
+  const supabase = client ?? await createClient();
 
   // Include ALL orders (not just active) — sheet transit data may lag behind
   // DB status changes. We want to link badges even for delivered/cancelled orders.

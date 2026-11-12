@@ -24,13 +24,23 @@ export default async function ReservationsPage({ searchParams }: PageProps) {
 
   const svc = createServiceClient();
   let q = svc.from("chat_reservations").select("*").order("requested_at", { ascending: false }).limit(200);
-  if (filter !== "all") q = q.eq("status", filter);
-  const { data: reservations } = await q;
+  if (filter === "in_stock") q = q.eq("status", "waiting").eq("last_stock_status", "in_stock");
+  else if (filter !== "all") q = q.eq("status", filter);
+  const { data: rawReservations } = await q;
+  // Wieder vorrätige wartende Reservierungen nach oben (sonst Reihenfolge wie bisher)
+  const isReady = (r: { status: string; last_stock_status: string | null }) => r.status === "waiting" && r.last_stock_status === "in_stock";
+  const reservations = [...(rawReservations ?? [])].sort((a, b) => Number(isReady(b)) - Number(isReady(a)));
 
   // Counts pro Status
   const { count: cntWaiting } = await svc.from("chat_reservations").select("id", { count: "exact", head: true }).eq("status", "waiting");
   const { count: cntNotified } = await svc.from("chat_reservations").select("id", { count: "exact", head: true }).eq("status", "notified");
   const { count: cntCancelled } = await svc.from("chat_reservations").select("id", { count: "exact", head: true }).eq("status", "cancelled");
+  const { count: cntInStock } = await svc.from("chat_reservations").select("id", { count: "exact", head: true }).eq("status", "waiting").eq("last_stock_status", "in_stock");
+  const { data: lastCheck } = await svc.from("chat_reservations").select("last_checked_at").not("last_checked_at", "is", null).order("last_checked_at", { ascending: false }).limit(1).maybeSingle();
+  const lastCheckedAt = lastCheck?.last_checked_at ? new Date(lastCheck.last_checked_at) : null;
+  const lastCheckedStr = lastCheckedAt
+    ? `${lastCheckedAt.toLocaleDateString("de-DE", { timeZone: "Europe/Berlin" })} ${lastCheckedAt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}`
+    : null;
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
@@ -49,10 +59,22 @@ export default async function ReservationsPage({ searchParams }: PageProps) {
         <KPI label="Storniert" count={cntCancelled ?? 0} color="text-neutral-500" icon={<XCircle size={16} />} />
       </div>
 
+      {(cntInStock ?? 0) > 0 && (
+        <div className="rounded-2xl border border-green-200 bg-green-50 p-4 text-sm text-green-900 flex items-center gap-2 flex-wrap">
+          <CheckCircle2 size={16} className="text-green-700" />
+          <strong>{cntInStock} wartende Reservierung{cntInStock === 1 ? " ist" : "en sind"} wieder auf Lager</strong>
+          <span className="text-green-800">— Kundinnen per 1-Klick benachrichtigen (grün markierte Zeilen).</span>
+        </div>
+      )}
+      {lastCheckedStr && (
+        <div className="text-xs text-neutral-500 -mt-3">Letzter Lager-Check: {lastCheckedStr} · läuft automatisch jeden Morgen</div>
+      )}
+
       {/* Filter-Buttons */}
       <div className="flex gap-2 flex-wrap">
         {[
           { v: "waiting",   label: `⏳ Offen (${cntWaiting ?? 0})` },
+          { v: "in_stock",  label: `✅ Wieder auf Lager (${cntInStock ?? 0})` },
           { v: "notified",  label: `✓ Benachrichtigt (${cntNotified ?? 0})` },
           { v: "cancelled", label: `✗ Storniert (${cntCancelled ?? 0})` },
           { v: "all",       label: "Alle" },

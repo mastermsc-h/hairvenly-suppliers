@@ -6,6 +6,7 @@ import type { FeatureKey } from "@/lib/types";
 import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings, Truck, Globe2, Bot, Scissors, CalendarDays, HeartPulse, Wallet } from "lucide-react";
 import SidebarGroup from "./sidebar-group";
 import ChatbotInboxBadge from "./chatbot-inbox-badge";
+import ReservationsInStockBadge from "./reservations-in-stock-badge";
 import LanguageSwitcher from "./language-switcher";
 import { MobileSidebarWrapper } from "./mobile-sidebar";
 import ChangePassword from "./change-password";
@@ -214,10 +215,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                   label="Chatbot"
                   icon={<Bot size={16} />}
                   href="/chatbot/inbox"
+                  trailing={<ReservationsInStockBadge compact />}
                   items={[
                     { href: "/chatbot/inbox",         label: "Chat-Inbox", badge: <ChatbotInboxBadge /> },
                     { href: "/chatbot/stats",         label: "Statistik" },
-                    { href: "/chatbot/reservations",  label: "Reservierungen (Produkte)" },
+                    { href: "/chatbot/reservations",  label: "Reservierungen (Produkte)", badge: <ReservationsInStockBadge /> },
                     { href: "/chatbot/appointments",  label: "Termin-Anfragen" },
                     { href: "/chatbot/guardian",      label: "Wächter (Alerts)" },
                     { href: "/chatbot/follow-ups",    label: "Follow-Ups" },

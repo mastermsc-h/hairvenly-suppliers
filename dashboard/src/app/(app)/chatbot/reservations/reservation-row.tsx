@@ -35,7 +35,21 @@ export interface Reservation {
   length_cm: number | null;
   method_kind: string | null;
   structured_complete: boolean;
+  // Letzter Lager-Check (Migration 0149, Cron + Button „Lager-Check")
+  last_stock_status: "in_stock" | "unterwegs" | "out_of_stock" | "unknown" | "service_item" | null;
+  last_stock_eta: string | null;
+  last_stock_match: string | null;
+  last_checked_at: string | null;
+  in_stock_since: string | null;
 }
+
+const STOCK_STATUS_LABEL: Record<string, string> = {
+  in_stock: "vorrätig",
+  unterwegs: "unterwegs",
+  out_of_stock: "ausverkauft",
+  unknown: "kein Treffer im Sortiment",
+  service_item: "kein Inventar-Artikel",
+};
 
 export default function ReservationRow({
   reservation: r,
@@ -52,14 +66,18 @@ export default function ReservationRow({
   const [notes, setNotes] = useState(r.notes ?? "");
   // Stock-Scan-Ergebnis pro Reservierung — wird via Custom Event vom
   // StockCheckButton broadcasted, jede Row pickt sich nur ihren Eintrag.
-  const [scanStatus, setScanStatus] = useState<"in_stock" | "unterwegs" | "out_of_stock" | "unknown" | null>(null);
-  const [scanEta, setScanEta] = useState<string | null>(null);
+  // Ohne frischen Scan im Browser gilt der gespeicherte Stand des letzten
+  // Lager-Checks (täglicher Cron) — nur für noch offene Reservierungen.
+  const [liveStatus, setScanStatus] = useState<string | null>(null);
+  const [liveEta, setScanEta] = useState<string | null>(null);
+  const scanStatus = liveStatus ?? (r.status === "waiting" ? r.last_stock_status : null);
+  const scanEta = liveStatus ? liveEta : r.last_stock_eta;
   useEffect(() => {
     function onResults(e: Event) {
       const ce = e as CustomEvent<Array<{ reservationId: string; status: string; eta?: string }>>;
       const mine = ce.detail?.find(x => x.reservationId === r.id);
       if (mine) {
-        setScanStatus(mine.status as typeof scanStatus);
+        setScanStatus(mine.status);
         setScanEta(mine.eta || null);
       }
     }
@@ -100,10 +118,13 @@ export default function ReservationRow({
         {/* Stock-Scan-Badge — nur wenn der letzte Lager-Check ein Treffer war */}
         {scanStatus === "in_stock" && (
           <div className="mb-2 flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-green-600 text-white shadow-sm animate-pulse">
-              ✅ Ware vorrätig!
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-green-600 text-white shadow-sm">
+              ✅ Wieder auf Lager
             </span>
-            <span className="text-[11px] text-green-700">→ jetzt benachrichtigen</span>
+            <span className="text-[11px] text-green-700">
+              {r.in_stock_since && !liveStatus && <>seit {new Date(r.in_stock_since).toLocaleDateString("de-DE")} </>}
+              → jetzt benachrichtigen
+            </span>
           </div>
         )}
         {scanStatus === "unterwegs" && (
@@ -187,6 +208,14 @@ export default function ReservationRow({
             {/* ETA + Notes */}
             <div className="text-xs text-neutral-500 mt-1 space-y-0.5">
               {r.eta_hint && <div>⏱ Lieferung erwartet: {r.eta_hint}</div>}
+              {r.status === "waiting" && r.last_checked_at && (
+                <div className="text-neutral-400" title={r.last_stock_match ? `Gematcht mit „${r.last_stock_match}"` : undefined}>
+                  🔎 Lager-Check: {new Date(r.last_checked_at).toLocaleDateString("de-DE")}{" "}
+                  {new Date(r.last_checked_at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}
+                  {" · "}{STOCK_STATUS_LABEL[r.last_stock_status ?? "unknown"] ?? r.last_stock_status}
+                  {r.last_stock_match && <span> · „{r.last_stock_match.split("|")[0].trim()}"</span>}
+                </div>
+              )}
               {r.status === "notified" && r.notified_at && (
                 <div className="text-green-700">
                   ✓ Benachrichtigt am {new Date(r.notified_at).toLocaleDateString("de-DE")}{" "}
