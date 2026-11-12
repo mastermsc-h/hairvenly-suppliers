@@ -502,15 +502,20 @@ function extractColorToken_(s: string): string {
 }
 
 /** Methoden-Klasse aus beliebigem Text (Produkt, Collection, Gruppen-Label). */
+// Reihenfolge ist Teil der Logik: die spezifischen Namen ("Invisible Tapes",
+// "Invisible Clip") müssen vor den allgemeinen Wörtern TAPE/INVISIBLE greifen,
+// sonst teilen sich zwei Linien gleicher Farbe+Länge einen Schlüssel und die
+// Verkaufszahlen der einen überschreiben die der anderen.
 function extractMethodClass_(s: string): string {
   const u = s.toUpperCase();
   if (/MINI\s*TAPE/.test(u)) return "MTAP";
+  if (/INVISIBLE\s*TAPE/.test(u)) return "ITAP";
   if (/TAPE/.test(u)) return "TAPE";
   if (/BONDING/.test(u)) return "BOND";
-  if (/CLASSIC/.test(u)) return "CWFT";
-  if (/INVISIBLE/.test(u)) return "IWFT";
-  if (/GENIUS/.test(u)) return "GWFT";
   if (/CLIP/.test(u)) return "CLIP";
+  if (/CLASSIC/.test(u)) return "CWFT";
+  if (/INVISIBLE|BUTTERFLY/.test(u)) return "IWFT";
+  if (/GENIUS/.test(u)) return "GWFT";
   if (/PONYTAIL/.test(u)) return "PNTL";
   return "";
 }
@@ -522,58 +527,100 @@ function extractLengthCm_(s: string | null | undefined): string {
   return m ? m[1] : "";
 }
 
+/** Zweiwort-Farbname ("#LATTEBALAYAGE" vs "#LATTEBROWN") zur Auflösung von Kollisionen
+ *  des Ein-Wort-Tokens. Numerische Codes (#2E, #4/27T24) sind bereits eindeutig. */
+function extractColorName2_(s: string): string {
+  const tok1 = extractColorToken_(s);
+  if (/^#\d/.test(tok1)) return tok1;
+  const m = s.match(/#([^|]*)/);
+  if (!m) return tok1;
+  const head = m[1].split(/\s+I\s+/)[0];
+  const words = head.trim().toUpperCase().split(/\s+/).filter(Boolean).slice(0, 2);
+  return words.length ? "#" + words.join("") : tok1;
+}
+
+/** Größe: Länge in cm, sonst Gramm-Variante (Clip-ins 100/150/225 g). */
+function extractSize_(...parts: (string | null | undefined)[]): string {
+  for (const p of parts) {
+    const cm = extractLengthCm_(p);
+    if (cm) return cm;
+  }
+  for (const p of parts) {
+    if (!p) continue;
+    const m = String(p).match(/^\s*(\d{2,3})\s*$/) || String(p).match(/(\d{2,3})\s*G\b/i);
+    if (m) return m[1] + "g";
+  }
+  return "";
+}
+
 export function enrichAlertsWithTier(
   alerts: AlertProduct[],
   topseller: TopsSellerSection[],
 ): AlertProduct[] {
-  type Meta = { tier: AlertProduct["tier"]; verkauft30d: number; verkauft90d: number; ziel: number };
-  const map = new Map<string, Meta>();
-  // Zweitindex ohne Länge — nur nutzen wenn eindeutig (genau 1 Kandidat).
-  // Fängt Fälle, wo eine Seite keine Länge trägt (z.B. Russisch Standard
-  // Tapes: eine Länge pro Methode, Topseller-Spalte leer).
+  type Meta = {
+    tier: AlertProduct["tier"]; verkauft30d: number; verkauft90d: number; ziel: number;
+    tok1: string; tok2: string;
+  };
+  // Schlüssel → ALLE Kandidaten (nie überschreiben: bei Kollision wird unten
+  // über den Zweiwort-Farbnamen aufgelöst, sonst lieber kein Treffer als ein falscher).
+  const map = new Map<string, Meta[]>();
+  // Zweitindex ohne Größe — fängt Fälle, wo eine Seite keine Länge trägt
+  // (z.B. Russisch Standard Tapes: eine Länge pro Methode, Topseller-Spalte leer).
   const noLenCandidates = new Map<string, Meta[]>();
+  const push = (m: Map<string, Meta[]>, k: string, v: Meta) => {
+    const arr = m.get(k);
+    if (arr) arr.push(v);
+    else m.set(k, [v]);
+  };
 
   for (const sec of topseller) {
     const sheetKey: "wellig" | "glatt" = sec.quality === "Usbekisch Wellig" ? "wellig" : "glatt";
     for (const group of sec.sections) {
-      // Methode/Länge aus Gruppen-Label ("Bondings 65cm (Usbekisch Wellig)")
-      // als Fallback, falls das Item selbst nichts hergibt
+      // Methode/Größe aus Gruppen-Label ("Bondings 65cm (Usbekisch Wellig)",
+      // "Clip-ins 100G (Russisch Glatt)") als Fallback
       const groupMethod = extractMethodClass_(group.label);
-      const groupLen = extractLengthCm_(group.label);
       for (const it of group.items) {
-        const colorTok = extractColorToken_(it.farbe);
+        const tok1 = extractColorToken_(it.farbe);
         const method = extractMethodClass_(it.farbe) || groupMethod;
-        const len = extractLengthCm_(it.laenge) || extractLengthCm_(it.farbe) || groupLen;
+        const size = extractSize_(it.laenge, it.farbe, group.label);
         const tier = (["TOP7", "MID", "REST", "KAUM"] as const).find((t) => t === it.tier);
         const meta: Meta = {
           tier,
           verkauft30d: it.verkauft30d || 0,
           verkauft90d: it.verkauftG || 0,
           ziel: it.ziel || 0,
+          tok1,
+          tok2: extractColorName2_(it.farbe),
         };
-        map.set(`${sheetKey}|${method}|${colorTok}|${len}`, meta);
-        const nlKey = `${sheetKey}|${method}|${colorTok}`;
-        const arr = noLenCandidates.get(nlKey) ?? [];
-        arr.push(meta);
-        noLenCandidates.set(nlKey, arr);
+        push(map, `${sheetKey}|${method}|${tok1}|${size}`, meta);
+        push(noLenCandidates, `${sheetKey}|${method}|${tok1}`, meta);
       }
     }
   }
 
+  const pick = (cands: Meta[] | undefined, tok2: string, allowSingle: boolean): Meta | undefined => {
+    if (!cands || cands.length === 0) return undefined;
+    if (cands.length === 1) return allowSingle || cands[0].tok2 === tok2 ? cands[0] : undefined;
+    const exact = cands.filter((c) => c.tok2 === tok2);
+    if (exact.length === 1) return exact[0];
+    if (exact.length > 1) return undefined;
+    // Kandidaten mit eigenem, abweichendem Zweiwort-Namen sind sicher eine andere Farbe
+    const rest = cands.filter((c) => c.tok2 === c.tok1);
+    return rest.length === 1 ? rest[0] : undefined;
+  };
+
   return alerts.map((a) => {
     // Farb-Token aus dem PRODUKT (dort steht "#…"), Collection nur als Fallback
-    const colorTok = extractColorToken_(a.product || a.collection);
+    const src = a.product || a.collection;
+    const colorTok = extractColorToken_(src);
+    const tok2 = extractColorName2_(src);
     const method = extractMethodClass_(`${a.product} ${a.collection}`);
-    const len =
-      extractLengthCm_(a.variant) ||
-      extractLengthCm_(a.product) ||
-      extractLengthCm_(a.collection);
+    const size = extractSize_(a.variant, a.product, a.collection);
 
-    let meta = map.get(`${a.sheetKey}|${method}|${colorTok}|${len}`);
+    let meta = pick(map.get(`${a.sheetKey}|${method}|${colorTok}|${size}`), tok2, true);
     if (!meta) {
-      // Ohne Länge — aber nur bei EINEM Kandidaten (sonst Verwechslungsgefahr)
-      const cands = noLenCandidates.get(`${a.sheetKey}|${method}|${colorTok}`);
-      if (cands && cands.length === 1) meta = cands[0];
+      // Ohne Größe — mehrere Längen derselben Farbe bleiben mehrdeutig → kein Treffer
+      meta = pick(noLenCandidates.get(`${a.sheetKey}|${method}|${colorTok}`), tok2, true);
     }
     if (!meta) return a;
     return {
