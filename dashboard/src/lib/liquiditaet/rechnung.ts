@@ -474,7 +474,7 @@ export interface LiqRohdaten {
    *  zählt deren EUSt wie früher nur als Ø in der USt (alte Rohdaten). */
   einfuhrAndere?: LiqEinfuhrPosten[];
   /** Bestellrhythmus Ebru (für die Nachbestell-Schätzung). */
-  ebruNachbestellung?: { lieferant: string; kgProMonatAuto: number; usdProKgAuto: number; leadWochen: number } | null;
+  ebruNachbestellung?: { lieferant: string; kgProMonatAuto: number; usdProKgAuto: number; leadWochen: number; kgVerbrauchMonat?: number | null } | null;
   /** Abbuchungen von DHL (ZIT) / Ungewitter, deren Nummer an keiner Bestellung steht. */
   zollBuchungen?: ZollBuchung[];
   /** An Bestellungen eingetragene Lieferanten-Zahlungen, die noch nicht auf dem Konto stehen. */
@@ -1014,7 +1014,8 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
 
   // 1a') Künftige Ebru-Nachbestellungen (Schätzung): wöchentlich ab nächstem Montag, Rechnung bei Versand
   const ebruNb = roh.ebruNachbestellung ?? null;
-  const ebruNachbestellKgMonat = e.ebruNachbestellKgMonat ?? ebruNb?.kgProMonatAuto ?? 0;
+  // Nachbestellt wird nach Verbrauch (Usbekisch wellig laut Verkaufsanalyse), sonst Ø Bestellungen
+  const ebruNachbestellKgMonat = e.ebruNachbestellKgMonat ?? ebruNb?.kgVerbrauchMonat ?? ebruNb?.kgProMonatAuto ?? 0;
   const nbPositionen: LiqManuellePosition[] = [];
   if (e.ebruNachbestellungenEinrechnen && ebruNb && ebruEinzeln) {
     const usdKg = e.ebruUsdProKg ?? ebruNb.usdProKgAuto;

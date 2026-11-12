@@ -780,6 +780,13 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
             <>
               <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mt-3 mb-1">Ebru-Bestellungen</div>
               <Zeile l="Bestellt Ø letzte 6 Monate" r={`${roh.ebruNachbestellung.kgProMonatAuto.toLocaleString("de-DE")} kg / Monat`} />
+              {roh.ebruNachbestellung.kgVerbrauchMonat != null && (
+                <Zeile l="Verkauf Usbekisch wellig Ø 3 Monate" r={`${roh.ebruNachbestellung.kgVerbrauchMonat.toLocaleString("de-DE")} kg / Monat`} />
+              )}
+              <Zeile
+                l="Für Nachbestellungen gerechnet"
+                r={`${p.ebruNachbestellKgMonat.toLocaleString("de-DE", { maximumFractionDigits: 1 })} kg / Monat${e.ebruNachbestellKgMonat ? " (manuell)" : roh.ebruNachbestellung.kgVerbrauchMonat ? " (= Verbrauch)" : ""}`}
+              />
               <Zeile l="Ø Einkaufspreis" r={`${usd(roh.ebruNachbestellung.usdProKgAuto)} / kg`} />
               <Zeile l="Lieferzeit" r={`${roh.ebruNachbestellung.leadWochen} Wochen`} />
             </>
@@ -899,7 +906,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           {e.ebruNachbestellungenEinrechnen && (
             <>
               <Feld
-                label={`Ebru kg/Monat (leer = Ø Bestellungen ${roh.ebruNachbestellung?.kgProMonatAuto ?? 0})`}
+                label={`Ebru kg/Monat (leer = ${roh.ebruNachbestellung?.kgVerbrauchMonat != null ? `Verbrauch ${roh.ebruNachbestellung.kgVerbrauchMonat}` : `Ø Bestellungen ${roh.ebruNachbestellung?.kgProMonatAuto ?? 0}`})`}
                 value={e.ebruNachbestellKgMonat}
                 optional
                 onChange={(v) => set("ebruNachbestellKgMonat", v)}

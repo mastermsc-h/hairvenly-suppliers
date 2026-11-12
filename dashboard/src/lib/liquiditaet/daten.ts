@@ -40,17 +40,20 @@ type Sb = ReturnType<typeof createServiceClient>;
  * Verkauf Russisch glatt (= Amanda-Ware) laut Verkaufsanalyse, Ø 3 Monate in kg/Monat.
  * 1 h zwischengespeichert — die Bestellliste soll nicht bei jedem Aufruf das Sheet lesen.
  */
-const verbrauchGlattKgMonat = unstable_cache(
-  async (): Promise<number | null> => {
+const verbrauchKgMonat = unstable_cache(
+  async (): Promise<{ glatt: number | null; wellig: number | null }> => {
     try {
       const { rows } = await readVerkaufsanalyse();
-      const r = rows.find((x) => x.quality === "Russisch Glatt" && x.isSummary);
-      return r && r.avg3mKg > 0 ? Math.round(r.avg3mKg * 10) / 10 : null;
+      const kg = (q: string) => {
+        const r = rows.find((x) => x.quality === q && x.isSummary);
+        return r && r.avg3mKg > 0 ? Math.round(r.avg3mKg * 10) / 10 : null;
+      };
+      return { glatt: kg("Russisch Glatt"), wellig: kg("Usbekisch Wellig") };
     } catch {
-      return null;
+      return { glatt: null, wellig: null };
     }
   },
-  ["liquiditaet-verbrauch-glatt"],
+  ["liquiditaet-verbrauch-glatt-wellig"],
   { revalidate: 3600 }
 );
 
@@ -104,7 +107,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
   const { data: lieferant } = await sb.from("suppliers").select("id, default_lead_weeks").eq("name", "Amanda").maybeSingle();
   const amandaId = lieferant?.id ?? "00000000-0000-0000-0000-000000000000";
 
-  const [alleTx, posten, { data: orders }, { data: amanda }, kgVerbrauchMonat, { data: salden }, { data: amandaAnkuenfte }, { data: einfuhrNr }] = await Promise.all([
+  const [alleTx, posten, { data: orders }, { data: amanda }, verbrauch, { data: salden }, { data: amandaAnkuenfte }, { data: einfuhrNr }] = await Promise.all([
     selectAll<Tx>((from, to) =>
       sb.from("bank_transactions")
         .select("account_iban, booking_date, amount, kategorie, counterparty_name, purpose")
@@ -126,7 +129,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
       .gte("order_date", plusTage(heute, -180))
       .not("status", "in", "(hidden,manual)")
       .gt("weight_kg", 1),
-    verbrauchGlattKgMonat(),
+    verbrauchKgMonat(),
     sb.from("bank_salden").select("account_iban, saldo, stand, abgerufen_am"),
     // Amanda-Ankünfte der letzten 13 Monate (für den Amanda-Anteil an der historischen EUSt)
     sb.from("orders")
@@ -353,7 +356,8 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     ratenZahlTage,
     ratenKommendUsd,
     einfuhrAndere,
-    ebruNachbestellung,
+    // Nachbestellen nach Verbrauch (User 12.11.2026): Ebru-Ware = Usbekisch wellig
+    ebruNachbestellung: ebruNachbestellung && { ...ebruNachbestellung, kgVerbrauchMonat: verbrauch.wellig },
     zollBuchungen,
     zahlungenUnterwegs,
     verschiebungen,
@@ -384,7 +388,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     },
     nachbestellung: {
       kgProMonatAuto: Math.round((kg90 / 3) * 10) / 10,
-      kgVerbrauchMonat,
+      kgVerbrauchMonat: verbrauch.glatt,
       usdProKgAuto: kgPreis > 0 ? Math.round(mitPreis.reduce((s, h) => s + Number(h.invoice_total), 0) / kgPreis) : 0,
       leadWochen,
     },

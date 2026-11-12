@@ -371,6 +371,8 @@ const nb = { lieferant: "Ebru (CN + TR)", kgProMonatAuto: 130 / 3, usdProKgAuto:
 const pnb = L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: nb }), { ...E0, ebruNachbestellungenEinrechnen: true });
 check("Ebru-Nachbestellung: Einfuhr 3 Tage nach Versand (bestellt Mo 19.10. + 8 Wochen − 7 + 3)", pnb.ereignisse.filter((x) => x.label.includes("Ebru-Nachbestellung")).map((x) => [x.datum, x.betrag, x.schaetzung]), [["2026-12-10", -1520, true]]);
 check("Ebru-Nachbestellung: kg/Monat im Ergebnis", Math.round(pnb.ebruNachbestellKgMonat * 10) / 10, 43.3);
+check("Ebru-Nachbestellung: Verbrauch geht vor Ø Bestellungen", L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: { ...nb, kgVerbrauchMonat: 30 } }), { ...E0, ebruNachbestellungenEinrechnen: true }).ebruNachbestellKgMonat, 30);
+check("Ebru-Nachbestellung: manuell geht vor Verbrauch", L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: { ...nb, kgVerbrauchMonat: 30 } }), { ...E0, ebruNachbestellungenEinrechnen: true, ebruNachbestellKgMonat: 20 }).ebruNachbestellKgMonat, 20);
 check("Ebru-Nachbestellung aus: nichts", L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: nb }), E0).ereignisse.length, 0);
 const pnb2 = L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: nb }), { ...E0, ebruNachbestellungenEinrechnen: true, horizontTage: 120 });
 check("Ebru-Nachbestellung: Rechnung reiht sich als geschätzte Rate ein", pnb2.ereignisse.filter((x) => x.art === "manuell").every((x) => x.schaetzung && x.label.includes("≈ Nachbestellung")), true);
