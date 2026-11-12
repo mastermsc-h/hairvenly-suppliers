@@ -23,8 +23,8 @@ export interface KategorieDef {
 export const KATEGORIEN: KategorieDef[] = [
   // Einnahmen
   { key: "ein_shop", label: "Shop-Auszahlungen (Stripe, PayPal)", gruppe: "einnahmen" },
-  { key: "ein_karte", label: "Kartenzahlungen (Nexi)", gruppe: "einnahmen" },
-  { key: "ein_treatwell", label: "Treatwell-Auszahlungen", gruppe: "einnahmen" },
+  { key: "ein_karte", label: "Kartenzahlungen Salon (Nexi)", gruppe: "einnahmen" },
+  { key: "ein_treatwell", label: "Salon online (Treatwell, früher Planity)", gruppe: "einnahmen" },
   { key: "ein_vorkasse", label: "Kundenüberweisungen (Vorkasse/Rechnung)", gruppe: "einnahmen" },
   { key: "ein_bargeld", label: "Bareinzahlungen", gruppe: "einnahmen" },
   { key: "ein_sonstige", label: "Sonstige Einnahmen", gruppe: "einnahmen" },
