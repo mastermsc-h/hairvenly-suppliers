@@ -26,6 +26,10 @@ src = src.replace(
   `const ARCHIVED_STATUS = new Set(["stocked","cancelled"]);
    function isArchived(m){ return !!m && !!m.status && ARCHIVED_STATUS.has(m.status); }`
 );
+// eta-pick (importfrei) mittranspilieren und als data:-Modul einhängen
+const etaSrc = readFileSync(path.resolve(process.cwd(), "src/lib/chatbot/eta-pick.ts"), "utf8");
+const etaJs = ts.transpileModule(etaSrc, { compilerOptions: { module: "ESNext", target: "ES2022" } }).outputText;
+src = src.replace(/["']@\/lib\/chatbot\/eta-pick["']/, JSON.stringify("data:text/javascript;base64," + Buffer.from(etaJs).toString("base64")));
 const js = ts.transpileModule(src, {
   compilerOptions: { module: "ESNext", target: "ES2022" },
 }).outputText;
@@ -63,7 +67,8 @@ const NAME = "#DUBAI STANDARD RUSSISCHE TAPE EXTENSIONS GLATT ♡";
 
 // ── 2) KEIN DB-Match → Sheet-Datum bleibt, aber als UNBESTÄTIGT markiert
 {
-  const out = filterArchivedFromStock([alert(NAME, "Amanda 12.05.2026", SHEET_DUBAI)], { /* leer */ });
+  // Prüfdatum = Bug-Tag: Sheet-Ankunft liegt in der Zukunft (sonst greift Fall 8)
+  const out = filterArchivedFromStock([alert(NAME, "Amanda 12.05.2026", SHEET_DUBAI)], { /* leer */ }, { todayIso: "2026-06-15" });
   check("kein DB-Match: Sheet-Datum bleibt", out[0].perOrder[0].ankunft, SHEET_DUBAI);
   check("kein DB-Match: etaConfirmed=false", out[0].perOrder[0].etaConfirmed, false);
 }
@@ -103,7 +108,7 @@ const NAME = "#DUBAI STANDARD RUSSISCHE TAPE EXTENSIONS GLATT ♡";
       { name: "Amanda 12.05.2026", ankunft: SHEET_DUBAI, menge: 1000 },                // DB-Match
     ] };
   const map = { "Amanda 12.05.2026": meta({ itemEtas: { [NAME]: ["2026-06-22"] } }) };
-  const out = filterArchivedFromStock([ap], map);
+  const out = filterArchivedFromStock([ap], map, { todayIso: "2026-06-15" });
   const confirmedSheet = out[0].perOrder.filter(o => o.etaConfirmed === true && !/22\.06/.test(o.ankunft));
   check("INVARIANTE: kein Sheet-Datum als bestätigt", confirmedSheet.length, 0);
   check("gemischt: DB-Position bestätigt", out[0].perOrder.find(o => /22\.06/.test(o.ankunft))?.etaConfirmed, true);
@@ -128,6 +133,22 @@ const NAME = "#DUBAI STANDARD RUSSISCHE TAPE EXTENSIONS GLATT ♡";
   const map2 = { "Amanda 25.08.2026": meta({ itemEtas: { [BC]: ["2026-09-01", "2026-10-06"] } }) };
   const allPast = filterArchivedFromStock(ap(), map2, { todayIso: "2026-10-16" });
   check("todayIso: alle überfällig → früheste (wird im Bot zu overdue)", allPast[0].perOrder[0].ankunft, "ca. Ankunft: 01.09.2026");
+}
+
+// ── 8) Sheet-Leiche: Bestellung NUR im Sheet, Ankunft > 30 Tage vorbei → angekommen
+//     Echter Fall 12.11.2026: "China 03.04.2026" (Ankunft 29.05.) zählte als unterwegs.
+{
+  const SHEET_MAI = "ca. Ankunft: 29.05.2026";
+  const stale = filterArchivedFromStock([alert(NAME, "China 03.04.2026", SHEET_MAI)], {}, { todayIso: "2026-11-12" });
+  check("Sheet-Leiche: perOrder leer", stale[0].perOrder.length, 0);
+  check("Sheet-Leiche: unterwegsG=0", stale[0].unterwegsG, 0);
+  // Grenze: erst nach 30 Tagen
+  const fresh = filterArchivedFromStock([alert(NAME, "China 03.04.2026", SHEET_MAI)], {}, { todayIso: "2026-06-20" });
+  check("Sheet-only < 30 Tage überfällig: bleibt", fresh[0].perOrder.length, 1);
+  // DB-Bestellungen nie betroffen, auch wenn Sheet-Datum uralt
+  const map = { "China 03.04.2026": meta({ status: "in_production" }) };
+  const db = filterArchivedFromStock([alert(NAME, "China 03.04.2026", SHEET_MAI)], map, { todayIso: "2026-11-12" });
+  check("DB-Bestellung überfällig: bleibt unterwegs", db[0].perOrder.length, 1);
 }
 
 console.log("=== ETA-CONFIRMED SMOKE-TEST ===");
