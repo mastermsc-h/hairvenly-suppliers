@@ -814,6 +814,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
               <p>
                 <b>{ebruRegel.name}:</b> alle offenen Rechnungen in Raten à {usd(ebruRegel.rateUsd)} — erste Rate {ebruRegel.fristTage} Tage nach
                 Rechnungseingang (= Datum der Position), danach alle {ebruRegel.abstandTage} Tage ab der letzten Zahlung
+                {ebruRegel.wechselAb && ebruRegel.abstandTageAb ? `, ab ${deDate(ebruRegel.wechselAb)} alle ${ebruRegel.abstandTageAb} Tage` : ""}
                 {Object.entries(roh.letzteZahlung ?? {}).filter(([l]) => l.toLowerCase().includes(ebruRegel.name.toLowerCase())).map(([, d]) => ` (letzte laut Bank: ${deDate(d)})`)}.
               </p>
             )}
@@ -855,6 +856,18 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
               <Feld label={`${ebruRegel.name}: Rate (USD)`} value={ebruRegel.rateUsd} step={1000} onChange={(v) => setEbru({ rateUsd: Math.max(1000, v ?? 40_000) })} />
               <Feld label={`${ebruRegel.name}: erste Rate nach Rechnungseingang (Tage)`} value={ebruRegel.fristTage} onChange={(v) => setEbru({ fristTage: Math.max(0, v ?? 14) })} />
               <Feld label={`${ebruRegel.name}: Abstand der Raten (Tage)`} value={ebruRegel.abstandTage} onChange={(v) => setEbru({ abstandTage: Math.max(1, v ?? 14) })} />
+              <label className="block">
+                <span className="text-xs font-medium text-neutral-600">{ebruRegel.name}: neuer Rhythmus ab (leer = keiner)</span>
+                <input
+                  type="date"
+                  value={ebruRegel.wechselAb ?? ""}
+                  onChange={(ev) => setEbru({ wechselAb: ev.target.value || null, abstandTageAb: ev.target.value ? (ebruRegel.abstandTageAb ?? 7) : null })}
+                  className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 focus:outline-none"
+                />
+              </label>
+              {ebruRegel.wechselAb && (
+                <Feld label={`${ebruRegel.name}: Abstand ab ${deDate(ebruRegel.wechselAb)} (Tage)`} value={ebruRegel.abstandTageAb ?? 7} onChange={(v) => setEbru({ abstandTageAb: Math.max(1, v ?? 7) })} />
+              )}
             </>
           )}
           <Feld label="Manuelle Positionen: Rate (USD)" value={e.manuellRateUsd} step={1000} onChange={(v) => set("manuellRateUsd", Math.max(1000, v ?? LIQ_DEFAULTS.manuellRateUsd))} />

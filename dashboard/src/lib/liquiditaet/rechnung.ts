@@ -106,6 +106,9 @@ export interface LiqRatenRegel {
   abstandTage: number;
   /** Empfängername in den Kontoumsätzen (für "letzte Zahlung"). */
   bankMuster: string;
+  /** Rhythmuswechsel: ab diesem Tag gilt `abstandTageAb` (erste Rate im neuen Rhythmus spätestens an diesem Tag). */
+  wechselAb?: string | null;
+  abstandTageAb?: number | null;
 }
 
 /** Regel für einen Lieferanten: eigene Ratenregel oder die allgemeine für manuelle Positionen. */
@@ -792,9 +795,18 @@ export function ratenplan(
     const rate = Math.max(1, cfg.rateUsd);
     const raten: Rate[] = [];
     let letzte: string | null = letzteZahlung[lieferant] ?? null;
+    // Nächste Rate nach einer Zahlung am Tag l — mit Rhythmuswechsel: ab `wechselAb` neuer Abstand,
+    // eine Rate, die nach altem Rhythmus über den Wechseltag hinaus fiele, kommt am Wechseltag.
+    const naechste = (l: string) => {
+      const w = cfg.wechselAb, a2 = cfg.abstandTageAb;
+      if (!w || !a2 || a2 < 1) return plusTage(l, cfg.abstandTage);
+      if (l >= w) return plusTage(l, a2);
+      const n = plusTage(l, cfg.abstandTage);
+      return n > w ? w : n;
+    };
     const jetzt = ratenVerschiebungenJetzt(verschiebungen, lieferant, zahlTage[lieferant], letzte);
     for (let kopf = 0; kopf < offen.length && raten.length < 200; ) {
-      const frueh: string = letzte ? plusTage(letzte, cfg.abstandTage) : offen[kopf].faellig;
+      const frueh: string = letzte ? naechste(letzte) : offen[kopf].faellig;
       let datum: string = frueh > offen[kopf].faellig ? frueh : offen[kopf].faellig;
       if (datum < start) datum = start;
       const t = terminMit(datum, jetzt.get(raten.length + 1), start);

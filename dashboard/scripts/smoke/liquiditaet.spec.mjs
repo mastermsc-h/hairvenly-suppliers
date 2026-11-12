@@ -420,6 +420,12 @@ const pun2 = L.prognose(roh({ bestellungen: [best({ id: "x" })], zahlungenUnterw
 check("Unterwegs: Ampel/Termin der Bestellung unverändert", pun2.bestellungen[0].zahlDatum, L.prognose(roh({ bestellungen: [best({ id: "x" })] }), E0).bestellungen[0].zahlDatum);
 check("Unterwegs Ebru: als Raten-Abgang", L.prognose(roh({ zahlungenUnterwegs: [{ id: "z", orderId: "y", label: "EHL1", lieferant: "Ebru (CN + TR)", datum: "2026-10-16", usd: 12500, art: "raten" }] }), E0).ereignisse.filter((x) => x.unterwegs).map((x) => [x.art, x.ratenLieferant]), [["manuell", "Ebru (CN + TR)"]]);
 
+// Rhythmuswechsel (User 12.11.2026: ab 07.12. jede Woche eine Ebru-Rate)
+const rw = (regel, raten = {}) => L.prognose(roh({ ratenPositionen: [mp({ restUsd: 400000 })], letzteZahlung: { [EB]: "2026-10-19" }, ...vs({}, raten) }), { ...E0, horizontTage: 90, ratenLieferanten: [{ name: "Ebru", rateUsd: 40000, fristTage: 14, abstandTage: 14, bankMuster: "X", ...regel }] }).ereignisse.filter((x) => x.art === "manuell").map((x) => x.datum);
+check("Ab 07.12. wöchentlich: Rate nach altem Rhythmus über den Wechsel hinaus → am Wechseltag", rw({ wechselAb: "2026-12-07", abstandTageAb: 7 }).slice(0, 7), ["2026-11-02", "2026-11-16", "2026-11-30", "2026-12-07", "2026-12-14", "2026-12-21", "2026-12-28"]);
+check("Ab 07.12. wöchentlich mit verschobener Rate 1 (01.12.)", rw({ wechselAb: "2026-12-07", abstandTageAb: 7 }, { [EB]: { datum: "2026-12-01", notiz: null, basisZahlung: "2026-10-19" } }).slice(0, 4), ["2026-12-01", "2026-12-07", "2026-12-14", "2026-12-21"]);
+check("Ohne Wechsel unverändert", rw({}).slice(0, 3), ["2026-11-02", "2026-11-16", "2026-11-30"]);
+
 // Defaults
 check("Defaults vollständig", Object.keys(L.mitDefaults({})).length, Object.keys(L.LIQ_DEFAULTS).length);
 

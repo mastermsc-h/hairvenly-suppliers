@@ -15,6 +15,9 @@ const ZAHLEN: Array<[keyof LiqEinstellungen, number, number]> = [
   ["puffer", 0, 10_000_000],
   ["horizontTage", 14, 365],
   ["restNachAnzahlungTage", 1, 180],
+  ["manuellRateUsd", 1000, 10_000_000],
+  ["manuellFristTage", 0, 365],
+  ["manuellAbstandTage", 1, 365],
 ];
 const OPTIONAL: Array<[keyof LiqEinstellungen, number, number]> = [
   ["fxUsdProEur", 0.5, 2],
@@ -57,6 +60,24 @@ export async function saveLiquiditaetEinstellungen(input: Partial<LiqEinstellung
           quelle: String(a.quelle ?? "").slice(0, 120),
         }
       : null;
+  // Ratenregeln (Ebru …) — wurden bis 12.11.2026 nicht gespeichert, die Felder fielen still auf den Standard zurück
+  const zahl = (v: unknown, min: number, max: number, std: number) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Math.min(max, Math.max(min, Number(v))) : std);
+  out.ratenLieferanten = (Array.isArray(input.ratenLieferanten) ? input.ratenLieferanten : LIQ_DEFAULTS.ratenLieferanten)
+    .slice(0, 5)
+    .filter((r) => r && typeof r.name === "string" && r.name.trim())
+    .map((r) => {
+      const std = LIQ_DEFAULTS.ratenLieferanten[0];
+      const wechselAb = datum(r.wechselAb);
+      return {
+        name: r.name.trim().slice(0, 40),
+        rateUsd: zahl(r.rateUsd, 1000, 10_000_000, std.rateUsd),
+        fristTage: zahl(r.fristTage, 0, 365, std.fristTage),
+        abstandTage: zahl(r.abstandTage, 1, 365, std.abstandTage),
+        bankMuster: String(r.bankMuster ?? "").slice(0, 60),
+        wechselAb,
+        abstandTageAb: wechselAb ? zahl(r.abstandTageAb, 1, 365, 7) : null,
+      };
+    });
   out.ausgeblendeteKategorien = Array.isArray(input.ausgeblendeteKategorien)
     ? [...new Set(input.ausgeblendeteKategorien.filter((k) => typeof k === "string" && KATEGORIE_BY_KEY[k]))]
     : [];
