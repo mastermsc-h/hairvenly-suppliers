@@ -1,6 +1,29 @@
 import type { AlertProduct, TopsSellerSection } from "@/lib/stock-sheets";
 import type { OrderMeta } from "@/lib/order-name-map";
 import { isArchived } from "@/lib/order-name-map";
+import { berlinTodayIso, parseEtaDate } from "@/lib/chatbot/eta-pick";
+
+/**
+ * Bestellungen, die NUR noch im Bestell-Sheet stehen (DB kennt sie nicht) und
+ * deren Sheet-Ankunft länger als STALE_SHEET_ORDER_DAYS zurückliegt, sind
+ * längst angekommen — das Sheet wurde nur nie bereinigt (z.B. "China
+ * 03.04.2026", Ankunft Mai). Sonst zählen sie ewig als "unterwegs".
+ * DB-Bestellungen sind nie betroffen, auch nicht überfällige.
+ */
+const STALE_SHEET_ORDER_DAYS = 30;
+
+export function isStaleSheetOnlyOrder(
+  name: string,
+  ankunft: string | null | undefined,
+  orderIdByName: Record<string, OrderMeta>,
+  todayIso: string = berlinTodayIso(),
+): boolean {
+  if (orderIdByName[name]) return false;
+  const eta = parseEtaDate(ankunft);
+  if (!eta) return false;
+  const days = (Date.parse(todayIso) - Date.parse(eta.iso)) / 864e5;
+  return days > STALE_SHEET_ORDER_DAYS;
+}
 
 /** Format ISO YYYY-MM-DD to German DD.MM.YYYY for display in stock sheets. */
 function formatDeDate(iso: string): string {
@@ -302,8 +325,11 @@ export function filterArchivedFromStock(
 ): AlertProduct[] {
   if (!orderIdByName) return items;
   return items.map((item) => {
-    // 1) Filter out archived orders
-    let kept = item.perOrder.filter((o) => !isArchived(orderIdByName[o.name]));
+    // 1) Filter out archived orders + längst angekommene Sheet-Leichen
+    const todayIso = opts?.todayIso ?? berlinTodayIso();
+    let kept = item.perOrder.filter(
+      (o) => !isArchived(orderIdByName[o.name]) && !isStaleSheetOnlyOrder(o.name, o.ankunft, orderIdByName, todayIso),
+    );
     // 2) Filter out orders where this product is in an arrived Teillieferung
     //    (Sheet meldet weiter unterwegs, aber DB sagt: ist physisch da)
     kept = kept.filter((o) => {
@@ -359,9 +385,11 @@ export function filterArchivedFromTopseller(
 
     // Indices to keep
     const keep: number[] = [];
+    const todayIso = berlinTodayIso();
     sec.orderHeaders.forEach((h, i) => {
       const name = headerToOrderName(h);
-      if (!isArchived(orderIdByName[name])) keep.push(i);
+      const ankunft = h.split("\n")[1] ?? "";
+      if (!isArchived(orderIdByName[name]) && !isStaleSheetOnlyOrder(name, ankunft, orderIdByName, todayIso)) keep.push(i);
     });
     if (keep.length === sec.orderHeaders.length) return sec;
 
