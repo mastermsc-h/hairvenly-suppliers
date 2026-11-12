@@ -49,14 +49,16 @@ export interface StockCandidatesInput {
  * bereinigte Bestellungen. Gemeinsame Basis für Kritisch und Ladenhüter.
  * `url` = Shop-URL aus dem Inventar-Tab (für Handle-Lookups).
  */
-export function buildStockCandidates(input: StockCandidatesInput): (AlertProduct & { url?: string | null })[] {
+export type StockCandidate = AlertProduct & { url?: string | null; unitWeight?: number };
+
+export function buildStockCandidates(input: StockCandidatesInput): StockCandidate[] {
 
   // Sheet-Zeilen tragen Bestellungen (perOrder) und die alte Stufe → bevorzugt.
   const fromSheet = new Map<string, AlertProduct>();
   for (const a of input.alerts.unterwegs) fromSheet.set(keyOf(a.collection, a.product, a.variant), a);
   for (const a of input.alerts.kritisch) fromSheet.set(keyOf(a.collection, a.product, a.variant), a);
 
-  const candidates = new Map<string, AlertProduct & { url?: string | null }>();
+  const candidates = new Map<string, StockCandidate>();
   const tabs: [InventoryRow[], "wellig" | "glatt"][] = [[input.wellig, "wellig"], [input.glatt, "glatt"]];
   for (const [rows, tabKey] of tabs) {
     for (const r of rows) {
@@ -68,7 +70,7 @@ export function buildStockCandidates(input: StockCandidatesInput): (AlertProduct
       const sheetRow = fromSheet.get(key);
       candidates.set(
         key,
-        sheetRow ? { ...sheetRow, url: r.url } : {
+        sheetRow ? { ...sheetRow, url: r.url, unitWeight: r.unitWeight } : {
           collection: r.collection,
           product: clip ? `${r.product}  [${r.unitWeight}g]` : r.product,
           variant,
@@ -77,6 +79,7 @@ export function buildStockCandidates(input: StockCandidatesInput): (AlertProduct
           unterwegsG: 0,
           perOrder: [],
           url: r.url,
+          unitWeight: r.unitWeight,
         },
       );
     }
@@ -97,8 +100,9 @@ export function buildCriticalStock(input: StockCandidatesInput & { todayIso?: st
   const items: AlertProduct[] = [];
   let actionCount = 0;
   for (const d of filtered) {
-    const { url: _url, ...rest } = d;
+    const { url: _url, unitWeight: _uw, ...rest } = d;
     void _url;
+    void _uw;
     const crit = assessStock(d, todayIso);
     const action = needsAction(d, crit);
     if (action) actionCount++;

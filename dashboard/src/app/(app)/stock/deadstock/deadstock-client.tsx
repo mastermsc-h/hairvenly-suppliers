@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Search, Skull, TrendingDown, PackageX, Truck, Info } from "lucide-react";
 import type { ClientOrderMeta } from "@/lib/order-name-map";
-import type { DeadStockItem } from "@/lib/stock-deadstock";
+import type { DeadStockItem, RecentlyAvailableItem } from "@/lib/stock-deadstock";
 import SyncBadge from "../sync-badge";
 
 type Kind = "all" | "tot" | "fasttot" | "ordered";
@@ -12,6 +12,7 @@ const MONTH_OPTIONS = [12, 18, 24] as const;
 
 interface Props {
   items: DeadStockItem[];
+  recentlyAvailable: RecentlyAvailableItem[];
   tooNew: { count: number; kg: number };
   noData: { count: number; kg: number };
   totalLagerKg: number;
@@ -21,7 +22,7 @@ interface Props {
 
 const kg = (g: number) => (g / 1000).toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
-export default function DeadStockClient({ items, tooNew, noData, totalLagerKg, lastUpdated, orderIdByName }: Props) {
+export default function DeadStockClient({ items, recentlyAvailable, tooNew, noData, totalLagerKg, lastUpdated, orderIdByName }: Props) {
   const [minMonths, setMinMonths] = useState<(typeof MONTH_OPTIONS)[number]>(24);
   const [kind, setKind] = useState<Kind>("all");
   const [collection, setCollection] = useState<string | null>(null);
@@ -73,7 +74,7 @@ export default function DeadStockClient({ items, tooNew, noData, totalLagerKg, l
         <div>
           <h1 className="text-2xl font-semibold text-neutral-900">Ladenhüter &amp; Sale-Kandidaten</h1>
           <p className="text-sm text-neutral-500 mt-1">
-            Produkte mit Lager, die in den letzten 90 Tagen (fast) nichts verkauft haben
+            Produkte mit Lager, die in den letzten 90 Tagen (fast) nichts verkauft haben, obwohl sie lieferbar waren
           </p>
         </div>
         <SyncBadge lastUpdated={lastUpdated} />
@@ -90,7 +91,7 @@ export default function DeadStockClient({ items, tooNew, noData, totalLagerKg, l
         <Kpi
           label="Tot"
           value={`${kg(sum(tot))} kg`}
-          sub={`${tot.length} Produkte · 0 g in 90 Tagen`}
+          sub={`${tot.length} Produkte · 0 g trotz Lieferbarkeit`}
           icon={<Skull size={16} />}
           tone="red"
         />
@@ -140,7 +141,7 @@ export default function DeadStockClient({ items, tooNew, noData, totalLagerKg, l
           ))}
         </div>
         <div className="flex items-center gap-1.5 text-xs text-neutral-500">
-          <span title="'Fast tot' = Lager reicht beim Verkaufstempo der letzten 90 Tage länger als …">Fast tot ab</span>
+          <span title="'Fast tot' = Lager reicht beim Verkaufstempo der lieferbaren Tage länger als …">Fast tot ab</span>
           {MONTH_OPTIONS.map((m) => (
             <button
               key={m}
@@ -186,12 +187,53 @@ export default function DeadStockClient({ items, tooNew, noData, totalLagerKg, l
       {glatt.length > 0 && <DeadSection label="Russisch Glatt" accent="green" items={glatt} orderIdByName={orderIdByName} />}
       {filtered.length === 0 && <div className="text-center py-12 text-neutral-400">Keine Produkte für diese Auswahl</div>}
 
+      {recentlyAvailable.length > 0 && (
+        <details className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
+          <summary className="px-4 py-2.5 text-sm font-medium text-neutral-700 cursor-pointer select-none">
+            Nicht bewertet: {recentlyAvailable.length} Produkte ({kg(recentlyAvailable.reduce((s, d) => s + d.lagerG, 0))} kg) waren
+            weniger als 60 von 90 Tagen lieferbar — z.B. ausverkauft und gerade wieder eingetroffen
+          </summary>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-neutral-50/60 text-left text-[10px] uppercase text-neutral-500">
+                <tr>
+                  <th className="px-2 py-1.5 font-medium">Kollektion</th>
+                  <th className="px-2 py-1.5 font-medium">Produkt</th>
+                  <th className="px-2 py-1.5 font-medium text-right">Lager</th>
+                  <th className="px-2 py-1.5 font-medium text-right">Lieferbar</th>
+                  <th className="px-2 py-1.5 font-medium text-right">Verkauft 90T</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100">
+                {recentlyAvailable
+                  .filter((d) => !collection || d.collection === collection)
+                  .map((d, i) => (
+                    <tr key={i}>
+                      <td className="px-2 py-1 text-neutral-500 whitespace-nowrap">{d.collection}</td>
+                      <td className="px-2 py-1 text-neutral-900 max-w-[320px] truncate" title={d.product}>{d.product}</td>
+                      <td className="px-2 py-1 text-right whitespace-nowrap">{d.lagerG.toLocaleString("de-DE")} g</td>
+                      <td className="px-2 py-1 text-right text-neutral-600 whitespace-nowrap">{d.availDays} / 90 T</td>
+                      <td className="px-2 py-1 text-right text-neutral-600 whitespace-nowrap">{d.sold90G.toLocaleString("de-DE")} g</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+
       <div className="flex items-start gap-2 text-xs text-neutral-500">
         <Info size={14} className="shrink-0 mt-0.5" />
         <div>
-          Bewertet nach den Verkäufen der letzten 90 Tage. Nicht bewertet:{" "}
-          <strong>{tooNew.count}</strong> neue Produkte (in Shopify jünger als 90 Tage, {tooNew.kg.toFixed(1)} kg) und{" "}
-          <strong>{noData.count}</strong> Produkte ohne Verkaufszahlen im Topseller-Tab ({noData.kg.toFixed(1)} kg).
+          Bewertet werden nur Tage, an denen das Produkt lieferbar war (mind. 150 g, Clip-ins 1 Stück) — rekonstruiert aus
+          aktuellem Bestand, Shopify-Tagesverkäufen und eingelagerten Bestellungen. Zusätzlich nicht bewertet:{" "}
+          <strong>{tooNew.count}</strong> neue Produkte (in Shopify jünger als 90 Tage, {tooNew.kg.toFixed(1)} kg)
+          {noData.count > 0 && (
+            <>
+              {" "}und <strong>{noData.count}</strong> Produkte ohne Verkaufsdaten ({noData.kg.toFixed(1)} kg)
+            </>
+          )}
+          .
         </div>
       </div>
     </div>
@@ -222,9 +264,9 @@ function DeadSection({ label, accent, items, orderIdByName }: {
               <th className="px-2 py-1.5 font-medium">Produkt</th>
               <th className="px-2 py-1.5 font-medium">Status</th>
               <th className="px-2 py-1.5 font-medium text-right">Lager</th>
-              <th className="px-2 py-1.5 font-medium text-right" title="Verkauf letzte 90 Tage">90T</th>
-              <th className="px-2 py-1.5 font-medium text-right" title="Verkauf letzte 30 Tage">30T</th>
-              <th className="px-2 py-1.5 font-medium text-right" title="So lange reicht das Lager beim Verkaufstempo der letzten 90 Tage">Reicht</th>
+              <th className="px-2 py-1.5 font-medium text-right" title="Verkauft in den letzten 90 Tagen (Shopify-Bestellungen)">90T</th>
+              <th className="px-2 py-1.5 font-medium text-right" title="An so vielen der letzten 90 Tage war das Produkt lieferbar">Lieferbar</th>
+              <th className="px-2 py-1.5 font-medium text-right" title="So lange reicht das Lager beim Verkaufstempo der lieferbaren Tage">Reicht</th>
               <th className="px-2 py-1.5 font-medium">Unterwegs</th>
             </tr>
           </thead>
@@ -241,8 +283,8 @@ function DeadSection({ label, accent, items, orderIdByName }: {
                   )}
                 </td>
                 <td className="px-2 py-1 text-right font-semibold text-neutral-900 whitespace-nowrap">{d.lagerG.toLocaleString("de-DE")} g</td>
-                <td className={`px-2 py-1 text-right ${d.verkauft90d ? "text-neutral-600" : "text-red-400 font-medium"}`}>{d.verkauft90d ?? 0} g</td>
-                <td className={`px-2 py-1 text-right ${d.verkauft30d ? "text-neutral-600" : "text-neutral-300"}`}>{d.verkauft30d ?? 0} g</td>
+                <td className={`px-2 py-1 text-right ${d.sold90G ? "text-neutral-600" : "text-red-400 font-medium"}`}>{d.sold90G.toLocaleString("de-DE")} g</td>
+                <td className="px-2 py-1 text-right text-neutral-600 whitespace-nowrap">{d.availDays} / 90 T</td>
                 <td className="px-2 py-1 text-right text-neutral-600 whitespace-nowrap">
                   {d.monthsCover === null ? "∞" : d.monthsCover >= 120 ? "> 10 J." : `${Math.round(d.monthsCover)} Mon.`}
                 </td>

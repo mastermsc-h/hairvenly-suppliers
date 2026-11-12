@@ -9,11 +9,12 @@ export default async function DeadStockPage() {
   const profile = await requireProfile();
   if (!profile.is_admin) return <div className="p-8 text-neutral-500">Nur für Admins.</div>;
 
-  const { items, tooNew, noData, totalLagerKg, lastUpdated, orderIdByName } = await loadDeadStock();
+  const { items, recentlyAvailable, tooNew, noData, totalLagerKg, lastUpdated, orderIdByName } = await loadDeadStock();
 
   return (
     <DeadStockClient
       items={items}
+      recentlyAvailable={recentlyAvailable}
       tooNew={tooNew}
       noData={noData}
       totalLagerKg={totalLagerKg}
