@@ -5,6 +5,7 @@ import { readDashboardAlerts, readInventorySheet, readTopseller } from "@/lib/st
 import { fetchOrderIdByName } from "@/lib/order-name-map";
 import { filterArchivedFromStock, filterArchivedFromTopseller } from "@/lib/filter-archived-orders";
 import { buildCriticalStock } from "@/lib/stock-critical";
+import { buildDeadStock, fetchProductCreatedAt } from "@/lib/stock-deadstock";
 import StockOverviewClient, { type InsightProduct, type StockSnapshot } from "./stock-overview";
 
 export const revalidate = 60;
@@ -15,7 +16,7 @@ export default async function StockIndexPage() {
   const locale = (profile.language ?? "de") as Locale;
 
   const supabase = await createClient();
-  const [alertsRaw, wellig, glatt, topsellerRaw, orderIdByName, snapshotRes] = await Promise.all([
+  const [alertsRaw, wellig, glatt, topsellerRaw, orderIdByName, snapshotRes, createdAt] = await Promise.all([
     readDashboardAlerts(),
     readInventorySheet("Usbekisch - WELLIG"),
     readInventorySheet("Russisch - GLATT"),
@@ -26,6 +27,7 @@ export default async function StockIndexPage() {
       .select("taken_on, total_kg, wellig_kg, glatt_kg")
       .order("taken_on", { ascending: true })
       .limit(400),
+    fetchProductCreatedAt(),
   ]);
   const history = (snapshotRes.data ?? []) as StockSnapshot[];
 
@@ -45,6 +47,17 @@ export default async function StockIndexPage() {
     topseller: topsellerRaw.sections,
     orderIdByName,
   });
+  // Ladenhüter-Kachel: gleiche Logik wie /stock/deadstock bei Standardgrenze 24 Monate
+  const dead = buildDeadStock({
+    alerts: alertsRaw,
+    wellig: wellig.rows,
+    glatt: glatt.rows,
+    topseller: topsellerRaw.sections,
+    orderIdByName,
+    createdAt,
+  }).items.filter((d) => d.deadKind === "tot" || (d.monthsCover ?? 0) > 24);
+  const deadCount = dead.length;
+  const deadKg = dead.reduce((s, d) => s + d.lagerG, 0) / 1000;
 
   // Build insights from topseller data
   const insights = buildInsights(topseller.sections);
@@ -106,6 +119,8 @@ export default async function StockIndexPage() {
         glattZero,
         nullbestandCount: alerts.nullbestand.length,
         kritischCount,
+        deadCount,
+        deadKg,
         unterwegsCount: alerts.unterwegs.length,
         welligCollections: welligByCollection,
         glattCollections: glattByCollection,

@@ -94,6 +94,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                       { href: "/stock/transit/russian", label: t(locale, "nav.stock.russian") },
                     ],
                   },
+                  { href: "/stock/deadstock", label: t(locale, "nav.stock.deadstock") },
                   { href: "/stock/sales", label: t(locale, "nav.stock.sales") },
                   { href: "/stock/preorders", label: t(locale, "nav.stock.preorders") },
                   {

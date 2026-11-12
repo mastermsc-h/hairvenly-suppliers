@@ -46,6 +46,8 @@ interface StockStats {
   glattZero: number;
   nullbestandCount: number;
   kritischCount: number;
+  deadCount: number;
+  deadKg: number;
   unterwegsCount: number;
   welligCollections: CollectionStat[];
   glattCollections: CollectionStat[];
@@ -101,7 +103,7 @@ export default function StockOverviewClient({ stats, locale, history = [] }: { s
       </section>
 
       {/* Alert Quick-Links */}
-      <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <AlertCard
           href="/stock/zero"
           icon={<AlertTriangle size={18} />}
@@ -125,6 +127,14 @@ export default function StockOverviewClient({ stats, locale, history = [] }: { s
           count={stats.unterwegsCount}
           color="cyan"
           description="Produkte in offenen Bestellungen"
+        />
+        <AlertCard
+          href="/stock/deadstock"
+          icon={<Skull size={18} />}
+          label="Ladenhüter"
+          count={stats.deadCount}
+          color="slate"
+          description={`${stats.deadKg.toLocaleString("de-DE", { maximumFractionDigits: 1 })} kg, die (fast) nicht verkaufen — Sale-Kandidaten`}
         />
       </section>
 
@@ -333,12 +343,13 @@ function InsightCard({ title, description, icon, color, products, focused, onTog
 
 function AlertCard({ href, icon, label, count, color, description }: {
   href: string; icon: React.ReactNode; label: string; count: number;
-  color: "red" | "orange" | "cyan"; description: string;
+  color: "red" | "orange" | "cyan" | "slate"; description: string;
 }) {
   const colors = {
     red: { bg: "bg-red-50", text: "text-red-600", border: "border-red-200", badge: "bg-red-100 text-red-700" },
     orange: { bg: "bg-orange-50", text: "text-orange-600", border: "border-orange-200", badge: "bg-orange-100 text-orange-700" },
     cyan: { bg: "bg-cyan-50", text: "text-cyan-600", border: "border-cyan-200", badge: "bg-cyan-100 text-cyan-700" },
+    slate: { bg: "bg-slate-50", text: "text-slate-600", border: "border-slate-200", badge: "bg-slate-200 text-slate-700" },
   };
   const c = colors[color];
 

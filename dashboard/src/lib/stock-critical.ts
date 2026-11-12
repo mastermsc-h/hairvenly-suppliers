@@ -36,22 +36,27 @@ export interface CriticalStockResult {
   todayIso: string;
 }
 
-export function buildCriticalStock(input: {
+export interface StockCandidatesInput {
   alerts: Pick<Alerts, "kritisch" | "unterwegs">;
   wellig: InventoryRow[];
   glatt: InventoryRow[];
   topseller: TopsSellerSection[];
   orderIdByName: Record<string, OrderMeta>;
-  todayIso?: string;
-}): CriticalStockResult {
-  const todayIso = input.todayIso ?? berlinTodayIso();
+}
+
+/**
+ * Alle Produkte mit Lager > 0, angereichert um Verkaufsrang/-zahlen und
+ * bereinigte Bestellungen. Gemeinsame Basis für Kritisch und Ladenhüter.
+ * `url` = Shop-URL aus dem Inventar-Tab (für Handle-Lookups).
+ */
+export function buildStockCandidates(input: StockCandidatesInput): (AlertProduct & { url?: string | null })[] {
 
   // Sheet-Zeilen tragen Bestellungen (perOrder) und die alte Stufe → bevorzugt.
   const fromSheet = new Map<string, AlertProduct>();
   for (const a of input.alerts.unterwegs) fromSheet.set(keyOf(a.collection, a.product, a.variant), a);
   for (const a of input.alerts.kritisch) fromSheet.set(keyOf(a.collection, a.product, a.variant), a);
 
-  const candidates = new Map<string, AlertProduct>();
+  const candidates = new Map<string, AlertProduct & { url?: string | null }>();
   const tabs: [InventoryRow[], "wellig" | "glatt"][] = [[input.wellig, "wellig"], [input.glatt, "glatt"]];
   for (const [rows, tabKey] of tabs) {
     for (const r of rows) {
@@ -60,9 +65,10 @@ export function buildCriticalStock(input: {
       const variant = clip ? String(r.unitWeight) : null;
       const key = keyOf(r.collection, r.product, variant);
       if (candidates.has(key)) continue;
+      const sheetRow = fromSheet.get(key);
       candidates.set(
         key,
-        fromSheet.get(key) ?? {
+        sheetRow ? { ...sheetRow, url: r.url } : {
           collection: r.collection,
           product: clip ? `${r.product}  [${r.unitWeight}g]` : r.product,
           variant,
@@ -70,6 +76,7 @@ export function buildCriticalStock(input: {
           sheetKey: clip ? "glatt" : tabKey,
           unterwegsG: 0,
           perOrder: [],
+          url: r.url,
         },
       );
     }
@@ -80,16 +87,22 @@ export function buildCriticalStock(input: {
   }
 
   const enriched = enrichAlertsWithTier([...candidates.values()], input.topseller);
-  const filtered = filterArchivedFromStock(enriched, input.orderIdByName);
+  return filterArchivedFromStock(enriched, input.orderIdByName).filter((d) => d.lagerG > 0);
+}
+
+export function buildCriticalStock(input: StockCandidatesInput & { todayIso?: string }): CriticalStockResult {
+  const todayIso = input.todayIso ?? berlinTodayIso();
+  const filtered = buildStockCandidates(input);
 
   const items: AlertProduct[] = [];
   let actionCount = 0;
   for (const d of filtered) {
-    if (d.lagerG <= 0) continue;
+    const { url: _url, ...rest } = d;
+    void _url;
     const crit = assessStock(d, todayIso);
     const action = needsAction(d, crit);
     if (action) actionCount++;
-    if (action || d.lagerG < LOW_STOCK_G) items.push({ ...d, crit });
+    if (action || d.lagerG < LOW_STOCK_G) items.push({ ...rest, crit });
   }
   return { items, actionCount, todayIso };
 }
