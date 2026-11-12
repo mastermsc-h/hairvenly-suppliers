@@ -428,6 +428,17 @@ check("Ab 07.12. wöchentlich: Rate nach altem Rhythmus über den Wechsel hinaus
 check("Ab 07.12. wöchentlich mit verschobener Rate 1 (01.12.)", rw({ wechselAb: "2026-12-07", abstandTageAb: 7 }, { [EB]: { datum: "2026-12-01", notiz: null, basisZahlung: "2026-10-19" } }).slice(0, 4), ["2026-12-01", "2026-12-07", "2026-12-14", "2026-12-21"]);
 check("Ohne Wechsel unverändert", rw({}).slice(0, 3), ["2026-11-02", "2026-11-16", "2026-11-30"]);
 
+// Flaute nach der Aktion (Bank 2025/26: 08.12.–04.01. nur 57 % der normalen Eingänge)
+const aktNl = (nachlauf) => ({ ...E0, horizontTage: 120, aktion: { aktiv: false, label: "BF", von: "2026-11-15", bis: "2026-11-30", mehrumsatzBrutto: 0, profil: [], verzugTage: 0, auszahlungProzent: 100, quelle: "", nachlauf } });
+const nlOhne = L.prognose(roh(), aktNl(null));
+const nlMit = L.prognose(roh(), aktNl({ aktiv: true, quelle: "", abschnitte: [{ von: "2026-12-08", bis: "2026-12-17", faktor: 0.5 }] }));
+const tagN = (p, d) => p.tage.find((t) => t.datum === d).saldo;
+const normalTag = nlOhne.einnahmenProTag;
+check("Flaute: 10 Tage × halbe Einnahmen weniger", Math.round(tagN(nlOhne, "2026-12-20") - tagN(nlMit, "2026-12-20")), Math.round(normalTag * 0.5 * 10));
+check("Flaute: Summe im Ergebnis", Math.round(nlMit.nachlaufSumme), -Math.round(normalTag * 0.5 * 10));
+check("Flaute aus: nichts", L.prognose(roh(), aktNl({ aktiv: false, quelle: "", abschnitte: [{ von: "2026-12-08", bis: "2026-12-17", faktor: 0.5 }] })).nachlaufSumme, 0);
+check("Flaute vor dem Start zählt nicht", L.prognose(roh(), aktNl({ aktiv: true, quelle: "", abschnitte: [{ von: "2026-10-01", bis: "2026-10-10", faktor: 0.5 }] })).nachlaufSumme, 0);
+
 // Defaults
 check("Defaults vollständig", Object.keys(L.mitDefaults({})).length, Object.keys(L.LIQ_DEFAULTS).length);
 

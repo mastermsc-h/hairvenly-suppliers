@@ -58,6 +58,17 @@ export async function saveLiquiditaetEinstellungen(input: Partial<LiqEinstellung
           verzugTage: Math.min(30, Math.max(0, Math.round(Number(a.verzugTage) || 0))),
           auszahlungProzent: Math.min(100, Math.max(50, Number(a.auszahlungProzent) || 100)),
           quelle: String(a.quelle ?? "").slice(0, 120),
+          nachlauf:
+            a.nachlauf && typeof a.nachlauf === "object"
+              ? {
+                  aktiv: a.nachlauf.aktiv === true,
+                  abschnitte: (Array.isArray(a.nachlauf.abschnitte) ? a.nachlauf.abschnitte : [])
+                    .slice(0, 6)
+                    .filter((x) => datum(x?.von) && datum(x?.bis) && x.von <= x.bis)
+                    .map((x) => ({ von: x.von, bis: x.bis, faktor: Math.min(1.5, Math.max(0, Number(x.faktor) || 0)) })),
+                  quelle: String(a.nachlauf.quelle ?? "").slice(0, 200),
+                }
+              : null,
         }
       : null;
   // Ratenregeln (Ebru …) — wurden bis 12.11.2026 nicht gespeichert, die Felder fielen still auf den Standard zurück

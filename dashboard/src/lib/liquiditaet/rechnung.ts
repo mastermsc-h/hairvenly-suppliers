@@ -139,6 +139,15 @@ export interface LiqAktion {
   /** Anteil, der nach Zahlungsgebühren ankommt (%). */
   auszahlungProzent: number;
   quelle: string;
+  /** Flaute nach der Aktion (vorgezogene Käufe): Zeiträume mit Anteil der normalen Einnahmen. */
+  nachlauf?: LiqNachlauf | null;
+}
+
+export interface LiqNachlauf {
+  aktiv: boolean;
+  /** faktor = Anteil der normalen Tageseinnahmen (0,57 = 57 %). */
+  abschnitte: Array<{ von: string; bis: string; faktor: number }>;
+  quelle: string;
 }
 
 export const LIQ_DEFAULTS: LiqEinstellungen = {
@@ -656,6 +665,8 @@ export interface PrognoseErgebnis {
   fx: number;
   fxQuelle: "auto" | "manuell" | "standard";
   einnahmenProTag: number;
+  /** Summe der Flaute nach der Aktion im Vorschau-Zeitraum (negativ). */
+  nachlaufSumme: number;
   laufendProTag: number; // negativ
   andereLieferantenProTag: number; // negativ (nur wenn eingerechnet)
   ustBasis: number;
@@ -733,6 +744,8 @@ interface Plan {
   ebruNachbestellKgMonat: number;
   einfuhrAndere: Map<string, { datum: string; eust: number; zoll: number } | null>;
   vermutungen: Map<string, EinfuhrVermutung>;
+  /** Tag → Abweichung der Einnahmen vom Ø (Flaute nach der Aktion, negativ). */
+  einnahmenKorrektur: Map<string, number>;
   eustAndereMonat: number;
   ustIstSchnitt: number | null;
 }
@@ -1104,6 +1117,20 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       ustZusatz[monatVon(tag)] = (ustZusatz[monatVon(tag)] ?? 0) + (brutto * 19) / 119;
     }
   }
+  // 2c) Flaute nach der Aktion: Kunden haben vorgezogen gekauft → weniger Einnahmen (und weniger USt)
+  const einnahmenKorrektur = new Map<string, number>();
+  const nl = a?.nachlauf;
+  if (nl?.aktiv) {
+    const normal = roh.basis.einnahmen / Math.max(1, roh.basis.tage);
+    for (const ab of nl.abschnitte) {
+      if (!(ab.faktor >= 0) || ab.von > ab.bis) continue;
+      for (let d = ab.von < start ? start : ab.von; d <= ab.bis && d <= ende; d = plusTage(d, 1)) {
+        const fehl = normal * (ab.faktor - 1);
+        einnahmenKorrektur.set(d, r2((einnahmenKorrektur.get(d) ?? 0) + fehl));
+        ustZusatz[monatVon(d)] = (ustZusatz[monatVon(d)] ?? 0) + (fehl * 19) / 119;
+      }
+    }
+  }
 
   // 3) Umsatzsteuer: Zahllast = Basis (USt auf Umsätze − Inlands-Vorsteuer) − EUSt des Monats.
   //    EUSt eines vergangenen Monats = tatsächlich gezahlt (alle Lieferanten). Laufender/künftiger
@@ -1195,7 +1222,7 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
 
   // Innerhalb eines Tages: Eingänge vor Ausgängen, sonst stabil
   ereignisse.sort((a, b) => a.datum.localeCompare(b.datum) || Math.sign(b.betrag) - Math.sign(a.betrag));
-  return { start, ende, fx, fxQuelle, ereignisse, ustBasis, eustAndereMonat, ustIstSchnitt, bestellInfo, hinweise, nachbestellKgMonat, ebruNachbestellKgMonat, einfuhrAndere, vermutungen };
+  return { start, ende, fx, fxQuelle, ereignisse, ustBasis, eustAndereMonat, ustIstSchnitt, bestellInfo, hinweise, nachbestellKgMonat, ebruNachbestellKgMonat, einfuhrAndere, vermutungen, einnahmenKorrektur };
 }
 
 function simuliere(
@@ -1203,7 +1230,8 @@ function simuliere(
   start: string,
   ende: string,
   proTag: number,
-  ereignisse: Ereignis[]
+  ereignisse: Ereignis[],
+  korrektur: Map<string, number> = new Map(),
 ): { tage: Array<{ datum: string; saldo: number }>; nachEreignis: Map<Ereignis, number>; tiefpunkt: { datum: string; saldo: number } } {
   const tage: Array<{ datum: string; saldo: number }> = [];
   const nachEreignis = new Map<Ereignis, number>();
@@ -1211,7 +1239,7 @@ function simuliere(
   let tief = { datum: start, saldo: startSaldo };
   let i = 0;
   for (let d = start; d <= ende; d = plusTage(d, 1)) {
-    saldo += proTag;
+    saldo += proTag + (korrektur.get(d) ?? 0);
     while (i < ereignisse.length && ereignisse[i].datum === d) {
       saldo += ereignisse[i].betrag;
       nachEreignis.set(ereignisse[i], saldo);
@@ -1244,10 +1272,10 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
   if (pp && !ppFrisch) plan.hinweise.push(`PayPal-Stand ist vom ${pp.abgerufenAm.slice(0, 10)} — nicht eingerechnet (Worker/PayPal-API prüfen).`);
   const startSaldo = roh.startSaldo + (ppEin && pp ? pp.saldo : 0);
 
-  const sim = simuliere(startSaldo, plan.start, plan.ende, proTag, plan.ereignisse);
+  const sim = simuliere(startSaldo, plan.start, plan.ende, proTag, plan.ereignisse, plan.einnahmenKorrektur);
   const simAndere = e.andereLieferantenEinrechnen
     ? sim
-    : simuliere(startSaldo, plan.start, plan.ende, proTag + andereGesamtProTag, plan.ereignisse);
+    : simuliere(startSaldo, plan.start, plan.ende, proTag + andereGesamtProTag, plan.ereignisse, plan.einnahmenKorrektur);
 
   const bestellungen: BestellPrognose[] = [];
   for (const b of roh.bestellungen) {
@@ -1309,6 +1337,7 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
     fx: plan.fx,
     fxQuelle: plan.fxQuelle,
     einnahmenProTag,
+    nachlaufSumme: r2([...plan.einnahmenKorrektur.values()].reduce((s, x) => s + x, 0)),
     laufendProTag,
     andereLieferantenProTag: r2(andereGesamtProTag),
     ustBasis: plan.ustBasis,

@@ -811,6 +811,40 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
             später (Stripe/PayPal-Auszahlung), abzüglich Gebühren. Die Umsatzsteuer auf den Mehrumsatz ({eur((e.aktion.mehrumsatzBrutto * 19) / 119)}) ist in der
             USt-Voranmeldung des Aktionsmonats eingerechnet.
           </p>
+          {e.aktion.nachlauf && (
+            <div className="mt-4 border-t border-neutral-100 pt-4">
+              <Schalter
+                label={`Flaute nach der Aktion einrechnen${p.nachlaufSumme ? ` (${eur(-p.nachlaufSumme)} weniger Einnahmen in der Vorschau)` : ""}`}
+                checked={e.aktion.nachlauf.aktiv}
+                onChange={(v) => e.aktion?.nachlauf && setAktion({ nachlauf: { ...e.aktion.nachlauf, aktiv: v } })}
+              />
+              <div className="mt-3 grid gap-2">
+                {e.aktion.nachlauf.abschnitte.map((ab, i) => {
+                  const setAb = (patch: Partial<typeof ab>) =>
+                    e.aktion?.nachlauf &&
+                    setAktion({ nachlauf: { ...e.aktion.nachlauf, abschnitte: e.aktion.nachlauf.abschnitte.map((x, j) => (j === i ? { ...x, ...patch } : x)) } });
+                  return (
+                    <div key={i} className="flex flex-wrap items-end gap-2 text-sm">
+                      <input type="date" value={ab.von} onChange={(ev) => ev.target.value && setAb({ von: ev.target.value })} className="rounded-lg border border-neutral-300 px-2 py-1.5 text-sm" />
+                      <span className="pb-2 text-neutral-500">bis</span>
+                      <input type="date" value={ab.bis} onChange={(ev) => ev.target.value && setAb({ bis: ev.target.value })} className="rounded-lg border border-neutral-300 px-2 py-1.5 text-sm" />
+                      <input
+                        type="number"
+                        step={1}
+                        value={Math.round(ab.faktor * 100)}
+                        onChange={(ev) => setAb({ faktor: Math.max(0, Number(ev.target.value.replace(",", ".")) || 0) / 100 })}
+                        className="w-20 rounded-lg border border-neutral-300 px-2 py-1.5 text-sm"
+                      />
+                      <span className="pb-2 text-neutral-500">% der normalen Einnahmen</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-xs text-neutral-500">
+                {e.aktion.nachlauf.quelle} Weniger Umsatz heißt auch weniger Umsatzsteuer — das ist in der USt-Voranmeldung der Monate eingerechnet.
+              </p>
+            </div>
+          )}
         </Card>
       )}
 
