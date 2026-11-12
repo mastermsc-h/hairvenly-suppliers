@@ -54,7 +54,7 @@
     },
     {
       "path": "/api/cron/reservations-notify",
-      "schedule": "0 9,10 * * 1-6"
+      "schedule": "0 10 * * 1-6"
     }
   ]
 }

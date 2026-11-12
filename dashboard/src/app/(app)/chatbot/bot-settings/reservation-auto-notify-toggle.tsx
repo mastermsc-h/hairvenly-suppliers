@@ -22,7 +22,7 @@ export default function ReservationAutoNotifyToggle({ initialMode, wouldSend }: 
   function choose(next: Mode) {
     if (next === mode) return;
     if (next === "live" && !confirm(
-      `Automatische Benachrichtigung LIVE schalten?\n\nAb dem nächsten Lauf (Mo–Sa 11 Uhr) bekommen Kundinnen automatisch eine Instagram-Nachricht, sobald ihre reservierte Variante eindeutig auf Lager ist.${wouldSend > 0 ? `\n\nAktuell wären das ${wouldSend} Reservierung(en).` : ""}`,
+      `Automatische Benachrichtigung LIVE schalten?\n\nAb dem nächsten Lauf (Mo–Sa ca. 11 Uhr) bekommen Kundinnen automatisch eine Instagram-Nachricht, sobald ihre reservierte Variante eindeutig auf Lager ist.${wouldSend > 0 ? `\n\nAktuell wären das ${wouldSend} Reservierung(en).` : ""}`,
     )) return;
     const prev = mode;
     setMode(next);
@@ -45,7 +45,7 @@ export default function ReservationAutoNotifyToggle({ initialMode, wouldSend }: 
       </div>
       <p className="text-xs text-neutral-600 mb-3 leading-relaxed">
         Jeden Morgen prüft der Lager-Check alle wartenden Reservierungen. Ist <strong>genau die reservierte Variante</strong>{" "}
-        (Farbe, Methode, Länge/Gramm) eindeutig auf Lager, schreibt Ava der Kundin Mo–Sa um 11 Uhr automatisch auf Instagram
+        (Farbe, Methode, Länge/Gramm) eindeutig auf Lager, schreibt Ava der Kundin Mo–Sa gegen 11 Uhr automatisch auf Instagram
         (max. 30 Nachrichten pro Tag, eine Nachricht pro Kundin). Unklare Treffer, „unterwegs" und WhatsApp/Web bleiben bei euch (1-Klick).
       </p>
       <p className="text-xs text-neutral-600 mb-3 leading-relaxed">

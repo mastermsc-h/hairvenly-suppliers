@@ -219,7 +219,7 @@ export default function ReservationRow({
               {r.eta_hint && <div>⏱ Lieferung erwartet: {r.eta_hint}</div>}
               {r.status === "waiting" && autoMode !== "off" && r.auto_notify_decision === "would_send" && !r.last_notify_error && (
                 <div className={autoMode === "live" ? "text-green-700 font-medium" : "text-blue-700 font-medium"}>
-                  🤖 {autoMode === "live" ? "Wird automatisch benachrichtigt (Mo–Sa 11 Uhr)" : "Würde automatisch benachrichtigt (Probelauf — nichts gesendet)"}
+                  🤖 {autoMode === "live" ? "Wird automatisch benachrichtigt (Mo–Sa ca. 11 Uhr)" : "Würde automatisch benachrichtigt (Probelauf — nichts gesendet)"}
                 </div>
               )}
               {r.status === "waiting" && autoMode !== "off" && r.auto_notify_decision === "skip" && r.last_stock_status === "in_stock" && r.auto_notify_reason && (

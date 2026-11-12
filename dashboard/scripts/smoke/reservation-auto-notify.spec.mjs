@@ -7,8 +7,8 @@
  *    Lager-Variante), Instagram-Kontakt, offen, < 3 Fehlversuche, heute noch
  *    nicht versucht. Alles andere → skip (Mitarbeiterin klickt selbst).
  *  - Eine Nachricht pro Kundin, max. 30 Nachrichten pro Lauf.
- *  - Nur Mo–Sa 9–19 Uhr Berlin; der Cron arbeitet nur um 11 Uhr Berlin
- *    (nach dem Lager-Refresh 9–10 Uhr).
+ *  - Nur Mo–Sa 9–19 Uhr Berlin; der Cron (10:00 UTC) arbeitet nur um 11/12 Uhr
+ *    Berlin (nach dem Lager-Refresh 9–10 Uhr).
  *  - Ein-Produkt-Text = exakt der bisherige Standardtext (+ Signatur bei Auto).
  *
  * Run:  node scripts/smoke/reservation-auto-notify.spec.mjs
@@ -107,10 +107,11 @@ check("Sa 10 Uhr Berlin → Fenster", A.isInSendWindow(new Date("2026-11-14T09:0
 check("So 10 Uhr Berlin → kein Versand", A.isInSendWindow(new Date("2026-11-15T09:00:00Z")), false);
 check("Do 07 Uhr Berlin → kein Versand", A.isInSendWindow(new Date("2026-11-12T06:00:00Z")), false);
 check("Do 19 Uhr Berlin → kein Versand", A.isInSendWindow(new Date("2026-11-12T18:00:00Z")), false);
-check("Versand-Stunde 11 Uhr", A.AUTO_NOTIFY_HOUR_BERLIN, 11);
-check("Winter: 10 UTC = 11 Uhr Berlin", A.berlinHour(new Date("2026-11-12T10:00:00Z")), 11);
-check("Sommer: 09 UTC = 11 Uhr Berlin", A.berlinHour(new Date("2026-07-01T09:00:00Z")), 11);
-check("Winter: 09 UTC ≠ Versand-Stunde", A.berlinHour(new Date("2026-11-12T09:00:00Z")) === 11, false);
+const inHour = (iso) => A.AUTO_NOTIFY_HOURS_BERLIN.includes(A.berlinHour(new Date(iso)));
+check("Winter: Cron 10 UTC = 11 Uhr Berlin → Versand", inHour("2026-11-12T10:00:00Z"), true);
+check("Sommer: Cron 10 UTC = 12 Uhr Berlin → Versand", inHour("2026-07-01T10:00:00Z"), true);
+check("10 Uhr Berlin (Refresh-Stunde) → kein Versand", inHour("2026-11-12T09:00:00Z"), false);
+check("18 Uhr Berlin (Refresh-Stunde) → kein Versand", inHour("2026-11-12T17:00:00Z"), false);
 
 // ── Text ────────────────────────────────────────────────────────────────
 const p1 = { product_name: "Taupe Standard Russische Tape Extensions 60cm", color: "Taupe", method: "Standard Tapes", product_url: "https://hairvenly.de/products/taupe" };

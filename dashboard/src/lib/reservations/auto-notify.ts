@@ -76,12 +76,12 @@ export function isInSendWindow(now: Date): boolean {
 }
 
 /**
- * Versand-Stunde (Berlin). 11 statt 10 Uhr: der Lager-Refresh in Apps Script
- * startet irgendwann zwischen 9 und 10 Uhr und schreibt 20+ Minuten in Batches.
- * Der Cron feuert 09 + 10 UTC; gearbeitet wird nur im Lauf, der in Berlin
- * 11 Uhr ist (Sommer- wie Winterzeit).
+ * Versand-Stunden (Berlin). Der Cron feuert einmal täglich 10:00 UTC (Vercel
+ * Hobby erlaubt nur tägliche Crons) = 11 Uhr Winter / 12 Uhr Sommer. Beides
+ * liegt nach dem Lager-Refresh in Apps Script (startet zwischen 9 und 10 Uhr,
+ * schreibt 20+ Minuten in Batches) und vor dem 18-Uhr-Refresh.
  */
-export const AUTO_NOTIFY_HOUR_BERLIN = 11;
+export const AUTO_NOTIFY_HOURS_BERLIN = [11, 12];
 
 /** Berliner Stunde (0–23). */
 export function berlinHour(now: Date): number {

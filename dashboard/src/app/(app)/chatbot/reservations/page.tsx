@@ -77,7 +77,7 @@ export default async function ReservationsPage({ searchParams }: PageProps) {
       {autoMode !== "off" && (
         <div className={`rounded-2xl border p-3 text-xs flex items-center gap-2 flex-wrap ${autoMode === "live" ? "border-green-200 bg-white text-green-900" : "border-blue-200 bg-blue-50 text-blue-900"}`}>
           {autoMode === "live" ? (
-            <span>📨 <strong>Automatische Benachrichtigung: LIVE</strong> — Ava schreibt Mo–Sa um 11 Uhr alle eindeutigen Treffer an ({cntWouldSend ?? 0} vorgemerkt).</span>
+            <span>📨 <strong>Automatische Benachrichtigung: LIVE</strong> — Ava schreibt Mo–Sa gegen 11 Uhr alle eindeutigen Treffer an ({cntWouldSend ?? 0} vorgemerkt).</span>
           ) : (
             <span>🧪 <strong>Automatische Benachrichtigung: Probelauf</strong> — es wird nichts gesendet. {cntWouldSend ?? 0} Reservierung{cntWouldSend === 1 ? " würde" : "en würden"} automatisch benachrichtigt (🤖 in der Zeile).</span>
           )}
