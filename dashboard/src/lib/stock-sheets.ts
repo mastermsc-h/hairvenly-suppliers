@@ -122,7 +122,7 @@ function extractTimestamp(text: string): string | null {
 
 export async function readInventorySheet(
   tabName: "Russisch - GLATT" | "Usbekisch - WELLIG",
-): Promise<{ rows: InventoryRow[]; lastUpdated: string | null }> {
+): Promise<{ rows: InventoryRow[]; lastUpdated: string | null; completedCollections: string[] }> {
   const auth = getAuth();
   const sheets = google.sheets({ version: "v4", auth });
 
@@ -136,6 +136,9 @@ export async function readInventorySheet(
   const rows: InventoryRow[] = [];
   let currentCollection = "";
   let lastUpdated: string | null = null;
+  // Apps Script schreibt "Total Weight for <Collection>" erst, wenn die
+  // Collection fertig ist (Refresh läuft in Batches) → Vollständigkeits-Signal.
+  const completedCollections: string[] = [];
 
   for (const row of rawRows) {
     const col0 = String(row[0] ?? "").trim();
@@ -150,6 +153,7 @@ export async function readInventorySheet(
       continue;
     }
     if (col0 === "Collection Name") continue;
+    if (col0.startsWith("Total Weight for ")) completedCollections.push(col0.slice("Total Weight for ".length).trim());
     if (col0.startsWith("Total") || col0.startsWith("GRAND")) continue;
     if (col0) currentCollection = col0;
     if (!col1) continue;
@@ -171,7 +175,7 @@ export async function readInventorySheet(
     });
   }
 
-  return { rows, lastUpdated };
+  return { rows, lastUpdated, completedCollections };
 }
 
 // ── Gesamt-Lagerbestand in kg (für Firmen-Gesundheits-Kennzahl) ──

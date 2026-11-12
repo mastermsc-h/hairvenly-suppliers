@@ -4,7 +4,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { runReservationStockCheck } from "@/lib/reservations/stock-check";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /**
  * Täglicher Lager-Check der Chatbot-Warteliste (morgens). Speichert pro
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   if (!valid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const { counts, newlyInStock, results } = await runReservationStockCheck(createServiceClient());
+    const { counts, newlyInStock, results } = await runReservationStockCheck(createServiceClient(), new Date(), { retries: 3 });
     revalidatePath("/chatbot/reservations");
     console.log("[cron/reservations-check]", JSON.stringify({ checked: results.length, counts, newlyInStock }));
     return NextResponse.json({ ok: true, checked: results.length, counts, newlyInStock });

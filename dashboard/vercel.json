@@ -51,6 +51,10 @@
     {
       "path": "/api/cron/reservations-check",
       "schedule": "15 6 * * *"
+    },
+    {
+      "path": "/api/cron/reservations-notify",
+      "schedule": "0 9,10 * * 1-6"
     }
   ]
 }

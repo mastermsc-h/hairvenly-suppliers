@@ -21,6 +21,15 @@ export interface StockCheckResult {
   status: ReservationStockStatus;
   eta?: string;
   matchedProduct?: string;
+  /** Shopify-URL der gematchten Lager-Zeile (nur bei in_stock) */
+  matchedUrl?: string;
+  /**
+   * Nur bei in_stock: Anzahl verschiedener Lager-Varianten (Produkt × Gewicht ×
+   * Linie), die auf die Reservierung passen — egal ob mit Bestand. 1 = die
+   * Reservierung beschreibt GENAU eine Variante → eindeutig (Voraussetzung für
+   * die automatische Benachrichtigung). >1 = z.B. Clip ohne Gramm-Angabe.
+   */
+  variantCount?: number;
   reason?: string;
 }
 
@@ -39,6 +48,9 @@ export interface StockSnapshot {
   /** Lager-Zeilen aus „Russisch - GLATT" bzw. „Usbekisch - WELLIG" */
   ru: InventoryRow[];
   uz: InventoryRow[];
+  /** "Total Weight for …"-Zeilen je Tab (fertig geschriebene Collections), optional für Tests */
+  ruCompleted?: string[];
+  uzCompleted?: string[];
   /** Dashboard-Alerts, bereits um archivierte Bestellungen bereinigt */
   unterwegs: AlertProduct[];
   nullbestand: AlertProduct[];
@@ -62,6 +74,50 @@ function etaFor(perOrder: AlertProduct["perOrder"] | undefined, todayIso: string
   const picked = pickEta(perOrder, todayIso);
   if (picked.text) return picked.text;
   return picked.overdue ? "überfällig" : "bald";
+}
+
+// Verschiedene Varianten zählen — dieselbe Variante kann im Sheet unter
+// mehreren Collections stehen, das macht sie nicht mehrdeutig.
+function countVariants(rows: { product: string; unitWeight: number; _line: string }[]): number {
+  return new Set(rows.map(r => `${r._line}|${r.product.trim().toLowerCase()}|${r.unitWeight}`)).size;
+}
+
+/**
+ * Vollständigkeit der Lager-Tabs. Apps Script (fetchShopifyInventoryData,
+ * Trigger 9 + 18 Uhr) baut die Tabs in Batches neu auf — wer mittendrin liest,
+ * bekommt eine halbe Tabelle (beobachtet 12.11.2026: RU 1 → 100 → … Zeilen über
+ * 20+ Minuten). Darauf darf weder ein Status gespeichert noch eine Kundin
+ * angeschrieben werden.
+ *
+ * Signal: Das Script arbeitet die Collections strikt in Listen-Reihenfolge ab
+ * (collectionGroups FirstSheet = Usbekisch, SecondSheet = Russisch in Code.js)
+ * und schreibt "Total Weight for <Collection>", sobald eine fertig ist.
+ * Steht die Total-Zeile der LETZTEN Collection eines Tabs da, ist der Tab
+ * komplett. (Collections, die es in Shopify nicht gibt — z.B. „Invisible Mini
+ * Tapes" — überspringt das Script ohne Total-Zeile; deshalb nicht jede prüfen.)
+ * Ändert sich die letzte Collection in Code.js, schlägt der Check laut fehl
+ * (sicher) → hier nachziehen.
+ */
+export const LAST_COLLECTION = {
+  uz: "Ponytail Extensions kaufen",
+  ru: "Russische Invisible Tressen (Glatt) | Butterfly Weft",
+};
+/** Zusätzliche Untergrenze (Stand 11/2026: ~320 RU, ~300 UZ Zeilen). */
+export const MIN_INVENTORY_ROWS_PER_SHEET = 100;
+
+/** null = Snapshot vollständig, sonst Grund für den Abbruch. */
+export function snapshotProblem(stock: StockSnapshot): string | null {
+  for (const [key, label] of [["ru", "Russisch"], ["uz", "Usbekisch"]] as const) {
+    const rows = stock[key];
+    if (rows.length < MIN_INVENTORY_ROWS_PER_SHEET) {
+      return `Lager-Sheet ${label} unvollständig (${rows.length} Zeilen, erwartet ≥ ${MIN_INVENTORY_ROWS_PER_SHEET}) — vermutlich läuft gerade der Sheet-Refresh`;
+    }
+    const done = stock[key === "ru" ? "ruCompleted" : "uzCompleted"];
+    if (done && !done.some(c => c.trim().toLowerCase() === LAST_COLLECTION[key].toLowerCase())) {
+      return `Lager-Sheet ${label} unvollständig (letzte Collection „${LAST_COLLECTION[key]}" noch nicht fertig) — vermutlich läuft gerade der Sheet-Refresh`;
+    }
+  }
+  return null;
 }
 
 export function matchReservationsAgainstStock(
@@ -326,9 +382,14 @@ export function matchReservationsAgainstStock(
         })(),
       };
       const sMatch = (row: Parameters<typeof structuredMatch>[0]) => structuredMatch(row, structFields);
-      const stockedS = allInventory.filter(row => sMatch(row) && row.quantity > 0);
+      const matchedS = allInventory.filter(row => sMatch(row));
+      const stockedS = matchedS.filter(row => row.quantity > 0);
       if (stockedS.length > 0) {
-        results.push({ reservationId: r.id, productName: r.product_name, status: "in_stock", matchedProduct: stockedS[0].product });
+        results.push({
+          reservationId: r.id, productName: r.product_name, status: "in_stock",
+          matchedProduct: stockedS[0].product, matchedUrl: stockedS[0].url || undefined,
+          variantCount: countVariants(matchedS),
+        });
         continue;
       }
       const onTheWayS = unterwegs.filter(u => sMatch(u));
@@ -388,6 +449,14 @@ export function matchReservationsAgainstStock(
     // searchStr ist der Original-Reservierungs-Text (Farbe + Method + Name),
     // den der Compound-Guard analysiert um Modifier-Tokens zu erkennen.
     const tokenMatch = matchTokens(tokens, wants, searchStr);
+    // Farb-Identität: "balayage"/"ombré" sind STOP-Wörter (Beschreiber), gehören
+    // aber teils zum Farbnamen — „Latte Balayage" traf sonst auch „Latte Brown".
+    // Nennt die Reservierungs-FARBE so ein Wort, muss die Zeile es auch tragen.
+    const colorIdentity = (r.color || "").toLowerCase().match(/\b(balayage|ombr[eé])\b/g) ?? [];
+    const colorIdentityOk = (text: string) => {
+      const hay = text.toLowerCase().replace(/ombré/g, "ombre");
+      return colorIdentity.every(w => hay.includes(w.replace("é", "e")));
+    };
 
     // Match-Helper: berücksichtigt Tokens + Subtype + Gewicht + Länge + Linie
     const fullMatch = (row: { collection?: string; product?: string; unitWeight?: number; variant?: string | null; _line?: "russisch" | "usbekisch" }) => {
@@ -398,6 +467,7 @@ export function matchReservationsAgainstStock(
         if (rowLine && rowLine !== reservationLine) return false;
       }
       if (!tokenMatch(text)) return false;
+      if (!colorIdentityOk(text)) return false;
       if (targetGrams !== null) {
         const g = rowGrams(row);
         if (g !== null && Math.abs(g - targetGrams) > 5) return false;
@@ -418,13 +488,16 @@ export function matchReservationsAgainstStock(
       return true;
     };
 
-    const stocked = allInventory.filter(row => fullMatch(row) && row.quantity > 0);
+    const matched = allInventory.filter(row => fullMatch(row));
+    const stocked = matched.filter(row => row.quantity > 0);
     if (stocked.length > 0) {
       results.push({
         reservationId: r.id,
         productName: r.product_name,
         status: "in_stock",
         matchedProduct: stocked[0].product,
+        matchedUrl: stocked[0].url || undefined,
+        variantCount: countVariants(matched),
       });
       continue;
     }

@@ -240,16 +240,14 @@ export async function defaultNotificationText(reservationId: string): Promise<st
     .select("product_name, color, method, product_url, customer_name")
     .eq("id", reservationId).single();
   if (!r) return "";
-  const prod = [r.color, r.method].filter(Boolean).join(" ").trim() || r.product_name;
-  let txt = `Hallo Liebes 💕\n\nGute Nachrichten — die ${prod} sind jetzt wieder da! 🥳`;
-  if (r.product_url) txt += `\n\n${r.product_url}`;
-  txt += `\n\nMagst du sie noch? Sag Bescheid wenn ich dir weiterhelfen soll 🩷`;
-  return txt;
+  const { buildNotificationText } = await import("@/lib/reservations/auto-notify");
+  return buildNotificationText([r]);
 }
 
 /**
  * Sendet die Reservierungs-Nachricht an den ursprünglichen Channel
  * + erzeugt eine human_agent-Message im Chat (damit es im Verlauf sichtbar bleibt).
+ * Gemeinsamer Versandpfad mit der Auto-Benachrichtigung (Sperre gegen Doppelversand).
  */
 export async function sendReservationNotification(reservationId: string, customText?: string) {
   const supabase = await createClient();
@@ -264,38 +262,9 @@ export async function sendReservationNotification(reservationId: string, customT
   const text = (customText || await defaultNotificationText(reservationId)).trim();
   if (!text) throw new Error("Leerer Text");
 
-  // Versand
-  if (r.channel === "instagram" && r.external_id) {
-    const { sendInstagramMessage } = await import("@/lib/messaging/meta");
-    const result = await sendInstagramMessage(r.external_id, text);
-    if (!result.success) throw new Error(`IG send failed: ${result.error}`);
-  } else if (r.channel === "whatsapp" && r.external_id) {
-    const { sendWhatsAppMessage } = await import("@/lib/messaging/meta");
-    const result = await sendWhatsAppMessage(r.external_id, text);
-    if (!result.success) throw new Error(`WA send failed: ${result.error}`);
-  }
-
-  // Chat-Message-Eintrag (damit es im Verlauf erscheint)
-  if (r.session_id) {
-    await svc.from("chat_messages").insert({
-      session_id: r.session_id,
-      role:       "human_agent",
-      content:    text,
-      agent_id:   user.id,
-    });
-    await svc.from("chat_sessions").update({
-      last_message_at:       new Date().toISOString(),
-      last_seen_by_agent_at: new Date().toISOString(),
-    }).eq("id", r.session_id);
-  }
-
-  // Status aktualisieren
-  await svc.from("chat_reservations").update({
-    status:               "notified",
-    notified_at:          new Date().toISOString(),
-    notified_by:          user.id,
-    notification_message: text,
-  }).eq("id", reservationId);
+  const { deliverReservationNotification } = await import("@/lib/reservations/notify");
+  const res = await deliverReservationNotification(svc, [r], text, { agentId: user.id });
+  if (res.sentIds.length === 0) throw new Error(res.error || "Versand fehlgeschlagen");
 
   revalidatePath("/chatbot/reservations");
   if (r.session_id) revalidatePath(`/chatbot/inbox/${r.session_id}`);

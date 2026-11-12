@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { Mail, MessageSquare, Clock, CheckCircle2, XCircle, Bot } from "lucide-react";
 import ReservationRow from "./reservation-row";
 import StockCheckButton from "./stock-check-button";
+import { parseAutoNotifyMode } from "@/lib/reservations/auto-notify";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,9 @@ export default async function ReservationsPage({ searchParams }: PageProps) {
   const { count: cntCancelled } = await svc.from("chat_reservations").select("id", { count: "exact", head: true }).eq("status", "cancelled");
   const { count: cntInStock } = await svc.from("chat_reservations").select("id", { count: "exact", head: true }).eq("status", "waiting").eq("last_stock_status", "in_stock");
   const { data: lastCheck } = await svc.from("chat_reservations").select("last_checked_at").not("last_checked_at", "is", null).order("last_checked_at", { ascending: false }).limit(1).maybeSingle();
+  const { count: cntWouldSend } = await svc.from("chat_reservations").select("id", { count: "exact", head: true }).eq("status", "waiting").eq("auto_notify_decision", "would_send");
+  const { data: settingsRow } = await svc.from("chatbot_settings").select("reservation_auto_notify").eq("id", 1).maybeSingle();
+  const autoMode = parseAutoNotifyMode(settingsRow?.reservation_auto_notify);
   const lastCheckedAt = lastCheck?.last_checked_at ? new Date(lastCheck.last_checked_at) : null;
   const lastCheckedStr = lastCheckedAt
     ? `${lastCheckedAt.toLocaleDateString("de-DE", { timeZone: "Europe/Berlin" })} ${lastCheckedAt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}`
@@ -68,6 +72,17 @@ export default async function ReservationsPage({ searchParams }: PageProps) {
       )}
       {lastCheckedStr && (
         <div className="text-xs text-neutral-500 -mt-3">Letzter Lager-Check: {lastCheckedStr} · läuft automatisch jeden Morgen</div>
+      )}
+
+      {autoMode !== "off" && (
+        <div className={`rounded-2xl border p-3 text-xs flex items-center gap-2 flex-wrap ${autoMode === "live" ? "border-green-200 bg-white text-green-900" : "border-blue-200 bg-blue-50 text-blue-900"}`}>
+          {autoMode === "live" ? (
+            <span>📨 <strong>Automatische Benachrichtigung: LIVE</strong> — Ava schreibt Mo–Sa um 11 Uhr alle eindeutigen Treffer an ({cntWouldSend ?? 0} vorgemerkt).</span>
+          ) : (
+            <span>🧪 <strong>Automatische Benachrichtigung: Probelauf</strong> — es wird nichts gesendet. {cntWouldSend ?? 0} Reservierung{cntWouldSend === 1 ? " würde" : "en würden"} automatisch benachrichtigt (🤖 in der Zeile).</span>
+          )}
+          <Link href="/chatbot/bot-settings" className="ml-auto text-blue-700 hover:underline">Schalter in Bot-Einstellungen →</Link>
+        </div>
       )}
 
       {/* Filter-Buttons */}
@@ -107,6 +122,7 @@ export default async function ReservationsPage({ searchParams }: PageProps) {
                 key={r.id}
                 reservation={r}
                 statusBadge={STATUS_LABELS[r.status] || STATUS_LABELS.waiting}
+                autoMode={autoMode}
               />
             ))}
           </ul>

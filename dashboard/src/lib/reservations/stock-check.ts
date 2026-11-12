@@ -2,11 +2,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   matchReservationsAgainstStock,
   planStockStatusUpdates,
+  snapshotProblem,
   type PreviousStockState,
   type ReservationForMatch,
   type StockCheckResult,
   type StockSnapshot,
 } from "./stock-match";
+import { decideAutoNotify, type AutoNotifyDecision, type NotifyState } from "./auto-notify";
 
 /**
  * Lager-Check der Warteliste: liest die Stock-Sheets (gleiche Quelle wie das
@@ -36,30 +38,82 @@ export async function loadStockSnapshot(svc: SupabaseClient): Promise<StockSnaps
   return {
     ru: ruSheet.rows,
     uz: uzSheet.rows,
+    ruCompleted: ruSheet.completedCollections,
+    uzCompleted: uzSheet.completedCollections,
     unterwegs: filterArchivedFromStock(rawUnterwegs, orderIdByName),
     nullbestand: filterArchivedFromStock(rawNullbestand, orderIdByName),
   };
 }
 
+export interface CheckedReservation extends NotifyState {
+  product_name: string;
+  color: string | null;
+  method: string | null;
+  product_url: string | null;
+  session_id: string | null;
+  result: StockCheckResult | undefined;
+  decision: AutoNotifyDecision;
+  reason: string;
+}
+
 export interface ReservationStockCheckRun {
   results: StockCheckResult[];
+  /** Pro wartender Reservierung: Treffer + Auto-Benachrichtigungs-Entscheidung */
+  checked: CheckedReservation[];
   counts: Record<StockCheckResult["status"], number>;
   newlyInStock: number;
 }
 
-export async function runReservationStockCheck(svc: SupabaseClient): Promise<ReservationStockCheckRun> {
+/**
+ * `retries`: Crons warten bei halber Tabelle (Sheet-Refresh) und lesen erneut;
+ * der Button meldet es sofort (retries 0).
+ */
+export async function runReservationStockCheck(
+  svc: SupabaseClient,
+  now: Date = new Date(),
+  opts: { retries?: number; retryDelayMs?: number } = {},
+): Promise<ReservationStockCheckRun> {
   const { data: rows, error } = await svc
     .from("chat_reservations")
-    .select("id, product_name, color, method, line, length_cm, method_kind, structured_complete, last_stock_status, in_stock_since")
-    .eq("status", "waiting");
+    .select(
+      "id, status, session_id, channel, external_id, product_name, product_url, color, method, line, length_cm, method_kind, " +
+      "structured_complete, last_stock_status, in_stock_since, notify_attempts, last_notify_attempt_at",
+    )
+    .eq("status", "waiting")
+    .returns<(ReservationForMatch & PreviousStockState & CheckedReservation)[]>();
   if (error) throw new Error(`chat_reservations lesen: ${error.message}`);
 
   const counts: ReservationStockCheckRun["counts"] = { in_stock: 0, unterwegs: 0, out_of_stock: 0, unknown: 0, service_item: 0 };
-  if (!rows || rows.length === 0) return { results: [], counts, newlyInStock: 0 };
+  if (!rows || rows.length === 0) return { results: [], checked: [], counts, newlyInStock: 0 };
 
-  const stock = await loadStockSnapshot(svc);
-  const results = matchReservationsAgainstStock(rows as ReservationForMatch[], stock);
-  const updates = planStockStatusUpdates(rows as PreviousStockState[], results, new Date().toISOString());
+  // Halbe Tabelle (Sheet-Refresh läuft) → erneut lesen; bleibt sie halb,
+  // abbrechen: letzter Stand bleibt stehen, nichts wird gesendet.
+  let stock = await loadStockSnapshot(svc);
+  let problem = snapshotProblem(stock);
+  for (let i = 0; problem && i < (opts.retries ?? 0); i++) {
+    await new Promise(res => setTimeout(res, opts.retryDelayMs ?? 60_000));
+    stock = await loadStockSnapshot(svc);
+    problem = snapshotProblem(stock);
+  }
+  if (problem) throw new Error(problem);
+  const results = matchReservationsAgainstStock(rows, stock);
+  const resultById = new Map(results.map(r => [r.reservationId, r]));
+  const checked: CheckedReservation[] = rows.map(r => {
+    const result = resultById.get(r.id);
+    const { decision, reason } = decideAutoNotify(r, result, now);
+    return {
+      id: r.id, status: r.status, session_id: r.session_id, channel: r.channel, external_id: r.external_id,
+      product_name: r.product_name, product_url: r.product_url, color: r.color, method: r.method,
+      notify_attempts: r.notify_attempts, last_notify_attempt_at: r.last_notify_attempt_at,
+      result, decision, reason,
+    };
+  });
+  const checkedById = new Map(checked.map(c => [c.id, c]));
+  const updates = planStockStatusUpdates(rows, results, now.toISOString()).map(u => ({
+    ...u,
+    auto_notify_decision: checkedById.get(u.id)?.decision ?? null,
+    auto_notify_reason: checkedById.get(u.id)?.reason ?? null,
+  }));
 
   // Pro Zeile updaten (Warteliste = zweistellig) — Fehler einzelner Zeilen
   // sammeln statt abbrechen, damit ein Ausreißer nicht den Rest blockiert.
@@ -75,5 +129,5 @@ export async function runReservationStockCheck(svc: SupabaseClient): Promise<Res
   for (const r of results) counts[r.status]++;
   const prevInStock = new Set(rows.filter(r => r.last_stock_status === "in_stock").map(r => r.id));
   const newlyInStock = results.filter(r => r.status === "in_stock" && !prevInStock.has(r.reservationId)).length;
-  return { results, counts, newlyInStock };
+  return { results, checked, counts, newlyInStock };
 }

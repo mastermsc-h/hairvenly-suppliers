@@ -2,6 +2,8 @@ import { requireProfile } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import KillSwitchPanel from "./kill-switch-panel";
 import LeanPromptToggle from "./lean-prompt-toggle";
+import ReservationAutoNotifyToggle from "./reservation-auto-notify-toggle";
+import { parseAutoNotifyMode } from "@/lib/reservations/auto-notify";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +29,7 @@ export default async function BotSettingsPage() {
   const { data } = await svc
     .from("chatbot_settings")
     .select(
-      "default_bot_mode, proactive_generation_enabled, proactive_safe_categories, use_lean_prompt, updated_at"
+      "default_bot_mode, proactive_generation_enabled, proactive_safe_categories, use_lean_prompt, reservation_auto_notify, updated_at"
     )
     .eq("id", 1)
     .maybeSingle();
@@ -36,8 +38,14 @@ export default async function BotSettingsPage() {
     proactive_generation_enabled: false,
     proactive_safe_categories: [],
     use_lean_prompt: false,
+    reservation_auto_notify: "off",
     updated_at: null,
   };
+  const { count: wouldSend } = await svc
+    .from("chat_reservations")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "waiting")
+    .eq("auto_notify_decision", "would_send");
   const safe = (settings.proactive_safe_categories || []) as string[];
   const leanOn = settings.use_lean_prompt === true;
 
@@ -79,6 +87,8 @@ export default async function BotSettingsPage() {
       />
 
       <LeanPromptToggle initialEnabled={leanOn} />
+
+      <ReservationAutoNotifyToggle initialMode={parseAutoNotifyMode(settings.reservation_auto_notify)} wouldSend={wouldSend ?? 0} />
 
       {settings.updated_at && (
         <div className="text-xs text-neutral-500 text-right">

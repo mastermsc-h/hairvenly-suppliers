@@ -41,6 +41,13 @@ export interface Reservation {
   last_stock_match: string | null;
   last_checked_at: string | null;
   in_stock_since: string | null;
+  // Auto-Benachrichtigung (Migration 0150)
+  auto_notify_decision: "would_send" | "skip" | null;
+  auto_notify_reason: string | null;
+  notified_auto: boolean;
+  notify_attempts: number;
+  last_notify_error: string | null;
+  last_notify_attempt_at: string | null;
 }
 
 const STOCK_STATUS_LABEL: Record<string, string> = {
@@ -54,9 +61,11 @@ const STOCK_STATUS_LABEL: Record<string, string> = {
 export default function ReservationRow({
   reservation: r,
   statusBadge,
+  autoMode = "off",
 }: {
   reservation: Reservation;
   statusBadge: { label: string; color: string };
+  autoMode?: "off" | "shadow" | "live";
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -208,6 +217,23 @@ export default function ReservationRow({
             {/* ETA + Notes */}
             <div className="text-xs text-neutral-500 mt-1 space-y-0.5">
               {r.eta_hint && <div>⏱ Lieferung erwartet: {r.eta_hint}</div>}
+              {r.status === "waiting" && autoMode !== "off" && r.auto_notify_decision === "would_send" && !r.last_notify_error && (
+                <div className={autoMode === "live" ? "text-green-700 font-medium" : "text-blue-700 font-medium"}>
+                  🤖 {autoMode === "live" ? "Wird automatisch benachrichtigt (Mo–Sa 11 Uhr)" : "Würde automatisch benachrichtigt (Probelauf — nichts gesendet)"}
+                </div>
+              )}
+              {r.status === "waiting" && autoMode !== "off" && r.auto_notify_decision === "skip" && r.last_stock_status === "in_stock" && r.auto_notify_reason && (
+                <div className="text-amber-700">🤖 Nicht automatisch: {r.auto_notify_reason}</div>
+              )}
+              {r.status === "waiting" && r.last_notify_error && (
+                <div className="text-red-700">
+                  ⚠️ Automatischer Versand fehlgeschlagen ({r.notify_attempts}/3
+                  {r.last_notify_attempt_at && `, ${new Date(r.last_notify_attempt_at).toLocaleDateString("de-DE")}`}): {r.last_notify_error}
+                </div>
+              )}
+              {r.status === "notified" && r.notified_auto && (
+                <div className="text-green-700">🤖 Automatisch von Ava benachrichtigt</div>
+              )}
               {r.status === "waiting" && r.last_checked_at && (
                 <div className="text-neutral-400" title={r.last_stock_match ? `Gematcht mit „${r.last_stock_match}"` : undefined}>
                   🔎 Lager-Check: {new Date(r.last_checked_at).toLocaleDateString("de-DE")}{" "}

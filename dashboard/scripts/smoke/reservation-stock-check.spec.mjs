@@ -139,6 +139,24 @@ check("nicht mehr vorrätig → Status übernommen", weg.last_stock_status, "out
 const [ohnePrev] = M.planStockStatusUpdates([], [{ ...r("b", "unterwegs"), eta: "20.11.2026", matchedProduct: "#Pearl White" }], T1);
 check("ETA + Treffer werden gespeichert", [ohnePrev.last_stock_eta, ohnePrev.last_stock_match, ohnePrev.in_stock_since], ["20.11.2026", "#Pearl White", null]);
 
+// ── Halbe Tabelle (Sheet-Refresh läuft, beobachtet 12.11.2026: RU 1, UZ 27) ──
+const fill = (n) => Array.from({ length: n }, (_, i) => inv("X", `#P${i}`, 25, 1));
+check("vollständiger Snapshot → ok", M.snapshotProblem({ ...stock, ru: fill(320), uz: fill(301) }), null);
+check("RU 1 Zeile → Abbruch", typeof M.snapshotProblem({ ...stock, ru: fill(1), uz: fill(301) }), "string");
+check("UZ 27 Zeilen → Abbruch", typeof M.snapshotProblem({ ...stock, ru: fill(320), uz: fill(27) }), "string");
+check("leer → Abbruch", typeof M.snapshotProblem({ ...stock, ru: [], uz: [] }), "string");
+const RU_DONE = ["Clip In Extensions Echthaar", "Standard Tapes Russisch", "Mini Tapes Glatt", "Russische Bondings (Glatt)",
+  "Russische Classic Tressen (Glatt)", "Russische Genius Tressen (Glatt)", "Russische Invisible Tressen (Glatt) | Butterfly Weft"];
+const UZ_DONE = ["Tapes Wellig 45cm", "Bondings wellig 65cm", "Ponytail Extensions kaufen"];
+// Echter fertiger Stand 12.11.2026: „Invisible Mini Tapes" existiert in Shopify nicht → keine Total-Zeile, trotzdem komplett
+check("fertig (ohne Invisible Mini Tapes) → ok", M.snapshotProblem({ ...stock, ruCompleted: RU_DONE, uzCompleted: UZ_DONE, ru: fill(320), uz: fill(301) }), null);
+// Beobachtet 12.11.2026: RU 152 Zeilen (über der Zeilen-Schwelle!), aber erst 2 Collections fertig
+const halb = M.snapshotProblem({ ...stock, ruCompleted: RU_DONE.slice(0, 2), uzCompleted: UZ_DONE, ru: fill(152), uz: fill(301) });
+check("RU 152 Zeilen, 2 Collections fertig → Abbruch", typeof halb, "string");
+check("Abbruch nennt letzte Collection", halb.includes("Butterfly Weft"), true);
+check("UZ ohne Ponytail-Total → Abbruch", typeof M.snapshotProblem({ ...stock, ruCompleted: RU_DONE, uzCompleted: UZ_DONE.slice(0, 2), ru: fill(320), uz: fill(301) }), "string");
+check("Groß-/Kleinschreibung egal", M.snapshotProblem({ ...stock, ruCompleted: RU_DONE.map((c) => c.toUpperCase()), uzCompleted: UZ_DONE, ru: fill(320), uz: fill(301) }), null);
+
 console.log("=== RESERVIERUNGS-LAGER-CHECK SMOKE-TEST ===");
 console.log(`PASS: ${pass} / ${pass + fail}`);
 if (fail > 0) { fails.forEach((f) => console.log(f)); process.exit(1); }

@@ -51,3 +51,24 @@ export async function setLeanPromptMode(enabled: boolean) {
   }).eq("id", 1);
   revalidatePath("/chatbot/bot-settings");
 }
+
+/**
+ * Automatische Wartelisten-Benachrichtigung: off | shadow (Probelauf, sendet
+ * nichts) | live. Nur Admins. Wirkt ab dem nächsten Cron-Lauf (Mo–Sa 10 Uhr).
+ */
+export async function setReservationAutoNotify(mode: "off" | "shadow" | "live") {
+  const sup = await createClient();
+  const { data: { user } } = await sup.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  if (!["off", "shadow", "live"].includes(mode)) throw new Error("Ungültiger Modus");
+  const svc = createServiceClient();
+  const { data: profile } = await svc.from("profiles").select("is_admin").eq("id", user.id).maybeSingle();
+  if (!profile?.is_admin) throw new Error("Nur für Admins");
+  const { error } = await svc.from("chatbot_settings").update({
+    reservation_auto_notify: mode,
+    updated_at: new Date().toISOString(),
+  }).eq("id", 1);
+  if (error) throw new Error(error.message);
+  revalidatePath("/chatbot/bot-settings");
+  revalidatePath("/chatbot/reservations");
+}
