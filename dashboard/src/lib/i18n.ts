@@ -864,6 +864,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     "bank.label.via_amount": "Betrag gleich",
     "bank.status.auto_paid": "Automatisch",
     "bank.status.manual_paid": "Manuell",
+    "nav.marketing": "Marketing",
+    "nav.marketing.overview": "Zahlen",
+    "nav.marketing.tasks": "Team-Aufgaben (HALO)",
   },
 
   en: {
@@ -1721,6 +1724,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     "bank.label.via_amount": "Same amount",
     "bank.status.auto_paid": "Automatic",
     "bank.status.manual_paid": "Manual",
+    "nav.marketing": "Marketing",
+    "nav.marketing.overview": "Numbers",
+    "nav.marketing.tasks": "Team tasks (HALO)",
   },
 
   tr: {
@@ -2603,6 +2609,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     "bank.label.via_amount": "Aynı tutar",
     "bank.status.auto_paid": "Otomatik",
     "bank.status.manual_paid": "Elle",
+    "nav.marketing": "Pazarlama",
+    "nav.marketing.overview": "Rakamlar",
+    "nav.marketing.tasks": "Ekip görevleri (HALO)",
   },
 };
 
