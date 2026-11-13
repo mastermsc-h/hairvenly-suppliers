@@ -81,12 +81,28 @@ async function rpc<T>(prefix: "HALO" | "MKT", fn: string, body: Record<string, u
   return (await r.json()) as T;
 }
 
-export function ladeHalo(): Promise<HaloDaten> {
-  return rpc<HaloDaten>("HALO", "jarvis_halo", {});
+// Ein Wiederholversuch bei Statement-Timeout (anon hat 3 s; kalter DB-Cache kann knapp werden).
+async function mitWiederholung<T>(f: () => Promise<T>): Promise<T> {
+  try {
+    return await f();
+  } catch (e) {
+    if (e instanceof Error && /57014|statement timeout/.test(e.message)) return f();
+    throw e;
+  }
 }
 
-export function ladeMarketing(tage = 28): Promise<MktDaten> {
-  return rpc<MktDaten>("MKT", "jarvis_marketing", { p_days: tage });
+export function ladeHalo(): Promise<HaloDaten> {
+  return mitWiederholung(() => rpc<HaloDaten>("HALO", "jarvis_halo", {}));
+}
+
+// Zwei Teile parallel (Umsatz/Werbung/Besucher + Google-Suche), damit jeder Aufruf
+// sicher unter dem anon-Timeout bleibt.
+export async function ladeMarketing(tage = 28): Promise<MktDaten> {
+  const [a, b] = await Promise.all([
+    mitWiederholung(() => rpc<MktDaten>("MKT", "jarvis_marketing", { p_days: tage, p_teil: "umsatz" })),
+    mitWiederholung(() => rpc<Pick<MktDaten, "suche">>("MKT", "jarvis_marketing", { p_days: tage, p_teil: "suche" })),
+  ]);
+  return { ...a, suche: b.suche };
 }
 
 // ── Dringlichkeit ────────────────────────────────────────────────────

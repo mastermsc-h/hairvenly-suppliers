@@ -21,15 +21,21 @@ if (!P) {
   process.exit(1);
 }
 const fn = P === "HALO" ? "jarvis_halo" : "jarvis_marketing";
-const body = { p_key: env[`${P}_JARVIS_KEY`], ...(P === "MKT" ? { p_days: Number(tage) } : {}) };
-const r = await fetch(`${env[`${P}_SUPABASE_URL`]}/rest/v1/rpc/${fn}`, {
-  method: "POST",
-  headers: { apikey: env[`${P}_SUPABASE_ANON_KEY`], Authorization: `Bearer ${env[`${P}_SUPABASE_ANON_KEY`]}`, "Content-Type": "application/json" },
-  body: JSON.stringify(body),
-});
-const text = await r.text();
-if (!r.ok) {
-  console.error(`HTTP ${r.status}: ${text}`);
-  process.exit(1);
+async function abruf(extra) {
+  const r = await fetch(`${env[`${P}_SUPABASE_URL`]}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: { apikey: env[`${P}_SUPABASE_ANON_KEY`], Authorization: `Bearer ${env[`${P}_SUPABASE_ANON_KEY`]}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ p_key: env[`${P}_JARVIS_KEY`], ...extra }),
+  });
+  const text = await r.text();
+  if (!r.ok) {
+    console.error(`HTTP ${r.status}: ${text}`);
+    process.exit(1);
+  }
+  return JSON.parse(text);
 }
-console.log(JSON.stringify(JSON.parse(text), null, 2));
+// Marketing in zwei Teilen (anon-Timeout 3 s), dann zusammenführen
+const daten = P === "HALO"
+  ? await abruf({})
+  : Object.assign(...(await Promise.all(["umsatz", "suche"].map((t) => abruf({ p_days: Number(tage), p_teil: t })))));
+console.log(JSON.stringify(daten, null, 2));

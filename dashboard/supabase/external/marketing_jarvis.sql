@@ -13,7 +13,10 @@ create table if not exists public.jarvis_access (
 alter table public.jarvis_access enable row level security;
 revoke all on public.jarvis_access from anon, authenticated;
 
-create or replace function public.jarvis_marketing(p_key text, p_days int default 28)
+-- p_teil: 'umsatz' (Umsatz/Werbung/Tage/Quellen/Besucher/IG/SEO) oder 'suche' (Google Suche).
+-- Zwei Teile, damit jeder Aufruf sicher unter dem anon-Statement-Timeout (3 s) bleibt; null = alles.
+drop function if exists public.jarvis_marketing(text, int);
+create or replace function public.jarvis_marketing(p_key text, p_days int default 28, p_teil text default null)
 returns jsonb
 language plpgsql stable security definer
 set search_path = public
@@ -25,6 +28,7 @@ declare
   von date := bis - d + 1;
   vbis date := von - 1;
   vvon date := von - d;
+  erg jsonb;
 begin
   select exists (
     select 1 from public.jarvis_access
@@ -34,7 +38,11 @@ begin
     raise exception 'kein Zugriff' using errcode = '42501';
   end if;
 
-  return jsonb_build_object(
+  erg := jsonb_build_object('stand', now(),
+    'zeitraum', jsonb_build_object('von', von, 'bis', bis, 'tage', d, 'vorher_von', vvon, 'vorher_bis', vbis));
+
+  if coalesce(p_teil, 'umsatz') = 'umsatz' then
+  erg := erg || jsonb_build_object(
     'stand', now(),
     'zeitraum', jsonb_build_object('von', von, 'bis', bis, 'tage', d, 'vorher_von', vvon, 'vorher_bis', vbis),
 
@@ -121,28 +129,6 @@ begin
       'top_seiten', coalesce((select jsonb_agg(p order by p.sessions desc) from (select path, sessions, checkout_sessions, period_start, period_end from seo_page_sessions where period_end = (select max(period_end) from seo_page_sessions) order by sessions desc limit 15) p), '[]'::jsonb)
     ),
 
-    -- Google Suche
-    'suche', jsonb_build_object(
-      'klicks', (select coalesce(sum(clicks), 0) from gsc_performance where date between von and bis),
-      'impressionen', (select coalesce(sum(impressions), 0) from gsc_performance where date between von and bis),
-      'klicks_vorher', (select coalesce(sum(clicks), 0) from gsc_performance where date between vvon and vbis),
-      'impressionen_vorher', (select coalesce(sum(impressions), 0) from gsc_performance where date between vvon and vbis),
-      'position', (select round(sum(position * impressions) / nullif(sum(impressions), 0), 1) from gsc_performance where date between von and bis),
-      'top_suchbegriffe', coalesce((
-        select jsonb_agg(q order by (q->>'klicks')::int desc) from (
-          select jsonb_build_object('begriff', query, 'klicks', sum(clicks), 'impressionen', sum(impressions),
-                                    'position', round(sum(position * impressions) / nullif(sum(impressions), 0), 1)) q
-          from gsc_performance where date between von and bis and query is not null
-          group by query order by sum(clicks) desc limit 20) x), '[]'::jsonb),
-      'top_seiten', coalesce((
-        select jsonb_agg(q order by (q->>'klicks')::int desc) from (
-          select jsonb_build_object('seite', page, 'klicks', sum(clicks), 'impressionen', sum(impressions)) q
-          from gsc_performance where date between von and bis
-          group by page order by sum(clicks) desc limit 10) x), '[]'::jsonb),
-      'schnelle_erfolge', coalesce((select jsonb_agg(to_jsonb(w)) from (select * from gsc_quick_wins limit 10) w), '[]'::jsonb),
-      'aufsteiger', coalesce((select jsonb_agg(to_jsonb(m)) from (select * from gsc_movers order by improvement desc nulls last limit 10) m), '[]'::jsonb)
-    ),
-
     -- Instagram (Konto)
     'instagram', coalesce((
       select jsonb_build_object('reichweite', sum(reach), 'profilaufrufe', sum(profile_views),
@@ -162,11 +148,39 @@ begin
           limit 25) x), '[]'::jsonb)
     )
   );
+  end if;
+
+  if coalesce(p_teil, 'suche') = 'suche' then
+  erg := erg || jsonb_build_object(
+    'suche', jsonb_build_object(
+      'klicks', (select coalesce(sum(clicks), 0) from gsc_performance where date between von and bis),
+      'impressionen', (select coalesce(sum(impressions), 0) from gsc_performance where date between von and bis),
+      'klicks_vorher', (select coalesce(sum(clicks), 0) from gsc_performance where date between vvon and vbis),
+      'impressionen_vorher', (select coalesce(sum(impressions), 0) from gsc_performance where date between vvon and vbis),
+      'position', (select round(sum(position * impressions) / nullif(sum(impressions), 0), 1) from gsc_performance where date between von and bis),
+      'top_suchbegriffe', coalesce((
+        select jsonb_agg(q order by (q->>'klicks')::int desc) from (
+          select jsonb_build_object('begriff', query, 'klicks', sum(clicks), 'impressionen', sum(impressions),
+                                    'position', round(sum(position * impressions) / nullif(sum(impressions), 0), 1)) q
+          from gsc_performance where date between von and bis and query is not null
+          group by query order by sum(clicks) desc limit 20) x), '[]'::jsonb),
+      'top_seiten', coalesce((
+        select jsonb_agg(q order by (q->>'klicks')::int desc) from (
+          select jsonb_build_object('seite', page, 'klicks', sum(clicks), 'impressionen', sum(impressions)) q
+          from gsc_performance where date between von and bis
+          group by page order by sum(clicks) desc limit 10) x), '[]'::jsonb),
+      'schnelle_erfolge', coalesce((select jsonb_agg(to_jsonb(w)) from (select * from gsc_quick_wins limit 10) w), '[]'::jsonb),
+      'aufsteiger', coalesce((select jsonb_agg(to_jsonb(m)) from (select * from gsc_movers order by improvement desc nulls last limit 10) m), '[]'::jsonb)
+    )
+  );
+  end if;
+
+  return erg;
 end $$;
 
-revoke all on function public.jarvis_marketing(text, int) from public;
-grant execute on function public.jarvis_marketing(text, int) to anon, authenticated;
+revoke all on function public.jarvis_marketing(text, int, text) from public;
+grant execute on function public.jarvis_marketing(text, int, text) to anon, authenticated;
 
 -- Rückbau:
--- drop function if exists public.jarvis_marketing(text, int);
+-- drop function if exists public.jarvis_marketing(text, int, text);
 -- drop table if exists public.jarvis_access;
