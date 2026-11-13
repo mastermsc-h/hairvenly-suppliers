@@ -41,6 +41,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </div>
 
       <nav className="p-3 space-y-1 text-sm">
+        {/* 0) Startbildschirm (Cockpit) — alle außer Lieferanten */}
+        {profile.role !== "supplier" && (
+          <NavLink href="/start" icon={<LayoutDashboard size={16} />} label={t(locale, "nav.start")} />
+        )}
         {/* 1) Auslandsbestellungen + Neue Bestellung */}
         <NavLink href="/" icon={<Globe2 size={16} />} label={t(locale, "nav.overview")} />
         {profile.role === "supplier" && (
