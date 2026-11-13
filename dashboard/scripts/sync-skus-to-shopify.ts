@@ -15,15 +15,15 @@
  *   5. Berichte zähle erfolg/fehler/skipped
  */
 
-import { config } from "dotenv";
 import { Client } from "pg";
 
-config({ path: ".env.local" });
+try { process.loadEnvFile(".env.local"); } catch {}
 
 const DRY_RUN = !process.argv.includes("--apply");
 const SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN!;
 const ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN!;
-const DB_URL = "postgresql://postgres.xzisnlkqiomvmbslwhvg:yPa1PNWr0KozQlPP@aws-1-eu-central-1.pooler.supabase.com:5432/postgres";
+if (!process.env.SUPABASE_DB_URL) { console.error("SUPABASE_DB_URL fehlt in .env.local"); process.exit(1); }
+const DB_URL = process.env.SUPABASE_DB_URL;
 
 if (!SHOP_DOMAIN || !ACCESS_TOKEN) {
   console.error("ERROR: SHOPIFY_SHOP_DOMAIN and SHOPIFY_ACCESS_TOKEN must be set in .env.local");

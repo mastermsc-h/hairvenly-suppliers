@@ -14,7 +14,9 @@
 import { Client } from "pg";
 import { generateUniqueSku } from "../src/lib/sku-generator";
 
-const CONNECTION_STRING = "postgresql://postgres.xzisnlkqiomvmbslwhvg:yPa1PNWr0KozQlPP@aws-1-eu-central-1.pooler.supabase.com:5432/postgres";
+try { process.loadEnvFile(".env.local"); } catch {}
+if (!process.env.SUPABASE_DB_URL) { console.error("SUPABASE_DB_URL fehlt in .env.local"); process.exit(1); }
+const CONNECTION_STRING = process.env.SUPABASE_DB_URL;
 
 interface Row {
   color_id: string;

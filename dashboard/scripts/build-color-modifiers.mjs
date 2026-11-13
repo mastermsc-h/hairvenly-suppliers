@@ -4,7 +4,9 @@
  */
 import pg from "pg";
 const { Client } = pg;
-const c = new Client({ connectionString: "postgresql://postgres.xzisnlkqiomvmbslwhvg:yPa1PNWr0KozQlPP@aws-1-eu-central-1.pooler.supabase.com:5432/postgres" });
+try { process.loadEnvFile(".env.local"); } catch {}
+if (!process.env.SUPABASE_DB_URL) { console.error("SUPABASE_DB_URL fehlt in .env.local"); process.exit(1); }
+const c = new Client({ connectionString: process.env.SUPABASE_DB_URL });
 await c.connect();
 
 // Noise: methodische/strukturelle Tokens, die aus den Shopify-Namen rausfliegen müssen

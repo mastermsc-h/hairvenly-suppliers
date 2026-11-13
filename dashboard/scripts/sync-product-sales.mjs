@@ -2,17 +2,16 @@
 // Usage: node scripts/sync-product-sales.mjs [months]
 // Run from the dashboard/ directory so module resolution + .env work.
 
-import { config } from "dotenv";
 import pg from "pg";
 
-config({ path: ".env.local" });
-config({ path: ".env" });
+try { process.loadEnvFile(".env.local"); } catch {}
+try { process.loadEnvFile(".env"); } catch {}
 
 const MONTHS = Number(process.argv[2] ?? 12);
 const SHOP = process.env.SHOPIFY_SHOP_DOMAIN;
 const TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
-const DB = process.env.SUPABASE_DB_URL
-  ?? "postgresql://postgres.xzisnlkqiomvmbslwhvg:yPa1PNWr0KozQlPP@aws-1-eu-central-1.pooler.supabase.com:5432/postgres";
+const DB = process.env.SUPABASE_DB_URL;
+if (!process.env.SUPABASE_DB_URL) { console.error("SUPABASE_DB_URL fehlt in .env.local"); process.exit(1); }
 
 if (!SHOP || !TOKEN) {
   console.error("SHOPIFY_SHOP_DOMAIN und SHOPIFY_ACCESS_TOKEN müssen gesetzt sein.");

@@ -1,5 +1,7 @@
 const { Client } = require('pg');
-const c = new Client('postgresql://postgres.xzisnlkqiomvmbslwhvg:yPa1PNWr0KozQlPP@aws-1-eu-central-1.pooler.supabase.com:5432/postgres');
+try { process.loadEnvFile(".env.local"); } catch {}
+if (!process.env.SUPABASE_DB_URL) { console.error("SUPABASE_DB_URL fehlt in .env.local"); process.exit(1); }
+const c = new Client(process.env.SUPABASE_DB_URL);
 (async () => {
   await c.connect();
   const answer = `IMMER get_available_colors mit search=<Farbcode> aufrufen, BEVOR du sagst "kenne ich nicht" oder "gibt es nicht in unserem System".
