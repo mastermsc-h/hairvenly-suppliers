@@ -11,6 +11,7 @@ const eur = (n: number) => new Intl.NumberFormat("de-DE", { style: "currency", c
 const eur2 = (n: number) => new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 2 }).format(n);
 const num = (n: number) => new Intl.NumberFormat("de-DE").format(Math.round(n));
 const pct = (n: number) => new Intl.NumberFormat("de-DE", { style: "percent", maximumFractionDigits: 1 }).format(n);
+const pct2 = (n: number) => new Intl.NumberFormat("de-DE", { style: "percent", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 const datum = (iso: string | null | undefined) => (iso ? new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso).toLocaleDateString("de-DE") : "—");
 const CARD = "bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm";
 const LABEL = "text-xs font-medium text-neutral-600 uppercase tracking-wide";
@@ -118,7 +119,7 @@ function MarketingZahlen({ m }: { m: MktDaten }) {
         <Kpi label="Werbekosten" wert={eur(kosten)} delta={<Delta jetzt={kosten} vorher={kostenVorher} umkehren />} sub={`Meta ${eur(m.werbung.meta_kosten)} · Google ${eur(m.werbung.google_kosten)}`} />
         <Kpi label="Umsatz je 1 € Werbung" wert={kosten ? `${(netto / kosten).toFixed(0)} €` : "—"} sub="gesamter Netto-Umsatz ÷ Werbekosten" />
         <Kpi label="Besucher (Sessions)" wert={f ? num(f.sessions) : "—"} delta={f && fVorher ? <Delta jetzt={f.sessions} vorher={fVorher.sessions} /> : undefined} sub={f ? `${datum(f.period_start)} – ${datum(f.period_end)}` : undefined} />
-        <Kpi label="Kaufquote" wert={f ? pct(conv) : "—"} delta={fVorher ? <Delta jetzt={conv} vorher={convVorher} /> : undefined} sub={f ? `${num(f.cart)} Warenkorb · ${num(f.checkout)} Kasse · ${num(f.purchased)} Kauf` : undefined} />
+        <Kpi label="Kaufquote" wert={f ? pct2(conv) : "—"} delta={fVorher ? <Delta jetzt={conv} vorher={convVorher} /> : undefined} sub={f ? `${num(f.cart)} Warenkorb · ${num(f.checkout)} Kasse · ${num(f.purchased)} Kauf` : undefined} />
         <Kpi label="Google-Klicks" wert={num(m.suche.klicks)} delta={<Delta jetzt={m.suche.klicks} vorher={m.suche.klicks_vorher} />} sub={`${num(m.suche.impressionen)} Impressionen · Ø Pos. ${m.suche.position ?? "—"}`} />
         <Kpi label="SEO offen" wert={num(Object.values(m.seo_offen.anzahl ?? {}).reduce((a, b) => a + b, 0))} sub={`${m.seo_offen.anzahl?.hoch ?? 0} hoch · ${m.seo_offen.anzahl?.mittel ?? 0} mittel · ${m.seo_offen.anzahl?.niedrig ?? 0} niedrig`} />
       </div>
