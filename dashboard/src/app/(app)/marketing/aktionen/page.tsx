@@ -113,7 +113,7 @@ export default async function AktionenPage({ searchParams }: { searchParams: Pro
       <section className={CARD}>
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <h2 className="font-semibold">Aktive Influencer <span className="text-neutral-400 font-normal">· {aktive.length}</span></h2>
-          <InfluencerFormular key={sp.code ?? "neu"} vorlage={sp.code ? { rabattcode: sp.code.toUpperCase(), aktiv_von: heute } : undefined} offen={!!sp.code} />
+          <InfluencerFormular key={sp.code ?? "neu"} vorlage={sp.code ? { rabattcode: sp.code.toUpperCase(), aktiv_von: codeStatistik(bestellungen, sp.code, heute).ersteNutzung ?? heute } : undefined} offen={!!sp.code} />
         </div>
         {aktive.length ? tabelle(aktive) : <p className="text-sm text-neutral-500">Noch keine aktiven Influencer. Lege einen an, oder nimm unten einen benutzten Code.</p>}
         <p className="mt-3 text-xs text-neutral-400">Code-Bestellungen zählen nur im eingetragenen Zeitraum, höchstens {TAGE_CODES} Tage zurück. Stornierte Bestellungen zählen nicht.</p>
