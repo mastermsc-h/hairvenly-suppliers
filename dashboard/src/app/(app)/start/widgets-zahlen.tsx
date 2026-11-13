@@ -8,7 +8,7 @@ import {
   AlertTriangle, ArrowRight, Check, CheckCircle2, Globe2, Landmark, Lock, Package, ShoppingBag, ShoppingCart, Sparkles, TrendingDown,
   Undo2, Users, XCircle,
 } from "lucide-react";
-import type { AuslandDaten, BesucherDaten, LiqGruppe, ChatDaten, HyDaten, LiquiditaetDaten, PflichtenDaten, ShopifyDaten, Signal, UmsatzDaten } from "@/lib/cockpit/typen";
+import type { TotesKapitalDaten, AuslandDaten, BesucherDaten, LiqGruppe, ChatDaten, HyDaten, LiquiditaetDaten, PflichtenDaten, ShopifyDaten, Signal, UmsatzDaten } from "@/lib/cockpit/typen";
 import { Balken, Delta, Funke, Hinweis, Ring, Symbol, Zahl, eur, kurzEur, monatName, tagMonat, zahl } from "./bausteine";
 
 function Mehr({ href, children }: { href: string; children: React.ReactNode }) {
@@ -382,6 +382,71 @@ export function AuslandWidget({ d }: { d: AuslandDaten }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <span className="ck-matt" style={{ fontSize: 11 }}>Nach Lieferland, ohne Stornos{d.standBis ? ` · bis ${tagMonat(d.standBis)} aus der Nachtsynchronisation, heute live` : ""}</span>
         <Mehr href="/pack/kunden">Kundenanalyse</Mehr>
+      </div>
+    </div>
+  );
+}
+
+// ── Totes Kapital (Ladenhüter) ──────────────────────────────────────────────
+
+export function TotesKapitalWidget({ d }: { d: TotesKapitalDaten }) {
+  if (!d.anzahl) return <Hinweis>Aktuell keine Ladenhüter – nichts liegt länger als nötig im Lager.</Hinweis>;
+  const max = Math.max(...d.kollektionen.map((k) => k.wertEur), 1);
+  const arten = [
+    { label: "Tot", info: "kein Verkauf in 90 Tagen", t: d.tot, farbe: "#c2576b" },
+    { label: "Fast tot", info: "Lager reicht über 12 Monate", t: d.fastTot, farbe: "#d99a3c" },
+  ];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 10 }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <Ring anteil={d.anteilLager} groesse={62} dicke={8}><span className="ck-mono" style={{ fontSize: 13, fontWeight: 750 }}>{zahl(d.anteilLager)}<span style={{ fontSize: 9 }}> %</span></span></Ring>
+        <div style={{ flex: 1 }}>
+          <div className="ck-etikett">Gebunden in Ladenhütern</div>
+          <Zahl wert={d.wertEur} format="eur" className="ck-gross ck-farbig" />
+          <div className="ck-matt" style={{ fontSize: 11.5 }}>{zahl(d.kg, 1)} kg · {zahl(d.anzahl)} Produkte · {zahl(d.anteilLager, 1)} % des Lagers</div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        {arten.map((a) => (
+          <div key={a.label} className="ck-kachel" style={{ borderLeft: `4px solid ${a.farbe}` }} title={a.info}>
+            <div className="ck-etikett">{a.label} · {zahl(a.t.anzahl)}</div>
+            <div className="ck-mittel ck-mono">{kurzEur(a.t.wertEur)}</div>
+            <div className="ck-matt" style={{ fontSize: 11 }}>{zahl(a.t.kg, 1)} kg · {a.info}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gap: 6 }}>
+        <div className="ck-etikett">Wo es liegt</div>
+        {d.kollektionen.map((k) => (
+          <div key={k.name}>
+            <div className="ck-zeile" style={{ padding: "0 0 2px" }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.name}</span>
+              <span className="ck-mono" style={{ whiteSpace: "nowrap" }}><span className="ck-matt">{zahl(k.kg, 1)} kg · </span><b>{kurzEur(k.wertEur)}</b></span>
+            </div>
+            <Balken anteil={(k.wertEur / max) * 100} />
+          </div>
+        ))}
+      </div>
+
+      {d.produkte.length > 0 && (
+        <div style={{ display: "grid", gap: 4 }}>
+          <div className="ck-etikett">Größte Einzelposten</div>
+          {d.produkte.map((p, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5 }} title={`${p.name} · ${p.kollektion}`}>
+              <i className="ck-legende" style={{ background: p.art === "tot" ? "#c2576b" : "#d99a3c", borderRadius: "50%" }} />
+              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+              <span className="ck-mono ck-matt" style={{ whiteSpace: "nowrap" }}>{zahl(p.kg, 1)} kg</span>
+              <b className="ck-mono" style={{ whiteSpace: "nowrap" }}>{kurzEur(p.wertEur)}</b>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: "auto" }}>
+        <span className="ck-matt" style={{ fontSize: 11 }}>Lager × heutiger Verkaufspreis{d.ohnePreis ? ` · ${d.ohnePreis} ohne Preis nicht enthalten` : ""}</span>
+        <Mehr href="/stock/deadstock">Ladenhüter</Mehr>
       </div>
     </div>
   );

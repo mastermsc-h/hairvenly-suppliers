@@ -7,9 +7,10 @@ import { ladePrognose } from "@/lib/liquiditaet/daten";
 import { plusTage, zahlGruppe } from "@/lib/liquiditaet/rechnung";
 import { shopifyGraphQL } from "@/lib/shopify";
 import { holeShopifyUmsatzMonat } from "@/lib/shopify-umsatz";
+import { loadDeadStock } from "@/lib/stock-deadstock";
 import type {
   Ampel, AuslandDaten, BesucherDaten, ChatDaten, CockpitLayout, Eintrag, EintragArt, HyDaten, KampagneDaten,
-  LiqGruppe, LiquiditaetDaten, PflichtenDaten, PflichtPosten, ShopifyDaten, Signal, UmsatzDaten,
+  LiqGruppe, LiquiditaetDaten, PflichtenDaten, PflichtPosten, ShopifyDaten, Signal, TotesKapitalDaten, UmsatzDaten,
 } from "./typen";
 
 const berlin = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin" });
@@ -385,6 +386,32 @@ export const ladeAusland = cache(async (): Promise<AuslandDaten> => {
     reihen: [...top.map((code) => ({ code, name: nameVon(code) })), ...(hatRest ? [{ code: "rest", name: "Übrige" }] : [])],
     laender,
     standBis,
+  };
+});
+
+// ── Totes Kapital (Ladenhüter) — dieselbe Berechnung wie /stock/deadstock ───
+
+export const ladeTotesKapital = cache(async (): Promise<TotesKapitalDaten> => {
+  const { items, totalLagerKg } = await loadDeadStock();
+  const teil = (l: typeof items) => ({
+    wertEur: r0(l.reduce((s, d) => s + (d.valueEur ?? 0), 0)),
+    kg: Math.round(l.reduce((s, d) => s + d.lagerG, 0) / 100) / 10,
+    anzahl: l.length,
+  });
+  const gesamt = teil(items);
+  const proKollektion = new Map<string, typeof items>();
+  for (const d of items) proKollektion.set(d.collection, [...(proKollektion.get(d.collection) ?? []), d]);
+  return {
+    ...gesamt,
+    anteilLager: totalLagerKg > 0 ? Math.round((gesamt.kg / totalLagerKg) * 1000) / 10 : 0,
+    tot: teil(items.filter((d) => d.deadKind === "tot")),
+    fastTot: teil(items.filter((d) => d.deadKind === "fasttot")),
+    ohnePreis: items.filter((d) => d.valueEur === null).length,
+    kollektionen: [...proKollektion.entries()].map(([name, l]) => ({ name, ...teil(l) })).sort((a, b) => b.wertEur - a.wertEur).slice(0, 5),
+    produkte: [...items]
+      .sort((a, b) => (b.valueEur ?? 0) - (a.valueEur ?? 0))
+      .slice(0, 5)
+      .map((d) => ({ name: d.product, kollektion: d.collection, wertEur: r0(d.valueEur ?? 0), kg: Math.round(d.lagerG / 100) / 10, art: d.deadKind })),
   };
 });
 

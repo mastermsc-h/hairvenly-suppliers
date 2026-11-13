@@ -6,7 +6,7 @@ import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "re
 import ReactGridLayout, { useContainerWidth, verticalCompactor, type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import {
-  Activity, BadgePercent, CheckSquare, Compass, Eye, EyeOff, Flag, Gauge, Globe2, HeartPulse, Lightbulb, MessageSquare,
+  Activity, BadgePercent, CheckSquare, Compass, Eye, EyeOff, Flag, Gauge, Globe2, Megaphone, PackageX, HeartPulse, Lightbulb, MessageSquare,
   MousePointerClick, RotateCcw, Settings2, SlidersHorizontal, Zap, ShoppingBag, StickyNote, TrendingUp, Wallet, Waves, Check, GripVertical,
 } from "lucide-react";
 import { cockpitLayoutZuruecksetzen, speichereCockpitLayout } from "@/lib/actions/cockpit";
@@ -17,7 +17,7 @@ import "./cockpit.css";
 const ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   lage: Activity, umsatz: TrendingUp, chats: MessageSquare, hy: HeartPulse, aufgaben: CheckSquare, pflichten: Wallet,
   shopify: ShoppingBag, besucher: MousePointerClick, notizen: StickyNote, ideen: Lightbulb, pfeiler: Gauge,
-  meilensteine: Flag, ausland: Globe2, aktionen: BadgePercent, philosophie: Compass, liquiditaet: Waves,
+  meilensteine: Flag, ausland: Globe2, toteskapital: PackageX, marketing: Megaphone, aktionen: BadgePercent, philosophie: Compass, liquiditaet: Waves,
 };
 
 const SPALTEN = 12;

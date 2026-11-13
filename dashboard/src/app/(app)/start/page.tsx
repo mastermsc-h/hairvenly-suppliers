@@ -2,13 +2,13 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import {
-  ladeAusland, ladeBesucher, ladeChats, ladeEintraege, ladeHy, ladeKampagnen, ladeLayout, ladeLiquiditaet, ladePflichten,
+  ladeAusland, ladeBesucher, ladeTotesKapital, ladeChats, ladeEintraege, ladeHy, ladeKampagnen, ladeLayout, ladeLiquiditaet, ladePflichten,
   ladeShopify, ladeSignale, ladeTeam, ladeUmsatz,
 } from "@/lib/cockpit/daten";
 import { WIDGETS } from "@/lib/cockpit/typen";
 import CockpitGrid from "./cockpit-grid";
 import { Hinweis, Lade } from "./bausteine";
-import { AuslandWidget, BesucherWidget, ChatsWidget, HyWidget, LageWidget, LiquiditaetWidget, PflichtenWidget, ShopifyWidget, UmsatzWidget } from "./widgets-zahlen";
+import { TotesKapitalWidget, AuslandWidget, BesucherWidget, ChatsWidget, HyWidget, LageWidget, LiquiditaetWidget, PflichtenWidget, ShopifyWidget, UmsatzWidget } from "./widgets-zahlen";
 import { ladeHalo } from "@/lib/marketing-extern";
 import MarketingWidget from "../marketing/marketing-widget";
 import { AktionenWidget, AufgabenWidget, IdeenWidget, MeilensteineWidget, NotizenWidget, PfeilerWidget, PhilosophieWidget } from "./widgets-eintraege";
@@ -64,6 +64,7 @@ export default async function StartPage() {
     inhalte.hy = warte(<Mit lade={ladeHy}>{(d) => <HyWidget d={d} />}</Mit>);
     inhalte.shopify = warte(<Mit lade={ladeShopify}>{(d) => <ShopifyWidget d={d} />}</Mit>);
     inhalte.ausland = warte(<Mit lade={ladeAusland}>{(d) => <AuslandWidget d={d} />}</Mit>);
+    inhalte.toteskapital = warte(<Mit lade={ladeTotesKapital}>{(d) => <TotesKapitalWidget d={d} />}</Mit>);
     inhalte.besucher = warte(<Mit lade={ladeBesucher}>{(d) => <BesucherWidget d={d} />}</Mit>);
     inhalte.pflichten = warte(<Mit lade={() => ladePflichten(30)}>{(d) => <PflichtenWidget d={d} />}</Mit>);
     inhalte.liquiditaet = warte(<Mit lade={ladeLiquiditaet}>{(d) => <LiquiditaetWidget d={d} />}</Mit>);

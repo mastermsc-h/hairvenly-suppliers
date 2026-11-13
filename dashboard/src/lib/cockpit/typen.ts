@@ -115,6 +115,21 @@ export interface AuslandDaten {
   standBis: string | null;
 }
 
+export interface TotesKapitalDaten {
+  /** Ladenhüter gesamt: Lager × aktueller Shopify-Verkaufspreis. */
+  wertEur: number;
+  kg: number;
+  anzahl: number;
+  /** Anteil am bewerteten Lager (kg, %). */
+  anteilLager: number;
+  tot: { wertEur: number; kg: number; anzahl: number };
+  fastTot: { wertEur: number; kg: number; anzahl: number };
+  /** Produkte ohne Shopify-Preis — im Wert nicht enthalten. */
+  ohnePreis: number;
+  kollektionen: Array<{ name: string; wertEur: number; kg: number; anzahl: number }>;
+  produkte: Array<{ name: string; kollektion: string; wertEur: number; kg: number; art: "tot" | "fasttot" }>;
+}
+
 export interface BesucherDaten {
   verbunden: boolean;
   grund?: string;
@@ -193,6 +208,7 @@ export const WIDGETS = [
   { id: "shopify", name: "Shopify", info: "Heute, Warenkorb, Kunden, Topseller", feature: "finances" },
   { id: "besucher", name: "Besucher & Conversion", info: "Sitzungen und Kaufquote im Shop", feature: "finances" },
   { id: "ausland", name: "Auslandsbestellungen", info: "Österreich & Co.: Tag, Woche, Trend", feature: "finances" },
+  { id: "toteskapital", name: "Totes Kapital", info: "Ladenhüter: gebundener Warenwert", feature: "finances" },
   { id: "notizen", name: "Notizzettel", info: "Nur für dich", feature: null },
   { id: "ideen", name: "Ideen & Inspiration", info: "Sammelstelle fürs Team", feature: null },
   { id: "pfeiler", name: "Wachstumspfeiler", info: "Die großen Hebel des Unternehmens", feature: null },
@@ -224,6 +240,7 @@ export const STANDARD_LAYOUT: LayoutItem[] = [
   { i: "philosophie", x: 9, y: 40, w: 3, h: 4 },
   { i: "liquiditaet", x: 0, y: 44, w: 12, h: 8 },
   { i: "marketing", x: 0, y: 52, w: 6, h: 8 },
+  { i: "toteskapital", x: 6, y: 52, w: 6, h: 11 },
 ];
 
 export const MIN_GROESSE: Record<string, { w: number; h: number }> = {
