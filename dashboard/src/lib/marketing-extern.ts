@@ -105,6 +105,13 @@ export async function ladeMarketing(tage = 28): Promise<MktDaten> {
   return { ...a, suche: b.suche };
 }
 
+/** Nur der Tagesverlauf (Umsatz/Werbekosten je Tag), z. B. für Influencer-Effekte. */
+// Schlanke RPC jarvis_marketing_tage (nur Tagesreihe, ~0,3 s auch für 365 Tage).
+export async function ladeTagesUmsatz(tage: number): Promise<Omit<MktTag, "such_klicks">[]> {
+  const a = await mitWiederholung(() => rpc<{ tage: Omit<MktTag, "such_klicks">[] }>("MKT", "jarvis_marketing_tage", { p_days: tage }));
+  return a.tage;
+}
+
 // ── Dringlichkeit ────────────────────────────────────────────────────
 // Ein offener Schritt/eine Aufgabe ist "dringend", wenn sie überfällig ist,
 // in den nächsten 2 Tagen fällig/geplant ist, oder Prio hoch hat und in 7 Tagen fällig ist.

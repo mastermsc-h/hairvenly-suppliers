@@ -869,6 +869,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "nav.marketing": "Marketing",
     "nav.marketing.overview": "Zahlen",
     "nav.marketing.tasks": "Team-Aufgaben (HALO)",
+    "nav.marketing.actions": "Aktuelle Aktionen",
   },
 
   en: {
@@ -1731,6 +1732,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "nav.marketing": "Marketing",
     "nav.marketing.overview": "Numbers",
     "nav.marketing.tasks": "Team tasks (HALO)",
+    "nav.marketing.actions": "Current campaigns",
   },
 
   tr: {
@@ -2618,6 +2620,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "nav.marketing": "Pazarlama",
     "nav.marketing.overview": "Rakamlar",
     "nav.marketing.tasks": "Ekip görevleri (HALO)",
+    "nav.marketing.actions": "Güncel kampanyalar",
   },
 };
 

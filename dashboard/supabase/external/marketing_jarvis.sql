@@ -184,3 +184,32 @@ grant execute on function public.jarvis_marketing(text, int, text) to anon, auth
 -- Rückbau:
 -- drop function if exists public.jarvis_marketing(text, int, text);
 -- drop table if exists public.jarvis_access;
+
+-- Schlanke Tagesreihe (Umsatz/Bestellungen/Werbekosten je Tag) für Influencer-Effekte, bis 400 Tage.
+create or replace function public.jarvis_marketing_tage(p_key text, p_days int default 90)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  d   int  := greatest(1, least(coalesce(p_days, 90), 400));
+  bis date := (now() at time zone 'Europe/Berlin')::date;
+  von date := bis - d + 1;
+begin
+  if not exists (select 1 from public.jarvis_access where key_hash = encode(sha256(convert_to(coalesce(p_key, ''), 'UTF8')), 'hex')) then
+    raise exception 'kein Zugriff' using errcode = '42501';
+  end if;
+  return jsonb_build_object('stand', now(), 'von', von, 'bis', bis, 'tage', coalesce((
+    select jsonb_agg(jsonb_build_object('datum', g.day::date, 'bestellungen', coalesce(o.n, 0), 'umsatz', coalesce(o.s, 0),
+                                        'meta_kosten', coalesce(m.s, 0), 'google_kosten', coalesce(ga.s, 0)) order by g.day)
+    from generate_series(von, bis, interval '1 day') as g(day)
+    left join (select created_at::date dd, count(*) n, sum(total) s from shopify_orders
+               where created_at >= von::timestamptz - interval '1 day' and created_at::date between von and bis
+                 and upper(coalesce(financial_status,'')) <> 'VOIDED' group by 1) o on o.dd = g.day::date
+    left join (select date dd, sum(spend) s from meta_ads where date between von and bis group by 1) m on m.dd = g.day::date
+    left join (select date dd, sum(cost) s from google_ads where date between von and bis group by 1) ga on ga.dd = g.day::date
+  ), '[]'::jsonb));
+end $$;
+revoke all on function public.jarvis_marketing_tage(text, int) from public;
+grant execute on function public.jarvis_marketing_tage(text, int) to anon, authenticated;
+-- Rückbau: drop function if exists public.jarvis_marketing_tage(text, int);
