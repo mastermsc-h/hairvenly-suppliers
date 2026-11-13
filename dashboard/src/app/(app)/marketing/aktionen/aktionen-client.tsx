@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Bar, CartesianGrid, ComposedChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
 import { Plus, Trash2, Pencil, X } from "lucide-react";
@@ -31,6 +31,14 @@ function useAktion() {
 export function InfluencerFormular({ vorlage, offen: startOffen = false, knopfText = "Influencer anlegen" }: { vorlage?: Partial<Influencer>; offen?: boolean; knopfText?: string }) {
   const [offen, setOffen] = useState(startOffen);
   const { fehler, laeuft, los } = useAktion();
+  const ref = useRef<HTMLFormElement>(null);
+  // Aus einem Code-Vorschlag geöffnet → zum Formular scrollen und Namen fokussieren
+  useEffect(() => {
+    if (startOffen && !vorlage?.id) {
+      ref.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      ref.current?.querySelector<HTMLInputElement>('input[name="name"]')?.focus({ preventScroll: true });
+    }
+  }, [startOffen, vorlage?.id]);
   if (!offen) {
     return (
       <button type="button" onClick={() => setOffen(true)} className="inline-flex items-center gap-1.5 text-sm rounded-lg border border-neutral-300 px-3 py-1.5 hover:bg-neutral-50">
@@ -40,6 +48,7 @@ export function InfluencerFormular({ vorlage, offen: startOffen = false, knopfTe
   }
   const formular = (
     <form
+      ref={ref}
       action={(f) => los(() => speichereInfluencer(f), () => setOffen(false))}
       className="grid grid-cols-2 md:grid-cols-4 gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-left"
     >
