@@ -585,35 +585,35 @@ a.ck-signal:hover { border-color: var(--s); }
 }
 .ck-stil[data-stil-wahl="aurora"] .ck-stil-vorschau { background: linear-gradient(120deg, #e7defe, #fde3ef 50%, #dff5ee); border-top: 3px solid #7c5cff; }
 
-/* Glas: milchig-durchscheinend, Lichtkante oben, Farbwolken scheinen durch */
+/* Glas: klares Milchglas — genug Deckkraft für scharfe Schrift, feine Kanten, dezente Farbwolken.
+   Umsatz (eigene Farbkachel) und Hi (Kugel) behalten ihr Aussehen. */
 .ck[data-stil="glas"] {
-  --ck-panel-2: rgba(255, 255, 255, 0.42);
+  --ck-panel-2: rgba(255, 255, 255, 0.62);
   background:
-    radial-gradient(700px 500px at 10% 20%, rgba(255, 160, 200, 0.45), transparent 70%),
-    radial-gradient(760px 520px at 85% 10%, rgba(140, 200, 255, 0.5), transparent 70%),
-    radial-gradient(700px 520px at 60% 70%, rgba(170, 150, 255, 0.4), transparent 70%),
-    radial-gradient(640px 480px at 15% 90%, rgba(150, 235, 205, 0.4), transparent 70%),
-    radial-gradient(640px 480px at 90% 85%, rgba(255, 210, 150, 0.38), transparent 70%),
-    #f1edfb;
+    radial-gradient(700px 500px at 8% 18%, rgba(255, 170, 205, 0.3), transparent 70%),
+    radial-gradient(760px 520px at 88% 8%, rgba(150, 205, 255, 0.34), transparent 70%),
+    radial-gradient(700px 520px at 60% 72%, rgba(175, 160, 255, 0.26), transparent 70%),
+    radial-gradient(640px 480px at 12% 92%, rgba(160, 235, 210, 0.26), transparent 70%),
+    #f5f2fc;
   background-attachment: fixed;
 }
-.ck[data-stil="glas"] .ck-panel:not([data-w="hi"]) {
-  background: linear-gradient(150deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.26));
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(22px) saturate(1.7);
-  -webkit-backdrop-filter: blur(22px) saturate(1.7);
+.ck[data-stil="glas"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]) {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.6));
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.25),
-    0 20px 44px -26px rgba(60, 40, 120, 0.5);
+    0 0 0 0.5px rgba(96, 84, 150, 0.14),
+    inset 0 1px 0 #fff,
+    0 18px 38px -26px rgba(60, 40, 120, 0.45);
 }
 .ck[data-stil="glas"] .ck-panel:not([data-w="hi"])::before {
   content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  background: linear-gradient(115deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 32%);
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0) 28%);
 }
 
 /* Aurora: jedes Fenster leicht in seiner Farbe getönt, mit farbiger Lichtkante */
-.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]) {
+.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]) {
   background:
     radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--w) 17%, transparent), transparent 60%),
     radial-gradient(100% 70% at 100% 100%, color-mix(in srgb, var(--w) 9%, transparent), transparent 60%),
@@ -621,9 +621,10 @@ a.ck-signal:hover { border-color: var(--s); }
   border: 1px solid color-mix(in srgb, var(--w) 26%, white);
   box-shadow: 0 1px 2px rgba(60, 40, 120, 0.05), 0 18px 40px -24px color-mix(in srgb, var(--w) 65%, transparent);
 }
-.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"])::before {
+.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"])::before {
   content: ""; position: absolute; left: 18px; right: 18px; top: 0; height: 2px; border-radius: 2px; pointer-events: none;
   background: linear-gradient(90deg, transparent, var(--w), transparent);
   opacity: 0.85;
 }
 .ck[data-stil="aurora"] { --ck-panel-2: rgba(255, 255, 255, 0.7); }
+.ck[data-stil="glas"] .ck-panel[data-w="umsatz"], .ck[data-stil="aurora"] .ck-panel[data-w="umsatz"] { --ck-panel-2: rgba(255, 255, 255, 0.16); }
