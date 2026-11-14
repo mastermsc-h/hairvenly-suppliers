@@ -11,7 +11,7 @@ export const SYMBOLE: Record<SymbolTyp, { Icon: LucideIcon; kurz: string; name: 
   einfuhr: { Icon: Ship, kurz: "EUSt", name: "Einfuhrabgaben (EUSt + Zoll)", cls: "bg-amber-100 text-amber-800", farbe: "#d97706" },
   lieferant: { Icon: Truck, kurz: "Amanda", name: "Amanda-Zahlung", cls: "bg-indigo-100 text-indigo-700", farbe: "#4f46e5" },
   manuell: { Icon: Factory, kurz: "Rate", name: "Lieferanten-Rate (Ebru …)", cls: "bg-teal-100 text-teal-700", farbe: "#0d9488" },
-  nachbestellung: { Icon: PackagePlus, kurz: "Nachb.", name: "Nachbestellung (Schätzung)", cls: "bg-neutral-100 text-neutral-600", farbe: "#525252" },
+  nachbestellung: { Icon: PackagePlus, kurz: "≈ Amanda", name: "Amanda-Nachbestellung (Schätzung)", cls: "bg-neutral-100 text-neutral-600", farbe: "#525252" },
   aktion: { Icon: Sparkles, kurz: "BF", name: "Black-Friday-Mehrumsatz", cls: "bg-emerald-100 text-emerald-700", farbe: "#059669" },
 };
 

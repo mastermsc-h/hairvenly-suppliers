@@ -1065,7 +1065,7 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
         const usd = r2(kgBestellung * usdKg);
         const ankunft = plusTage(d, ebruNb.leadWochen * 7);
         const rechnung = plusTage(ankunft, -e.zahlungVorAnkunftTage);
-        const label = `Nachbestellung ~${kgBestellung.toFixed(1)} kg (bestellt ${deKurz(d)})`;
+        const label = `Ebru-Nachbestellung ~${kgBestellung.toFixed(1)} kg (bestellt ${deKurz(d)})`;
         if (rechnung <= ende) nbPositionen.push({ id: `nb-ebru-${d}`, label, lieferant: ebruNb.lieferant, datum: rechnung, restUsd: usd, geschaetzt: true });
         // Verzoller-Rechnung kurz nach Versand (Versand = Rechnung von Ebru)
         const zoll = plusTage(rechnung, ZOLL_NACH_VERSAND_TAGE);
@@ -1111,10 +1111,10 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       const usd = kgBestellung * usdKg;
       const zahl = plusTage(d, leadTage - e.zahlungVorAnkunftTage);
       const ankunft = plusTage(d, leadTage);
-      if (zahl <= ende) ereignisse.push({ datum: zahl, betrag: -r2(usd / fx), art: "nachbestellung", label: `Nachbestellung ~${kgBestellung.toFixed(1)} kg (bestellt ${deKurz(d)})` });
+      if (zahl <= ende) ereignisse.push({ datum: zahl, betrag: -r2(usd / fx), art: "nachbestellung", label: `Amanda-Nachbestellung ~${kgBestellung.toFixed(1)} kg (bestellt ${deKurz(d)})` });
       if (ankunft <= ende) {
         const ab = einfuhrFuer(usd, null);
-        ereignisse.push({ datum: ankunft, betrag: -(ab.eust + ab.zoll), art: "einfuhr", label: `Einfuhrabgaben Nachbestellung ${d}` });
+        ereignisse.push({ datum: ankunft, betrag: -(ab.eust + ab.zoll), art: "einfuhr", label: `Einfuhrabgaben Amanda-Nachbestellung ${deKurz(d)}` });
         eustProMonat[monatVon(ankunft)] = (eustProMonat[monatVon(ankunft)] ?? 0) + ab.eust;
       }
     }

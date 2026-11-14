@@ -940,7 +940,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           {e.nachbestellungenEinrechnen && (
             <>
               <Feld
-                label={`Nachbestellung kg/Monat (leer = ${roh.nachbestellung.kgVerbrauchMonat != null ? `Verbrauch ${roh.nachbestellung.kgVerbrauchMonat}` : `Ø Bestellungen ${roh.nachbestellung.kgProMonatAuto}`})`}
+                label={`Amanda kg/Monat (leer = ${roh.nachbestellung.kgVerbrauchMonat != null ? `Verbrauch ${roh.nachbestellung.kgVerbrauchMonat}` : `Ø Bestellungen ${roh.nachbestellung.kgProMonatAuto}`})`}
                 value={e.nachbestellKgMonat}
                 optional
                 onChange={(v) => set("nachbestellKgMonat", v)}
