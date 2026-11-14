@@ -92,6 +92,8 @@ export interface LiqEinstellungen {
   ebruNachbestellungenEinrechnen: boolean;
   /** Abbuchungen von DHL (ZIT) / Ungewitter ohne zugeordnete Bestellung gegen die Einfuhr-Schätzung verschickter Ware verrechnen. */
   zollAbbuchungenVerrechnen: boolean;
+  /** Bestellrhythmus der Nachbestellungen (Amanda + Ebru), gerechnet ab der letzten echten Bestellung. */
+  nachbestellAbstandTage: number;
   ebruNachbestellKgMonat: number | null; // null = Ø Bestellungen der letzten 6 Monate
   ebruUsdProKg: number | null; // null = Ø der letzten Bestellungen
 }
@@ -176,6 +178,8 @@ export const LIQ_DEFAULTS: LiqEinstellungen = {
   ebruNachbestellungenEinrechnen: false,
   // User 06.11.2026: schon abgebuchte, aber nicht zugeordnete ZIT-Rechnungen nicht doppelt rechnen
   zollAbbuchungenVerrechnen: true,
+  // User 14.11.2026: "wir bestellen alle zwei Wochen, was benötigt wird"
+  nachbestellAbstandTage: 14,
   ebruNachbestellKgMonat: null,
   ebruUsdProKg: null,
 };
@@ -483,7 +487,7 @@ export interface LiqRohdaten {
    *  zählt deren EUSt wie früher nur als Ø in der USt (alte Rohdaten). */
   einfuhrAndere?: LiqEinfuhrPosten[];
   /** Bestellrhythmus Ebru (für die Nachbestell-Schätzung). */
-  ebruNachbestellung?: { lieferant: string; kgProMonatAuto: number; usdProKgAuto: number; leadWochen: number; kgVerbrauchMonat?: number | null } | null;
+  ebruNachbestellung?: { lieferant: string; kgProMonatAuto: number; usdProKgAuto: number; leadWochen: number; kgVerbrauchMonat?: number | null; letzteBestellung?: string | null } | null;
   /** Abbuchungen von DHL (ZIT) / Ungewitter, deren Nummer an keiner Bestellung steht. */
   zollBuchungen?: ZollBuchung[];
   /** An Bestellungen eingetragene Lieferanten-Zahlungen, die noch nicht auf dem Konto stehen. */
@@ -522,6 +526,8 @@ export interface LiqRohdaten {
     kgVerbrauchMonat: number | null;
     usdProKgAuto: number;
     leadWochen: number;
+    /** Datum der letzten echten Amanda-Bestellung (Rhythmus der Nachbestellungen läuft ab hier). */
+    letzteBestellung?: string | null;
   };
 }
 
@@ -842,6 +848,26 @@ export function ratenplan(
   return out;
 }
 
+/**
+ * Bestelltage künftiger Nachbestellungen: alle `abstand` Tage ab der letzten echten Bestellung.
+ * Ist der nächste Termin schon vorbei (Bestellung überfällig), wird ab heute bestellt. Ohne letzte
+ * Bestellung: ab dem nächsten Montag.
+ */
+export function bestellTage(letzte: string | null | undefined, start: string, ende: string, abstand: number): string[] {
+  const schritt = Math.max(1, Math.round(abstand));
+  let d: string;
+  if (letzte) {
+    d = plusTage(letzte, schritt);
+    if (d < start) d = start;
+  } else {
+    d = start;
+    while (new Date(`${d}T12:00:00Z`).getUTCDay() !== 1) d = plusTage(d, 1);
+  }
+  const out: string[] = [];
+  for (; d <= ende && out.length < 400; d = plusTage(d, schritt)) out.push(d);
+  return out;
+}
+
 /** Schlüssel einer Rate zum Verschieben: Rate 1 = Lieferantenname (wie früher), sonst "Lieferant#nr". */
 export function rateSchluessel(lieferant: string, nr: number): string {
   return nr <= 1 ? lieferant : `${lieferant}#${nr}`;
@@ -1025,23 +1051,21 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     }
   }
 
-  // 1a') Künftige Ebru-Nachbestellungen (Schätzung): wöchentlich ab nächstem Montag, Rechnung bei Versand
+  // 1a') Künftige Ebru-Nachbestellungen (Schätzung): im Bestellrhythmus ab der letzten Bestellung, Rechnung bei Versand
   const ebruNb = roh.ebruNachbestellung ?? null;
   // Nachbestellt wird nach Verbrauch (Usbekisch wellig laut Verkaufsanalyse), sonst Ø Bestellungen
   const ebruNachbestellKgMonat = e.ebruNachbestellKgMonat ?? ebruNb?.kgVerbrauchMonat ?? ebruNb?.kgProMonatAuto ?? 0;
   const nbPositionen: LiqManuellePosition[] = [];
   if (e.ebruNachbestellungenEinrechnen && ebruNb && ebruEinzeln) {
     const usdKg = e.ebruUsdProKg ?? ebruNb.usdProKgAuto;
-    const kgWoche = (ebruNachbestellKgMonat * 12) / 52;
-    if (kgWoche <= 0 || usdKg <= 0) hinweise.push("Ebru-Nachbestellungen: keine kg/Monat oder kein Preis pro kg — nicht eingerechnet.");
+    const kgBestellung = (ebruNachbestellKgMonat * 12 * e.nachbestellAbstandTage) / 365;
+    if (kgBestellung <= 0 || usdKg <= 0) hinweise.push("Ebru-Nachbestellungen: keine kg/Monat oder kein Preis pro kg — nicht eingerechnet.");
     else {
-      let d = start;
-      while (new Date(`${d}T12:00:00Z`).getUTCDay() !== 1) d = plusTage(d, 1);
-      for (; d <= ende; d = plusTage(d, 7)) {
-        const usd = r2(kgWoche * usdKg);
+      for (const d of bestellTage(ebruNb.letzteBestellung, start, ende, e.nachbestellAbstandTage)) {
+        const usd = r2(kgBestellung * usdKg);
         const ankunft = plusTage(d, ebruNb.leadWochen * 7);
         const rechnung = plusTage(ankunft, -e.zahlungVorAnkunftTage);
-        const label = `Nachbestellung ~${kgWoche.toFixed(1)} kg (bestellt ${deKurz(d)})`;
+        const label = `Nachbestellung ~${kgBestellung.toFixed(1)} kg (bestellt ${deKurz(d)})`;
         if (rechnung <= ende) nbPositionen.push({ id: `nb-ebru-${d}`, label, lieferant: ebruNb.lieferant, datum: rechnung, restUsd: usd, geschaetzt: true });
         // Verzoller-Rechnung kurz nach Versand (Versand = Rechnung von Ebru)
         const zoll = plusTage(rechnung, ZOLL_NACH_VERSAND_TAGE);
@@ -1076,20 +1100,18 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     hinweise.push("Ebru-Raten sind eingeplant UND andere Lieferanten als Ø eingerechnet — Ebru-Zahlungen zählen dadurch doppelt.");
   }
 
-  // 2) Künftige Nachbestellungen (Schätzung): wöchentlich ab nächstem Montag
+  // 2) Künftige Nachbestellungen (Schätzung): im Bestellrhythmus ab der letzten Amanda-Bestellung
   const nachbestellKgMonat = e.nachbestellKgMonat ?? roh.nachbestellung.kgVerbrauchMonat ?? roh.nachbestellung.kgProMonatAuto;
   if (e.nachbestellungenEinrechnen) {
     const kgMonat = nachbestellKgMonat;
     const usdKg = e.usdProKg ?? roh.nachbestellung.usdProKgAuto;
     const leadTage = roh.nachbestellung.leadWochen * 7;
-    const kgWoche = (kgMonat * 12) / 52;
-    let d = start;
-    while (new Date(`${d}T12:00:00Z`).getUTCDay() !== 1) d = plusTage(d, 1);
-    for (; d <= ende; d = plusTage(d, 7)) {
-      const usd = kgWoche * usdKg;
+    const kgBestellung = (kgMonat * 12 * e.nachbestellAbstandTage) / 365;
+    for (const d of bestellTage(roh.nachbestellung.letzteBestellung, start, ende, e.nachbestellAbstandTage)) {
+      const usd = kgBestellung * usdKg;
       const zahl = plusTage(d, leadTage - e.zahlungVorAnkunftTage);
       const ankunft = plusTage(d, leadTage);
-      if (zahl <= ende) ereignisse.push({ datum: zahl, betrag: -r2(usd / fx), art: "nachbestellung", label: `Nachbestellung ~${kgWoche.toFixed(1)} kg (bestellt ${d})` });
+      if (zahl <= ende) ereignisse.push({ datum: zahl, betrag: -r2(usd / fx), art: "nachbestellung", label: `Nachbestellung ~${kgBestellung.toFixed(1)} kg (bestellt ${deKurz(d)})` });
       if (ankunft <= ende) {
         const ab = einfuhrFuer(usd, null);
         ereignisse.push({ datum: ankunft, betrag: -(ab.eust + ab.zoll), art: "einfuhr", label: `Einfuhrabgaben Nachbestellung ${d}` });

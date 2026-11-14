@@ -369,7 +369,13 @@ check("USt Nov mit Ebru-Ankunft: deren EUSt verrechnet", L.prognose(roh({ einfuh
 // Ebru-Nachbestellungen (Schätzung)
 const nb = { lieferant: "Ebru (CN + TR)", kgProMonatAuto: 130 / 3, usdProKgAuto: 1000, leadWochen: 8 };
 const pnb = L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: nb }), { ...E0, ebruNachbestellungenEinrechnen: true });
-check("Ebru-Nachbestellung: Einfuhr 3 Tage nach Versand (bestellt Mo 19.10. + 8 Wochen − 7 + 3)", pnb.ereignisse.filter((x) => x.label.includes("Ebru-Nachbestellung")).map((x) => [x.datum, x.betrag, x.schaetzung]), [["2026-12-10", -1520, true]]);
+check("Ebru-Nachbestellung: Einfuhr 3 Tage nach Versand (bestellt Mo 19.10. + 8 Wochen − 7 + 3)", pnb.ereignisse.filter((x) => x.label.includes("Ebru-Nachbestellung")).map((x) => [x.datum, x.betrag, x.schaetzung]), [["2026-12-10", -3031.67, true]]);
+// Bestellrhythmus ab der letzten echten Bestellung (User 14.11.2026: alle 2 Wochen, letzte Ebru-Bestellung 02.11.)
+check("Bestelltage: alle 14 Tage ab letzter Bestellung", L.bestellTage("2026-11-02", "2026-11-14", "2026-12-31", 14), ["2026-11-16", "2026-11-30", "2026-12-14", "2026-12-28"]);
+check("Bestelltage: überfällig → ab heute", L.bestellTage("2026-10-01", "2026-11-14", "2026-11-30", 14), ["2026-11-14", "2026-11-28"]);
+check("Bestelltage: ohne letzte Bestellung ab nächstem Montag", L.bestellTage(null, "2026-11-14", "2026-11-30", 14), ["2026-11-16", "2026-11-30"]);
+const pnbR = L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: { ...nb, letzteBestellung: "2026-10-12" } }), { ...E0, horizontTage: 70, ebruNachbestellungenEinrechnen: true });
+check("Ebru-Nachbestellung im Rhythmus ab letzter Bestellung (12.10. → 26.10.)", pnbR.ereignisse.filter((x) => x.label.includes("Ebru-Nachbestellung")).map((x) => x.label), ["Einfuhrabgaben Ebru-Nachbestellung 26.10.26"]);
 check("Ebru-Nachbestellung: kg/Monat im Ergebnis", Math.round(pnb.ebruNachbestellKgMonat * 10) / 10, 43.3);
 check("Ebru-Nachbestellung: Verbrauch geht vor Ø Bestellungen", L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: { ...nb, kgVerbrauchMonat: 30 } }), { ...E0, ebruNachbestellungenEinrechnen: true }).ebruNachbestellKgMonat, 30);
 check("Ebru-Nachbestellung: manuell geht vor Verbrauch", L.prognose(roh({ einfuhrAndere: [], ebruNachbestellung: { ...nb, kgVerbrauchMonat: 30 } }), { ...E0, ebruNachbestellungenEinrechnen: true, ebruNachbestellKgMonat: 20 }).ebruNachbestellKgMonat, 20);

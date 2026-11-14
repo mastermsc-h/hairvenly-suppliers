@@ -18,6 +18,7 @@ const ZAHLEN: Array<[keyof LiqEinstellungen, number, number]> = [
   ["manuellRateUsd", 1000, 10_000_000],
   ["manuellFristTage", 0, 365],
   ["manuellAbstandTage", 1, 365],
+  ["nachbestellAbstandTage", 1, 90],
 ];
 const OPTIONAL: Array<[keyof LiqEinstellungen, number, number]> = [
   ["fxUsdProEur", 0.5, 2],

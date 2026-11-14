@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
 import { Area, Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
-import { LIQ_DEFAULTS, VERSAND_FRUEHESTENS_TAGE, ZOLL_NACH_VERSAND_TAGE, prognose, zahlGruppe, zerlegeRateSchluessel, type Ereignis, type LiqEinstellungen, type LiqRohdaten, type VerlaufTag, type ZahlGruppe } from "@/lib/liquiditaet/rechnung";
+import { LIQ_DEFAULTS, VERSAND_FRUEHESTENS_TAGE, bestellTage, ZOLL_NACH_VERSAND_TAGE, prognose, zahlGruppe, zerlegeRateSchluessel, type Ereignis, type LiqEinstellungen, type LiqRohdaten, type VerlaufTag, type ZahlGruppe } from "@/lib/liquiditaet/rechnung";
 import { SYMBOLE, TerminSymbol, symbolTyp, type SymbolTyp } from "./termin-symbol";
 import { AMPEL_STIL } from "../../orders/liquiditaet-badge";
 import EinfuhrRechnung from "./einfuhr-rechnung";
@@ -776,6 +776,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           <Zeile l="Für Nachbestellungen gerechnet" r={`${p.nachbestellKgMonat.toLocaleString("de-DE", { maximumFractionDigits: 1 })} kg / Monat${e.nachbestellKgMonat ? " (manuell)" : roh.nachbestellung.kgVerbrauchMonat ? " (= Verbrauch)" : ""}`} />
           <Zeile l="Ø Einkaufspreis" r={`${usd(roh.nachbestellung.usdProKgAuto)} / kg`} />
           <Zeile l="Lieferzeit" r={`${roh.nachbestellung.leadWochen} Wochen`} />
+          {roh.nachbestellung.letzteBestellung && <Zeile l="Letzte Bestellung" r={`${deDate(roh.nachbestellung.letzteBestellung)} · nächste ${deDate(bestellTage(roh.nachbestellung.letzteBestellung, p.start, "9999-12-31", e.nachbestellAbstandTage).slice(0, 1)[0] ?? p.start)}`} />}
           {roh.ebruNachbestellung && (
             <>
               <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mt-3 mb-1">Ebru-Bestellungen</div>
@@ -789,6 +790,9 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
               />
               <Zeile l="Ø Einkaufspreis" r={`${usd(roh.ebruNachbestellung.usdProKgAuto)} / kg`} />
               <Zeile l="Lieferzeit" r={`${roh.ebruNachbestellung.leadWochen} Wochen`} />
+              {roh.ebruNachbestellung.letzteBestellung && (
+                <Zeile l="Letzte Bestellung" r={`${deDate(roh.ebruNachbestellung.letzteBestellung)} · nächste ${deDate(bestellTage(roh.ebruNachbestellung.letzteBestellung, p.start, "9999-12-31", e.nachbestellAbstandTage).slice(0, 1)[0] ?? p.start)}`} />
+              )}
             </>
           )}
           {verbrauch?.stand && <p className="mt-2 text-xs text-neutral-400">Verkaufsanalyse: {verbrauch.stand}</p>}
@@ -926,6 +930,13 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
             <Schalter label="Künftige Ebru-Nachbestellungen (Schätzung)" checked={e.ebruNachbestellungenEinrechnen} onChange={(v) => set("ebruNachbestellungenEinrechnen", v)} />
             <Schalter label="Nicht zugeordnete DHL-/Ungewitter-Abbuchungen nach Versand verrechnen" checked={e.zollAbbuchungenVerrechnen} onChange={(v) => set("zollAbbuchungenVerrechnen", v)} />
           </div>
+          {(e.nachbestellungenEinrechnen || e.ebruNachbestellungenEinrechnen) && (
+            <Feld
+              label="Nachbestellungen alle … Tage (ab der letzten echten Bestellung)"
+              value={e.nachbestellAbstandTage}
+              onChange={(v) => set("nachbestellAbstandTage", Math.max(1, Math.min(90, v ?? LIQ_DEFAULTS.nachbestellAbstandTage)))}
+            />
+          )}
           {e.nachbestellungenEinrechnen && (
             <>
               <Feld

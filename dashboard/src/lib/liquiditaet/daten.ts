@@ -391,6 +391,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
       kgVerbrauchMonat: verbrauch.glatt,
       usdProKgAuto: kgPreis > 0 ? Math.round(mitPreis.reduce((s, h) => s + Number(h.invoice_total), 0) / kgPreis) : 0,
       leadWochen,
+      letzteBestellung: hist.map((h) => String(h.order_date ?? "").slice(0, 10)).filter(Boolean).sort().at(-1) ?? null,
     },
   };
 }
@@ -480,6 +481,7 @@ export async function ladeRatenDaten(
       kgProMonatAuto: Math.round((kg180 / 6) * 10) / 10,
       usdProKgAuto: kgPreis > 0 ? Math.round(mitPreis.reduce((s, o) => s + Number(o.invoice_effective), 0) / kgPreis) : 0,
       leadWochen: Number(ebruSup.default_lead_weeks ?? 8),
+      letzteBestellung: eigene.map((o) => String(o.order_date ?? "").slice(0, 10)).filter(Boolean).sort().at(-1) ?? null,
     };
   }
   // Letzte echte Zahlung je Lieferant: jüngste Abbuchung an den Empfänger laut Kontoumsätzen
