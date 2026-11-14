@@ -9,3 +9,6 @@ src/Code.js
 backups/
 *.backup
 .clasp.json.*
+
+# Lokale Geheimnisse (z. B. Google-Ads-Skript mit Ingest-Schlüssel) — niemals committen
+private/
