@@ -12,13 +12,13 @@ import { readVerkaufsanalyse } from "@/lib/stock-sheets";
 import { shopifyGraphQL } from "@/lib/shopify";
 import { ladeLagerBedarf } from "./lager-bedarf";
 
-const MAX_ZEICHEN = 40_000;
+const MAX_ZEICHEN = 24_000;
 
 export const WERKZEUGE: Anthropic.Tool[] = [
   {
     name: "datenbank_tabellen",
     description:
-      "Zeigt Tabellen und Spalten der Hairvenly-Datenbank (PostgreSQL, Schema public). Ohne Angabe: alle Tabellen mit ihren Spalten (kurz). Mit Tabellennamen: Spalten und Datentypen genau dieser Tabellen. Vor einer Abfrage auf eine Tabelle, deren Spalten du nicht sicher kennst, immer zuerst hier nachsehen.",
+      "Zeigt Spalten und Datentypen bestimmter Tabellen der Hairvenly-Datenbank (PostgreSQL, Schema public). Ohne Angabe nur die Liste aller Tabellennamen. Vor einer Abfrage auf eine Tabelle, deren Spalten du nicht sicher kennst, hier mit dem Tabellennamen nachsehen.",
     input_schema: {
       type: "object",
       properties: { tabellen: { type: "array", items: { type: "string" }, description: "Tabellennamen, z.B. [\"sick_days\", \"staff_members\"]" } },
@@ -43,7 +43,10 @@ export const WERKZEUGE: Anthropic.Tool[] = [
       "Liquiditätsvorschau der nächsten ~90 Tage (wie /finances/liquiditaet): Startstand Sparkasse+PayPal, Ø Einnahmen und laufende Abgänge pro Tag, Tiefpunkt, alle geplanten Zahlungen (Amanda-Bestellungen, Ebru-Raten, Einfuhrabgaben, Steuern, Black-Friday-Mehrumsatz, Nachbestellungen), offene Lieferantenschulden und Hinweise. Für Fragen zu Geld, Schulden, Zahlungsterminen, ob etwas bezahlbar ist.",
     input_schema: {
       type: "object",
-      properties: { nur_bis: { type: "string", description: "Optional: nur Zahlungen bis zu diesem Datum (YYYY-MM-DD)" } },
+      properties: {
+        nur_bis: { type: "string", description: "Optional: nur Zahlungen bis zu diesem Datum (YYYY-MM-DD)" },
+        details: { type: "boolean", description: "true = jede einzelne Zahlung und jede Ebru-Rechnung. Standard: Zusammenfassung (Summen je Monat und Art, nur Zahlungen ab 5.000 €)" },
+      },
     },
   },
   {
@@ -56,6 +59,7 @@ export const WERKZEUGE: Anthropic.Tool[] = [
         basis: { type: "string", enum: ["ø90", "vorsichtig"], description: "ø90 = Verkauf der letzten 90 Tage (Standard), vorsichtig = höherer Wert aus 30 und 90 Tagen" },
         rhythmus_tage: { type: "number", description: "Bestellrhythmus in Tagen, Standard 14" },
         puffer_tage: { type: "number", description: "Sicherheitspuffer in Tagen, Standard 14" },
+        details: { type: "boolean", description: "true = alle Produkte zum Nachbestellen und alle Ladenhüter-Beispiele. Standard: die 12 wichtigsten" },
       },
     },
   },
@@ -143,7 +147,7 @@ async function shopifyTage(von: string, bis: string) {
   return { tage, summe: { bestellungen: tage.reduce((s, t) => s + t.bestellungen, 0), bestellwert: tage.reduce((s, t) => s + t.bestellwert, 0), nachErstattung: tage.reduce((s, t) => s + t.nachErstattung, 0) } };
 }
 
-async function liquiditaet(nurBis?: string) {
+async function liquiditaet(nurBis?: string, details = false) {
   const { roh, einstellungen, ergebnis: p } = await ladePrognose();
   const bis = nurBis ?? p.tage.at(-1)?.datum ?? p.start;
   const ratenPos = roh.ratenPositionen ?? [];
@@ -154,19 +158,26 @@ async function liquiditaet(nurBis?: string) {
     wechselkursUsdProEur: p.fx,
     einnahmenProTag: p.einnahmenProTag,
     laufendeAbgaengeProTag: p.laufendProTag,
-    laufendeAbgaengeBasis: roh.basis,
+    laufendeAbgaengeBasis: details ? roh.basis : { monate: roh.basis.monate, tage: roh.basis.tage, laufend: roh.basis.laufend },
     flauteNachAktionSumme: p.nachlaufSumme,
     tiefpunkt: p.tiefpunkt,
-    stand: p.tage.filter((_, i) => i % 7 === 0).map((t) => ({ datum: t.datum, saldo: Math.round(t.saldo) })),
+    standJeWoche: p.tage.filter((_, i) => i % 7 === 0).map((t) => `${t.datum}: ${Math.round(t.saldo)}`).join(" | "),
     zahlungen: p.ereignisse
-      .filter((x) => x.datum <= bis)
-      .slice(0, 200)
-      .map((x) => ({ datum: x.datum, art: x.art, betragEur: Math.round(x.betrag), text: x.label, schaetzung: !!x.schaetzung, nochNichtAufKonto: !!x.unterwegs })),
+      .filter((x) => x.datum <= bis && (details || Math.abs(x.betrag) >= 5000))
+      .slice(0, details ? 200 : 60)
+      .map((x) => ({ datum: x.datum, art: x.art, betragEur: Math.round(x.betrag), text: x.label, ...(x.schaetzung ? { schaetzung: true } : {}), ...(x.unterwegs ? { nochNichtAufKonto: true } : {}) })),
+    summenJeMonatUndArt: Object.entries(
+      p.ereignisse.filter((x) => x.datum <= bis).reduce<Record<string, number>>((acc, x) => {
+        const k = `${x.datum.slice(0, 7)} ${x.art}`;
+        acc[k] = Math.round((acc[k] ?? 0) + x.betrag);
+        return acc;
+      }, {}),
+    ).map(([k, eur]) => ({ monatArt: k, eur })),
     schulden: {
       amandaOffenEur: Math.round(p.bestellungen.filter((b) => !b.bezahlt).reduce((s, b) => s + b.betragEur, 0)),
       ebruRatenOffenUsd: Math.round(ratenPos.reduce((s, x) => s + Math.max(0, x.restUsd), 0)),
       davonWareInProduktionUsd: Math.round(ratenPos.filter((x) => x.geschaetzt).reduce((s, x) => s + Math.max(0, x.restUsd), 0)),
-      ebruRechnungen: ratenPos.map((x) => ({ text: x.label, datum: x.datum, restUsd: Math.round(x.restUsd), geschaetzt: !!x.geschaetzt })),
+      ...(details ? { ebruRechnungen: ratenPos.map((x) => ({ text: x.label, datum: x.datum, restUsd: Math.round(x.restUsd), geschaetzt: !!x.geschaetzt })) } : { ebruRechnungenAnzahl: ratenPos.length }),
     },
     amandaBestellungen: p.bestellungen.map((b) => ({ text: b.label, status: b.status, ankunft: b.eta, offenEur: Math.round(b.betragEur), bezahlt: b.bezahlt, zahltag: b.zahlDatum, einfuhr: b.einfuhr ? { datum: b.einfuhr.datum, eur: Math.round(b.einfuhr.eust + b.einfuhr.zoll) } : null })),
     annahmen: {
@@ -186,10 +197,14 @@ export async function fuehreAus(name: string, input: unknown): Promise<{ inhalt:
     switch (name) {
       case "datenbank_tabellen": {
         const { tabellen } = z.object({ tabellen: z.array(z.string().regex(/^[a-z0-9_]+$/)).max(30).optional() }).parse(input ?? {});
-        const filter = tabellen?.length ? `and c.table_name in (${tabellen.map((t) => `'${t}'`).join(",")})` : "";
-        const detail = !!tabellen?.length;
-        const sql = `select c.table_name as tabelle, string_agg(c.column_name${detail ? " || ' ' || c.data_type" : ""}, ', ' order by c.ordinal_position) as spalten
-          from information_schema.columns c where c.table_schema = 'public' and c.table_name not like '\\_backup%' ${filter} group by c.table_name order by c.table_name`;
+        if (!tabellen?.length) {
+          const namen = (await abfrage(
+            "select string_agg(table_name, ', ' order by table_name) as tabellen from information_schema.tables where table_schema = 'public' and table_name not like '\\_backup%'",
+          )) as Array<{ tabellen: string }>;
+          return { inhalt: namen[0]?.tabellen ?? "", fehler: false };
+        }
+        const sql = `select c.table_name as tabelle, string_agg(c.column_name || ' ' || c.data_type, ', ' order by c.ordinal_position) as spalten
+          from information_schema.columns c where c.table_schema = 'public' and c.table_name in (${tabellen.map((t) => `'${t}'`).join(",")}) group by c.table_name order by c.table_name`;
         return { inhalt: kuerzen(await abfrage(sql)), fehler: false };
       }
       case "datenbank_abfrage": {
@@ -197,16 +212,28 @@ export async function fuehreAus(name: string, input: unknown): Promise<{ inhalt:
         return { inhalt: kuerzen(await abfrage(sql)), fehler: false };
       }
       case "liquiditaet_vorschau": {
-        const { nur_bis } = z.object({ nur_bis: datum.optional() }).parse(input ?? {});
-        return { inhalt: kuerzen(await liquiditaet(nur_bis)), fehler: false };
+        const { nur_bis, details } = z.object({ nur_bis: datum.optional(), details: z.boolean().optional() }).parse(input ?? {});
+        return { inhalt: kuerzen(await liquiditaet(nur_bis, details)), fehler: false };
       }
       case "lager_bedarf": {
-        const i = z.object({ basis: z.enum(["ø90", "vorsichtig"]).optional(), rhythmus_tage: z.number().min(1).max(90).optional(), puffer_tage: z.number().min(0).max(120).optional() }).parse(input ?? {});
-        return { inhalt: kuerzen(await ladeLagerBedarf({ basis: i.basis, rhythmusTage: i.rhythmus_tage, pufferTage: i.puffer_tage })), fehler: false };
+        const i = z.object({ basis: z.enum(["ø90", "vorsichtig"]).optional(), rhythmus_tage: z.number().min(1).max(90).optional(), puffer_tage: z.number().min(0).max(120).optional(), details: z.boolean().optional() }).parse(input ?? {});
+        const bedarf = await ladeLagerBedarf({ basis: i.basis, rhythmusTage: i.rhythmus_tage, pufferTage: i.puffer_tage });
+        const kurz = i.details
+          ? bedarf
+          : bedarf.map((q) => ({
+              ...q,
+              ladenhueter: { ...q.ladenhueter, beispiele: q.ladenhueter.beispiele.slice(0, 6).map((x) => `${x.produkt} ${x.lagerG} g`) },
+              jetztNachbestellen: q.jetztNachbestellen.slice(0, 12).map((x) => `${x.produkt}: ${x.mengeG} g (Lager ${x.lagerG}, unterwegs ${x.unterwegsG}, verkauft 30T ${x.verkauftG30}/90T ${x.verkauftG90})`),
+              jetztNachbestellenAnzahl: q.jetztNachbestellen.length,
+            }));
+        return { inhalt: kuerzen(kurz), fehler: false };
       }
       case "verkaufsanalyse": {
         const { rows, lastUpdated } = await readVerkaufsanalyse();
-        return { inhalt: kuerzen({ stand: lastUpdated, zeilen: rows }), fehler: false };
+        const zeilen = rows
+          .filter((r) => r.collection && !/^Trend/i.test(r.collection))
+          .map((r) => `${r.quality} · ${r.collection}: Ø12M ${r.avg12mKg} kg, Ø3M ${r.avg3mKg} kg, 30T ${r.d30Kg} kg${r.trend ? `, Trend ${r.trend}` : ""}`);
+        return { inhalt: kuerzen({ stand: lastUpdated, kgProMonat: zeilen }), fehler: false };
       }
       case "shopify_umsatz_tage": {
         const { von, bis } = z.object({ von: datum, bis: datum }).parse(input);

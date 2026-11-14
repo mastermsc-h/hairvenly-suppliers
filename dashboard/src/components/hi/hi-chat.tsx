@@ -13,11 +13,14 @@ interface Anzeige {
   text: string;
   schritte?: string[];
   fehler?: boolean;
+  /** Kosten dieser Antwort in Euro. */
+  kostenEur?: number;
 }
 
 // Verlauf für die API (inkl. Denk- und Werkzeugblöcke) und Anzeige — geteilt zwischen Seite und Widget
 const SPEICHER_VERLAUF = "hi:verlauf";
 const SPEICHER_ANZEIGE = "hi:anzeige";
+const SPEICHER_MODUS = "hi:modus";
 const MAX_ZEICHEN = 1_500_000;
 
 const VORSCHLAEGE = [
@@ -74,6 +77,7 @@ export default function HiChat({
   const [eingabe, setEingabe] = useState("");
   const [zustand, setZustand] = useState<HiZustand>("ruhig");
   const [impuls, setImpuls] = useState(0);
+  const [gruendlich, setGruendlich] = useState(false);
   const abbruch = useRef<AbortController | null>(null);
   const listeRef = useRef<HTMLDivElement>(null);
   const feldRef = useRef<HTMLTextAreaElement>(null);
@@ -84,6 +88,7 @@ export default function HiChat({
   useEffect(() => {
     setAnzeige(lies<Anzeige[]>(SPEICHER_ANZEIGE, []));
     setVerlauf(lies<ApiMessage[]>(SPEICHER_VERLAUF, []));
+    setGruendlich(lies<boolean>(SPEICHER_MODUS, false));
     setGeladen(true);
   }, []);
 
@@ -106,7 +111,7 @@ export default function HiChat({
       const aendereLetzte = (f: (a: Anzeige) => Anzeige) => setAnzeige((alt) => [...alt.slice(0, -1), f(alt[alt.length - 1])]);
 
       try {
-        const res = await fetch("/api/hi", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ verlauf: basis, frage }), signal: ctrl.signal });
+        const res = await fetch("/api/hi", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ verlauf: basis, frage, modus: gruendlich ? "gruendlich" : "normal" }), signal: ctrl.signal });
         if (!res.ok || !res.body) throw new Error(res.status === 403 ? "Hi ist nur für Admins freigeschaltet." : `Hi ist gerade nicht erreichbar (${res.status}).`);
         // Abgelaufene Anmeldung: die Middleware leitet auf die Login-Seite um (HTML statt Antwort-Stream)
         if (!(res.headers.get("content-type") ?? "").includes("ndjson")) throw new Error("Bitte neu anmelden — die Sitzung ist abgelaufen.");
@@ -121,7 +126,7 @@ export default function HiChat({
           puffer = teile.pop() ?? "";
           for (const zeile of teile) {
             if (!zeile.trim()) continue;
-            const ev = JSON.parse(zeile) as { t: string; d?: string; label?: string; verlauf?: ApiMessage[]; text?: string };
+            const ev = JSON.parse(zeile) as { t: string; d?: string; label?: string; verlauf?: ApiMessage[]; text?: string; eur?: number };
             if (ev.t === "text" && ev.d) {
               setZustand("spricht");
               setImpuls((x) => x + 1);
@@ -131,6 +136,9 @@ export default function HiChat({
               aendereLetzte((a) => ({ ...a, schritte: [...(a.schritte ?? []), ev.label as string], text: a.text && !a.text.endsWith("\n") ? a.text + "\n\n" : a.text }));
             } else if (ev.t === "denkt") {
               setZustand("denkt");
+            } else if (ev.t === "kosten" && typeof ev.eur === "number") {
+              const eur = ev.eur;
+              aendereLetzte((a) => ({ ...a, kostenEur: eur }));
             } else if (ev.t === "fertig" && ev.verlauf) {
               setVerlauf(ev.verlauf);
               schreib(SPEICHER_VERLAUF, ev.verlauf);
@@ -152,7 +160,7 @@ export default function HiChat({
         feldRef.current?.focus();
       }
     },
-    [anzeige, verlauf, zustand],
+    [anzeige, verlauf, zustand, gruendlich],
   );
 
   useEffect(() => {
@@ -228,6 +236,9 @@ export default function HiChat({
                 </div>
               )}
               {a.text ? <HiMarkdown text={a.text} /> : zustand !== "ruhig" && i === sichtbar.length - 1 ? <div className="hi-tippt"><span /><span /><span /></div> : null}
+              {typeof a.kostenEur === "number" && (
+                <div className="hi-kosten" title="Kosten dieser Antwort (KI-Nutzung)">≈ {a.kostenEur.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
+              )}
             </div>
           ),
         )}
@@ -241,6 +252,24 @@ export default function HiChat({
         </div>
       )}
 
+      {!widget && (
+        <div className="hi-modus">
+          <button
+            type="button"
+            className="hi-modus-knopf"
+            data-an={gruendlich}
+            onClick={() => { setGruendlich(!gruendlich); schreib(SPEICHER_MODUS, !gruendlich); }}
+            title="Gründlich: Hi denkt tiefer nach — bessere Analysen bei schwierigen Fragen, dauert länger und kostet etwa doppelt so viel"
+          >
+            <span className="hi-modus-punkt" /> Gründlich nachdenken
+          </button>
+          {anzeige.some((a) => typeof a.kostenEur === "number") && (
+            <span className="hi-kosten">
+              Gespräch ≈ {anzeige.reduce((s, a) => s + (a.kostenEur ?? 0), 0).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+            </span>
+          )}
+        </div>
+      )}
       <form className="hi-eingabe" onSubmit={(e) => { e.preventDefault(); fragen(eingabe); }}>
         <textarea
           ref={feldRef}
