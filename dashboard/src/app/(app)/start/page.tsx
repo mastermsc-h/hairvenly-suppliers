@@ -7,7 +7,7 @@ import {
 } from "@/lib/cockpit/daten";
 import { WIDGETS } from "@/lib/cockpit/typen";
 import CockpitGrid from "./cockpit-grid";
-import HiChat from "@/components/hi/hi-chat";
+import HiKugel from "@/components/hi/hi-kugel";
 import { Hinweis, Lade } from "./bausteine";
 import { TotesKapitalWidget, AuslandWidget, BesucherWidget, ChatsWidget, HyWidget, LageWidget, LiquiditaetWidget, PflichtenWidget, ShopifyWidget, UmsatzWidget } from "./widgets-zahlen";
 import { ladeHalo } from "@/lib/marketing-extern";
@@ -57,7 +57,7 @@ export default async function StartPage() {
     aktionen: <AktionenWidget eintraege={eintraege} kampagnen={kampagnen} istAdmin={istAdmin} />,
     philosophie: <PhilosophieWidget eintraege={eintraege} istAdmin={istAdmin} />,
   };
-  if (istAdmin) inhalte.hi = <HiChat variante="widget" />;
+  if (istAdmin) inhalte.hi = <HiKugel />;
   if (chatbot) {
     inhalte.chats = warte(<Mit lade={ladeChats}>{(d) => <ChatsWidget d={d} />}</Mit>);
   }

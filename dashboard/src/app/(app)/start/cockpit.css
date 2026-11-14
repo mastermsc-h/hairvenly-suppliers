@@ -549,3 +549,19 @@ a.ck-signal:hover { border-color: var(--s); }
   .ck-funke path.ck-linie-pfad { stroke-dashoffset: 0; }
   .ck-funke path.ck-flaeche { opacity: 1; }
 }
+
+/* Hi: kein Fenster, sondern eine freie Kugel — Kopfzeile nur zum Verschieben, beim Darüberfahren */
+.ck-panel[data-w="hi"] {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  overflow: visible;
+}
+.ck-panel[data-w="hi"]:hover { box-shadow: none; }
+.ck-panel[data-w="hi"] .ck-kopf { position: absolute; top: 0; left: 0; right: 0; z-index: 5; background: transparent; border: 0; opacity: 0; transition: opacity 0.2s; }
+.ck-panel[data-w="hi"]:hover .ck-kopf, .ck[data-anpassen="true"] .ck-panel[data-w="hi"] .ck-kopf { opacity: 1; }
+.ck-panel[data-w="hi"] .ck-kopf .ck-titel { display: none; }
+.ck-panel[data-w="hi"] .ck-inhalt { padding: 0; overflow: visible; }
+.ck-stapel .hi-kugel-box { min-height: 380px; }

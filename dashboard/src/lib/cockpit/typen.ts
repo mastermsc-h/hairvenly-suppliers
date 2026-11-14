@@ -242,11 +242,11 @@ export const STANDARD_LAYOUT: LayoutItem[] = [
   { i: "liquiditaet", x: 0, y: 44, w: 12, h: 8 },
   { i: "marketing", x: 0, y: 52, w: 6, h: 8 },
   { i: "toteskapital", x: 6, y: 52, w: 6, h: 11 },
-  { i: "hi", x: 0, y: 63, w: 6, h: 12 },
+  { i: "hi", x: 0, y: 63, w: 5, h: 11 },
 ];
 
 export const MIN_GROESSE: Record<string, { w: number; h: number }> = {
-  hi: { w: 3, h: 8 },
+  hi: { w: 3, h: 7 },
   lage: { w: 3, h: 2 },
   liquiditaet: { w: 4, h: 5 },
 };

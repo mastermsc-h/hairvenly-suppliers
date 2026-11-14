@@ -3,7 +3,7 @@
 import "./hi.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowUp, Maximize2, RotateCcw, Square } from "lucide-react";
+import { ArrowUp, Maximize2, RotateCcw, Square, X } from "lucide-react";
 import HiGehirn, { type HiZustand } from "./hi-gehirn";
 import HiMarkdown from "./hi-markdown";
 
@@ -58,7 +58,17 @@ function kuerzen(verlauf: ApiMessage[]): ApiMessage[] {
   return verlauf.slice(ab).map((m) => (typeof m.content === "string" ? m : { ...m, content: m.content.filter((b) => b.type !== "thinking" && b.type !== "redacted_thinking") }));
 }
 
-export default function HiChat({ variante = "seite" }: { variante?: "seite" | "widget" }) {
+export default function HiChat({
+  variante = "seite",
+  startFrage,
+  onSchliessen,
+}: {
+  variante?: "seite" | "widget";
+  /** Wird nach dem Laden des Verlaufs sofort gefragt (aus der Kugel im Startbildschirm). */
+  startFrage?: string;
+  /** Vollbild über dem Startbildschirm: Knopf zum Schließen. */
+  onSchliessen?: () => void;
+}) {
   const [anzeige, setAnzeige] = useState<Anzeige[]>([]);
   const [verlauf, setVerlauf] = useState<ApiMessage[]>([]);
   const [eingabe, setEingabe] = useState("");
@@ -68,10 +78,13 @@ export default function HiChat({ variante = "seite" }: { variante?: "seite" | "w
   const listeRef = useRef<HTMLDivElement>(null);
   const feldRef = useRef<HTMLTextAreaElement>(null);
   const widget = variante === "widget";
+  const [geladen, setGeladen] = useState(false);
+  const startGefragt = useRef(false);
 
   useEffect(() => {
     setAnzeige(lies<Anzeige[]>(SPEICHER_ANZEIGE, []));
     setVerlauf(lies<ApiMessage[]>(SPEICHER_VERLAUF, []));
+    setGeladen(true);
   }, []);
 
   useEffect(() => {
@@ -142,6 +155,19 @@ export default function HiChat({ variante = "seite" }: { variante?: "seite" | "w
     [anzeige, verlauf, zustand],
   );
 
+  useEffect(() => {
+    if (!geladen || !startFrage || startGefragt.current) return;
+    startGefragt.current = true;
+    fragen(startFrage);
+  }, [geladen, startFrage, fragen]);
+
+  useEffect(() => {
+    if (!onSchliessen) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onSchliessen();
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [onSchliessen]);
+
   const neuesGespraech = () => {
     if (zustand !== "ruhig") abbruch.current?.abort();
     setAnzeige([]);
@@ -175,6 +201,11 @@ export default function HiChat({ variante = "seite" }: { variante?: "seite" | "w
             <Link href="/hi" className="hi-knopf-klein" title="Im großen Fenster öffnen">
               <Maximize2 size={14} />
             </Link>
+          )}
+          {onSchliessen && (
+            <button type="button" className="hi-knopf-klein hi-zu" onClick={onSchliessen} title="Schließen (Esc)">
+              <X size={14} />
+            </button>
           )}
         </div>
       </div>
