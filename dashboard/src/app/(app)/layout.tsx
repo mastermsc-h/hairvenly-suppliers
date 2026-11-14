@@ -9,6 +9,8 @@ import ChatbotInboxBadge from "./chatbot-inbox-badge";
 import ReservationsInStockBadge from "./reservations-in-stock-badge";
 import LanguageSwitcher from "./language-switcher";
 import { MobileSidebarWrapper } from "./mobile-sidebar";
+import DesktopSidebar from "./desktop-sidebar";
+import { cookies } from "next/headers";
 import ChangePassword from "./change-password";
 import TopProgress from "./top-progress";
 import MyAvatarPicker from "./my-avatar-picker";
@@ -32,6 +34,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       .order("name");
     activeAvatars = (data || []).map((a) => a.name);
   }
+
+  const sidebarZu = (await cookies()).get("hv_sidebar_zu")?.value === "1"; // Name = SIDEBAR_COOKIE in desktop-sidebar.tsx
 
   const sidebarContent = (
     <>
@@ -346,10 +350,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="min-h-screen flex bg-neutral-50">
       <TopProgress />
-      {/* Desktop sidebar — hidden on mobile */}
-      <aside className="hidden md:flex w-60 border-r border-neutral-200 bg-white flex-col shrink-0">
+      {/* Desktop sidebar — hidden on mobile, zuklappbar */}
+      <DesktopSidebar startZu={sidebarZu} labelZu={t(locale, "nav.collapse")} labelAuf={t(locale, "nav.expand")}>
         {sidebarContent}
-      </aside>
+      </DesktopSidebar>
 
       {/* Mobile sidebar drawer + hamburger button */}
       <MobileSidebarWrapper sidebarContent={sidebarContent} />
