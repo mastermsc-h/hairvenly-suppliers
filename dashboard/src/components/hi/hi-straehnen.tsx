@@ -10,7 +10,9 @@ import { useEffect, useRef } from "react";
 export default function HiStraehnen({ groesse, schnell = false }: { groesse: number; schnell?: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const schnellRef = useRef(schnell);
-  schnellRef.current = schnell;
+  useEffect(() => {
+    schnellRef.current = schnell;
+  }, [schnell]);
   const flaeche = Math.round(groesse * 1.42);
 
   useEffect(() => {

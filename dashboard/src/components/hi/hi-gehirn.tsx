@@ -13,8 +13,10 @@ export default function HiGehirn({ zustand, groesse = 260, impuls = 0 }: { zusta
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const zustandRef = useRef(zustand);
   const impulsRef = useRef(impuls);
-  zustandRef.current = zustand;
-  impulsRef.current = impuls;
+  useEffect(() => {
+    zustandRef.current = zustand;
+    impulsRef.current = impuls;
+  }, [zustand, impuls]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
