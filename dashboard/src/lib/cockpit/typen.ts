@@ -46,7 +46,16 @@ export interface CockpitLayout {
   adern?: boolean;
   /** Abstand zwischen den Fenstern in Pixel (4–32, Standard 12). */
   abstand?: number;
+  /** Aussehen der Fenster (Standard: "standard"). */
+  stil?: KachelStil;
 }
+
+export type KachelStil = "standard" | "glas" | "aurora";
+export const KACHEL_STILE: Array<{ id: KachelStil; name: string; info: string }> = [
+  { id: "standard", name: "Standard", info: "Hell und ruhig" },
+  { id: "glas", name: "Glas", info: "Milchglas vor leuchtenden Farbwolken" },
+  { id: "aurora", name: "Aurora", info: "Jedes Fenster in seiner eigenen Farbe" },
+];
 
 export interface Signal {
   ampel: Ampel;

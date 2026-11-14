@@ -565,3 +565,65 @@ a.ck-signal:hover { border-color: var(--s); }
 .ck-panel[data-w="hi"] .ck-kopf .ck-titel { display: none; }
 .ck-panel[data-w="hi"] .ck-inhalt { padding: 0; overflow: visible; }
 .ck-stapel .hi-kugel-box { min-height: 380px; }
+
+/* ── Stil der Fenster (Darstellung) ────────────────────── */
+.ck-stile { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 2px 0 10px; }
+.ck-stil {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 6px 4px 7px; border-radius: 12px; font-size: 11.5px; color: var(--ck-dim);
+  border: 1px solid var(--ck-linie); background: #fff; transition: border-color 0.2s, color 0.2s;
+}
+.ck-stil[data-an="true"] { color: var(--ck-text); font-weight: 600; border-color: var(--ck-akzent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ck-akzent) 18%, transparent); }
+.ck-stil-vorschau { width: 100%; height: 30px; border-radius: 8px; border: 1px solid rgba(96, 84, 150, 0.15); }
+.ck-stil[data-stil-wahl="standard"] .ck-stil-vorschau { background: linear-gradient(#fff, #fff) padding-box, #f7f5fc; box-shadow: 0 6px 12px -8px rgba(60, 40, 120, 0.5); }
+.ck-stil[data-stil-wahl="glas"] .ck-stil-vorschau {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.2)),
+    radial-gradient(circle at 20% 30%, #ffb3d1, transparent 60%),
+    radial-gradient(circle at 80% 70%, #9fd8ff, transparent 60%),
+    #e9e4ff;
+}
+.ck-stil[data-stil-wahl="aurora"] .ck-stil-vorschau { background: linear-gradient(120deg, #e7defe, #fde3ef 50%, #dff5ee); border-top: 3px solid #7c5cff; }
+
+/* Glas: milchig-durchscheinend, Lichtkante oben, Farbwolken scheinen durch */
+.ck[data-stil="glas"] {
+  --ck-panel-2: rgba(255, 255, 255, 0.42);
+  background:
+    radial-gradient(700px 500px at 10% 20%, rgba(255, 160, 200, 0.45), transparent 70%),
+    radial-gradient(760px 520px at 85% 10%, rgba(140, 200, 255, 0.5), transparent 70%),
+    radial-gradient(700px 520px at 60% 70%, rgba(170, 150, 255, 0.4), transparent 70%),
+    radial-gradient(640px 480px at 15% 90%, rgba(150, 235, 205, 0.4), transparent 70%),
+    radial-gradient(640px 480px at 90% 85%, rgba(255, 210, 150, 0.38), transparent 70%),
+    #f1edfb;
+  background-attachment: fixed;
+}
+.ck[data-stil="glas"] .ck-panel:not([data-w="hi"]) {
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.26));
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(22px) saturate(1.7);
+  -webkit-backdrop-filter: blur(22px) saturate(1.7);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.25),
+    0 20px 44px -26px rgba(60, 40, 120, 0.5);
+}
+.ck[data-stil="glas"] .ck-panel:not([data-w="hi"])::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 32%);
+}
+
+/* Aurora: jedes Fenster leicht in seiner Farbe getönt, mit farbiger Lichtkante */
+.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]) {
+  background:
+    radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--w) 17%, transparent), transparent 60%),
+    radial-gradient(100% 70% at 100% 100%, color-mix(in srgb, var(--w) 9%, transparent), transparent 60%),
+    rgba(255, 255, 255, 0.9);
+  border: 1px solid color-mix(in srgb, var(--w) 26%, white);
+  box-shadow: 0 1px 2px rgba(60, 40, 120, 0.05), 0 18px 40px -24px color-mix(in srgb, var(--w) 65%, transparent);
+}
+.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"])::before {
+  content: ""; position: absolute; left: 18px; right: 18px; top: 0; height: 2px; border-radius: 2px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--w), transparent);
+  opacity: 0.85;
+}
+.ck[data-stil="aurora"] { --ck-panel-2: rgba(255, 255, 255, 0.7); }

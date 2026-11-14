@@ -45,7 +45,7 @@ export async function speichereCockpitLayout(layout: CockpitLayout): Promise<Erg
   const aus = (Array.isArray(layout?.aus) ? layout.aus : []).filter((id) => WIDGET_IDS.has(id));
   const { error } = await createServiceClient()
     .from("cockpit_layout")
-    .upsert({ user_id: profile.id, layout: { items, aus, adern: layout?.adern !== false, abstand: typeof layout?.abstand === "number" && Number.isFinite(layout.abstand) ? Math.max(4, Math.min(32, Math.round(layout.abstand))) : 12 }, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+    .upsert({ user_id: profile.id, layout: { items, aus, adern: layout?.adern !== false, abstand: typeof layout?.abstand === "number" && Number.isFinite(layout.abstand) ? Math.max(4, Math.min(32, Math.round(layout.abstand))) : 12, stil: layout?.stil === "glas" || layout?.stil === "aurora" ? layout.stil : "standard" }, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
   return error ? { ok: false, error: error.message } : { ok: true };
 }
 

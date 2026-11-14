@@ -10,7 +10,7 @@ import {
   MousePointerClick, RotateCcw, Settings2, SlidersHorizontal, Zap, ShoppingBag, StickyNote, TrendingUp, Wallet, Waves, Check, GripVertical, BrainCircuit,
 } from "lucide-react";
 import { cockpitLayoutZuruecksetzen, speichereCockpitLayout } from "@/lib/actions/cockpit";
-import { MIN_GROESSE, STANDARD_LAYOUT, WIDGETS, type CockpitLayout, type LayoutItem } from "@/lib/cockpit/typen";
+import { KACHEL_STILE, MIN_GROESSE, STANDARD_LAYOUT, WIDGETS, type CockpitLayout, type KachelStil, type LayoutItem } from "@/lib/cockpit/typen";
 import Adern from "./adern";
 import "./cockpit.css";
 
@@ -81,10 +81,12 @@ export default function CockpitGrid({
   const [aus, setAus] = useState<string[]>(start.aus);
   const [adern, setAdern] = useState(gespeichert?.adern !== false);
   const [abstand, setAbstand] = useState(gespeichert?.abstand ?? ABSTAND_STANDARD);
+  const [stil, setStil] = useState<KachelStil>(gespeichert?.stil ?? "standard");
   const [darstellung, setDarstellung] = useState(false);
   // aktuelle Darstellungs-Werte für das (verzögerte) Speichern
   const adernRef = useRef(adern);
   const abstandRef = useRef(abstand);
+  const stilRef = useRef(stil);
   const [anpassen, setAnpassen] = useState(false);
   const [status, setStatus] = useState<"" | "speichert" | "gespeichert" | "fehler">("");
   const jetzt = useJetzt();
@@ -97,7 +99,7 @@ export default function CockpitGrid({
     if (timer.current) clearTimeout(timer.current);
     setStatus("speichert");
     timer.current = setTimeout(async () => {
-      const res = await speichereCockpitLayout({ items: neu, aus: neuAus, adern: adernRef.current, abstand: abstandRef.current });
+      const res = await speichereCockpitLayout({ items: neu, aus: neuAus, adern: adernRef.current, abstand: abstandRef.current, stil: stilRef.current });
       setStatus(res.ok ? "gespeichert" : "fehler");
       if (res.ok) setTimeout(() => setStatus((s) => (s === "gespeichert" ? "" : s)), 1800);
     }, 700);
@@ -147,6 +149,12 @@ export default function CockpitGrid({
     speichern(items, aus);
   };
 
+  const stilSetzen = (s: KachelStil) => {
+    stilRef.current = s;
+    setStil(s);
+    speichern(items, aus);
+  };
+
   const zuruecksetzen = async () => {
     if (!window.confirm("Anordnung auf den Standard zurücksetzen? Deine Notizen und Einträge bleiben erhalten.")) return;
     const std = baueLayout(null, erlaubt);
@@ -154,6 +162,7 @@ export default function CockpitGrid({
     setAus([]);
     setAdern(true); adernRef.current = true;
     setAbstand(ABSTAND_STANDARD); abstandRef.current = ABSTAND_STANDARD;
+    setStil("standard"); stilRef.current = "standard";
     if (timer.current) clearTimeout(timer.current);
     const res = await cockpitLayoutZuruecksetzen();
     setStatus(res.ok ? "gespeichert" : "fehler");
@@ -185,7 +194,7 @@ export default function CockpitGrid({
   const reihenfolge = [...sichtbar].sort((a, b) => a.y - b.y || a.x - b.x);
 
   return (
-    <div className="ck" data-anpassen={anpassen}>
+    <div className="ck" data-anpassen={anpassen} data-stil={stil}>
       <div className="ck-top">
         <div>
           <div className="ck-marke-oben">Hairvenly · Überblick</div>
@@ -206,6 +215,16 @@ export default function CockpitGrid({
               <>
                 <div style={{ position: "fixed", inset: 0, zIndex: 40 }} onClick={() => setDarstellung(false)} aria-hidden />
                 <div className="ck-menue" role="dialog" aria-label="Darstellung">
+                  <div className="ck-menue-zeile" style={{ cursor: "default" }}><span>Stil der Fenster</span></div>
+                  <div className="ck-stile" role="radiogroup" aria-label="Stil der Fenster">
+                    {KACHEL_STILE.map((s) => (
+                      <button key={s.id} type="button" role="radio" aria-checked={stil === s.id} className="ck-stil" data-stil-wahl={s.id} data-an={stil === s.id} onClick={() => stilSetzen(s.id)} title={s.info}>
+                        <span className="ck-stil-vorschau" aria-hidden />
+                        {s.name}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="ck-trenner" />
                   <button type="button" className="ck-menue-zeile" role="switch" aria-checked={adern} onClick={adernUmschalten}>
                     <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}><Zap size={15} /> Datenfluss</span>
                     <i className="ck-kipp" />
