@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowUp } from "lucide-react";
 import HiGehirn from "./hi-gehirn";
+import HiStraehnen from "./hi-straehnen";
 import HiChat from "./hi-chat";
 
 /**
@@ -49,6 +50,7 @@ export default function HiKugel() {
       >
         <span className="hi-kugel-glas" aria-hidden />
         <HiGehirn zustand="ruhig" groesse={groesse} />
+        <HiStraehnen groesse={groesse} />
         <span className="hi-kugel-name" aria-hidden>Hi<span className="hi-punkt">.</span></span>
       </button>
       <form className="hi-eingabe hi-kugel-eingabe ck-kein-zug" onSubmit={(e) => { e.preventDefault(); if (eingabe.trim()) oeffnen(eingabe); }}>

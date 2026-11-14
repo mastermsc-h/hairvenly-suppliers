@@ -300,3 +300,6 @@
 .hi-modus-punkt { width: 8px; height: 8px; border-radius: 50%; background: #3a3f5c; transition: background 0.2s, box-shadow 0.2s; }
 .hi-modus-knopf[data-an="true"] { color: var(--hi-gold); border-color: rgba(255, 199, 115, 0.45); }
 .hi-modus-knopf[data-an="true"] .hi-modus-punkt { background: var(--hi-gold); box-shadow: 0 0 8px var(--hi-gold); }
+
+/* Goldene Strähnen um die Kugel */
+.hi-straehnen { position: absolute; z-index: 4; pointer-events: none; }
