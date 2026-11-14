@@ -7,6 +7,7 @@ import {
 } from "@/lib/cockpit/daten";
 import { WIDGETS } from "@/lib/cockpit/typen";
 import CockpitGrid from "./cockpit-grid";
+import HiChat from "@/components/hi/hi-chat";
 import { Hinweis, Lade } from "./bausteine";
 import { TotesKapitalWidget, AuslandWidget, BesucherWidget, ChatsWidget, HyWidget, LageWidget, LiquiditaetWidget, PflichtenWidget, ShopifyWidget, UmsatzWidget } from "./widgets-zahlen";
 import { ladeHalo } from "@/lib/marketing-extern";
@@ -37,7 +38,7 @@ export default async function StartPage() {
   const finanzen = hasFeature(profile, "finances");
   const chatbot = hasFeature(profile, "chatbot");
   const istAdmin = profile.role === "admin";
-  const erlaubt = WIDGETS.filter((w) => w.feature == null || (w.feature === "finances" ? finanzen : chatbot)).map((w) => w.id as string);
+  const erlaubt = WIDGETS.filter((w) => w.feature == null || (w.feature === "admin" ? istAdmin : w.feature === "finances" ? finanzen : chatbot)).map((w) => w.id as string);
 
   const [eintraege, team, gespeichert, kampagnen] = await Promise.all([
     ladeEintraege(profile.id),
@@ -56,6 +57,7 @@ export default async function StartPage() {
     aktionen: <AktionenWidget eintraege={eintraege} kampagnen={kampagnen} istAdmin={istAdmin} />,
     philosophie: <PhilosophieWidget eintraege={eintraege} istAdmin={istAdmin} />,
   };
+  if (istAdmin) inhalte.hi = <HiChat variante="widget" />;
   if (chatbot) {
     inhalte.chats = warte(<Mit lade={ladeChats}>{(d) => <ChatsWidget d={d} />}</Mit>);
   }

@@ -199,6 +199,7 @@ export interface KampagneDaten {
 }
 
 export const WIDGETS = [
+  { id: "hi", name: "Hi · Hairvenly Intelligence", info: "Frag die KI alles über Hairvenly", feature: "admin" },
   { id: "lage", name: "Lagebild", info: "Wo läuft es, wo hakt es", feature: null },
   { id: "umsatz", name: "Umsatz", info: "Monat & Jahr gegen Vorjahr", feature: "finances" },
   { id: "chats", name: "Neue Chats", info: "7 und 30 Tage im Vergleich", feature: "chatbot" },
@@ -241,9 +242,11 @@ export const STANDARD_LAYOUT: LayoutItem[] = [
   { i: "liquiditaet", x: 0, y: 44, w: 12, h: 8 },
   { i: "marketing", x: 0, y: 52, w: 6, h: 8 },
   { i: "toteskapital", x: 6, y: 52, w: 6, h: 11 },
+  { i: "hi", x: 0, y: 63, w: 6, h: 12 },
 ];
 
 export const MIN_GROESSE: Record<string, { w: number; h: number }> = {
+  hi: { w: 3, h: 8 },
   lage: { w: 3, h: 2 },
   liquiditaet: { w: 4, h: 5 },
 };

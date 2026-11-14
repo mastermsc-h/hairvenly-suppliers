@@ -3,7 +3,7 @@ import { requireProfile, hasFeature } from "@/lib/auth";
 import { signOut } from "@/lib/actions/auth";
 import { t, type Locale } from "@/lib/i18n";
 import type { FeatureKey } from "@/lib/types";
-import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings, Truck, Globe2, Bot, Scissors, CalendarDays, HeartPulse, Wallet, Orbit, Megaphone } from "lucide-react";
+import { LayoutDashboard, Package, Building2, Users, LogOut, FilePlus, Palette, Warehouse, DollarSign, Landmark, RotateCcw, FileText, Settings, Truck, Globe2, Bot, Scissors, CalendarDays, HeartPulse, Wallet, Orbit, Megaphone, BrainCircuit } from "lucide-react";
 import SidebarGroup from "./sidebar-group";
 import ChatbotInboxBadge from "./chatbot-inbox-badge";
 import ReservationsInStockBadge from "./reservations-in-stock-badge";
@@ -45,6 +45,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {profile.role !== "supplier" && (
           <NavLink href="/start" icon={<LayoutDashboard size={16} />} label={t(locale, "nav.start")} />
         )}
+        {/* Hi — Hairvenly Intelligence (KI mit Zugriff auf alle Bereiche), nur Admin */}
+        {profile.role === "admin" && <NavLink href="/hi" icon={<BrainCircuit size={16} />} label="Hi · KI" />}
         {/* 1) Auslandsbestellungen + Neue Bestellung */}
         <NavLink href="/" icon={<Globe2 size={16} />} label={t(locale, "nav.overview")} />
         {profile.role === "supplier" && (
