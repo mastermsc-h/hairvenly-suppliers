@@ -356,7 +356,40 @@ const umsatz: Pruefung = async () => {
   }];
 };
 
+// ── Datenquellen: steht ein nächtlicher Abgleich still? ─────────────────────
+// Auslöser: Der Nacht-Cron brach ab 3.9.2026 jede Nacht am 60-s-Limit ab — Retouren und
+// Kollektionsumsätze froren ein, ohne dass es jemand merkte. Diese Prüfung fängt jede Quelle ab.
+const QUELLEN: Array<{ name: string; tabelle: string; spalte: string; maxTage: number; href?: string }> = [
+  { name: "Umsätze je Kollektion (Retourenquoten)", tabelle: "shopify_collection_sales", spalte: "synced_at", maxTage: 3, href: "/returns/analytics" },
+  { name: "Shopify-Monatsumsatz", tabelle: "shopify_umsatz_monat", spalte: "stand", maxTage: 2, href: "/finances/overview" },
+  { name: "Tagesverkäufe je Variante", tabelle: "shopify_variant_daily_sales", spalte: "updated_at", maxTage: 3, href: "/stock/deadstock" },
+  { name: "Kundenbestellungen (Länder)", tabelle: "kunden_bestellungen", spalte: "synced_at", maxTage: 3, href: "/pack/kunden" },
+  { name: "Kontostände (Bank)", tabelle: "bank_salden", spalte: "abgerufen_am", maxTage: 4, href: "/finances/bank" },
+  { name: "HY-Score", tabelle: "company_health_snapshots", spalte: "created_at", maxTage: 2, href: "/health" },
+  { name: "Instagram-Statistik", tabelle: "instagram_tag", spalte: "stand", maxTage: 3 },
+];
+const datenquellen: Pruefung = async () => {
+  const sb = createServiceClient();
+  const alt: string[] = [];
+  await Promise.all(QUELLEN.map(async (q) => {
+    const { data, error } = await sb.from(q.tabelle).select(q.spalte).order(q.spalte, { ascending: false }).limit(1).maybeSingle();
+    if (error) { alt.push(`${q.name}: nicht lesbar (${error.message.slice(0, 60)})`); return; }
+    const wert = (data as Record<string, string> | null)?.[q.spalte];
+    if (!wert) { alt.push(`${q.name}: keine Daten`); return; }
+    const t = tageSeit(berlin.format(new Date(wert)));
+    if (t > q.maxTage) alt.push(`${q.name}: letzter Stand ${kurz(berlin.format(new Date(wert)))} (${t} Tage)`);
+  }));
+  if (!alt.length) return [];
+  return [{
+    id: "datenquellen", bereich: "daten", schwere: alt.length >= 3 ? "hoch" : "mittel",
+    titel: `${alt.length} Datenquelle${alt.length === 1 ? " steht" : "n stehen"} still`,
+    detail: "Der automatische Abgleich hat länger nichts Neues geliefert – Zahlen im Dashboard sind dort veraltet.",
+    liste: alt.sort(),
+  }];
+};
+
 const PRUEFUNGEN: Array<[string, Pruefung]> = [
+  ["Datenquellen", datenquellen],
   ["Lager", lager], ["Chats", chats], ["Werbung", werbung], ["Aktionen", aktionen], ["Vorkasse", vorkasse],
   ["Liquidität", liquiditaet], ["Versand", versand], ["Retouren", retouren], ["Steuern", steuern],
   ["Instagram", instagram], ["Umsatz", umsatz],

@@ -635,12 +635,16 @@ export async function fetchOrdersWithRefunds(sinceDate: string, toDate?: string)
     }
   `;
 
-  // Filter only by refund status — we'll filter by refund date client-side.
-  // This catches refunds on OLD orders that got returned in the target period.
-  // Use updated_at:>= with a wide buffer to bound pagination.
-  const bufferFrom = new Date(sinceDate);
-  bufferFrom.setDate(bufferFrom.getDate() - 1); // small buffer
-  const q = `financial_status:refunded OR financial_status:partially_refunded`;
+  // Erstattungen ändern die Bestellung → updated_at ≥ Beginn (mit 3 Tagen Puffer) begrenzt die Suche
+  // auf Bestellungen, die im Zeitraum angefasst wurden; nach Erstattungsdatum wird unten gefiltert.
+  // Das erwischt auch Erstattungen auf ALTE Bestellungen (deren updated_at springt mit).
+  // Geprüft 16.11.2026: seit 1.10. dieselben 180 Erstattungen wie der vollständige Durchlauf,
+  // 1 statt 13 Seiten. Der vollständige Durchlauf über alle je erstatteten Bestellungen brauchte
+  // mit den schweren Feldern >130 s und ließ den Nacht-Cron seit 3.9.2026 jede Nacht abbrechen.
+  // Gleiches Verfahren wie shopify-umsatz.ts (dort gegen Shopify-Analytics abgeglichen).
+  const bufferFrom = new Date(`${sinceDate.slice(0, 10)}T00:00:00Z`);
+  bufferFrom.setUTCDate(bufferFrom.getUTCDate() - 3);
+  const q = `updated_at:>='${bufferFrom.toISOString().slice(0, 10)}' (financial_status:refunded OR financial_status:partially_refunded)`;
 
   type RefundOrderNode = ShopifyOrder & { updatedAt: string; refunds: ShopifyRefund[] };
   type RefundOrdersResponse = {
@@ -652,10 +656,7 @@ export async function fetchOrdersWithRefunds(sinceDate: string, toDate?: string)
 
   const all: { order: ShopifyOrder; refunds: ShopifyRefund[] }[] = [];
   let cursor: string | null = null;
-  // Paginate exhaustively — do NOT stop based on order.updatedAt because Shopify
-  // doesn't always update the order's timestamp when a refund is added.
-  // That previously caused refunds on old orders to be missed entirely.
-  const maxPages = 300; // safety cap: up to 15,000 refunded orders
+  const maxPages = 300; // Sicherheitsgrenze
 
   const toDateEnd = toDate ? `${toDate}T23:59:59Z` : null;
 
