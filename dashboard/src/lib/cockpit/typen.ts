@@ -139,6 +139,22 @@ export interface TotesKapitalDaten {
   produkte: Array<{ name: string; kollektion: string; wertEur: number; kg: number; art: "tot" | "fasttot" }>;
 }
 
+export interface InstagramDaten {
+  follower: number | null;
+  /** Gesamtstand vor 30 Tagen (gemessen oder zurückgerechnet). */
+  followerVor30: number | null;
+  /** Ein Eintrag je Tag, ältester zuerst (bis gestern; die jüngsten Tage können noch fehlen). */
+  tage: Array<{ tag: string; neu: number | null; verloren: number | null; follower: number | null; reichweite: number | null }>;
+  /** Summen über die letzten 7/30 Tage mit vollständigen Daten, dazu der Zeitraum davor. */
+  d7: { neu: number; verloren: number; vorNeu: number; vorVerloren: number; reichweite: number; vorReichweite: number; profil: number; klicks: number };
+  d30: { neu: number; verloren: number; vorNeu: number; vorVerloren: number };
+  /** Letzter Tag mit Follower-Zahlen von Instagram (Verzug 1–2 Tage). */
+  bisAm: string | null;
+  demografie: { alter: Record<string, number>; geschlecht: Record<string, number>; land: Record<string, number>; stadt: Record<string, number> } | null;
+  /** Stunde (deutsche Zeit) → Follower online. */
+  online: Record<string, number> | null;
+}
+
 export interface BesucherDaten {
   verbunden: boolean;
   grund?: string;
@@ -219,6 +235,7 @@ export const WIDGETS = [
   { id: "besucher", name: "Besucher & Conversion", info: "Sitzungen und Kaufquote im Shop", feature: "finances" },
   { id: "ausland", name: "Auslandsbestellungen", info: "Österreich & Co.: Tag, Woche, Trend", feature: "finances" },
   { id: "toteskapital", name: "Totes Kapital", info: "Ladenhüter: gebundener Warenwert", feature: "finances" },
+  { id: "instagram", name: "Instagram", info: "Follower, Zu- und Abgänge, wer folgt, beste Zeit", feature: "chatbot" },
   { id: "notizen", name: "Notizzettel", info: "Nur für dich", feature: null },
   { id: "ideen", name: "Ideen & Inspiration", info: "Sammelstelle fürs Team", feature: null },
   { id: "pfeiler", name: "Wachstumspfeiler", info: "Die großen Hebel des Unternehmens", feature: null },
@@ -251,6 +268,7 @@ export const STANDARD_LAYOUT: LayoutItem[] = [
   { i: "liquiditaet", x: 0, y: 44, w: 12, h: 8 },
   { i: "marketing", x: 0, y: 52, w: 6, h: 8 },
   { i: "toteskapital", x: 6, y: 52, w: 6, h: 11 },
+  { i: "instagram", x: 0, y: 74, w: 12, h: 12 },
   { i: "hi", x: 0, y: 63, w: 5, h: 11 },
 ];
 

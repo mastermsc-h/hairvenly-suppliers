@@ -2,14 +2,14 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import {
-  ladeAusland, ladeBesucher, ladeTotesKapital, ladeChats, ladeEintraege, ladeHy, ladeKampagnen, ladeLayout, ladeLiquiditaet, ladePflichten,
+  ladeAusland, ladeInstagram, ladeBesucher, ladeTotesKapital, ladeChats, ladeEintraege, ladeHy, ladeKampagnen, ladeLayout, ladeLiquiditaet, ladePflichten,
   ladeShopify, ladeSignale, ladeTeam, ladeUmsatz,
 } from "@/lib/cockpit/daten";
 import { WIDGETS } from "@/lib/cockpit/typen";
 import CockpitGrid from "./cockpit-grid";
 import HiKugel from "@/components/hi/hi-kugel";
 import { Hinweis, Lade } from "./bausteine";
-import { TotesKapitalWidget, AuslandWidget, BesucherWidget, ChatsWidget, HyWidget, LageWidget, LiquiditaetWidget, PflichtenWidget, ShopifyWidget, UmsatzWidget } from "./widgets-zahlen";
+import { InstagramWidget, TotesKapitalWidget, AuslandWidget, BesucherWidget, ChatsWidget, HyWidget, LageWidget, LiquiditaetWidget, PflichtenWidget, ShopifyWidget, UmsatzWidget } from "./widgets-zahlen";
 import { ladeHalo } from "@/lib/marketing-extern";
 import MarketingWidget from "../marketing/marketing-widget";
 import { AktionenWidget, AufgabenWidget, IdeenWidget, MeilensteineWidget, NotizenWidget, PfeilerWidget, PhilosophieWidget } from "./widgets-eintraege";
@@ -60,6 +60,7 @@ export default async function StartPage() {
   if (istAdmin) inhalte.hi = <HiKugel />;
   if (chatbot) {
     inhalte.chats = warte(<Mit lade={ladeChats}>{(d) => <ChatsWidget d={d} />}</Mit>);
+    inhalte.instagram = warte(<Mit lade={ladeInstagram}>{(d) => <InstagramWidget d={d} />}</Mit>);
   }
   if (finanzen) {
     inhalte.umsatz = warte(<Mit lade={ladeUmsatz}>{(d) => <UmsatzWidget d={d} />}</Mit>);

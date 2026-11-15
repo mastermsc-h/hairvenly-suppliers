@@ -23,6 +23,9 @@
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   color-scheme: light;
   overflow: hidden;
+  /* clip statt nur hidden: der Hintergrund ragt über den Rand; "hidden" ließe sich per Fokus/Klick
+     trotzdem seitlich verschieben (Seite rutschte beim Klick auf einen Knopf nach links) */
+  overflow: clip;
   isolation: isolate;
 }
 
@@ -182,6 +185,7 @@
 .ck-panel[data-w="ausland"] { --w: #0ea5e9; }
 .ck-panel[data-w="toteskapital"] { --w: #8b6f5c; }
 .ck-panel[data-w="marketing"] { --w: #e0528f; }
+.ck-panel[data-w="instagram"] { --w: #d6249f; }
 .ck-panel[data-w="notizen"] { --w: #e8a800; }
 .ck-panel[data-w="ideen"] { --w: #f59e0b; }
 .ck-panel[data-w="pfeiler"] { --w: #5b6cff; }

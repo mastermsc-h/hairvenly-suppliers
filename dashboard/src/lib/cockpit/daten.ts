@@ -8,9 +8,10 @@ import { plusTage, zahlGruppe } from "@/lib/liquiditaet/rechnung";
 import { shopifyGraphQL } from "@/lib/shopify";
 import { holeShopifyUmsatzMonat } from "@/lib/shopify-umsatz";
 import { loadDeadStock } from "@/lib/stock-deadstock";
+import { holeFollowerLive, type InstagramTag } from "@/lib/instagram-statistik";
 import type {
   Ampel, AuslandDaten, BesucherDaten, ChatDaten, CockpitLayout, Eintrag, EintragArt, HyDaten, KampagneDaten,
-  LiqGruppe, LiquiditaetDaten, PflichtenDaten, PflichtPosten, ShopifyDaten, Signal, TotesKapitalDaten, UmsatzDaten,
+  LiqGruppe, LiquiditaetDaten, PflichtenDaten, PflichtPosten, ShopifyDaten, Signal, TotesKapitalDaten, InstagramDaten, UmsatzDaten,
 } from "./typen";
 
 const berlin = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin" });
@@ -412,6 +413,40 @@ export const ladeTotesKapital = cache(async (): Promise<TotesKapitalDaten> => {
       .sort((a, b) => (b.valueEur ?? 0) - (a.valueEur ?? 0))
       .slice(0, 5)
       .map((d) => ({ name: d.product, kollektion: d.collection, wertEur: r0(d.valueEur ?? 0), kg: Math.round(d.lagerG / 100) / 10, art: d.deadKind })),
+  };
+});
+
+// ── Instagram ────────────────────────────────────────────────────────────────
+
+export const ladeInstagram = cache(async (): Promise<InstagramDaten> => {
+  const sb = createServiceClient();
+  const heute = heuteBerlin();
+  const [{ data: rows }, { data: stand }, live] = await Promise.all([
+    sb.from("instagram_tag").select("tag, neu, verloren, follower, reichweite, profilaufrufe, website_klicks").gte("tag", plusTage(heute, -400)).order("tag"),
+    sb.from("instagram_stand").select("demografie, online").eq("id", 1).maybeSingle(),
+    holeFollowerLive(),
+  ]);
+  const tage = ((rows ?? []) as Array<Pick<InstagramTag, "tag" | "neu" | "verloren" | "follower" | "reichweite" | "profilaufrufe" | "website_klicks">>)
+    .map((r) => ({ ...r, tag: String(r.tag).slice(0, 10) }));
+  // Zeiträume am letzten Tag mit Follower-Zahlen ausrichten (Instagram liefert 1–2 Tage später)
+  const mitDaten = tage.filter((t) => t.neu != null);
+  const bisAm = mitDaten.length ? mitDaten[mitDaten.length - 1].tag : null;
+  const fenster = (vonAb: number, bisAb: number) => (bisAm ? tage.filter((t) => t.tag > plusTage(bisAm, -vonAb) && t.tag <= plusTage(bisAm, -bisAb)) : []);
+  const s = (l: typeof tage, k: "neu" | "verloren" | "reichweite" | "profilaufrufe" | "website_klicks") => l.reduce((a, t) => a + (t[k] ?? 0), 0);
+  const a7 = fenster(7, 0), v7 = fenster(14, 7), a30 = fenster(30, 0), v30 = fenster(60, 30);
+  const vor30 = bisAm ? tage.find((t) => t.tag === plusTage(bisAm, -30))?.follower ?? null : null;
+  return {
+    follower: live ?? [...tage].reverse().find((t) => t.follower != null)?.follower ?? null,
+    followerVor30: vor30,
+    tage: tage.map((t) => ({ tag: t.tag, neu: t.neu, verloren: t.verloren, follower: t.follower, reichweite: t.reichweite })),
+    d7: {
+      neu: s(a7, "neu"), verloren: s(a7, "verloren"), vorNeu: s(v7, "neu"), vorVerloren: s(v7, "verloren"),
+      reichweite: s(a7, "reichweite"), vorReichweite: s(v7, "reichweite"), profil: s(a7, "profilaufrufe"), klicks: s(a7, "website_klicks"),
+    },
+    d30: { neu: s(a30, "neu"), verloren: s(a30, "verloren"), vorNeu: s(v30, "neu"), vorVerloren: s(v30, "verloren") },
+    bisAm,
+    demografie: (stand?.demografie as InstagramDaten["demografie"]) && Object.keys(stand?.demografie ?? {}).length ? (stand!.demografie as InstagramDaten["demografie"]) : null,
+    online: stand?.online && Object.keys(stand.online).length ? (stand.online as Record<string, number>) : null,
   };
 });
 

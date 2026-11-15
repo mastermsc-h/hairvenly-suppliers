@@ -3,12 +3,12 @@
 // Anzeige-Widgets des Startbildschirms: bekommen fertige Zahlen vom Server.
 import { useState } from "react";
 import Link from "next/link";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, ComposedChart, Line } from "recharts";
 import {
   AlertTriangle, ArrowRight, Check, CheckCircle2, Globe2, Landmark, Lock, Package, ShoppingBag, ShoppingCart, Sparkles, TrendingDown,
   Undo2, Users, XCircle,
 } from "lucide-react";
-import type { TotesKapitalDaten, AuslandDaten, BesucherDaten, LiqGruppe, ChatDaten, HyDaten, LiquiditaetDaten, PflichtenDaten, ShopifyDaten, Signal, UmsatzDaten } from "@/lib/cockpit/typen";
+import type { InstagramDaten, TotesKapitalDaten, AuslandDaten, BesucherDaten, LiqGruppe, ChatDaten, HyDaten, LiquiditaetDaten, PflichtenDaten, ShopifyDaten, Signal, UmsatzDaten } from "@/lib/cockpit/typen";
 import { Balken, Delta, Funke, Hinweis, Ring, Symbol, Zahl, eur, kurzEur, monatName, tagMonat, zahl } from "./bausteine";
 
 function Mehr({ href, children }: { href: string; children: React.ReactNode }) {
@@ -383,6 +383,201 @@ export function AuslandWidget({ d }: { d: AuslandDaten }) {
         <span className="ck-matt" style={{ fontSize: 11 }}>Nach Lieferland, ohne Stornos{d.standBis ? ` · bis ${tagMonat(d.standBis)} aus der Nachtsynchronisation, heute live` : ""}</span>
         <Mehr href="/pack/kunden">Kundenanalyse</Mehr>
       </div>
+    </div>
+  );
+}
+
+// ── Instagram ────────────────────────────────────────────────────────────────
+
+const IG_NEU = "#d6249f";
+const IG_WEG = "#b8bccd";
+const IG_LINIE = "#7c5cff";
+
+function wochenstart(tag: string): string {
+  const d = new Date(`${tag}T12:00:00Z`);
+  const wt = d.getUTCDay();
+  d.setUTCDate(d.getUTCDate() + (wt === 0 ? -6 : 1 - wt));
+  return d.toISOString().slice(0, 10);
+}
+
+function IgTipp({ active, payload, wochen }: { active?: boolean; payload?: Array<{ payload: { tag: string; neu: number; weg: number; follower: number | null; offen: boolean } }>; wochen: boolean }) {
+  if (!active || !payload?.length) return null;
+  const p = payload[0].payload;
+  return (
+    <div className="ck-tipp">
+      <div style={{ fontWeight: 650, marginBottom: 3 }}>{wochen ? `Woche ab ${tagMonat(p.tag)}` : `${tagMonat(p.tag)}${p.tag.slice(0, 4)}`}</div>
+      {p.offen ? <div style={{ color: "#666c8c" }}>Follower-Zahlen kommen noch von Instagram</div> : (
+        <>
+          <div><b style={{ color: IG_NEU }}>+{zahl(p.neu)}</b> neu · <b style={{ color: "#8b90a7" }}>−{zahl(-p.weg)}</b> verloren</div>
+          <div>Netto <b>{p.neu + p.weg >= 0 ? "+" : ""}{zahl(p.neu + p.weg)}</b></div>
+        </>
+      )}
+      {p.follower != null && <div style={{ color: "#666c8c", marginTop: 2 }}>Stand {zahl(p.follower)} Follower</div>}
+    </div>
+  );
+}
+
+const ALTER = ["13-17", "18-24", "25-34", "35-44", "45-54", "55-64", "65+"];
+
+export function InstagramWidget({ d }: { d: InstagramDaten }) {
+  const [ansicht, setAnsicht] = useState<"tag" | "woche">("tag");
+  if (!d.tage.length) return <Hinweis>Noch keine Instagram-Zahlen gespeichert – der tägliche Abruf füllt das Fenster.</Hinweis>;
+
+  // Diagramm: Tage (60) oder Wochen (26)
+  const daten = (() => {
+    if (ansicht === "tag") {
+      return d.tage.slice(-60).map((t) => ({ tag: t.tag, neu: t.neu ?? 0, weg: -(t.verloren ?? 0), follower: t.follower, offen: t.neu == null }));
+    }
+    const m = new Map<string, { tag: string; neu: number; weg: number; follower: number | null; offen: boolean }>();
+    for (const t of d.tage) {
+      const w = wochenstart(t.tag);
+      const e = m.get(w) ?? { tag: w, neu: 0, weg: 0, follower: null, offen: false };
+      e.neu += t.neu ?? 0;
+      e.weg -= t.verloren ?? 0;
+      if (t.follower != null) e.follower = t.follower;
+      m.set(w, e);
+    }
+    return [...m.values()].slice(-26);
+  })();
+  const fMin = Math.min(...daten.map((x) => x.follower ?? Infinity));
+  const fMax = Math.max(...daten.map((x) => x.follower ?? -Infinity));
+
+  const netto7 = d.d7.neu - d.d7.verloren, vorNetto7 = d.d7.vorNeu - d.d7.vorVerloren;
+  const netto30 = d.d30.neu - d.d30.verloren, vorNetto30 = d.d30.vorNeu - d.d30.vorVerloren;
+  const g = d.demografie?.geschlecht ?? {};
+  const gSumme = (g.F ?? 0) + (g.M ?? 0) + (g.U ?? 0);
+  const frauen = gSumme ? Math.round(((g.F ?? 0) / gSumme) * 100) : null;
+  const alterMax = Math.max(...ALTER.map((a) => d.demografie?.alter?.[a] ?? 0), 1);
+  const alterSumme = ALTER.reduce((s, a) => s + (d.demografie?.alter?.[a] ?? 0), 0) || 1;
+  const top = (r: Record<string, number> | undefined, n: number) => Object.entries(r ?? {}).sort((a, b) => b[1] - a[1]).slice(0, n);
+  const landSumme = Object.values(d.demografie?.land ?? {}).reduce((s, v) => s + v, 0) || 1;
+  const onlineMax = Math.max(...Object.values(d.online ?? {}), 1);
+  const besteStunden = Object.entries(d.online ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([h]) => Number(h)).sort((a, b) => a - b);
+
+  const kacheln = [
+    { label: "Netto 7 Tage", wert: netto7, vor: vorNetto7, unter: `+${zahl(d.d7.neu)} neu · −${zahl(d.d7.verloren)} verloren` },
+    { label: "Netto 30 Tage", wert: netto30, vor: vorNetto30, unter: `+${zahl(d.d30.neu)} neu · −${zahl(d.d30.verloren)} verloren` },
+    { label: "Reichweite 7 Tage", wert: d.d7.reichweite, vor: d.d7.vorReichweite, unter: `${zahl(d.d7.profil)} Profilaufrufe · ${zahl(d.d7.klicks)} Website-Klicks` },
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 12 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 170px", borderRadius: 14, padding: "9px 12px", color: "#fff", background: "linear-gradient(135deg, #feda75 -10%, #fa7e1e 18%, #d62976 50%, #962fbf 80%, #4f5bd5 110%)" }}>
+          <div style={{ fontSize: 11.5, fontWeight: 600, opacity: 0.92 }}>Follower</div>
+          {d.follower != null ? <Zahl wert={d.follower} className="ck-gross" /> : <span className="ck-gross">–</span>}
+          <div style={{ fontSize: 11.5, opacity: 0.95 }}>
+            {d.follower != null && d.followerVor30 != null ? `${d.follower - d.followerVor30 >= 0 ? "+" : ""}${zahl(d.follower - d.followerVor30)} in 30 Tagen` : "@hairvenly.de"}
+          </div>
+        </div>
+        {kacheln.map((k) => (
+          <div key={k.label} className="ck-kachel" style={{ flex: "1 1 160px" }}>
+            <div className="ck-etikett">{k.label}</div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
+              <span className="ck-mittel ck-mono">{k.label.startsWith("Netto") && k.wert > 0 ? "+" : ""}{zahl(k.wert)}</span>
+              <Delta neu={k.wert} alt={k.vor} />
+            </div>
+            <div className="ck-matt" style={{ fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={k.unter}>{k.unter}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", flex: 1, minHeight: 170 }}>
+        <div style={{ flex: "3 1 380px", display: "flex", flexDirection: "column", minHeight: 160 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span className="ck-etikett" style={{ display: "inline-flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><i className="ck-legende" style={{ background: IG_NEU }} />neu</span>
+              <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><i className="ck-legende" style={{ background: IG_WEG }} />verloren</span>
+              <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><i className="ck-legende" style={{ background: IG_LINIE, height: 3 }} />Follower gesamt</span>
+            </span>
+            <span style={{ display: "inline-flex", gap: 4 }}>
+              {(["tag", "woche"] as const).map((a) => (
+                <button key={a} type="button" className="ck-chip" data-an={ansicht === a} onClick={() => setAnsicht(a)} style={{ padding: "3px 10px", fontSize: 11.5 }}>{a === "tag" ? "Tage" : "Wochen"}</button>
+              ))}
+            </span>
+          </div>
+          <div style={{ flex: 1, minHeight: 130 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={daten} stackOffset="sign" margin={{ top: 8, right: 0, left: 0, bottom: 0 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="tag" tickLine={false} axisLine={false} tickFormatter={tagMonat} minTickGap={24} />
+                <YAxis yAxisId="z" width={34} tickLine={false} axisLine={false} allowDecimals={false} />
+                <YAxis yAxisId="f" orientation="right" width={50} tickLine={false} axisLine={false} domain={[Math.floor(fMin * 0.998), Math.ceil(fMax * 1.002)]} tickFormatter={(v: number) => zahl(v)} tickCount={4} allowDecimals={false} hide={!Number.isFinite(fMin)} />
+                <Tooltip cursor={{ fill: "rgba(214,36,159,0.06)" }} content={<IgTipp wochen={ansicht === "woche"} />} />
+                <ReferenceLine yAxisId="z" y={0} stroke="#c9ccda" />
+                <Bar yAxisId="z" dataKey="neu" stackId="a" fill={IG_NEU} radius={[3, 3, 0, 0]} animationDuration={800} />
+                <Bar yAxisId="z" dataKey="weg" stackId="a" fill={IG_WEG} radius={[3, 3, 0, 0]} animationDuration={800} />
+                <Line yAxisId="f" type="monotone" dataKey="follower" stroke={IG_LINIE} strokeWidth={2.4} dot={false} connectNulls animationDuration={1200} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {d.demografie && (
+          <div style={{ flex: "2 1 260px", display: "grid", gap: 10, alignContent: "start" }}>
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              {frauen != null && (
+                <Ring anteil={frauen} groesse={64} dicke={8} farbe={IG_NEU}>
+                  <span style={{ textAlign: "center", lineHeight: 1.05 }}><b className="ck-mono" style={{ fontSize: 14 }}>{frauen} %</b><br /><span style={{ fontSize: 9 }} className="ck-matt">Frauen</span></span>
+                </Ring>
+              )}
+              <div style={{ flex: 1, display: "grid", gap: 3 }}>
+                <div className="ck-etikett">Alter</div>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 48 }} role="img" aria-label="Altersverteilung der Follower">
+                  {ALTER.map((a) => {
+                    const v = d.demografie?.alter?.[a] ?? 0;
+                    return (
+                      <div key={a} title={`${a}: ${zahl(v)} (${Math.round((v / alterSumme) * 100)} %)`} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, height: "100%", justifyContent: "flex-end" }}>
+                        <i style={{ display: "block", width: "100%", height: `${Math.max(4, (v / alterMax) * 100)}%`, borderRadius: "3px 3px 1px 1px", background: v === alterMax ? IG_NEU : "color-mix(in srgb, #d6249f 30%, #fff)" }} />
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ display: "flex", gap: 4 }}>{ALTER.map((a) => <span key={a} className="ck-matt" style={{ flex: 1, fontSize: 9, textAlign: "center" }}>{a}</span>)}</div>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div style={{ display: "grid", gap: 3 }}>
+                <div className="ck-etikett">Länder</div>
+                {top(d.demografie.land, 4).map(([c, v]) => (
+                  <div key={c} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "center" }}>
+                    <span>{flagge(c)}</span><span style={{ flex: 1 }}>{c}</span><span className="ck-mono ck-dim">{zahl((v / landSumme) * 100, v / landSumme < 0.1 ? 1 : 0)} %</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
+                <div className="ck-etikett">Städte</div>
+                {top(d.demografie.stadt, 4).map(([c, v]) => (
+                  <div key={c} style={{ display: "flex", gap: 6, fontSize: 12 }} title={c}>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.split(",")[0]}</span><span className="ck-mono ck-dim">{zahl(v)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {d.online && (
+        <div>
+          <div className="ck-etikett" style={{ marginBottom: 4 }}>
+            Wann deine Follower online sind{besteStunden.length ? ` · am meisten um ${besteStunden.map((h) => `${h} Uhr`).join(", ")}` : ""}
+          </div>
+          <div style={{ display: "flex", gap: 2 }} role="img" aria-label="Follower online je Stunde">
+            {Array.from({ length: 24 }, (_, h) => {
+              const v = d.online?.[String(h)] ?? 0;
+              return <i key={h} title={`${h}–${h + 1} Uhr: ${zahl(v)} Follower online`} style={{ flex: 1, height: 16, borderRadius: 3, background: IG_NEU, opacity: 0.12 + 0.88 * (v / onlineMax) }} />;
+            })}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between" }} className="ck-matt">
+            {[0, 6, 12, 18, 23].map((h) => <span key={h} style={{ fontSize: 9.5 }}>{h} Uhr</span>)}
+          </div>
+        </div>
+      )}
+
+      <span className="ck-matt" style={{ fontSize: 11 }}>
+        Instagram liefert neue und verlorene Follower mit 1–2 Tagen Verzug{d.bisAm ? ` · vollständig bis ${tagMonat(d.bisAm)}` : ""} · Altersverteilung und Länder beziehen sich auf alle Follower
+      </span>
     </div>
   );
 }
