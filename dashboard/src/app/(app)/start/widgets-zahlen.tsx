@@ -1,7 +1,7 @@
 "use client";
 
 // Anzeige-Widgets des Startbildschirms: bekommen fertige Zahlen vom Server.
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, ComposedChart, Line } from "recharts";
 import {
@@ -92,7 +92,65 @@ function UmsatzTipp({ active, payload, label, jahr }: { active?: boolean; payloa
   );
 }
 
+const ANSICHT_KEY = "ck-umsatz-ansicht";
+const ansichtHoerer = new Set<() => void>();
+function abonniereAnsicht(f: () => void) {
+  ansichtHoerer.add(f);
+  window.addEventListener("storage", f);
+  return () => {
+    ansichtHoerer.delete(f);
+    window.removeEventListener("storage", f);
+  };
+}
+
+const WT = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+const wochentag = (jahr: number, monat: string, tag: number) => WT[new Date(Date.UTC(jahr, Number(monat.slice(5)) - 1, tag)).getUTCDay()];
+
+function TageTipp({ active, payload, label, d, heute }: { active?: boolean; payload?: Array<{ payload?: { tag: number; dieses: number | null; letztes: number | null } }>; label?: number; d: UmsatzDaten; heute: number }) {
+  const p = payload?.[0]?.payload;
+  if (!active || !p || label == null) return null;
+  const summe = (feld: "dieses" | "letztes") => (d.tage ?? []).filter((x) => x.tag <= p.tag).reduce((s, x) => s + (x[feld] ?? 0), 0);
+  const name = `${p.tag}. ${monatName(d.monat).split(" ")[0]}`;
+  return (
+    <div className="ck-tipp">
+      <div style={{ fontWeight: 650, marginBottom: 3 }}>{name}</div>
+      <div>
+        <b style={{ color: "#7c5cff" }}>{wochentag(d.jahr, d.monat, p.tag)} {d.jahr}:</b>{" "}
+        {p.dieses != null ? `${eur(p.dieses)}${p.tag === heute ? " (bis jetzt)" : ""}` : "–"}
+      </div>
+      <div style={{ color: "#666c8c" }}>{wochentag(d.jahr - 1, d.monat, p.tag)} {d.jahr - 1}: {p.letztes != null ? eur(p.letztes) : "–"}</div>
+      <div style={{ marginTop: 4, fontSize: 11, color: "#666c8c" }}>
+        1.–{p.tag}.: {p.dieses != null ? kurzEur(summe("dieses")) : "–"} gegen {kurzEur(summe("letztes"))}
+      </div>
+    </div>
+  );
+}
+
 export function UmsatzWidget({ d }: { d: UmsatzDaten }) {
+  // Gemerkte Ansicht je Browser; der Server rendert immer "Monate" (kennt localStorage nicht)
+  const ansicht = useSyncExternalStore(
+    abonniereAnsicht,
+    () => {
+      try {
+        return window.localStorage.getItem(ANSICHT_KEY) === "tage" ? "tage" : "monate";
+      } catch {
+        return "monate";
+      }
+    },
+    () => "monate" as const,
+  );
+  const wechseln = (a: "monate" | "tage") => {
+    try {
+      window.localStorage.setItem(ANSICHT_KEY, a);
+    } catch {
+      /* privat-Modus: Umschalten wirkt dann nur bis zum Neuladen nicht */
+    }
+    ansichtHoerer.forEach((f) => f());
+  };
+  const tageAn = ansicht === "tage" && !!d.tage;
+  const heute = (d.tage ?? []).filter((x) => x.dieses != null).length;
+  const summeBis = (feld: "dieses" | "letztes", bis: number) => (d.tage ?? []).filter((x) => x.tag <= bis).reduce((s, x) => s + (x[feld] ?? 0), 0);
+  const vjGesamt = (d.tage ?? []).reduce((s, x) => s + (x.letztes ?? 0), 0);
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 10 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1.15fr 1fr", gap: 10 }}>
@@ -117,22 +175,49 @@ export function UmsatzWidget({ d }: { d: UmsatzDaten }) {
           )}
         </div>
       </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div className="ck-umschalter" role="tablist" aria-label="Ansicht Umsatz">
+          <button type="button" role="tab" aria-selected={!tageAn} data-an={!tageAn} onClick={() => wechseln("monate")}>Monate</button>
+          <button type="button" role="tab" aria-selected={tageAn} data-an={tageAn} onClick={() => wechseln("tage")} disabled={!d.tage} title={d.tage ? undefined : "Tageswerte gerade nicht verfügbar"}>
+            Tage
+          </button>
+        </div>
+        {tageAn && (
+          <span className="ck-dim" style={{ fontSize: 11.5 }} title="Bestellwert vor Erstattungen">
+            1.–{heute}.: {kurzEur(summeBis("dieses", heute))} gegen {kurzEur(summeBis("letztes", heute))} · {monatName(d.monat).split(" ")[0]} {d.jahr - 1} gesamt {kurzEur(vjGesamt)}
+          </span>
+        )}
+      </div>
       <div style={{ flex: 1, minHeight: 90 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={d.monate} barGap={2} margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
-            <XAxis dataKey="m" tickLine={false} axisLine={false} interval={0} />
-            <YAxis hide />
-            <Tooltip cursor={{ fill: "rgba(255,255,255,0.14)" }} content={<UmsatzTipp jahr={d.jahr} />} />
-            <Bar dataKey="letztes" fill="rgba(255,255,255,0.38)" radius={[4, 4, 0, 0]} animationDuration={900} />
-            <Bar dataKey="dieses" fill="#ffffff" radius={[4, 4, 0, 0]} animationDuration={1100} />
-          </BarChart>
+          {tageAn ? (
+            <BarChart data={d.tage ?? []} barGap={1} barCategoryGap="18%" margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
+              <XAxis dataKey="tag" tickLine={false} axisLine={false} interval={0} tickFormatter={(t: number) => (t === 1 || t % 5 === 0 ? String(t) : "")} />
+              <YAxis hide />
+              <Tooltip cursor={{ fill: "rgba(255,255,255,0.14)" }} content={<TageTipp d={d} heute={heute} />} />
+              <Bar dataKey="letztes" fill="rgba(255,255,255,0.38)" radius={[3, 3, 0, 0]} animationDuration={900} />
+              <Bar dataKey="dieses" radius={[3, 3, 0, 0]} animationDuration={1100}>
+                {(d.tage ?? []).map((x) => (
+                  <Cell key={x.tag} fill={x.tag === heute ? "rgba(255,255,255,0.7)" : "#ffffff"} />
+                ))}
+              </Bar>
+            </BarChart>
+          ) : (
+            <BarChart data={d.monate} barGap={2} margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
+              <XAxis dataKey="m" tickLine={false} axisLine={false} interval={0} />
+              <YAxis hide />
+              <Tooltip cursor={{ fill: "rgba(255,255,255,0.14)" }} content={<UmsatzTipp jahr={d.jahr} />} />
+              <Bar dataKey="letztes" fill="rgba(255,255,255,0.38)" radius={[4, 4, 0, 0]} animationDuration={900} />
+              <Bar dataKey="dieses" fill="#ffffff" radius={[4, 4, 0, 0]} animationDuration={1100} />
+            </BarChart>
+          )}
         </ResponsiveContainer>
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span className="ck-dim" style={{ fontSize: 11.5, display: "inline-flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><i className="ck-legende" style={{ background: "#fff" }} />{d.jahr}</span>
           <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><i className="ck-legende" style={{ background: "rgba(255,255,255,0.4)" }} />{d.jahr - 1}</span>
-          <span>bei gleichem Tempo {kurzEur(d.hochrechnung)} im Monat</span>
+          <span>{tageAn ? "Bestellwert pro Tag, vor Erstattungen" : `bei gleichem Tempo ${kurzEur(d.hochrechnung)} im Monat`}</span>
         </span>
         <Mehr href="/finances/overview">Finanzen</Mehr>
       </div>

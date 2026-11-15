@@ -83,6 +83,9 @@ export interface UmsatzDaten {
   /** Bestellwert vor Erstattungen vom 1. bis gestern — dieses Jahr und dieselben Tage im Vorjahr
    *  (live aus Shopify; null = Monatserster oder Shopify nicht erreichbar). */
   tageVergleich: { bisTag: number; dieses: number; letztes: number } | null;
+  /** Bestellwert vor Erstattungen je Kalendertag: dieser Monat (bis heute, heute = bisher) und der
+   *  ganze Vorjahresmonat. null = Shopify nicht erreichbar. */
+  tage: Array<{ tag: number; dieses: number | null; letztes: number | null }> | null;
   /** Hochrechnung auf den vollen Monat nach bisherigem Tagesschnitt. */
   hochrechnung: number;
   jahr: number;

@@ -91,17 +91,26 @@ export const ladeUmsatz = cache(async (): Promise<UmsatzDaten> => {
   const mm = monat.slice(5);
   // Fairer Vergleich zum Vorjahr: dieselben Tage (1. bis gestern), gleicher Maßstab (Bestellwert).
   // Anteilig vom Vorjahresmonat wäre falsch — im November liegt Black Friday am Monatsende.
-  const tageVergleich = async (): Promise<UmsatzDaten["tageVergleich"]> => {
-    if (tag < 2) return null;
+  // Tageswerte: dieser Monat bis jetzt + ganzer Vorjahresmonat (für die Tagesansicht im Fenster).
+  const tageVergleich = async (): Promise<{ tv: UmsatzDaten["tageVergleich"]; tage: UmsatzDaten["tage"] }> => {
     try {
+      const vjMonat = `${jahr - 1}-${mm}`;
       const [dieses, letztes] = await Promise.all([
-        shopifyBestellwert(`${monat}-01`, heute),
-        shopifyBestellwert(`${jahr - 1}-${mm}-01`, `${jahr - 1}-${heute.slice(5)}`),
+        shopifyBestellwertJeTag(`${monat}-01`, plusTage(heute, 1)),
+        shopifyBestellwertJeTag(`${vjMonat}-01`, plusTage(`${vjMonat}-${String(tageImMonat(vjMonat)).padStart(2, "0")}`, 1)),
       ]);
-      return { bisTag: tag - 1, dieses: r0(dieses), letztes: r0(letztes) };
+      const wert = (m: Record<string, number>, ym: string, t: number) => m[`${ym}-${String(t).padStart(2, "0")}`] ?? 0;
+      const n = Math.max(tageImMonat(monat), tageImMonat(vjMonat));
+      const tage = Array.from({ length: n }, (_, i) => ({
+        tag: i + 1,
+        dieses: i + 1 <= tag && i + 1 <= tageImMonat(monat) ? r0(wert(dieses, monat, i + 1)) : null,
+        letztes: i + 1 <= tageImMonat(vjMonat) ? r0(wert(letztes, vjMonat, i + 1)) : null,
+      }));
+      const bis = (feld: "dieses" | "letztes") => tage.filter((x) => x.tag < tag).reduce((s, x) => s + (x[feld] ?? 0), 0);
+      return { tv: tag < 2 ? null : { bisTag: tag - 1, dieses: bis("dieses"), letztes: bis("letztes") }, tage };
     } catch (e) {
       console.warn("[cockpit] Tagesvergleich:", e instanceof Error ? e.message : e);
-      return null;
+      return { tv: null, tage: null };
     }
   };
   // Der laufende Monat kommt live aus Shopify: die Tabelle wird nur nachts gefüllt und kennt den
@@ -110,7 +119,7 @@ export const ladeUmsatz = cache(async (): Promise<UmsatzDaten> => {
     console.warn("[cockpit] Umsatz live:", e instanceof Error ? e.message : e);
     return null;
   });
-  const [tabelle, tv, aktLive] = await Promise.all([ladeUmsatzRows(), tageVergleich(), live]);
+  const [tabelle, { tv, tage }, aktLive] = await Promise.all([ladeUmsatzRows(), tageVergleich(), live]);
   const rows = aktLive ? [...tabelle.filter((r) => r.monat !== monat), { ...aktLive, kanaele: aktLive.kanaele ?? null }] : tabelle;
   const by = new Map(rows.map((r) => [r.monat, r]));
   const akt = by.get(monat);
@@ -140,6 +149,7 @@ export const ladeUmsatz = cache(async (): Promise<UmsatzDaten> => {
     monatBestellungen: akt?.bestellungen ?? 0,
     vorjahrMonat: vj ? r0(vj.netto) : null,
     tageVergleich: tv,
+    tage,
     hochrechnung: r0((monatNetto / Math.max(1, tag)) * tageImMonat(monat)),
     jahr,
     jahrNetto: r0(rows.filter((r) => r.monat.startsWith(String(jahr))).reduce((s, r) => s + r.netto, 0)),
@@ -153,25 +163,30 @@ export const ladeUmsatz = cache(async (): Promise<UmsatzDaten> => {
 // ── Shopify ─────────────────────────────────────────────────────────────────
 
 /** Bestellwert (vor Erstattungen, ohne Tests/Stornos) der Bestellungen in [von, bis) — deutsche Zeit. */
-async function shopifyBestellwert(vonTag: string, bisTag: string): Promise<number> {
+/** Bestellwert (vor Erstattungen, ohne Tests/Stornos) je Kalendertag deutscher Zeit, [vonTag, bisTag). */
+async function shopifyBestellwertJeTag(vonTag: string, bisTag: string): Promise<Record<string, number>> {
   const von = `${vonTag}T00:00:00${berlinOffset(vonTag)}`;
   const bis = `${bisTag}T00:00:00${berlinOffset(bisTag)}`;
-  type Node = { cancelledAt: string | null; test: boolean; totalPriceSet: { shopMoney: { amount: string } } };
+  type Node = { createdAt: string; cancelledAt: string | null; test: boolean; totalPriceSet: { shopMoney: { amount: string } } };
   type Res = { orders: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; edges: Array<{ node: Node }> } };
-  let summe = 0;
+  const out: Record<string, number> = {};
   let after: string | null = null;
   for (let seite = 0; seite < 40; seite++) {
     const res: { data?: Res } = await shopifyGraphQL<Res>(
-      `query($q: String!, $after: String) { orders(first: 250, after: $after, query: $q) { pageInfo { hasNextPage endCursor } edges { node { cancelledAt test totalPriceSet { shopMoney { amount } } } } } }`,
+      `query($q: String!, $after: String) { orders(first: 250, after: $after, query: $q) { pageInfo { hasNextPage endCursor } edges { node { createdAt cancelledAt test totalPriceSet { shopMoney { amount } } } } } }`,
       { q: `created_at:>='${von}' created_at:<'${bis}'`, after },
     );
     const orders: Res["orders"] | undefined = res.data?.orders;
     if (!orders) throw new Error("Shopify: keine Bestelldaten");
-    for (const { node } of orders.edges) if (!node.test && !node.cancelledAt) summe += Number(node.totalPriceSet.shopMoney.amount) || 0;
-    if (!orders.pageInfo.hasNextPage) return summe;
+    for (const { node } of orders.edges) {
+      if (node.test || node.cancelledAt) continue;
+      const tag = new Date(node.createdAt).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
+      out[tag] = (out[tag] ?? 0) + (Number(node.totalPriceSet.shopMoney.amount) || 0);
+    }
+    if (!orders.pageInfo.hasNextPage) return out;
     after = orders.pageInfo.endCursor;
   }
-  throw new Error("Shopify: zu viele Bestellungen für den Tagesvergleich");
+  throw new Error("Shopify: zu viele Bestellungen für die Tagesansicht");
 }
 
 async function shopifyTage(): Promise<Pick<ShopifyDaten, "heute" | "gestern">> {
