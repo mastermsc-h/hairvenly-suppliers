@@ -199,6 +199,26 @@ export interface WerbungDaten {
   googleKampagnen: Array<{ name: string; kosten: number; klicks: number }>;
 }
 
+export type AuffaelligBereich = "lager" | "chats" | "werbung" | "aktionen" | "zahlungen" | "finanzen" | "versand" | "retouren" | "steuern" | "instagram" | "umsatz" | "daten";
+
+export interface Auffaelligkeit {
+  id: string;
+  bereich: AuffaelligBereich;
+  schwere: "hoch" | "mittel" | "hinweis";
+  titel: string;
+  detail: string;
+  href?: string;
+  liste?: string[];
+}
+
+export interface Bericht {
+  tag: string;
+  stand: string;
+  punkte: Auffaelligkeit[];
+  /** Prüfungen, die nicht laufen konnten (Quelle nicht erreichbar). */
+  fehler: string[];
+}
+
 export interface BesucherDaten {
   verbunden: boolean;
   grund?: string;
@@ -269,6 +289,7 @@ export interface KampagneDaten {
 
 export const WIDGETS = [
   { id: "hi", name: "Hi · Hairvenly Intelligence", info: "Frag die KI alles über Hairvenly", feature: "admin" },
+  { id: "sturm", name: "Auffälligkeiten", info: "Täglicher Prüfbericht: was gerade schiefläuft", feature: "finances" },
   { id: "lage", name: "Lagebild", info: "Wo läuft es, wo hakt es", feature: null },
   { id: "umsatz", name: "Umsatz", info: "Monat & Jahr gegen Vorjahr", feature: "finances" },
   { id: "chats", name: "Neue Chats", info: "7 und 30 Tage im Vergleich", feature: "chatbot" },
@@ -296,6 +317,7 @@ export type WidgetId = (typeof WIDGETS)[number]["id"];
 
 /** Standard-Anordnung im 12er-Raster (Zeilenhöhe 28 px + 16 px Abstand). */
 export const STANDARD_LAYOUT: LayoutItem[] = [
+  { i: "sturm", x: 0, y: 3, w: 12, h: 11 },
   { i: "lage", x: 0, y: 0, w: 12, h: 3 },
   { i: "umsatz", x: 0, y: 3, w: 5, h: 8 },
   { i: "chats", x: 5, y: 3, w: 4, h: 4 },

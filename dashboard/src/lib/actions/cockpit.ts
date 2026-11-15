@@ -117,3 +117,17 @@ export async function loescheEintrag(id: string): Promise<Ergebnis> {
   const { error } = await createServiceClient().from("cockpit_eintraege").delete().eq("id", id);
   return error ? { ok: false, error: error.message } : { ok: true };
 }
+
+/** Auffälligkeiten-Bericht sofort neu erstellen (sonst täglich gegen Mittag). Nur Admins. */
+export async function berichtJetztPruefen(): Promise<Ergebnis> {
+  const profile = await requireProfile();
+  if (profile.role !== "admin") return { ok: false, error: "Nur Admins" };
+  const { erstelleBericht, speichereBericht } = await import("@/lib/cockpit/auffaelligkeiten");
+  try {
+    await speichereBericht(await erstelleBericht());
+    revalidatePath("/start");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}

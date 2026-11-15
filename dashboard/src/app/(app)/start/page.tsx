@@ -7,6 +7,8 @@ import {
 } from "@/lib/cockpit/daten";
 import { WIDGETS } from "@/lib/cockpit/typen";
 import CockpitGrid from "./cockpit-grid";
+import SturmWidget from "./widget-sturm";
+import { ladeBericht } from "@/lib/cockpit/auffaelligkeiten";
 import HiKugel from "@/components/hi/hi-kugel";
 import { Hinweis, Lade } from "./bausteine";
 import { IgAnfragenWidget, WerbungWidget, InstagramWidget, TotesKapitalWidget, AuslandWidget, BesucherWidget, ChatsWidget, HyWidget, LageWidget, LiquiditaetWidget, PflichtenWidget, ShopifyWidget, UmsatzWidget } from "./widgets-zahlen";
@@ -68,6 +70,7 @@ export default async function StartPage() {
     inhalte.hy = warte(<Mit lade={ladeHy}>{(d) => <HyWidget d={d} />}</Mit>);
     inhalte.shopify = warte(<Mit lade={ladeShopify}>{(d) => <ShopifyWidget d={d} />}</Mit>);
     inhalte.ausland = warte(<Mit lade={ladeAusland}>{(d) => <AuslandWidget d={d} />}</Mit>);
+    inhalte.sturm = warte(<Mit lade={ladeBericht}>{(d) => <SturmWidget bericht={d.bericht} vorher={d.vorher} istAdmin={istAdmin} />}</Mit>);
     inhalte.werbung = warte(<Mit lade={ladeWerbung}>{(d) => <WerbungWidget d={d} />}</Mit>);
     inhalte.toteskapital = warte(<Mit lade={ladeTotesKapital}>{(d) => <TotesKapitalWidget d={d} />}</Mit>);
     inhalte.besucher = warte(<Mit lade={ladeBesucher}>{(d) => <BesucherWidget d={d} />}</Mit>);
