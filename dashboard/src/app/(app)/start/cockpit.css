@@ -420,7 +420,7 @@ a.ck-signal:hover { border-color: var(--s); }
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 120px;
+  min-height: 100px;
   border-radius: 3px 3px 14px 3px;
   padding: 16px 12px 8px;
   background: linear-gradient(170deg, color-mix(in srgb, var(--ck-z) 38%, #fff), color-mix(in srgb, var(--ck-z) 56%, #fff));
@@ -442,6 +442,24 @@ a.ck-signal:hover { border-color: var(--s); }
 }
 .ck-zettel:hover { transform: rotate(0deg) translateY(-3px); box-shadow: 0 1px 1px rgba(0, 0, 0, 0.06), 0 20px 24px -14px rgba(60, 40, 20, 0.5); }
 .ck-zettel[data-ziel="true"] { outline: 2px dashed var(--ck-akzent); outline-offset: 3px; }
+.ck-zettel[data-groesse="true"] { transform: none; transition: none; outline: 2px dashed color-mix(in srgb, var(--ck-z) 70%, #000); outline-offset: 2px; }
+/* Griff unten rechts: Zettel größer/kleiner ziehen */
+.ck-zettel-griff {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  touch-action: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  background:
+    linear-gradient(135deg, transparent 0 55%, rgba(60, 50, 20, 0.35) 55% 62%, transparent 62% 72%, rgba(60, 50, 20, 0.35) 72% 79%, transparent 79%);
+  border-bottom-right-radius: 14px;
+}
+.ck-zettel:hover .ck-zettel-griff,
+.ck-zettel[data-groesse="true"] .ck-zettel-griff { opacity: 1; }
 .ck .ck-zettel textarea {
   flex: 1;
   width: 100%;

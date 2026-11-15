@@ -32,6 +32,9 @@ function saubereDaten(d: EintragDaten | undefined): EintragDaten {
   if (d.prio === "hoch" || d.prio === "normal") out.prio = d.prio;
   if (typeof d.fortschritt === "number" && Number.isFinite(d.fortschritt)) out.fortschritt = Math.max(0, Math.min(100, Math.round(d.fortschritt)));
   if (typeof d.link === "string" && /^https?:\/\//.test(d.link)) out.link = d.link.slice(0, 500);
+  const px = (n: unknown, min: number, max: number) => (typeof n === "number" && Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : undefined);
+  if (px(d.breite, 120, 900) !== undefined) out.breite = px(d.breite, 120, 900);
+  if (px(d.hoehe, 100, 800) !== undefined) out.hoehe = px(d.hoehe, 100, 800);
   return out;
 }
 

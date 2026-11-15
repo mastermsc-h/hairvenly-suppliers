@@ -58,13 +58,47 @@ const heuteIso = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berl
 // ── Notizzettel (privat, per Ziehen sortierbar) ─────────────────────────────
 
 const ZETTEL_FARBEN = ["#ffd23f", "#ff8fbf", "#7cc8ff", "#7ddfa8", "#b99bff"];
+const ZETTEL_STANDARD = { b: 170, h: 150 };
+const ZETTEL_MIN = { b: 120, h: 100 };
 const DREHUNG = ["-1.2deg", "0.8deg", "-0.5deg", "1.3deg", "0.3deg"];
 
 export function NotizenWidget({ eintraege }: { eintraege: Eintrag[] }) {
   const { liste, setListe, fehler, neu, aendern, loeschen } = useEintraege(eintraege, "notiz");
   const zieht = useRef<string | null>(null);
   const [ziel, setZiel] = useState<string | null>(null);
+  // Größe ändern: Ecke unten rechts ziehen (Pointer), während dessen kein Umsortieren
+  const [groesse, setGroesse] = useState<{ id: string; b: number; h: number } | null>(null);
+  const ziehtGroesse = useRef(false);
   const sortiert = [...liste].sort((a, b) => a.sort - b.sort);
+
+  const groesseStart = (e: React.PointerEvent, n: Eintrag) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const zettel = (e.currentTarget as HTMLElement).parentElement!;
+    const box = zettel.getBoundingClientRect();
+    const start = { x: e.clientX, y: e.clientY, b: zettel.offsetWidth || box.width, h: zettel.offsetHeight || box.height };
+    const max = (zettel.parentElement?.clientWidth ?? 900) - 8;
+    ziehtGroesse.current = true;
+    let letzte = { b: start.b, h: start.h };
+    const bewegen = (ev: PointerEvent) => {
+      letzte = {
+        b: Math.round(Math.max(ZETTEL_MIN.b, Math.min(max, start.b + ev.clientX - start.x))),
+        h: Math.round(Math.max(ZETTEL_MIN.h, Math.min(800, start.h + ev.clientY - start.y))),
+      };
+      setGroesse({ id: n.id, ...letzte });
+    };
+    const ende = () => {
+      window.removeEventListener("pointermove", bewegen);
+      window.removeEventListener("pointerup", ende);
+      ziehtGroesse.current = false;
+      setGroesse(null);
+      const daten = { ...n.daten, breite: letzte.b, hoehe: letzte.h };
+      setListe((l) => l.map((x) => (x.id === n.id ? { ...x, daten } : x)));
+      aendern(n.id, { daten });
+    };
+    window.addEventListener("pointermove", bewegen);
+    window.addEventListener("pointerup", ende);
+  };
 
   const ablegen = (aufId: string) => {
     const von = zieht.current;
@@ -81,15 +115,20 @@ export function NotizenWidget({ eintraege }: { eintraege: Eintrag[] }) {
   return (
     <div>
       <Fehler text={fehler} />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 16, padding: "8px 4px 4px" }}>
-        {sortiert.map((n, idx) => (
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", gap: 16, padding: "8px 4px 4px" }}>
+        {sortiert.map((n, idx) => {
+          const g = groesse?.id === n.id ? groesse : null;
+          const breite = g?.b ?? n.daten.breite ?? ZETTEL_STANDARD.b;
+          const hoehe = g?.h ?? n.daten.hoehe ?? ZETTEL_STANDARD.h;
+          return (
           <div
             key={n.id}
             className="ck-zettel"
             data-ziel={ziel === n.id}
-            style={{ ["--ck-z" as string]: n.daten.farbe ?? ZETTEL_FARBEN[0], ["--dreh" as string]: DREHUNG[idx % DREHUNG.length] }}
+            data-groesse={!!g}
+            style={{ ["--ck-z" as string]: n.daten.farbe ?? ZETTEL_FARBEN[0], ["--dreh" as string]: DREHUNG[idx % DREHUNG.length], width: breite, height: hoehe, maxWidth: "100%" }}
             draggable
-            onDragStart={(e) => { zieht.current = n.id; e.dataTransfer.effectAllowed = "move"; }}
+            onDragStart={(e) => { if (ziehtGroesse.current) { e.preventDefault(); return; } zieht.current = n.id; e.dataTransfer.effectAllowed = "move"; }}
             onDragOver={(e) => { if (zieht.current && zieht.current !== n.id) { e.preventDefault(); setZiel(n.id); } }}
             onDragLeave={() => setZiel((z) => (z === n.id ? null : z))}
             onDrop={(e) => { e.preventDefault(); ablegen(n.id); }}
@@ -109,9 +148,11 @@ export function NotizenWidget({ eintraege }: { eintraege: Eintrag[] }) {
               ))}
               <button type="button" className="ck-icon-knopf ck-rot" style={{ marginLeft: "auto" }} aria-label="Notiz löschen" onClick={() => loeschen(n.id)}><Trash2 size={13} /></button>
             </div>
+            <span className="ck-zettel-griff" role="separator" aria-label="Zettel größer oder kleiner ziehen" title="Ziehen: größer oder kleiner" onPointerDown={(e) => groesseStart(e, n)} draggable={false} />
           </div>
-        ))}
-        <button type="button" className="ck-zettel-neu" onClick={() => neu({ text: "", daten: { farbe: ZETTEL_FARBEN[liste.length % ZETTEL_FARBEN.length] } })}>
+          );
+        })}
+        <button type="button" className="ck-zettel-neu" style={{ width: ZETTEL_STANDARD.b, height: ZETTEL_STANDARD.h }} onClick={() => neu({ text: "", daten: { farbe: ZETTEL_FARBEN[liste.length % ZETTEL_FARBEN.length] } })}>
           <Plus size={22} /> Neuer Zettel
         </button>
       </div>

@@ -15,6 +15,9 @@ export interface EintragDaten {
   von?: string;
   bis?: string;
   link?: string;
+  /** Größe eines Notizzettels in Pixel. */
+  breite?: number;
+  hoehe?: number;
 }
 
 export interface Eintrag {
