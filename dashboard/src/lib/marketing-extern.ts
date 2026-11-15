@@ -167,3 +167,9 @@ export function dringendeAufgaben(d: HaloDaten, heute = heuteBerlin()): Dringend
 
 export const PERSONEN: Record<string, string> = { mariam: "Mariam", mehmet: "Mehmet", thao: "Thao", alina: "Alina" };
 export const personName = (p: string | null) => (p ? PERSONEN[p] ?? p : "—");
+
+// ── Werbung für den Startbildschirm ──────────────────────────────────
+/** Nur der Teil "umsatz" (Werbekosten, Kampagnen, Tagesreihe) — ohne Google-Suche. */
+export function ladeWerbeteil(tage: number): Promise<Pick<MktDaten, "zeitraum" | "aktualitaet" | "werbung" | "tage">> {
+  return mitWiederholung(() => rpc<MktDaten>("MKT", "jarvis_marketing", { p_days: tage, p_teil: "umsatz" }));
+}

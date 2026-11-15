@@ -155,6 +155,44 @@ export interface InstagramDaten {
   online: Record<string, number> | null;
 }
 
+export interface IgAnfragenPeriode {
+  tage: number;
+  gespraeche: number;
+  nachrichten: number;
+  davor: { gespraeche: number; nachrichten: number };
+  vorjahr: { gespraeche: number; nachrichten: number } | null;
+  kategorien: Array<{ kategorie: string; gespraeche: number }>;
+}
+
+export interface IgAnfragenDaten {
+  heute: { gespraeche: number; nachrichten: number };
+  /** Gleicher Wochentag letzte Woche bis zur gleichen Uhrzeit. */
+  vorwoche: { gespraeche: number; nachrichten: number };
+  perioden: IgAnfragenPeriode[];
+  /** Gespräche je Tag, letzte 180 Tage (ältester zuerst) und dieselben Tage ein Jahr davor. */
+  tage: Array<{ tag: string; n: number }>;
+  tageVorjahr: Array<{ tag: string; n: number }>;
+  /** Kundennachrichten je Wochentag (1 = Mo) und Stunde, letzte 30 Tage. */
+  stunden: Array<{ wochentag: number; stunde: number; n: number }>;
+}
+
+export interface WerbungDaten {
+  /** Letzter Tag mit Meta-Daten im Marketing-Projekt; null = keine. */
+  metaStand: string | null;
+  googleStand: string | null;
+  /** 7 Tage bis metaStand und die 7 Tage davor. */
+  meta7: number;
+  metaVor7: number;
+  google7: number;
+  googleVor7: number;
+  /** Shopify-Umsatz in denselben 7 Tagen (für Werbekosten je 100 € Umsatz). */
+  umsatz7: number;
+  tage: Array<{ datum: string; meta: number; google: number; umsatz: number }>;
+  /** Kampagnen mit Ausgaben in den letzten 14 Tagen. */
+  kampagnen: Array<{ name: string; kosten: number; klicks: number; impressionen: number; reichweite: number }>;
+  googleKampagnen: Array<{ name: string; kosten: number; klicks: number }>;
+}
+
 export interface BesucherDaten {
   verbunden: boolean;
   grund?: string;
@@ -236,6 +274,8 @@ export const WIDGETS = [
   { id: "ausland", name: "Auslandsbestellungen", info: "Österreich & Co.: Tag, Woche, Trend", feature: "finances" },
   { id: "toteskapital", name: "Totes Kapital", info: "Ladenhüter: gebundener Warenwert", feature: "finances" },
   { id: "instagram", name: "Instagram", info: "Follower, Zu- und Abgänge, wer folgt, beste Zeit", feature: "chatbot" },
+  { id: "iganfragen", name: "Instagram-Anfragen", info: "DMs je Tag, gegen Vorwoche und Vorjahr", feature: "chatbot" },
+  { id: "werbung", name: "Werbung", info: "Laufende Anzeigen bei Meta & Google, Kosten", feature: "finances" },
   { id: "notizen", name: "Notizzettel", info: "Nur für dich", feature: null },
   { id: "ideen", name: "Ideen & Inspiration", info: "Sammelstelle fürs Team", feature: null },
   { id: "pfeiler", name: "Wachstumspfeiler", info: "Die großen Hebel des Unternehmens", feature: null },
@@ -269,6 +309,8 @@ export const STANDARD_LAYOUT: LayoutItem[] = [
   { i: "marketing", x: 0, y: 52, w: 6, h: 8 },
   { i: "toteskapital", x: 6, y: 52, w: 6, h: 11 },
   { i: "instagram", x: 0, y: 74, w: 12, h: 12 },
+  { i: "iganfragen", x: 0, y: 86, w: 7, h: 12 },
+  { i: "werbung", x: 7, y: 86, w: 5, h: 12 },
   { i: "hi", x: 0, y: 63, w: 5, h: 11 },
 ];
 

@@ -9,9 +9,10 @@ import { shopifyGraphQL } from "@/lib/shopify";
 import { holeShopifyUmsatzMonat } from "@/lib/shopify-umsatz";
 import { loadDeadStock } from "@/lib/stock-deadstock";
 import { holeFollowerLive, type InstagramTag } from "@/lib/instagram-statistik";
+import { ladeWerbeteil } from "@/lib/marketing-extern";
 import type {
   Ampel, AuslandDaten, BesucherDaten, ChatDaten, CockpitLayout, Eintrag, EintragArt, HyDaten, KampagneDaten,
-  LiqGruppe, LiquiditaetDaten, PflichtenDaten, PflichtPosten, ShopifyDaten, Signal, TotesKapitalDaten, InstagramDaten, UmsatzDaten,
+  LiqGruppe, LiquiditaetDaten, PflichtenDaten, PflichtPosten, ShopifyDaten, Signal, TotesKapitalDaten, InstagramDaten, IgAnfragenDaten, IgAnfragenPeriode, WerbungDaten, UmsatzDaten,
 } from "./typen";
 
 const berlin = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin" });
@@ -447,6 +448,86 @@ export const ladeInstagram = cache(async (): Promise<InstagramDaten> => {
     bisAm,
     demografie: (stand?.demografie as InstagramDaten["demografie"]) && Object.keys(stand?.demografie ?? {}).length ? (stand!.demografie as InstagramDaten["demografie"]) : null,
     online: stand?.online && Object.keys(stand.online).length ? (stand.online as Record<string, number>) : null,
+  };
+});
+
+// ── Instagram-Anfragen (DMs) ─────────────────────────────────────────────────
+
+export const ladeIgAnfragen = cache(async (): Promise<IgAnfragenDaten> => {
+  const sb = createServiceClient();
+  const jetzt = Date.now();
+  const tag = 86_400_000;
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const heute = heuteBerlin();
+  const heuteStart = Date.parse(`${heute}T00:00:00${berlinOffset(heute)}`);
+  const zr = async (von: number, bis: number) => {
+    const { data, error } = await sb.rpc("cockpit_ig_anfragen_zeitraum", { p_von: iso(von), p_bis: iso(bis) });
+    if (error) throw new Error(error.message);
+    const r = (data as Array<{ gespraeche: number; nachrichten: number }>)?.[0];
+    return { gespraeche: r?.gespraeche ?? 0, nachrichten: r?.nachrichten ?? 0 };
+  };
+  const tageReihe = async (von: string, bis: string) => {
+    const { data, error } = await sb.rpc("cockpit_ig_anfragen_tage", { p_von: von, p_bis: bis });
+    if (error) throw new Error(error.message);
+    const m = new Map(((data ?? []) as Array<{ tag: string; gespraeche: number }>).map((r) => [String(r.tag).slice(0, 10), r.gespraeche]));
+    const out: Array<{ tag: string; n: number }> = [];
+    for (let t = von; t <= bis; t = plusTage(t, 1)) out.push({ tag: t, n: m.get(t) ?? 0 });
+    return out;
+  };
+  // Archiv beginnt im Mai 2025 — davor gibt es keinen Vorjahresvergleich
+  const archivAb = Date.parse("2025-05-01T00:00:00+02:00");
+  const periode = async (n: number): Promise<IgAnfragenPeriode> => {
+    const vjBis = jetzt - 365 * tag;
+    const [a, d, v, k] = await Promise.all([
+      zr(jetzt - n * tag, jetzt),
+      zr(jetzt - 2 * n * tag, jetzt - n * tag),
+      vjBis - n * tag >= archivAb ? zr(vjBis - n * tag, vjBis) : Promise.resolve(null),
+      sb.rpc("cockpit_ig_anfragen_kategorien", { p_von: iso(jetzt - n * tag), p_bis: iso(jetzt) }),
+    ]);
+    return { tage: n, ...a, davor: d, vorjahr: v, kategorien: ((k.data ?? []) as IgAnfragenPeriode["kategorien"]).slice(0, 8) };
+  };
+  const [h, vw, perioden, tage, tageVorjahr, stunden] = await Promise.all([
+    zr(heuteStart, jetzt),
+    zr(heuteStart - 7 * tag, jetzt - 7 * tag),
+    Promise.all([7, 30, 90].map(periode)),
+    tageReihe(plusTage(heute, -179), heute),
+    tageReihe(plusTage(heute, -365 - 179), plusTage(heute, -365)),
+    sb.rpc("cockpit_ig_anfragen_stunden", { p_von: iso(jetzt - 30 * tag) }),
+  ]);
+  return {
+    heute: h,
+    vorwoche: vw,
+    perioden,
+    tage,
+    tageVorjahr,
+    stunden: ((stunden.data ?? []) as Array<{ wochentag: number; stunde: number; nachrichten: number }>).map((r) => ({ wochentag: r.wochentag, stunde: r.stunde, n: r.nachrichten })),
+  };
+});
+
+// ── Werbung (Meta / Google, aus dem Marketing-Projekt) ──────────────────────
+
+export const ladeWerbung = cache(async (): Promise<WerbungDaten> => {
+  const [lang, kurz] = await Promise.all([ladeWerbeteil(42), ladeWerbeteil(14)]);
+  const metaStand = lang.aktualitaet?.meta_ads ? String(lang.aktualitaet.meta_ads).slice(0, 10) : null;
+  const googleStand = lang.aktualitaet?.google_ads ? String(lang.aktualitaet.google_ads).slice(0, 10) : null;
+  const tage = (lang.tage ?? []).map((t) => ({ datum: String(t.datum).slice(0, 10), meta: Number(t.meta_kosten) || 0, google: Number(t.google_kosten) || 0, umsatz: Number(t.umsatz) || 0 }));
+  // Fenster am letzten Tag mit Meta-Daten ausrichten (das Marketing-Projekt holt sie mit Verzug)
+  const ende = metaStand ?? heuteBerlin();
+  const im = (von: number, bis: number) => tage.filter((t) => t.datum > plusTage(ende, -von) && t.datum <= plusTage(ende, -bis));
+  const sum = (l: typeof tage, k: "meta" | "google" | "umsatz") => r0(l.reduce((s, t) => s + t[k], 0));
+  const a = im(7, 0), v = im(14, 7);
+  return {
+    metaStand,
+    googleStand,
+    meta7: sum(a, "meta"),
+    metaVor7: sum(v, "meta"),
+    google7: sum(a, "google"),
+    googleVor7: sum(v, "google"),
+    umsatz7: sum(a, "umsatz"),
+    tage,
+    kampagnen: (kurz.werbung?.meta_kampagnen ?? []).filter((k) => Number(k.kosten) > 0).sort((x, y) => y.kosten - x.kosten)
+      .map((k) => ({ name: k.kampagne, kosten: r0(k.kosten), klicks: k.klicks, impressionen: k.impressionen, reichweite: k.reichweite })),
+    googleKampagnen: (kurz.werbung?.google_kampagnen ?? []).filter((k) => Number(k.kosten) > 0).map((k) => ({ name: k.kampagne, kosten: r0(k.kosten), klicks: k.klicks })),
   };
 });
 

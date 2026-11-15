@@ -8,7 +8,7 @@ import {
   AlertTriangle, ArrowRight, Check, CheckCircle2, Globe2, Landmark, Lock, Package, ShoppingBag, ShoppingCart, Sparkles, TrendingDown,
   Undo2, Users, XCircle,
 } from "lucide-react";
-import type { InstagramDaten, TotesKapitalDaten, AuslandDaten, BesucherDaten, LiqGruppe, ChatDaten, HyDaten, LiquiditaetDaten, PflichtenDaten, ShopifyDaten, Signal, UmsatzDaten } from "@/lib/cockpit/typen";
+import type { IgAnfragenDaten, WerbungDaten, InstagramDaten, TotesKapitalDaten, AuslandDaten, BesucherDaten, LiqGruppe, ChatDaten, HyDaten, LiquiditaetDaten, PflichtenDaten, ShopifyDaten, Signal, UmsatzDaten } from "@/lib/cockpit/typen";
 import { Balken, Delta, Funke, Hinweis, Ring, Symbol, Zahl, eur, kurzEur, monatName, tagMonat, zahl } from "./bausteine";
 
 function Mehr({ href, children }: { href: string; children: React.ReactNode }) {
@@ -383,6 +383,251 @@ export function AuslandWidget({ d }: { d: AuslandDaten }) {
         <span className="ck-matt" style={{ fontSize: 11 }}>Nach Lieferland, ohne Stornos{d.standBis ? ` · bis ${tagMonat(d.standBis)} aus der Nachtsynchronisation, heute live` : ""}</span>
         <Mehr href="/pack/kunden">Kundenanalyse</Mehr>
       </div>
+    </div>
+  );
+}
+
+// ── Instagram-Anfragen (DMs) ───────────────────────────────────────────────
+
+const KATEGORIE_NAME: Record<string, string> = {
+  availability: "Verfügbarkeit", pricing: "Preis", color_advice: "Farbberatung", appointment: "Termin",
+  complaint: "Reklamation", order_status: "Bestellstatus", gewerbe: "Gewerbe", partnership: "Kooperation",
+  models: "Modelle", general: "Sonstiges",
+};
+const WOCHENTAG = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+
+function AnfrageTipp({ active, payload, wochen }: { active?: boolean; payload?: Array<{ payload: { tag: string; n: number; vor: number | null; vj: number | null } }>; wochen: boolean }) {
+  if (!active || !payload?.length) return null;
+  const p = payload[0].payload;
+  return (
+    <div className="ck-tipp">
+      <div style={{ fontWeight: 650, marginBottom: 3 }}>{wochen ? `Woche ab ${tagMonat(p.tag)}` : `${WOCHENTAG[(new Date(`${p.tag}T12:00:00Z`).getUTCDay() + 6) % 7]}, ${tagMonat(p.tag)}`}</div>
+      <div><b style={{ color: "#c13584" }}>{zahl(p.n)}</b> Gespräche</div>
+      {p.vor != null && <div style={{ color: "#666c8c" }}>Zeitraum davor: {zahl(p.vor)}</div>}
+      {p.vj != null && <div style={{ color: "#666c8c" }}>Vorjahr: {zahl(p.vj)}</div>}
+    </div>
+  );
+}
+
+export function IgAnfragenWidget({ d }: { d: IgAnfragenDaten }) {
+  const [n, setN] = useState<7 | 30 | 90>(30);
+  const p = d.perioden.find((x) => x.tage === n) ?? d.perioden[0];
+  // Diagramm: Tage (7/30) bzw. Wochen (90); "davor" und "Vorjahr" an derselben Position
+  const wochen = n === 90;
+  const reihe = (() => {
+    const len = d.tage.length;
+    const roh: Array<{ tag: string; n: number; vor: number | null; vj: number | null }> = d.tage.map((t, i) => ({ tag: t.tag, n: t.n, vor: i - n >= 0 ? d.tage[i - n].n : null, vj: d.tageVorjahr[i]?.n ?? null }));
+    const fenster = roh.slice(len - n);
+    if (!wochen) return fenster;
+    const out: typeof fenster = [];
+    for (let i = 0; i < fenster.length; i += 7) {
+      const w = fenster.slice(i, i + 7);
+      const s = (k: "n" | "vor" | "vj") => (w.every((x) => x[k] == null) ? null : w.reduce((a, x) => a + (x[k] ?? 0), 0));
+      out.push({ tag: w[0].tag, n: s("n") ?? 0, vor: s("vor"), vj: s("vj") });
+    }
+    return out;
+  })();
+  const vjDa = d.tageVorjahr.some((t) => t.n > 0);
+  const katMax = Math.max(...p.kategorien.map((k) => k.gespraeche), 1);
+  const heatMax = Math.max(...d.stunden.map((s) => s.n), 1);
+  const heat = new Map(d.stunden.map((s) => [`${s.wochentag}-${s.stunde}`, s.n]));
+  const spitze = [...d.stunden].sort((a, b) => b.n - a.n)[0];
+
+  const vergleiche = [
+    { label: `Zeitraum davor`, alt: p.davor.gespraeche },
+    ...(p.vorjahr ? [{ label: "Vorjahr", alt: p.vorjahr.gespraeche }] : []),
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span className="ck-etikett">Kundinnen, die per Instagram-DM geschrieben haben</span>
+        <span style={{ display: "inline-flex", gap: 4 }}>
+          {([7, 30, 90] as const).map((x) => (
+            <button key={x} type="button" className="ck-chip" data-an={n === x} onClick={() => setN(x)} style={{ padding: "3px 10px", fontSize: 11.5 }}>{x} Tage</button>
+          ))}
+        </span>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div className="ck-kachel" style={{ flex: "1 1 130px" }}>
+          <div className="ck-etikett">Heute bis jetzt</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
+            <Zahl wert={d.heute.gespraeche} className="ck-gross ck-farbig" />
+            <Delta neu={d.heute.gespraeche} alt={d.vorwoche.gespraeche} />
+          </div>
+          <div className="ck-matt" style={{ fontSize: 11 }}>letzte Woche bis jetzt: {zahl(d.vorwoche.gespraeche)}</div>
+        </div>
+        <div style={{ flex: "2 1 240px", borderRadius: 14, padding: "9px 12px", color: "#fff", background: "linear-gradient(135deg, #c13584, #e1306c 55%, #f77737)" }}>
+          <div style={{ fontSize: 11.5, fontWeight: 600, opacity: 0.92 }}>Letzte {n} Tage</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+            <Zahl wert={p.gespraeche} className="ck-gross" />
+            <span style={{ fontSize: 12, opacity: 0.92 }}>Gespräche · {zahl(p.nachrichten)} Nachrichten</span>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 3 }}>
+            {vergleiche.map((v) => (
+              <span key={v.label} style={{ display: "inline-flex", gap: 5, alignItems: "center", fontSize: 11.5 }}>
+                <span style={{ background: "#fff", borderRadius: 999 }}><Delta neu={p.gespraeche} alt={v.alt} /></span>
+                {v.label} ({zahl(v.alt)})
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, minHeight: 120 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={reihe} margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
+            <CartesianGrid vertical={false} />
+            <XAxis dataKey="tag" tickLine={false} axisLine={false} tickFormatter={tagMonat} minTickGap={20} />
+            <YAxis width={28} tickLine={false} axisLine={false} allowDecimals={false} />
+            <Tooltip cursor={{ fill: "rgba(193,53,132,0.07)" }} content={<AnfrageTipp wochen={wochen} />} />
+            <Bar dataKey="n" fill="#c13584" radius={[4, 4, 0, 0]} animationDuration={800} />
+            <Line type="monotone" dataKey="vor" stroke="#9a9fb8" strokeWidth={1.8} dot={false} animationDuration={1000} />
+            {vjDa && <Line type="monotone" dataKey="vj" stroke="#f77737" strokeWidth={1.8} strokeDasharray="4 3" dot={false} animationDuration={1000} />}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+      <span className="ck-etikett" style={{ display: "inline-flex", gap: 12, flexWrap: "wrap" }}>
+        <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><i className="ck-legende" style={{ background: "#c13584" }} />{wochen ? "je Woche" : "je Tag"}</span>
+        <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><i className="ck-legende" style={{ background: "#9a9fb8", height: 3 }} />Zeitraum davor</span>
+        {vjDa && <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><i className="ck-legende" style={{ background: "#f77737", height: 3 }} />Vorjahr</span>}
+      </span>
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+        {p.kategorien.length > 0 && (
+          <div style={{ flex: "1 1 200px", display: "grid", gap: 4, alignContent: "start" }}>
+            <div className="ck-etikett">Worum es ging</div>
+            {p.kategorien.slice(0, 5).map((k) => (
+              <div key={k.kategorie}>
+                <div className="ck-zeile" style={{ padding: "0 0 2px", fontSize: 12 }}>
+                  <span>{KATEGORIE_NAME[k.kategorie] ?? k.kategorie}</span><span className="ck-mono">{zahl(k.gespraeche)}</span>
+                </div>
+                <Balken anteil={(k.gespraeche / katMax) * 100} />
+              </div>
+            ))}
+          </div>
+        )}
+        {d.stunden.length > 0 && (
+          <div style={{ flex: "1 1 220px", display: "grid", gap: 3, alignContent: "start" }}>
+            <div className="ck-etikett">Wann geschrieben wird (30 Tage){spitze ? ` · am meisten ${WOCHENTAG[spitze.wochentag - 1]} ${spitze.stunde} Uhr` : ""}</div>
+            {WOCHENTAG.map((w, i) => (
+              <div key={w} style={{ display: "flex", gap: 1.5, alignItems: "center" }}>
+                <span className="ck-matt" style={{ fontSize: 9.5, width: 16 }}>{w}</span>
+                {Array.from({ length: 24 }, (_, h) => {
+                  const v = heat.get(`${i + 1}-${h}`) ?? 0;
+                  return <i key={h} title={`${w} ${h}–${h + 1} Uhr: ${zahl(v)} Nachrichten`} style={{ flex: 1, height: 9, borderRadius: 2, background: "#c13584", opacity: v ? 0.12 + 0.88 * (v / heatMax) : 0.05 }} />;
+                })}
+              </div>
+            ))}
+            <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: 18 }} className="ck-matt">
+              {[0, 6, 12, 18, 23].map((h) => <span key={h} style={{ fontSize: 9 }}>{h}</span>)}
+            </div>
+          </div>
+        )}
+      </div>
+      <span className="ck-matt" style={{ fontSize: 11 }}>Gespräch = Unterhaltung, in der die Kundin im Zeitraum geschrieben hat · vor dem Chatbot (Mai 2026) aus dem Instagram-Archiv</span>
+    </div>
+  );
+}
+
+// ── Werbung (Meta / Google) ──────────────────────────────────────────────────
+
+function WerbeTipp({ active, payload }: { active?: boolean; payload?: Array<{ payload: { datum: string; meta: number; google: number; umsatz: number } }> }) {
+  if (!active || !payload?.length) return null;
+  const p = payload[0].payload;
+  return (
+    <div className="ck-tipp">
+      <div style={{ fontWeight: 650, marginBottom: 3 }}>{tagMonat(p.datum)}{p.datum.slice(0, 4)}</div>
+      <div><b style={{ color: "#1877f2" }}>Meta:</b> {eur(p.meta)}</div>
+      {p.google > 0 && <div><b style={{ color: "#34a853" }}>Google:</b> {eur(p.google)}</div>}
+      <div style={{ color: "#666c8c" }}>Shop-Umsatz: {eur(p.umsatz)}</div>
+    </div>
+  );
+}
+
+export function WerbungWidget({ d }: { d: WerbungDaten }) {
+  const heute = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin" }).format(new Date());
+  const verzug = d.metaStand ? Math.round((Date.parse(`${heute}T12:00:00Z`) - Date.parse(`${d.metaStand}T12:00:00Z`)) / 86_400_000) : null;
+  const kosten7 = d.meta7 + d.google7;
+  const quote = d.umsatz7 > 0 ? (kosten7 / d.umsatz7) * 100 : null;
+  const reihe = d.metaStand ? d.tage.filter((t) => t.datum <= d.metaStand!).slice(-28) : d.tage.slice(-28);
+  const maxK = Math.max(...d.kampagnen.map((k) => k.kosten), 1);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 10 }}>
+      {verzug != null && verzug > 2 && (
+        <div style={{ fontSize: 12, padding: "6px 10px", borderRadius: 10, background: "rgba(239,154,12,0.12)", color: "#9a6300" }}>
+          Meta-Daten stehen auf {tagMonat(d.metaStand!)} – das Marketing-Projekt hat seit {verzug} Tagen nichts Neues geholt.
+        </div>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <div className="ck-kachel" style={{ borderLeft: "4px solid #1877f2" }}>
+          <div className="ck-etikett">Laufende Meta-Kampagnen</div>
+          <div className="ck-gross ck-mono" style={{ color: "#1877f2" }}>{zahl(d.kampagnen.length)}</div>
+          <div className="ck-matt" style={{ fontSize: 11 }}>Instagram + Facebook, mit Ausgaben in 14 Tagen</div>
+        </div>
+        <div className="ck-kachel" style={{ borderLeft: "4px solid #34a853" }}>
+          <div className="ck-etikett">Google Ads</div>
+          {d.googleStand ? (
+            <>
+              <div className="ck-gross ck-mono" style={{ color: "#34a853" }}>{zahl(d.googleKampagnen.length)}</div>
+              <div className="ck-matt" style={{ fontSize: 11 }}>Kampagnen mit Ausgaben in 14 Tagen</div>
+            </>
+          ) : (
+            <>
+              <div className="ck-mittel" style={{ color: "#9a9fb8" }}>noch nicht verbunden</div>
+              <div className="ck-matt" style={{ fontSize: 11 }}>Das Google-Ads-Skript muss noch im Werbekonto eingerichtet werden</div>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div>
+          <div className="ck-etikett">Ausgaben 7 Tage{d.metaStand ? ` bis ${tagMonat(d.metaStand)}` : ""}</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+            <Zahl wert={kosten7} format="eur" className="ck-mittel" />
+            <Delta neu={kosten7} alt={d.metaVor7 + d.googleVor7} gutWennHoeher={false} />
+          </div>
+        </div>
+        {quote != null && (
+          <div title="Werbekosten geteilt durch Shop-Umsatz in denselben 7 Tagen">
+            <div className="ck-etikett">Je 100 € Umsatz</div>
+            <span className="ck-mittel ck-mono">{zahl(quote, 2)} €</span>
+          </div>
+        )}
+      </div>
+
+      <div style={{ flex: 1, minHeight: 90 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={reihe} margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
+            <CartesianGrid vertical={false} />
+            <XAxis dataKey="datum" tickLine={false} axisLine={false} tickFormatter={tagMonat} minTickGap={24} />
+            <YAxis width={36} tickLine={false} axisLine={false} tickFormatter={(v: number) => `${zahl(v)} €`} />
+            <Tooltip cursor={{ fill: "rgba(24,119,242,0.07)" }} content={<WerbeTipp />} />
+            <Bar dataKey="meta" stackId="w" fill="#1877f2" animationDuration={800} />
+            <Bar dataKey="google" stackId="w" fill="#34a853" radius={[3, 3, 0, 0]} animationDuration={800} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      {d.kampagnen.length > 0 && (
+        <div style={{ display: "grid", gap: 6 }}>
+          <div className="ck-etikett">Kampagnen, 14 Tage</div>
+          {d.kampagnen.slice(0, 6).map((k) => (
+            <div key={k.name} title={`${k.name} · ${zahl(k.impressionen)} Impressionen · ${zahl(k.reichweite)} erreicht`}>
+              <div className="ck-zeile" style={{ padding: "0 0 2px", fontSize: 12 }}>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.name}</span>
+                <span className="ck-mono" style={{ whiteSpace: "nowrap" }}>
+                  <span className="ck-matt">{zahl(k.klicks)} Klicks{k.klicks ? ` · ${zahl(k.kosten / k.klicks, 2)} €/Klick` : ""} · </span><b>{eur(k.kosten)}</b>
+                </span>
+              </div>
+              <Balken anteil={(k.kosten / maxK) * 100} von="#1877f2" />
+            </div>
+          ))}
+        </div>
+      )}
+      <span className="ck-matt" style={{ fontSize: 11 }}>Quelle: Marketing-Projekt (marketing.hairvenly.de)</span>
     </div>
   );
 }
