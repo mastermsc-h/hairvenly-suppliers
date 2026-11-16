@@ -10,6 +10,7 @@ import {
   MousePointerClick, RotateCcw, Settings2, SlidersHorizontal, Zap, ShoppingBag, StickyNote, TrendingUp, Wallet, Waves, Check, GripVertical, BrainCircuit,
 } from "lucide-react";
 import { cockpitLayoutZuruecksetzen, speichereCockpitLayout } from "@/lib/actions/cockpit";
+import { Plus, X } from "lucide-react";
 import { KACHEL_STILE, MIN_GROESSE, STANDARD_LAYOUT, WIDGETS, type CockpitLayout, type KachelStil, type LayoutItem } from "@/lib/cockpit/typen";
 import Adern from "./adern";
 import "./cockpit.css";
@@ -67,6 +68,71 @@ function Uhr() {
   );
 }
 
+/**
+ * Plus-Felder auf freien Stellen des Rasters: jede Lücke (mind. 2 Spalten × 3 Zeilen) und ein
+ * Feld unter dem letzten Fenster. Klick öffnet die Auswahl der nicht gezeigten Fenster.
+ */
+function PlusFelder({ layout, breite, abstand, zeile, verfuegbar, offen, setOffen, hinzufuegen }: {
+  layout: LayoutItem[]; breite: number; abstand: number; zeile: number;
+  verfuegbar: ReadonlyArray<{ id: string; name: string; info: string }>;
+  offen: string | null; setOffen: (k: string | null) => void;
+  hinzufuegen: (id: string, x: number, y: number, maxW: number) => void;
+}) {
+  if (!verfuegbar.length) return null;
+  const PAD_X = 16, PAD_Y = 8;
+  const spalteB = (breite - 2 * PAD_X - abstand * (SPALTEN - 1)) / SPALTEN;
+  const unten = layout.reduce((m, it) => Math.max(m, it.y + it.h), 0);
+  const belegt = (x: number, y: number) => layout.some((it) => x >= it.x && x < it.x + it.w && y >= it.y && y < it.y + it.h);
+  const felder: Array<{ x: number; y: number; w: number; h: number }> = [];
+  let vorher: Array<[number, number]> = [];
+  for (let y = 0; y < unten; y++) {
+    const laeufe: Array<[number, number]> = [];
+    for (let x = 0; x < SPALTEN;) {
+      if (belegt(x, y)) { x++; continue; }
+      let e = x;
+      while (e < SPALTEN && !belegt(e, y)) e++;
+      laeufe.push([x, e]);
+      x = e;
+    }
+    for (const [a, e] of laeufe) {
+      if (e - a < 2 || vorher.some(([va, ve]) => va === a && ve === e)) continue; // Lücke läuft von oben weiter
+      let h = 0;
+      while (y + h < unten && Array.from({ length: e - a }, (_, k) => a + k).every((x) => !belegt(x, y + h))) h++;
+      if (h >= 3) felder.push({ x: a, y, w: e - a, h: Math.min(h, 8) });
+    }
+    vorher = laeufe;
+  }
+  felder.push({ x: 0, y: unten, w: SPALTEN, h: 3 });
+  return (
+    <div className="ck-plus-ebene" aria-label="Freie Stellen">
+      {felder.slice(0, 12).map((f) => {
+        const k = `${f.x}-${f.y}`;
+        const style = {
+          left: 8 + PAD_X + f.x * (spalteB + abstand),
+          top: 4 + PAD_Y + f.y * (zeile + abstand),
+          width: f.w * spalteB + (f.w - 1) * abstand,
+          height: f.h * zeile + (f.h - 1) * abstand,
+        };
+        return (
+          <div key={k} className="ck-plus-feld" data-offen={offen === k} style={style}>
+            <button type="button" className="ck-plus-knopf" onClick={() => setOffen(offen === k ? null : k)} aria-label="Fenster hier hinzufügen" title="Fenster hier hinzufügen"><Plus size={18} /></button>
+            {offen === k && (
+              <div className="ck-plus-wahl" role="menu">
+                <div className="ck-plus-wahl-kopf">Hier hinzufügen</div>
+                {verfuegbar.map((w) => (
+                  <button key={w.id} type="button" role="menuitem" onClick={() => hinzufuegen(w.id, f.x, f.y, f.w)}>
+                    <b>{w.name}</b><span>{w.info}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function gruss(stunde: number) {
   return stunde < 5 ? "Gute Nacht" : stunde < 11 ? "Guten Morgen" : stunde < 18 ? "Hallo" : "Guten Abend";
 }
@@ -91,6 +157,9 @@ export default function CockpitGrid({
   const abstandRef = useRef(abstand);
   const stilRef = useRef(stil);
   const [anpassen, setAnpassen] = useState(false);
+  // Anordnung, wie das Raster sie gerade zeigt (nach dem Verdichten) – Grundlage für die Plus-Felder
+  const [angezeigt, setAngezeigt] = useState<LayoutItem[] | null>(null);
+  const [plusOffen, setPlusOffen] = useState<string | null>(null);
   const [status, setStatus] = useState<"" | "speichert" | "gespeichert" | "fehler">("");
   const jetzt = useJetzt();
   const stunde = jetzt ? Number(new Intl.DateTimeFormat("de-DE", { hour: "numeric", hour12: false, timeZone: "Europe/Berlin" }).format(jetzt)) : null;
@@ -181,11 +250,9 @@ export default function CockpitGrid({
           <span className="ck-abzeichen"><Icon size={15} /></span>
           <span className="ck-titel">{w.name}</span>
           <div className="ck-kopf-rechts">
-            {anpassen && (
-              <button type="button" className="ck-icon-knopf ck-rot ck-kein-zug" aria-label={`${w.name} ausblenden`} onClick={() => umschalten(id)}>
-                <EyeOff size={14} />
-              </button>
-            )}
+            <button type="button" className="ck-icon-knopf ck-rot ck-kein-zug ck-entfernen" aria-label={`${w.name} entfernen`} title="Fenster entfernen (über ein Plus oder „Anpassen“ wieder holen)" onClick={() => umschalten(id)}>
+              <X size={14} />
+            </button>
             {!schmal && <GripVertical size={14} style={{ color: "var(--ck-matt)" }} />}
           </div>
         </header>
@@ -292,9 +359,30 @@ export default function CockpitGrid({
               compactor={verticalCompactor}
               onDragStop={(l) => uebernehmen(l)}
               onResizeStop={(l) => uebernehmen(l)}
+              onLayoutChange={(l) => setAngezeigt(l.map((x) => ({ i: x.i, x: x.x, y: x.y, w: x.w, h: x.h })))}
             >
               {reihenfolge.map((it, i) => <div key={it.i}>{panel(it.i, i)}</div>)}
             </ReactGridLayout>
+            <PlusFelder
+              layout={angezeigt ?? sichtbar}
+              breite={width - 16}
+              abstand={abstand}
+              zeile={ZEILE + ABSTAND_STANDARD - abstand}
+              verfuegbar={WIDGETS.filter((w) => erlaubt.includes(w.id) && (aus.includes(w.id) || !items.some((it) => it.i === w.id)))}
+              offen={plusOffen}
+              setOffen={setPlusOffen}
+              hinzufuegen={(id, x, y, maxW) => {
+                const std = STANDARD_LAYOUT.find((s) => s.i === id);
+                const min = MIN_GROESSE[id]?.w ?? 2;
+                const neu = { i: id, x, y, w: Math.max(min, Math.min(std?.w ?? 4, maxW)), h: std?.h ?? 8 };
+                const neuItems = [...items.filter((it) => it.i !== id), neu];
+                const neuAus = aus.filter((a) => a !== id);
+                setItems(neuItems);
+                setAus(neuAus);
+                setPlusOffen(null);
+                speichern(neuItems, neuAus);
+              }}
+            />
           </div>
         )}
       </div>

@@ -67,7 +67,7 @@ export default async function StartPage() {
   };
   if (istAdmin) inhalte.hi = <HiKugel />;
   const anzeigeName = profile.display_name ?? profile.username ?? "du";
-  inhalte.hailey = warte(<Mit lade={() => ladeHailey({ finanzen, chatbot, name: anzeigeName })}>{(d) => <HaileyWidget d={d} />}</Mit>);
+  inhalte.hailey = warte(<Mit lade={() => ladeHailey({ finanzen, chatbot, name: anzeigeName, userId: profile.id })}>{(d) => <HaileyWidget d={d} />}</Mit>);
   inhalte.polaroid = warte(<Mit lade={() => ladePolaroids(profile.id)}>{(d) => <PolaroidWidget bilder={d} />}</Mit>);
   inhalte.wetter = warte(<Mit lade={ladeWetter}>{(d) => <WetterWidget d={d} />}</Mit>);
   if (finanzen) inhalte.pflanze = warte(<Mit lade={ladePflanze}>{(d) => <PflanzeWidget d={d} />}</Mit>);

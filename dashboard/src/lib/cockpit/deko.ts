@@ -9,7 +9,7 @@ const wochentag = () => new Intl.DateTimeFormat("de-DE", { weekday: "long", time
 
 // ── Hailey ──────────────────────────────────────────────────────────────────
 export type HaileyStimmung = "froh" | "normal" | "sturm";
-export interface HaileyDaten { stimmung: HaileyStimmung; saetze: string[] }
+export interface HaileyDaten { stimmung: HaileyStimmung; saetze: string[]; maskottchen: string }
 
 const SPRUECHE = [
   "Wusstest du? Haare wachsen ungefähr 1 cm im Monat. Wir sind schneller. 💁‍♀️",
@@ -20,13 +20,14 @@ const SPRUECHE = [
   "Heute schon jemandem ein Kompliment gemacht?",
 ];
 
-export async function ladeHailey(opts: { finanzen: boolean; chatbot: boolean; name: string }): Promise<HaileyDaten> {
+export async function ladeHailey(opts: { finanzen: boolean; chatbot: boolean; name: string; userId: string }): Promise<HaileyDaten> {
   const sicher = async <T,>(p: Promise<T>) => { try { return await p; } catch { return null; } };
-  const [routinen, bericht, umsatz, chats] = await Promise.all([
+  const [routinen, bericht, umsatz, chats, wahl] = await Promise.all([
     sicher(ladeRoutinen()),
     opts.finanzen ? sicher(ladeBericht()) : null,
     opts.finanzen ? sicher(ladeUmsatz()) : null,
     opts.chatbot ? sicher(ladeChats()) : null,
+    sicher(Promise.resolve(createServiceClient().from("cockpit_layout").select("maskottchen").eq("user_id", opts.userId).maybeSingle()).then((r) => (r.data?.maskottchen as string | null) ?? null)),
   ]);
   const h = berlinStunde();
   const saetze: string[] = [];
@@ -36,7 +37,7 @@ export async function ladeHailey(opts: { finanzen: boolean; chatbot: boolean; na
     if (r.status === "ueberfaellig") saetze.push(`„${r.titel}“ ist seit ${-(r.tageBis ?? 0)} Tagen überfällig. Magst du das heute erledigen?`);
   }
   const hoch = bericht?.bericht?.punkte.filter((p) => p.schwere === "hoch").length ?? 0;
-  if (hoch) saetze.push(`Im Gewitter-Fenster stehen ${hoch} ernste Punkte. Ich halte schon mal den Schirm. ☂️`);
+  if (hoch) saetze.push(`Im Gewitter-Fenster stehen ${hoch} ernste Punkte – ich halte den Schirm, du schaffst das! ☂️`);
   const tv = umsatz?.tageVergleich;
   let plus: number | null = null;
   if (tv && tv.letztes > 0) {
@@ -47,7 +48,7 @@ export async function ladeHailey(opts: { finanzen: boolean; chatbot: boolean; na
   const tag = Math.floor(Date.now() / 86_400_000);
   saetze.push(SPRUECHE[tag % SPRUECHE.length]);
   const stimmung: HaileyStimmung = hoch >= 3 ? "sturm" : plus != null && plus >= 0 ? "froh" : "normal";
-  return { stimmung, saetze };
+  return { stimmung, saetze, maskottchen: wahl ?? "hailey" };
 }
 
 // ── Pflanze ─────────────────────────────────────────────────────────────────

@@ -227,3 +227,16 @@ export async function bildLoeschen(id: string): Promise<Ergebnis> {
   revalidatePath("/start");
   return { ok: true };
 }
+
+/** Gewähltes Maskottchen speichern (eigene Spalte, die Anordnung bleibt unberührt). */
+export async function maskottchenSetzen(id: string): Promise<Ergebnis> {
+  const profile = await team();
+  if (!profile) return { ok: false, error: "Kein Zugriff" };
+  if (!["hailey", "max", "fuchs", "biber", "faultier"].includes(id)) return { ok: false, error: "Unbekannt" };
+  const sb = createServiceClient();
+  const { data } = await sb.from("cockpit_layout").select("user_id").eq("user_id", profile.id).maybeSingle();
+  const { error } = data
+    ? await sb.from("cockpit_layout").update({ maskottchen: id }).eq("user_id", profile.id)
+    : await sb.from("cockpit_layout").insert({ user_id: profile.id, layout: {}, maskottchen: id });
+  return error ? { ok: false, error: error.message } : { ok: true };
+}

@@ -110,7 +110,7 @@
 .ck-icon-knopf.ck-rot:hover { color: var(--ck-alarm); background: rgba(238, 63, 111, 0.1); }
 
 /* ── Raster + Panels ───────────────────────────────────── */
-.ck-raster { position: relative; padding: 4px 8px 40px; }
+.ck-raster { position: relative; padding: 4px 8px 150px; }
 
 /* Adern: Lichtpulse in den Spalten zwischen den Fenstern */
 .ck-adern { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
@@ -1112,3 +1112,37 @@ a.ck-signal:hover { border-color: var(--s); }
 @media (prefers-reduced-motion: reduce) {
   .hl-figur, .hl-augen, .hl-haare, .hl-straehne, .hl-hand, .hl-tropfen, .pf-pflanze, .pf-blatt, .pf-bluete, .wt-sonne, .wt-sterne, .wt-regen, .wt-schnee { animation: none !important; }
 }
+
+/* Maskottchen-Auswahl */
+.hl-wahl { display: flex; gap: 4px; justify-content: center; margin-top: 2px; min-height: 30px; opacity: 0; transition: opacity 0.2s; }
+.hl:hover .hl-wahl, .hl-wahl[data-offen="true"] { opacity: 1; }
+.hl-wechseln { display: inline-flex; align-items: center; gap: 5px; border: 0; background: #fff; color: var(--ck-dim); font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; cursor: pointer; box-shadow: 0 4px 10px -6px rgba(60, 40, 120, 0.4); }
+.hl-wahl-knopf { width: 38px; height: 38px; border-radius: 50%; border: 2px solid transparent; background: #fff; padding: 0; cursor: pointer; overflow: hidden; box-shadow: 0 4px 10px -6px rgba(60, 40, 120, 0.4); transition: transform 0.15s; }
+.hl-wahl-knopf:hover { transform: translateY(-2px); }
+.hl-wahl-knopf[data-an="true"] { border-color: var(--ck-akzent); }
+.hl-mini { display: block; width: 100%; height: 100%; }
+.hl-mini svg { width: 64px; height: 68px; margin: -12px 0 0 -13px; }
+
+/* ── Fenster entfernen + Plus auf freien Stellen ────────────────────────── */
+.ck-entfernen { opacity: 0; transition: opacity 0.15s; }
+.ck-panel:hover .ck-entfernen, .ck[data-anpassen="true"] .ck-entfernen { opacity: 1; }
+.ck-raster { min-height: 200px; }
+.ck-plus-ebene { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.ck-plus-feld { position: absolute; display: grid; place-items: center; border-radius: 18px; border: 2px dashed transparent; transition: border-color 0.2s, background 0.2s; }
+.ck-plus-feld:hover, .ck-plus-feld[data-offen="true"] { border-color: rgba(124, 92, 255, 0.35); background: rgba(124, 92, 255, 0.04); }
+.ck-plus-knopf {
+  pointer-events: auto; width: 40px; height: 40px; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer;
+  background: #fff; color: var(--ck-akzent); box-shadow: 0 6px 16px -8px rgba(60, 40, 120, 0.55); opacity: 0.18; transition: opacity 0.2s, transform 0.2s;
+}
+.ck-plus-feld:hover .ck-plus-knopf, .ck-plus-feld[data-offen="true"] .ck-plus-knopf { opacity: 1; transform: scale(1.06); }
+.ck-plus-feld { pointer-events: auto; }
+.ck-plus-wahl {
+  position: absolute; top: calc(50% + 26px); left: 50%; transform: translateX(-50%); z-index: 50; width: 270px; max-height: 320px; overflow-y: auto;
+  background: #fff; border-radius: 14px; padding: 6px; box-shadow: 0 20px 44px -16px rgba(60, 40, 120, 0.5); border: 1px solid var(--ck-linie);
+  animation: ck-rein 0.18s ease both;
+}
+.ck-plus-wahl-kopf { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ck-matt); padding: 4px 8px 6px; }
+.ck-plus-wahl button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 7px 8px; border-radius: 9px; cursor: pointer; }
+.ck-plus-wahl button:hover { background: var(--ck-panel-2); }
+.ck-plus-wahl b { display: block; font-size: 13px; color: var(--ck-text); }
+.ck-plus-wahl span { display: block; font-size: 11.5px; color: var(--ck-matt); }

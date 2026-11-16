@@ -806,7 +806,11 @@ export async function ladeLayout(userId: string): Promise<CockpitLayout | null> 
   const { data } = await createServiceClient().from("cockpit_layout").select("layout").eq("user_id", userId).maybeSingle();
   const l = data?.layout as Partial<CockpitLayout> | null | undefined;
   if (!l || !Array.isArray(l.items)) return null;
-  return { items: l.items, aus: Array.isArray(l.aus) ? l.aus : [], adern: l.adern !== false, abstand: typeof l.abstand === "number" ? Math.max(4, Math.min(32, Math.round(l.abstand))) : 12 };
+  return {
+    items: l.items, aus: Array.isArray(l.aus) ? l.aus : [], adern: l.adern !== false,
+    abstand: typeof l.abstand === "number" ? Math.max(4, Math.min(32, Math.round(l.abstand))) : 12,
+    stil: l.stil === "glas" || l.stil === "aurora" ? l.stil : "standard",
+  };
 }
 
 // ── Lagebild: wo läuft es, wo hakt es ───────────────────────────────────────

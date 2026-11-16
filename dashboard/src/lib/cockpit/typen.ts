@@ -366,7 +366,7 @@ export const WIDGETS = [
   { id: "werbung", name: "Werbung", info: "Laufende Anzeigen bei Meta & Google, Kosten", feature: "finances" },
   { id: "newsletter", name: "Newsletter", info: "Der Hairvenly Kurier: Abonnenten, neue, Abmeldungen", feature: "admin" },
   { id: "routinen", name: "Routinen", info: "Was regelmäßig dran ist: Bestellungen, Nachschub …", feature: null },
-  { id: "hailey", name: "Hailey", info: "Die kleine Figur mit Tipps und Sprüchen", feature: null },
+  { id: "hailey", name: "Maskottchen", info: "Hailey, Max, Fuchs, Biber oder Faultier – mit Tipps und Sprüchen", feature: null },
   { id: "pflanze", name: "Umsatz-Pflanze", info: "Wächst, wenn der Monat besser läuft als im Vorjahr", feature: "finances" },
   { id: "polaroid", name: "Polaroids", info: "Eure Fotos als Stapel", feature: null },
   { id: "wetter", name: "Wetter & Tag", info: "Bremen heute, rund", feature: null },

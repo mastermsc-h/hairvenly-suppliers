@@ -5,18 +5,22 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Caveat } from "next/font/google";
-import { ImagePlus, Trash2 } from "lucide-react";
-import { bildHochladen, bildLoeschen } from "@/lib/actions/cockpit";
+import { ImagePlus, Shuffle, Trash2 } from "lucide-react";
+import { bildHochladen, bildLoeschen, maskottchenSetzen } from "@/lib/actions/cockpit";
+import { Figur, MASKOTTCHEN, type MaskottchenId } from "./maskottchen";
 import { resizeImage } from "@/lib/image-resize";
 import type { HaileyDaten, PflanzeDaten, Polaroid, WetterDaten } from "@/lib/cockpit/deko";
 
 const handschrift = Caveat({ subsets: ["latin"], weight: ["500", "700"], display: "swap" });
 
-// ── Hailey ──────────────────────────────────────────────────────────────────
+// ── Maskottchen (Hailey, Max, Fuchs, Biber, Faultier) ───────────────────────
 
 export function HaileyWidget({ d }: { d: HaileyDaten }) {
+  const router = useRouter();
   const [i, setI] = useState(0);
   const [neu, setNeu] = useState(0); // löst die Einblend-Animation der Sprechblase neu aus
+  const [figur, setFigur] = useState<MaskottchenId>((MASKOTTCHEN.some((m) => m.id === d.maskottchen) ? d.maskottchen : "hailey") as MaskottchenId);
+  const [waehlen, setWaehlen] = useState(false);
   // alle 12 Sekunden der nächste Satz
   useEffect(() => {
     if (d.saetze.length < 2) return;
@@ -24,62 +28,26 @@ export function HaileyWidget({ d }: { d: HaileyDaten }) {
     return () => clearInterval(t);
   }, [d.saetze.length]);
   const weiter = () => { setI((x) => (x + 1) % d.saetze.length); setNeu((n) => n + 1); };
-  const s = d.stimmung;
+  const aendern = (m: MaskottchenId) => {
+    setFigur(m);
+    setWaehlen(false);
+    maskottchenSetzen(m).then(() => router.refresh());
+  };
   return (
-    <div className="hl" data-stimmung={s}>
+    <div className="hl" data-stimmung={d.stimmung}>
       <button type="button" key={neu} className="hl-blase" onClick={weiter} title="Nächster Satz">{d.saetze[i]}</button>
-      <button type="button" className="hl-figur" onClick={weiter} aria-label="Hailey – nächster Satz">
-        <svg viewBox="0 0 160 170" width="150" height="160" aria-hidden>
-          <defs>
-            <linearGradient id="hl-haar" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="#5b3a2a" />
-              <stop offset="0.55" stopColor="#9a6a43" />
-              <stop offset="1" stopColor="#e6c38f" />
-            </linearGradient>
-            <linearGradient id="hl-shirt" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stopColor="#7c5cff" /><stop offset="1" stopColor="#ff6fae" />
-            </linearGradient>
-          </defs>
-          {/* Schirm bei Sturm */}
-          {s === "sturm" && (
-            <g className="hl-schirm">
-              <path d="M18 52 Q80 -6 142 52 Q126 44 111 52 Q96 44 80 52 Q64 44 49 52 Q34 44 18 52 Z" fill="#7c5cff" />
-              <path d="M80 50 V96" stroke="#3b3355" strokeWidth="3" strokeLinecap="round" />
-              {[30, 58, 104, 132].map((x, k) => <line key={k} className="hl-tropfen" x1={x} y1={60} x2={x - 3} y2={70} stroke="#7cc8ff" strokeWidth="2" strokeLinecap="round" style={{ animationDelay: `${k * 0.3}s` }} />)}
-            </g>
-          )}
-          {/* Haare hinten (schwingen leicht) */}
-          <path className="hl-haare" d="M44 70 C38 40 56 22 80 22 C104 22 122 40 116 70 C122 100 126 128 116 150 L44 150 C34 128 38 100 44 70 Z" fill="url(#hl-haar)" />
-          {/* Körper */}
-          <path d="M42 170 C42 140 58 128 80 128 C102 128 118 140 118 170 Z" fill="url(#hl-shirt)" />
-          <rect x="72" y="112" width="16" height="20" rx="7" fill="#f2c9a8" />
-          {/* Kopf */}
-          <ellipse cx="80" cy="82" rx="27" ry="31" fill="#f6d2b4" />
-          {/* Pony */}
-          <path d="M53 76 C54 52 72 46 88 50 C100 53 108 62 108 76 C98 64 82 60 66 66 C60 68 56 72 53 76 Z" fill="#6b4530" />
-          {/* Augen (blinzeln) */}
-          <g className="hl-augen">
-            <ellipse cx="70" cy="86" rx="3.2" ry="4" fill="#2b2238" />
-            <ellipse cx="90" cy="86" rx="3.2" ry="4" fill="#2b2238" />
-            <circle cx="71" cy="84.5" r="1" fill="#fff" /><circle cx="91" cy="84.5" r="1" fill="#fff" />
-          </g>
-          {/* Wangen + Mund je Stimmung */}
-          <circle cx="63" cy="96" r="4.5" fill="#ff8fa8" opacity="0.45" /><circle cx="97" cy="96" r="4.5" fill="#ff8fa8" opacity="0.45" />
-          {s === "froh" && <path d="M71 99 Q80 108 89 99" fill="none" stroke="#b23a5a" strokeWidth="2.6" strokeLinecap="round" />}
-          {s === "normal" && <path d="M73 101 Q80 105 87 101" fill="none" stroke="#b23a5a" strokeWidth="2.4" strokeLinecap="round" />}
-          {s === "sturm" && <path d="M73 104 Q80 99 87 104" fill="none" stroke="#b23a5a" strokeWidth="2.4" strokeLinecap="round" />}
-          {/* Haarsträhnen vorne über die Schultern */}
-          <path className="hl-straehne" d="M52 78 C46 104 50 126 44 148" fill="none" stroke="url(#hl-haar)" strokeWidth="9" strokeLinecap="round" />
-          <path className="hl-straehne hl-straehne-2" d="M108 78 C114 104 110 126 116 148" fill="none" stroke="url(#hl-haar)" strokeWidth="9" strokeLinecap="round" />
-          {/* winkende Hand, wenn es gut läuft */}
-          {s === "froh" && (
-            <g className="hl-hand">
-              <path d="M118 150 C128 136 132 122 134 110" fill="none" stroke="#f6d2b4" strokeWidth="9" strokeLinecap="round" />
-              <circle cx="135" cy="104" r="7.5" fill="#f6d2b4" />
-            </g>
-          )}
-        </svg>
+      <button type="button" className="hl-figur" onClick={weiter} aria-label={`${MASKOTTCHEN.find((m) => m.id === figur)?.name} – nächster Satz`}>
+        <Figur id={figur} stimmung={d.stimmung} />
       </button>
+      <div className="hl-wahl" data-offen={waehlen}>
+        {waehlen ? MASKOTTCHEN.map((m) => (
+          <button key={m.id} type="button" className="hl-wahl-knopf" data-an={m.id === figur} onClick={() => aendern(m.id)} title={m.name}>
+            <span className="hl-mini"><Figur id={m.id} stimmung="normal" /></span>
+          </button>
+        )) : (
+          <button type="button" className="hl-wechseln" onClick={() => setWaehlen(true)} title="Anderes Maskottchen wählen"><Shuffle size={13} /> wechseln</button>
+        )}
+      </div>
     </div>
   );
 }
