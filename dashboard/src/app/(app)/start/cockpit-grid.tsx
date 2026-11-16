@@ -49,6 +49,7 @@ const ueberlappt = (a: Geo, b: Geo) => a.x < b.x + b.w && a.x + a.w > b.x && a.y
  *  - Beim Ziehen verdrängt das Fenster ein anderes nur, wenn seine Oberkante über dessen
  *    Oberkante hinaus gezogen wird („überholt“). Ragt es nur von unten hinein, dockt es direkt
  *    unter dem anderen an – sonst flöge das obere Fenster samt allem darunter weit nach unten.
+ *  - Nach oben ziehen / kürzer machen: alles, was darunter lag, kommt um dieselbe Strecke mit.
  *  - Ohne Geste (Laden, Hinzufügen) werden vorhandene Überlappungen genauso aufgelöst.
  */
 function freiAufloesen(layout: Layout, aktiv: Aktiv): Layout {
@@ -56,8 +57,7 @@ function freiAufloesen(layout: Layout, aktiv: Aktiv): Layout {
     const s = aktiv && it.i !== aktiv.id ? aktiv.start.get(it.i) : undefined;
     return { ...it, ...(s ?? {}), y: Math.max(0, s?.y ?? it.y), moved: false };
   });
-  const fest = aktiv ? neu.filter((it) => it.i === aktiv.id) : [];
-  const a = fest[0];
+  const a = aktiv ? neu.find((it) => it.i === aktiv.id) : undefined;
   if (a && aktiv?.art === "zug") {
     const andere = neu.filter((it) => it !== a);
     for (let k = 0; k < 200; k++) {
@@ -66,9 +66,25 @@ function freiAufloesen(layout: Layout, aktiv: Aktiv): Layout {
       a.y = Math.max(...drueber.map((o) => o.y + o.h));
     }
   }
-  const rest = neu.filter((it) => !fest.includes(it)).sort((a, b) => a.y - b.y || a.x - b.x);
-  const platziert: Geo[] = [...fest];
-  for (const it of rest) {
+  // Mitziehen: wird das Fenster nach oben gezogen (oder kürzer gemacht), kommen alle Fenster,
+  // die komplett darunter lagen, um dieselbe Strecke mit hoch – kein einzelnes Nachschieben.
+  const alt = a && aktiv ? aktiv.start.get(a.i) : undefined;
+  const hoch = a && alt ? (aktiv?.art === "zug" ? alt.y - a.y : alt.y + alt.h - (a.y + a.h)) : 0;
+  const folger = new Set<LayoutItem>();
+  if (a && alt && hoch > 0) {
+    for (const it of neu) {
+      if (it === a || it.y < alt.y + alt.h) continue;
+      it.y = Math.max(0, it.y - hoch);
+      folger.add(it);
+    }
+  }
+  const nachY = (p: LayoutItem, q: LayoutItem) => p.y - q.y || p.x - q.x;
+  // Reihenfolge: aktives Fenster fest, dann die stehenbleibenden, zuletzt die mitgezogenen –
+  // so schieben die mitgezogenen nie ein stehendes Fenster weg, sondern docken darunter an.
+  const stehend = neu.filter((it) => it !== a && !folger.has(it)).sort(nachY);
+  const mit = [...folger].sort(nachY);
+  const platziert: Geo[] = a ? [a] : [];
+  for (const it of [...stehend, ...mit]) {
     for (let k = 0; k < 500; k++) {
       const stoss = platziert.filter((p) => ueberlappt(p, it));
       if (!stoss.length) break;
