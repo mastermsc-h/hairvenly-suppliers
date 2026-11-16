@@ -25,6 +25,14 @@ function fmtDate(iso: string | null) {
   return `${d}.${m}.${y}`;
 }
 
+/** Sortierschlüssel für Zeiträume: "2026-07" bleibt, "Q3 2026" → "2026-09", Jahr "2026" → "2026-12". */
+function zeitKey(z: string) {
+  const q = z.match(/^Q([1-4])\s*(\d{4})$/);
+  if (q) return `${q[2]}-${String(Number(q[1]) * 3).padStart(2, "0")}`;
+  if (/^\d{4}$/.test(z)) return `${z}-12`;
+  return z;
+}
+
 const ART_ORDER: SteuerArt[] = [
   "ust_va", "eust", "lst_anmeldung", "est_vz", "gewst_vz",
   "ust_nachzahlung", "est_nachzahlung", "gewst_nachzahlung", "sonstige",
@@ -101,7 +109,7 @@ export default function SteuerLedger({
   // Group by art in fixed order
   const groups = useMemo(() => {
     return ART_ORDER
-      .map((art) => ({ art, rows: posten.filter((p) => p.art === art) }))
+      .map((art) => ({ art, rows: posten.filter((p) => p.art === art).sort((x, y) => zeitKey(x.zeitraum).localeCompare(zeitKey(y.zeitraum)) || (x.faellig_am ?? "9999").localeCompare(y.faellig_am ?? "9999")) }))
       .filter((g) => g.rows.length > 0);
   }, [posten]);
 
