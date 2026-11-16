@@ -938,7 +938,7 @@ export function TotesKapitalWidget({ d }: { d: TotesKapitalDaten }) {
   const max = Math.max(...d.kollektionen.map((k) => k.wertEur), 1);
   const arten = [
     { label: "Tot", info: "kein Verkauf in 90 Tagen", t: d.tot, farbe: "#c2576b" },
-    { label: "Fast tot", info: "Lager reicht über 12 Monate", t: d.fastTot, farbe: "#d99a3c" },
+    { label: "Fast tot", info: `Lager reicht über ${d.fastTotAbMonate} Monate`, t: d.fastTot, farbe: "#d99a3c" },
   ];
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 10, position: "relative" }}>

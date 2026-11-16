@@ -6,9 +6,10 @@ import { Search, Skull, TrendingDown, PackageX, Truck, Info } from "lucide-react
 import type { ClientOrderMeta } from "@/lib/order-name-map";
 import type { DeadStockItem, RecentlyAvailableItem } from "@/lib/stock-deadstock";
 import SyncBadge from "../sync-badge";
+import { FAST_TOT_MONATE_OPTIONEN, FAST_TOT_STANDARD_MONATE } from "@/lib/deadstock-grenze";
 
 type Kind = "all" | "tot" | "fasttot" | "ordered";
-const MONTH_OPTIONS = [12, 18, 24] as const;
+const MONTH_OPTIONS = FAST_TOT_MONATE_OPTIONEN;
 
 interface Props {
   items: DeadStockItem[];
@@ -27,7 +28,7 @@ const eurSum = (arr: { valueEur: number | null }[]) => arr.reduce((s, d) => s + 
 const orderedEur = (d: DeadStockItem) => (d.valueEur !== null && d.lagerG > 0 ? (d.valueEur / d.lagerG) * d.unterwegsG : 0);
 
 export default function DeadStockClient({ items, recentlyAvailable, tooNew, noData, totalLagerKg, lastUpdated, orderIdByName }: Props) {
-  const [minMonths, setMinMonths] = useState<(typeof MONTH_OPTIONS)[number]>(24);
+  const [minMonths, setMinMonths] = useState<(typeof MONTH_OPTIONS)[number]>(FAST_TOT_STANDARD_MONATE);
   const [kind, setKind] = useState<Kind>("all");
   const [collection, setCollection] = useState<string | null>(null);
   const [query, setQuery] = useState("");

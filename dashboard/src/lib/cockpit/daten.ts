@@ -8,6 +8,7 @@ import { plusTage, zahlGruppe } from "@/lib/liquiditaet/rechnung";
 import { shopifyGraphQL } from "@/lib/shopify";
 import { holeShopifyUmsatzMonat } from "@/lib/shopify-umsatz";
 import { loadDeadStock } from "@/lib/stock-deadstock";
+import { FAST_TOT_STANDARD_MONATE } from "@/lib/deadstock-grenze";
 import { holeFollowerLive, type InstagramTag } from "@/lib/instagram-statistik";
 import { ladeWerbeteil } from "@/lib/marketing-extern";
 import type {
@@ -409,7 +410,10 @@ export const ladeAusland = cache(async (): Promise<AuslandDaten> => {
 // ── Totes Kapital (Ladenhüter) — dieselbe Berechnung wie /stock/deadstock ───
 
 export const ladeTotesKapital = cache(async (): Promise<TotesKapitalDaten> => {
-  const { items, totalLagerKg } = await loadDeadStock();
+  const alle = await loadDeadStock();
+  const { totalLagerKg } = alle;
+  // Gleiche Grenze wie die Seite /stock/deadstock: "fast tot" erst ab dieser Reichweite
+  const items = alle.items.filter((d) => d.deadKind === "tot" || (d.monthsCover ?? 0) > FAST_TOT_STANDARD_MONATE);
   const teil = (l: typeof items) => ({
     wertEur: r0(l.reduce((s, d) => s + (d.valueEur ?? 0), 0)),
     kg: Math.round(l.reduce((s, d) => s + d.lagerG, 0) / 100) / 10,
@@ -421,6 +425,7 @@ export const ladeTotesKapital = cache(async (): Promise<TotesKapitalDaten> => {
   return {
     ...gesamt,
     anteilLager: totalLagerKg > 0 ? Math.round((gesamt.kg / totalLagerKg) * 1000) / 10 : 0,
+    fastTotAbMonate: FAST_TOT_STANDARD_MONATE,
     tot: teil(items.filter((d) => d.deadKind === "tot")),
     fastTot: teil(items.filter((d) => d.deadKind === "fasttot")),
     ohnePreis: items.filter((d) => d.valueEur === null).length,

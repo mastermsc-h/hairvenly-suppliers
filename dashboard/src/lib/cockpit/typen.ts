@@ -137,6 +137,8 @@ export interface TotesKapitalDaten {
   anzahl: number;
   /** Anteil am bewerteten Lager (kg, %). */
   anteilLager: number;
+  /** "Fast tot" zählt ab dieser Reichweite in Monaten (wie die Ladenhüter-Seite). */
+  fastTotAbMonate: number;
   tot: { wertEur: number; kg: number; anzahl: number };
   fastTot: { wertEur: number; kg: number; anzahl: number };
   /** Produkte ohne Shopify-Preis — im Wert nicht enthalten. */
