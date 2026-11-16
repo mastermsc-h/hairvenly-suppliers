@@ -181,16 +181,13 @@ function MarketingZahlen({ m, vorschau }: { m: MktDaten; vorschau: Record<string
                   <li key={k.kampagne} className="py-2 flex items-center gap-3">
                     <VorschauKachel bild={v?.bild ?? null} link={v?.link ?? null} manager={v?.manager ?? null} typ={v?.typ ?? null} titel={titel} />
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm text-neutral-900 truncate" title={k.kampagne}>{titel}</div>
-                      <div className="text-xs text-neutral-500">
-                        {/^Instagram-Beitrag:/i.test(k.kampagne) ? "Beworbener Beitrag" : "Kampagne"}
+                      <div className="text-sm leading-snug text-neutral-900 line-clamp-2 break-words" title={k.kampagne}>{titel}</div>
+                      <div className="mt-0.5 text-xs text-neutral-500">
+                        {num(k.klicks)} Klicks · {num(k.reichweite)} erreicht
                         {v && v.anzeigen > 1 ? ` · ${v.anzeigen} Anzeigen` : ""}
                       </div>
                     </div>
-                    <div className="text-right text-sm tabular-nums whitespace-nowrap">
-                      <div className="font-medium">{eur2(k.kosten)}</div>
-                      <div className="text-xs text-neutral-500">{num(k.klicks)} Klicks · {num(k.reichweite)} erreicht</div>
-                    </div>
+                    <div className="text-right text-sm font-medium tabular-nums whitespace-nowrap">{eur2(k.kosten)}</div>
                   </li>
                 );
               })}
