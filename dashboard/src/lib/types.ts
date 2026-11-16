@@ -722,6 +722,18 @@ export interface FinanzInput {
   gewstFreibetrag: number;
   /** true = Shop-Umsatz von Hand eingetragen; sonst kommt er aus shopify_umsatz_monat */
   shopManuell?: boolean;
+  /** true = Salon-Umsatz von Hand eingetragen; sonst Eingänge auf dem Treatwell-Konto */
+  salonManuell?: boolean;
+}
+
+/** Salon-Umsatz eines Monats = Eingänge auf dem Treatwell-Konto (Sparkasse …6001). */
+export interface SalonUmsatzMonat {
+  monat: string; // YYYY-MM
+  brutto: number;
+  karte: number; // Nexi-Kartenzahlungen
+  online: number; // Treatwell/Planity über Stripe
+  bar: number; // Bareinzahlungen
+  sonstige: number;
 }
 
 /** Shopify-Umsatz eines Kalendermonats (deutsche Zeit), aus shopify_umsatz_monat. */

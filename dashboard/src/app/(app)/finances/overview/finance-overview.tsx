@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { t, type Locale } from "@/lib/i18n";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, Pencil, Plus, RefreshCw, Trash2, Users } from "lucide-react";
-import type { FinanzInput, FinanzMitarbeiter, FinanzMonatsdaten, ShopifyUmsatzMonat, SteuerArt, SteuerPosten } from "@/lib/types";
-import { aktualisiereShopifyUmsatz, fetchFinanzJahr, fetchShopifyUmsatzJahr, saveFinanzMonat } from "@/lib/actions/finanzen";
+import type { FinanzInput, FinanzMitarbeiter, FinanzMonatsdaten, SalonUmsatzMonat, ShopifyUmsatzMonat, SteuerArt, SteuerPosten } from "@/lib/types";
+import { aktualisiereShopifyUmsatz, fetchFinanzJahr, fetchSalonUmsatzJahr, fetchShopifyUmsatzJahr, saveFinanzMonat } from "@/lib/actions/finanzen";
 import { fetchSteuerPosten, upsertSteuerIst } from "@/lib/actions/steuer";
 
 // Gespeichert wird Netto; eingegeben wird (wie im Sheet) der Brutto-Rechnungsbetrag.
@@ -206,10 +206,11 @@ type Props = {
   initialRows: FinanzMonatsdaten[];
   initialSteuerPosten: SteuerPosten[];
   initialShopify: ShopifyUmsatzMonat[];
+  initialSalon: SalonUmsatzMonat[];
   staffEmployees: FinanzMitarbeiter[];
 };
 
-export default function FinanceOverview({ locale, initialJahr, initialMonat, initialRows, initialSteuerPosten, initialShopify, staffEmployees }: Props) {
+export default function FinanceOverview({ locale, initialJahr, initialMonat, initialRows, initialSteuerPosten, initialShopify, initialSalon, staffEmployees }: Props) {
   const [jahr, setJahr] = useState(initialJahr);
   const [monat, setMonat] = useState(initialMonat);
   const [view, setView] = useState<"month" | "year">("month");
@@ -223,6 +224,10 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
   // Shop-Umsatz je Monat direkt aus Shopify (Schlüssel YYYY-MM)
   const [shopify, setShopify] = useState<Record<string, ShopifyUmsatzMonat>>(() =>
     Object.fromEntries(initialShopify.map((u) => [u.monat, u]))
+  );
+  // Salon-Umsatz je Monat aus dem Treatwell-Konto (Schlüssel YYYY-MM)
+  const [salon, setSalon] = useState<Record<string, SalonUmsatzMonat>>(() =>
+    Object.fromEntries(initialSalon.map((u) => [u.monat, u]))
   );
   const [shopifyLaedt, setShopifyLaedt] = useState(false);
   const [shopifyFehler, setShopifyFehler] = useState<string | null>(null);
@@ -246,12 +251,14 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
     setJahr(next);
     if (!loadedYears.includes(next)) {
       startYearLoad(async () => {
-        const [rows, posten, umsatz] = await Promise.all([
+        const [rows, posten, umsatz, salonJahr] = await Promise.all([
           fetchFinanzJahr(next),
           fetchSteuerPosten(next),
           fetchShopifyUmsatzJahr(next),
+          fetchSalonUmsatzJahr(next),
         ]);
         setShopify((prev) => ({ ...prev, ...Object.fromEntries(umsatz.map((u) => [u.monat, u])) }));
+        setSalon((prev) => ({ ...prev, ...Object.fromEntries(salonJahr.map((u) => [u.monat, u])) }));
         setSaved((prev) => ({
           ...prev,
           ...Object.fromEntries(rows.map((r) => [keyOf(r.jahr, r.monat), r.daten])),
@@ -262,11 +269,16 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
     }
   }
 
-  // Shop-Umsatz kommt aus Shopify (nach Erstattungen), außer er wurde bewusst von Hand eingetragen
+  // Shop-Umsatz kommt aus Shopify (nach Erstattungen), Salon-Umsatz aus dem Treatwell-Konto —
+  // außer er wurde bewusst von Hand eingetragen
   function mitShopify<T extends FinanzInput | null>(j: number, m: number, input: T): T {
+    if (!input) return input;
     const u = shopify[ymOf(j, m)];
-    if (!input || input.shopManuell || !u) return input;
-    return { ...input, shopBrutto: u.netto };
+    const sa = salon[ymOf(j, m)];
+    let out = input;
+    if (!input.shopManuell && u) out = { ...out, shopBrutto: u.netto };
+    if (!input.salonManuell && sa) out = { ...out, salonBrutto: sa.brutto };
+    return out;
   }
 
   // Effektive Eingaben eines Monats: lokale Edits > gespeichert > nichts
@@ -289,6 +301,8 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
   const current: FinanzInput = mitShopify(jahr, monat, edits[k] ?? saved[k] ?? prefillFor(jahr, monat));
   const shopifyMonat = shopify[ymOf(jahr, monat)] ?? null;
   const shopAusShopify = !!shopifyMonat && !current.shopManuell;
+  const salonMonat = salon[ymOf(jahr, monat)] ?? null;
+  const salonAusKonto = !!salonMonat && !current.salonManuell;
   const isPrefilled = !isSaved && !isEdited;
 
   const c = useMemo(() => compute(current), [current]);
@@ -498,11 +512,33 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
                 <tr className="border-b border-neutral-100">
                   <td className="py-1.5 text-neutral-700">{t(locale, "finance.revenue.salon")}</td>
                   <td className="py-1.5 text-right">
-                    <NumField value={current.salonBrutto} onCommit={(v) => update({ salonBrutto: v })} className={`${inputCls} w-28`} />
+                    {salonAusKonto ? (
+                      <span
+                        className="inline-block w-28 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-sm text-right tabular-nums text-emerald-900"
+                        title="Automatisch aus dem Treatwell-Konto (alle Salon-Eingänge)"
+                      >
+                        {current.salonBrutto.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    ) : (
+                      <NumField value={current.salonBrutto} onCommit={(v) => update({ salonBrutto: v })} className={`${inputCls} w-28`} />
+                    )}
                   </td>
                   <td className="py-1.5 text-right tabular-nums">{fmt(c.salonNetto)}</td>
                   <td className="py-1.5 text-right tabular-nums">{fmt(c.salonUst)}</td>
                 </tr>
+                {salonMonat && (
+                  <tr className="border-b border-neutral-100">
+                    <td colSpan={4} className="pb-2">
+                      <SalonHinweis
+                        umsatz={salonMonat}
+                        aktiv={salonAusKonto}
+                        laufend={ymOf(jahr, monat) === ymOf(new Date().getFullYear(), new Date().getMonth() + 1)}
+                        onManuell={() => update({ salonManuell: true })}
+                        onKonto={() => update({ salonManuell: false, salonBrutto: salonMonat.brutto })}
+                      />
+                    </td>
+                  </tr>
+                )}
                 <tr className={shopifyMonat ? "" : "border-b border-neutral-100"}>
                   <td className="py-1.5 text-neutral-700">{t(locale, "finance.revenue.shop")}</td>
                   <td className="py-1.5 text-right">
@@ -1721,6 +1757,51 @@ function KpiCard({ label, value, desc }: { label: string; value: string; desc: s
 }
 
 // Herkunft des Shop-Umsatzes: aus Shopify (Standard) oder von Hand überschrieben
+function SalonHinweis({
+  umsatz,
+  aktiv,
+  laufend,
+  onManuell,
+  onKonto,
+}: {
+  umsatz: SalonUmsatzMonat;
+  aktiv: boolean;
+  laufend: boolean;
+  onManuell: () => void;
+  onKonto: () => void;
+}) {
+  const e = (n: number) => n.toLocaleString("de-DE", { maximumFractionDigits: 0 }) + " €";
+  const teile = [
+    { l: "Karte (Nexi)", w: umsatz.karte },
+    { l: "Treatwell online", w: umsatz.online },
+    { l: "Bareinzahlungen", w: umsatz.bar },
+    { l: "Sonstige", w: umsatz.sonstige },
+  ].filter((t) => Math.abs(t.w) >= 1);
+  return (
+    <div className={`rounded-lg px-3 py-2 text-xs ${aktiv ? "bg-emerald-50 text-emerald-900" : "bg-neutral-50 text-neutral-600"}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span>
+          {aktiv ? "Automatisch aus dem Treatwell-Konto" : "Von Hand eingetragen — Treatwell-Konto zeigt"}:{" "}
+          {teile.map((t, i) => (
+            <span key={t.l}>
+              {i > 0 && " + "}
+              {t.l} <b className="tabular-nums">{e(t.w)}</b>
+            </span>
+          ))}{" "}
+          = <b className="tabular-nums">{e(umsatz.brutto)}</b>
+          {laufend && " · Monat läuft noch"}
+        </span>
+        <button onClick={aktiv ? onManuell : onKonto} className="font-medium underline-offset-2 hover:underline">
+          {aktiv ? "Von Hand eintragen" : "Aus dem Konto übernehmen"}
+        </button>
+      </div>
+      <div className="mt-1 opacity-70">
+        Eingänge nach Buchungstag. Bargeld zählt nur, soweit es eingezahlt wurde; Kartenzahlungen kommen 1–2 Tage später aufs Konto.
+      </div>
+    </div>
+  );
+}
+
 function ShopifyHinweis({
   umsatz,
   aktiv,
