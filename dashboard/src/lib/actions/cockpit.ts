@@ -192,3 +192,38 @@ export async function routineProduktSuche(text: string): Promise<Array<{ handle:
   const { sucheProdukte } = await import("@/lib/cockpit/routinen");
   try { return await sucheProdukte(text); } catch { return []; }
 }
+
+// ── Polaroids (Bilder fürs Team) ────────────────────────────────────────────
+
+export async function bildHochladen(formData: FormData): Promise<Ergebnis> {
+  const profile = await team();
+  if (!profile) return { ok: false, error: "Kein Zugriff" };
+  const datei = formData.get("datei");
+  if (!(datei instanceof File) || !datei.size) return { ok: false, error: "Kein Bild" };
+  if (!/^image\/(jpeg|png|webp)$/.test(datei.type)) return { ok: false, error: "Nur JPG, PNG oder WebP" };
+  if (datei.size > 8 * 1024 * 1024) return { ok: false, error: "Bild zu groß (max. 8 MB)" };
+  const endung = datei.type === "image/png" ? "png" : datei.type === "image/webp" ? "webp" : "jpg";
+  const pfad = `${profile.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${endung}`;
+  const sb = createServiceClient();
+  const { error: e1 } = await sb.storage.from("cockpit-bilder").upload(pfad, datei, { contentType: datei.type });
+  if (e1) return { ok: false, error: e1.message };
+  const titel = String(formData.get("titel") ?? "").trim().slice(0, 60);
+  const { error: e2 } = await sb.from("cockpit_bilder").insert({ pfad, titel, owner_id: profile.id });
+  if (e2) return { ok: false, error: e2.message };
+  revalidatePath("/start");
+  return { ok: true };
+}
+
+export async function bildLoeschen(id: string): Promise<Ergebnis> {
+  const profile = await team();
+  if (!profile) return { ok: false, error: "Kein Zugriff" };
+  const sb = createServiceClient();
+  const { data } = await sb.from("cockpit_bilder").select("pfad, owner_id").eq("id", id).maybeSingle();
+  if (!data) return { ok: false, error: "Bild nicht gefunden" };
+  if (data.owner_id !== profile.id && profile.role !== "admin") return { ok: false, error: "Nur eigene Bilder" };
+  await sb.storage.from("cockpit-bilder").remove([data.pfad]);
+  const { error } = await sb.from("cockpit_bilder").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/start");
+  return { ok: true };
+}

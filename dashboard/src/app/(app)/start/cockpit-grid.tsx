@@ -6,7 +6,7 @@ import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "re
 import ReactGridLayout, { useContainerWidth, verticalCompactor, type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import {
-  Activity, BadgePercent, CheckSquare, Compass, Eye, EyeOff, Flag, Gauge, Globe2, Camera, Newspaper, Repeat, CloudLightning, Inbox, Target, Megaphone, PackageX, HeartPulse, Lightbulb, MessageSquare,
+  Activity, BadgePercent, CheckSquare, Compass, Eye, EyeOff, Flag, Gauge, Globe2, Camera, Newspaper, Repeat, Smile, Sprout, Images, CloudSun, CloudLightning, Inbox, Target, Megaphone, PackageX, HeartPulse, Lightbulb, MessageSquare,
   MousePointerClick, RotateCcw, Settings2, SlidersHorizontal, Zap, ShoppingBag, StickyNote, TrendingUp, Wallet, Waves, Check, GripVertical, BrainCircuit,
 } from "lucide-react";
 import { cockpitLayoutZuruecksetzen, speichereCockpitLayout } from "@/lib/actions/cockpit";
@@ -18,8 +18,11 @@ const ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   hi: BrainCircuit,
   lage: Activity, umsatz: TrendingUp, chats: MessageSquare, hy: HeartPulse, aufgaben: CheckSquare, pflichten: Wallet,
   shopify: ShoppingBag, besucher: MousePointerClick, notizen: StickyNote, ideen: Lightbulb, pfeiler: Gauge,
-  meilensteine: Flag, ausland: Globe2, toteskapital: PackageX, marketing: Megaphone, instagram: Camera, sturm: CloudLightning, newsletter: Newspaper, routinen: Repeat, iganfragen: Inbox, werbung: Target, aktionen: BadgePercent, philosophie: Compass, liquiditaet: Waves,
+  meilensteine: Flag, ausland: Globe2, toteskapital: PackageX, marketing: Megaphone, instagram: Camera, sturm: CloudLightning, newsletter: Newspaper, routinen: Repeat, hailey: Smile, pflanze: Sprout, polaroid: Images, wetter: CloudSun, iganfragen: Inbox, werbung: Target, aktionen: BadgePercent, philosophie: Compass, liquiditaet: Waves,
 };
+
+/** Fenster ohne sichtbaren Rahmen: die Form gibt der Inhalt (Figur, Pflanze, Fotos, Kreis, Zeitung). */
+const FREI = new Set(["hailey", "pflanze", "polaroid", "wetter"]);
 
 const SPALTEN = 12;
 const ZEILE = 28;
@@ -173,7 +176,7 @@ export default function CockpitGrid({
     if (!w) return null;
     const Icon = ICONS[id] ?? Activity;
     return (
-      <section className="ck-panel" data-w={id} style={{ ["--ck-i" as string]: i }} aria-label={w.name}>
+      <section className="ck-panel" data-w={id} data-frei={FREI.has(id)} style={{ ["--ck-i" as string]: i }} aria-label={w.name}>
         <header className={`ck-kopf ${schmal ? "" : "ck-griff"}`} title={schmal ? undefined : "Ziehen zum Verschieben"}>
           <span className="ck-abzeichen"><Icon size={15} /></span>
           <span className="ck-titel">{w.name}</span>

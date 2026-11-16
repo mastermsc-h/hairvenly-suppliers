@@ -10,6 +10,8 @@ import CockpitGrid from "./cockpit-grid";
 import SturmWidget from "./widget-sturm";
 import ZeitungWidget from "./widget-zeitung";
 import RoutinenWidget from "./widget-routinen";
+import { HaileyWidget, PflanzeWidget, PolaroidWidget, WetterWidget } from "./widgets-deko";
+import { ladeHailey, ladePflanze, ladePolaroids, ladeWetter } from "@/lib/cockpit/deko";
 import { ladeRoutinen } from "@/lib/cockpit/routinen";
 import { ladeNewsletter } from "@/lib/newsletter";
 import { ladeBericht } from "@/lib/cockpit/auffaelligkeiten";
@@ -64,6 +66,11 @@ export default async function StartPage() {
     philosophie: <PhilosophieWidget eintraege={eintraege} istAdmin={istAdmin} />,
   };
   if (istAdmin) inhalte.hi = <HiKugel />;
+  const anzeigeName = profile.display_name ?? profile.username ?? "du";
+  inhalte.hailey = warte(<Mit lade={() => ladeHailey({ finanzen, chatbot, name: anzeigeName })}>{(d) => <HaileyWidget d={d} />}</Mit>);
+  inhalte.polaroid = warte(<Mit lade={() => ladePolaroids(profile.id)}>{(d) => <PolaroidWidget bilder={d} />}</Mit>);
+  inhalte.wetter = warte(<Mit lade={ladeWetter}>{(d) => <WetterWidget d={d} />}</Mit>);
+  if (finanzen) inhalte.pflanze = warte(<Mit lade={ladePflanze}>{(d) => <PflanzeWidget d={d} />}</Mit>);
   inhalte.routinen = warte(<Mit lade={ladeRoutinen}>{(d) => <RoutinenWidget routinen={d} istAdmin={istAdmin} />}</Mit>);
   if (istAdmin) inhalte.newsletter = warte(<Mit lade={() => ladeNewsletter()}>{(d) => <ZeitungWidget d={d} />}</Mit>);
   if (chatbot) {

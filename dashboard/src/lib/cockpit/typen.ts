@@ -366,6 +366,10 @@ export const WIDGETS = [
   { id: "werbung", name: "Werbung", info: "Laufende Anzeigen bei Meta & Google, Kosten", feature: "finances" },
   { id: "newsletter", name: "Newsletter", info: "Der Hairvenly Kurier: Abonnenten, neue, Abmeldungen", feature: "admin" },
   { id: "routinen", name: "Routinen", info: "Was regelmäßig dran ist: Bestellungen, Nachschub …", feature: null },
+  { id: "hailey", name: "Hailey", info: "Die kleine Figur mit Tipps und Sprüchen", feature: null },
+  { id: "pflanze", name: "Umsatz-Pflanze", info: "Wächst, wenn der Monat besser läuft als im Vorjahr", feature: "finances" },
+  { id: "polaroid", name: "Polaroids", info: "Eure Fotos als Stapel", feature: null },
+  { id: "wetter", name: "Wetter & Tag", info: "Bremen heute, rund", feature: null },
   { id: "notizen", name: "Notizzettel", info: "Nur für dich", feature: null },
   { id: "ideen", name: "Ideen & Inspiration", info: "Sammelstelle fürs Team", feature: null },
   { id: "pfeiler", name: "Wachstumspfeiler", info: "Die großen Hebel des Unternehmens", feature: null },
@@ -405,6 +409,10 @@ export const STANDARD_LAYOUT: LayoutItem[] = [
   { i: "hi", x: 0, y: 63, w: 5, h: 11 },
   { i: "newsletter", x: 0, y: 98, w: 6, h: 13 },
   { i: "routinen", x: 6, y: 98, w: 6, h: 13 },
+  { i: "hailey", x: 0, y: 111, w: 3, h: 9 },
+  { i: "pflanze", x: 3, y: 111, w: 2, h: 9 },
+  { i: "polaroid", x: 5, y: 111, w: 4, h: 9 },
+  { i: "wetter", x: 9, y: 111, w: 3, h: 9 },
 ];
 
 export const MIN_GROESSE: Record<string, { w: number; h: number }> = {

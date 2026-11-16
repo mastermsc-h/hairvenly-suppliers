@@ -624,7 +624,7 @@ a.ck-signal:hover { border-color: var(--s); }
     #f5f2fc;
   background-attachment: fixed;
 }
-.ck[data-stil="glas"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]):not([data-w="newsletter"]) {
+.ck[data-stil="glas"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]):not([data-w="newsletter"]):not([data-frei="true"]) {
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.6));
   border: 1px solid rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(16px) saturate(1.15);
@@ -634,13 +634,13 @@ a.ck-signal:hover { border-color: var(--s); }
     inset 0 1px 0 #fff,
     0 18px 38px -26px rgba(60, 40, 120, 0.45);
 }
-.ck[data-stil="glas"] .ck-panel:not([data-w="hi"]):not([data-w="sturm"]):not([data-w="newsletter"])::before {
+.ck[data-stil="glas"] .ck-panel:not([data-w="hi"]):not([data-w="sturm"]):not([data-w="newsletter"]):not([data-frei="true"])::before {
   content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
   background: linear-gradient(115deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0) 28%);
 }
 
 /* Aurora: jedes Fenster leicht in seiner Farbe getönt, mit farbiger Lichtkante */
-.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]):not([data-w="newsletter"]) {
+.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]):not([data-w="newsletter"]):not([data-frei="true"]) {
   background:
     radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--w) 17%, transparent), transparent 60%),
     radial-gradient(100% 70% at 100% 100%, color-mix(in srgb, var(--w) 9%, transparent), transparent 60%),
@@ -648,7 +648,7 @@ a.ck-signal:hover { border-color: var(--s); }
   border: 1px solid color-mix(in srgb, var(--w) 26%, white);
   box-shadow: 0 1px 2px rgba(60, 40, 120, 0.05), 0 18px 40px -24px color-mix(in srgb, var(--w) 65%, transparent);
 }
-.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]):not([data-w="newsletter"])::before {
+.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]):not([data-w="newsletter"]):not([data-frei="true"])::before {
   content: ""; position: absolute; left: 18px; right: 18px; top: 0; height: 2px; border-radius: 2px; pointer-events: none;
   background: linear-gradient(90deg, transparent, var(--w), transparent);
   opacity: 0.85;
@@ -1013,3 +1013,102 @@ a.ck-signal:hover { border-color: var(--s); }
 .rt-treffer button span { margin-left: auto; color: var(--ck-matt); }
 .rt-fehler { color: var(--ck-alarm); font-size: 12px; }
 @media (prefers-reduced-motion: reduce) { .rt-zeiger, .rt-ring .rt-bogen { animation: none !important; } }
+
+
+/* ── Freie Fenster (Hailey, Pflanze, Polaroids, Wetter): kein Rahmen, Kopf nur beim Darüberfahren ── */
+.ck-panel[data-frei="true"] { background: transparent; border-color: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; overflow: visible; }
+.ck-panel[data-frei="true"]:hover { box-shadow: none; }
+.ck-panel[data-frei="true"] .ck-kopf { position: absolute; top: 0; left: 0; right: 0; z-index: 6; opacity: 0; transition: opacity 0.2s; }
+.ck-panel[data-frei="true"]:hover .ck-kopf, .ck[data-anpassen="true"] .ck-panel[data-frei="true"] .ck-kopf { opacity: 1; }
+.ck-panel[data-frei="true"] .ck-kopf .ck-titel, .ck-panel[data-frei="true"] .ck-abzeichen { display: none; }
+.ck-panel[data-frei="true"] .ck-inhalt { padding: 0; overflow: visible; display: flex; align-items: center; justify-content: center; }
+
+
+/* ── Hailey ─────────────────────────────────────────────────────────────── */
+.hl { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; width: 100%; }
+.hl-figur { border: 0; background: none; padding: 0; cursor: pointer; animation: hl-atmet 4s ease-in-out infinite; transform-origin: 50% 100%; filter: drop-shadow(0 10px 14px rgba(60, 40, 120, 0.25)); }
+.hl-figur:hover { animation-duration: 1.6s; }
+@keyframes hl-atmet { 50% { transform: translateY(-3px) scale(1.01); } }
+.hl-blase {
+  position: relative; max-width: 230px; margin-bottom: 8px; padding: 9px 13px; border: 0; cursor: pointer; text-align: left;
+  background: #fff; color: var(--ck-text); font: inherit; font-size: 12.5px; line-height: 1.4; border-radius: 16px 16px 16px 4px;
+  box-shadow: 0 10px 24px -12px rgba(60, 40, 120, 0.45), 0 0 0 1px rgba(96, 84, 150, 0.08);
+  animation: hl-blase 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.3) both;
+}
+.hl-blase::after { content: ""; position: absolute; left: 40%; bottom: -7px; width: 14px; height: 14px; background: #fff; transform: rotate(45deg); border-radius: 0 0 4px 0; box-shadow: 3px 3px 4px -2px rgba(60, 40, 120, 0.12); }
+@keyframes hl-blase { from { opacity: 0; transform: translateY(6px) scale(0.92); } to { opacity: 1; transform: none; } }
+.hl-augen { animation: hl-blinzeln 5s infinite; transform-origin: 80px 86px; }
+@keyframes hl-blinzeln { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.1); } }
+.hl-haare, .hl-straehne { animation: hl-haare 5s ease-in-out infinite alternate; transform-origin: 80px 40px; }
+.hl-straehne-2 { animation-delay: -2.5s; }
+@keyframes hl-haare { from { transform: rotate(-1.2deg); } to { transform: rotate(1.2deg); } }
+.hl-hand { animation: hl-winkt 1.4s ease-in-out infinite; transform-origin: 118px 150px; }
+@keyframes hl-winkt { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-14deg); } 75% { transform: rotate(10deg); } }
+.hl-tropfen { animation: hl-tropfen 1.1s linear infinite; }
+@keyframes hl-tropfen { from { transform: translateY(-6px); opacity: 0; } 30% { opacity: 1; } to { transform: translateY(26px); opacity: 0; } }
+
+/* ── Umsatz-Pflanze ─────────────────────────────────────────────────────── */
+.pf { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+.pf svg { overflow: visible; filter: drop-shadow(0 10px 12px rgba(60, 40, 120, 0.2)); }
+.pf-pflanze { animation: pf-wiegt 6s ease-in-out infinite alternate; }
+.pf[data-welk="true"] .pf-pflanze { animation-duration: 9s; }
+@keyframes pf-wiegt { from { transform: rotate(-2deg); } to { transform: rotate(2deg); } }
+.pf-blatt { animation: pf-blatt 4s ease-in-out infinite alternate; }
+@keyframes pf-blatt { to { transform: rotate(5deg); } }
+.pf-bluete { animation: pf-bluete 3s ease-in-out infinite alternate; }
+@keyframes pf-bluete { from { opacity: 0.85; } to { opacity: 1; filter: drop-shadow(0 0 6px #ff6fae); } }
+.pf-schild { margin-top: 4px; text-align: center; font-weight: 800; font-size: 18px; letter-spacing: -0.02em; color: #12a36a; line-height: 1.1; }
+.pf[data-welk="true"] .pf-schild { color: #b45309; }
+.pf-schild span { display: block; font-size: 10.5px; font-weight: 500; color: var(--ck-matt); letter-spacing: 0; }
+
+/* ── Polaroids ──────────────────────────────────────────────────────────── */
+.po { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+.po-stapel { position: relative; width: 190px; height: 220px; }
+.po-karte {
+  position: absolute; inset: 0; margin: 0; padding: 10px 10px 0; background: #fff; border: 0; border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 14px 26px -14px rgba(40, 30, 60, 0.55);
+  transform: rotate(var(--d)) translateY(calc(var(--e, 0) * 3px)); transition: transform 0.7s cubic-bezier(0.3, 0.7, 0.3, 1), opacity 0.7s;
+  display: flex; flex-direction: column;
+}
+.po-karte[data-oben="true"]:hover { transform: rotate(0deg) scale(1.03); }
+.po-karte[data-weg="true"] { transform: translate(120px, 10px) rotate(18deg); opacity: 0; }
+.po-foto { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; background: #eee9f8; border-radius: 1px; }
+.po-foto-leer { display: grid; place-items: center; color: var(--ck-matt); }
+.po-leer { cursor: pointer; }
+.po-text { display: block; text-align: center; font-size: 19px; line-height: 1.6; color: #3b3355; padding: 2px 4px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.po-loeschen { position: absolute; top: 14px; right: 14px; width: 26px; height: 26px; border-radius: 50%; border: 0; display: grid; place-items: center; background: rgba(255, 255, 255, 0.9); color: var(--ck-alarm); cursor: pointer; opacity: 0; transition: opacity 0.2s; }
+.po-karte:hover .po-loeschen { opacity: 1; }
+.po-plus { position: absolute; right: 6px; bottom: 6px; width: 32px; height: 32px; border-radius: 50%; border: 0; display: grid; place-items: center; background: #fff; color: var(--ck-akzent); box-shadow: 0 6px 14px -6px rgba(60, 40, 120, 0.5); cursor: pointer; opacity: 0; transition: opacity 0.2s; }
+.po:hover .po-plus { opacity: 1; }
+.po-fehler { position: absolute; bottom: 0; left: 0; right: 40px; font-size: 11.5px; color: var(--ck-alarm); }
+
+/* ── Wetter- und Tageskarte (Kreis) ─────────────────────────────────────── */
+.wt {
+  position: relative; width: min(210px, 100%); aspect-ratio: 1; border-radius: 50%; overflow: hidden; color: #fff;
+  background: radial-gradient(circle at 30% 25%, #8fd3ff, #3b82f6 70%);
+  box-shadow: 0 18px 40px -18px rgba(40, 80, 180, 0.7), inset 0 -10px 30px rgba(0, 0, 0, 0.12);
+  display: grid; place-items: center; animation: ck-rein 0.6s ease both;
+}
+.wt[data-art="wolken"], .wt[data-art="nebel"] { background: radial-gradient(circle at 30% 25%, #c7d6ea, #7b93b6 72%); }
+.wt[data-art="regen"], .wt[data-art="gewitter"] { background: radial-gradient(circle at 30% 25%, #8ea0bd, #4b5c7d 72%); }
+.wt[data-art="schnee"] { background: radial-gradient(circle at 30% 25%, #f1f6ff, #9fb6d9 72%); color: #23324d; }
+.wt[data-tag="false"] { background: radial-gradient(circle at 30% 25%, #3a3f7a, #141733 72%); }
+.wt-bogen { position: absolute; inset: 0; width: 100%; height: 100%; }
+.wt-sonne { fill: #ffd23f; filter: drop-shadow(0 0 8px #ffd23f); animation: wt-sonne 4s ease-in-out infinite alternate; }
+@keyframes wt-sonne { to { filter: drop-shadow(0 0 14px #ffe48a); } }
+.wt-inhalt { position: relative; text-align: center; padding: 0 22px; margin-top: 18px; }
+.wt-ort { font-size: 11px; font-weight: 600; opacity: 0.9; text-transform: capitalize; }
+.wt-temp { font-size: 46px; font-weight: 800; letter-spacing: -0.04em; line-height: 1; }
+.wt-art { font-size: 12px; opacity: 0.92; }
+.wt-zeit { font-size: 10.5px; opacity: 0.8; }
+.wt-satz { font-size: 11.5px; line-height: 1.3; margin-top: 6px; opacity: 0.95; }
+.wt-sterne { position: absolute; inset: 0; background-image: radial-gradient(1.2px 1.2px at 20% 30%, #fff, transparent), radial-gradient(1px 1px at 70% 20%, #fff, transparent), radial-gradient(1.4px 1.4px at 80% 60%, #fff, transparent), radial-gradient(1px 1px at 35% 75%, #fff, transparent), radial-gradient(1px 1px at 55% 45%, #fff, transparent); animation: wt-funkeln 3s ease-in-out infinite alternate; }
+@keyframes wt-funkeln { from { opacity: 0.5; } to { opacity: 1; } }
+.wt-regen { position: absolute; inset: -20%; background-image: repeating-linear-gradient(105deg, transparent 0 8px, rgba(255, 255, 255, 0.28) 8px 9px, transparent 9px 18px); animation: st-regnet 0.6s linear infinite; background-size: 90px 90px; }
+.wt-schnee { position: absolute; inset: 0; background-image: radial-gradient(2px 2px at 20% 10%, #fff, transparent), radial-gradient(2px 2px at 60% 30%, #fff, transparent), radial-gradient(2px 2px at 80% 5%, #fff, transparent), radial-gradient(2px 2px at 40% 50%, #fff, transparent); background-size: 100% 60%; animation: wt-schneit 5s linear infinite; }
+@keyframes wt-schneit { from { background-position: 0 -60px; } to { background-position: 0 200px; } }
+.wt-leer { width: 180px; aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; text-align: center; padding: 30px; background: var(--ck-panel-2); color: var(--ck-dim); font-size: 12px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hl-figur, .hl-augen, .hl-haare, .hl-straehne, .hl-hand, .hl-tropfen, .pf-pflanze, .pf-blatt, .pf-bluete, .wt-sonne, .wt-sterne, .wt-regen, .wt-schnee { animation: none !important; }
+}
