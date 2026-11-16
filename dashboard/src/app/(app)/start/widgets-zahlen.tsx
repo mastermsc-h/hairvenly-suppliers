@@ -923,7 +923,7 @@ export function TotesKapitalWidget({ d }: { d: TotesKapitalDaten }) {
     { label: "Fast tot", info: "Lager reicht über 12 Monate", t: d.fastTot, farbe: "#d99a3c" },
   ];
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 10 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 10, position: "relative" }}>
       <LavaRiss />
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <Ring anteil={d.anteilLager} groesse={62} dicke={8}><span className="ck-mono" style={{ fontSize: 13, fontWeight: 750 }}>{zahl(d.anteilLager)}<span style={{ fontSize: 9 }}> %</span></span></Ring>

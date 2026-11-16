@@ -814,8 +814,8 @@ a.ck-signal:hover { border-color: var(--s); }
 
 
 /* ── Totes Kapital: Riss mit Lava, Rauch und Funken (oben rechts) ───────── */
-.ck-panel[data-w="toteskapital"] .ck-kopf { position: relative; z-index: 3; }
-.lv { position: absolute; top: 0; right: 34px; width: 140px; height: 150px; pointer-events: none; z-index: 2; }
+/* Liegt im scrollbaren Inhalt (scrollt mit nach oben weg), 30 % kleiner als die Zeichnung */
+.lv { position: absolute; top: -8px; right: 0; width: 140px; height: 150px; pointer-events: none; z-index: 2; transform: scale(0.7); transform-origin: top right; }
 .lv-riss { position: absolute; inset: 0; overflow: visible; }
 .lv-schein { opacity: 0.55; animation: lv-pulsiert 3.2s ease-in-out infinite alternate; }
 .lv-lava { animation: lv-glimmt 2.4s ease-in-out infinite alternate; }
