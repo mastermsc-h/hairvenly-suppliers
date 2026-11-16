@@ -1149,6 +1149,8 @@ a.ck-signal:hover { border-color: var(--s); }
   content: ""; position: absolute; left: 0; right: 0; top: 0; bottom: var(--ck-abstand, 12px);
   background: rgba(124, 92, 255, 0.14); border: 2px dashed var(--ck-akzent); border-radius: 22px;
 }
-/* Plus auf freien Stellen gut sichtbar (nicht erst beim Drüberfahren) */
-.ck-plus-feld { border-color: rgba(124, 92, 255, 0.16); }
-.ck-plus-knopf { opacity: 0.55; }
+/* Plus auf freien Stellen: unsichtbar, bis man drüberfährt, ein Fenster zieht/vergrößert
+   oder im „Anpassen"-Modus ist */
+.ck-plus-knopf { opacity: 0; }
+.ck[data-geste="true"] .ck-plus-feld, .ck[data-anpassen="true"] .ck-plus-feld { border-color: rgba(124, 92, 255, 0.16); }
+.ck[data-geste="true"] .ck-plus-knopf, .ck[data-anpassen="true"] .ck-plus-knopf { opacity: 0.55; }

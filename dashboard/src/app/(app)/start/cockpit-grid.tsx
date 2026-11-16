@@ -221,12 +221,14 @@ export default function CockpitGrid({
   const [plusOffen, setPlusOffen] = useState<string | null>(null);
   // Fenster, das gerade gezogen/in der Größe geändert wird, samt Anordnung beim Start der Geste
   const aktivRef = useRef<Aktiv>(null);
+  const [geste, setGeste] = useState(false); // gerade ziehen/vergrößern → Plus-Felder zeigen
   const compactor = useMemo<Compactor>(() => ({
     type: null,
     allowOverlap: true, // Bibliothek schiebt selbst nichts – die Auflösung macht freiAufloesen
     compact: (l) => freiAufloesen(l, aktivRef.current),
   }), []);
   const gesteStart = (l: Layout, it: { i: string } | null, art: "zug" | "groesse") => {
+    setGeste(!!it);
     aktivRef.current = it ? { id: it.i, art, start: new Map(l.map((x) => [x.i, { x: x.x, y: x.y, w: x.w, h: x.h }])) } : null;
   };
   const [status, setStatus] = useState<"" | "speichert" | "gespeichert" | "fehler">("");
@@ -333,7 +335,7 @@ export default function CockpitGrid({
   const reihenfolge = [...sichtbar].sort((a, b) => a.y - b.y || a.x - b.x);
 
   return (
-    <div className="ck" data-anpassen={anpassen} data-stil={stil}>
+    <div className="ck" data-anpassen={anpassen} data-geste={geste} data-stil={stil}>
       <div className="ck-top">
         <div>
           <div className="ck-marke-oben">Hairvenly · Überblick</div>
@@ -428,8 +430,8 @@ export default function CockpitGrid({
               compactor={compactor}
               onDragStart={(l, alt) => gesteStart(l, alt, "zug")}
               onResizeStart={(l, alt) => gesteStart(l, alt, "groesse")}
-              onDragStop={(l) => { aktivRef.current = null; uebernehmen(l); }}
-              onResizeStop={(l) => { aktivRef.current = null; uebernehmen(l); }}
+              onDragStop={(l) => { aktivRef.current = null; setGeste(false); uebernehmen(l); }}
+              onResizeStop={(l) => { aktivRef.current = null; setGeste(false); uebernehmen(l); }}
               onLayoutChange={(l) => setAngezeigt(l.map((x) => ({ i: x.i, x: x.x, y: x.y, w: x.w, h: x.h })))}
             >
               {reihenfolge.map((it, i) => <div key={it.i}>{panel(it.i, i)}</div>)}
