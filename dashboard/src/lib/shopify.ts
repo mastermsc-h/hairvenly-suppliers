@@ -1513,27 +1513,52 @@ function buildPackOrderQuery(): string {
  * Fetch unfulfilled, paid orders — these need to be packed.
  * Sorted oldest-first (FIFO) so the oldest orders are packed first.
  * Excludes orders tagged with PACK_SKIP_TAGS.
+ *
+ * Shopify gibt max. 250 Orders pro GraphQL-Seite → bei 300+ offenen
+ * Bestellungen MUSS paginiert werden (sonst sah man nur die ersten 100/250).
+ * Wir holen seitenweise (100/Seite, cost-sicher mit lineItems(50)) bis
+ * hasNextPage false ist. `maxTotal` ist nur eine Sicherheits-Obergrenze gegen
+ * Endlos-Schleifen; standardmäßig faktisch unbegrenzt (bis Shopify fertig ist).
  */
-export async function fetchUnfulfilledPaidOrders(limit = 100): Promise<PackOrder[]> {
+export async function fetchUnfulfilledPaidOrders(maxTotal = 5000): Promise<PackOrder[]> {
   const query = `
-    query packQueue($q: String!, $first: Int!) {
-      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: false) {
-        edges { node { ${PACK_ORDER_FIELDS_SLIM} } }
+    query packQueue($q: String!, $first: Int!, $after: String) {
+      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: false, after: $after) {
+        edges { cursor node { ${PACK_ORDER_FIELDS_SLIM} } }
+        pageInfo { hasNextPage endCursor }
       }
     }
   `;
   const q = buildPackOrderQuery();
-  const res = await shopifyGraphQL<{ orders: { edges: { node: PackOrderNode }[] } }>(
-    query,
-    { q, first: limit },
-  );
-  // Doppelter Schutz zur Query (Shopifys Suchindex hinkt manchmal nach):
-  // storniert → raus; nach currentQuantity-Filter keine Position mehr → raus
-  // (nichts zu packen, z.B. alle Artikel entfernt/erstattet).
-  return (res.data?.orders.edges ?? [])
-    .filter((e) => !e.node.cancelledAt)
-    .map((e) => mapPackOrder(e.node))
-    .filter((o) => o.lineItems.length > 0);
+  const PAGE = 100; // cost-sicher (jede Order zieht lineItems(first:50))
+  const maxPages = Math.ceil(maxTotal / PAGE) + 1;
+  const out: PackOrder[] = [];
+  let cursor: string | null = null;
+
+  for (let page = 0; page < maxPages; page++) {
+    const res: GraphQLResponse<{
+      orders: {
+        edges: { node: PackOrderNode }[];
+        pageInfo: { hasNextPage: boolean; endCursor: string };
+      };
+    }> = await shopifyGraphQL(query, { q, first: PAGE, after: cursor });
+
+    const edges = res.data?.orders.edges ?? [];
+    for (const e of edges) {
+      // Doppelter Schutz zur Query (Shopifys Suchindex hinkt manchmal nach):
+      // storniert → raus; nach currentQuantity-Filter keine Position mehr → raus
+      // (nichts zu packen, z.B. alle Artikel entfernt/erstattet).
+      if (e.node.cancelledAt) continue;
+      const mapped = mapPackOrder(e.node);
+      if (mapped.lineItems.length > 0) out.push(mapped);
+    }
+
+    if (out.length >= maxTotal) break;
+    if (!res.data?.orders.pageInfo.hasNextPage) break;
+    cursor = res.data.orders.pageInfo.endCursor;
+  }
+
+  return out;
 }
 
 /**
@@ -1956,11 +1981,49 @@ export interface PrintAllOrder {
  * Holt offene Bestellungen für die Massen-Druck-Seite. Inkludiert collections(first:5)
  * pro Variante damit isExtension korrekt erkannt wird, ohne den Query-Cost zu sprengen.
  */
-export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[]> {
+interface PrintAllNode {
+  name: string;
+  createdAt: string;
+  subtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+  currentSubtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+  totalDiscountsSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+  currentTotalDiscountsSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+  totalShippingPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+  totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
+  currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+  shippingAddress: PrintAllOrder["shippingAddress"];
+  lineItems: {
+    edges: {
+      node: {
+        title: string;
+        quantity: number;
+        currentQuantity?: number;
+        discountedUnitPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+        variant: {
+          title: string | null;
+          product: { collections: { edges: { node: { handle: string } }[] } } | null;
+        } | null;
+      };
+    }[];
+  };
+}
+
+/**
+ * Lädt Bestellungen für den Lieferschein-Druck.
+ * - `orderName` gesetzt → GENAU diese eine Bestellung (direkt per name-Query,
+ *   wird IMMER gefunden, egal wie weit hinten sie in der Liste steht → fixt
+ *   den Einzeldruck per Drucker-Icon bei >50 offenen Bestellungen).
+ * - sonst → ALLE offenen bezahlten Bestellungen, paginiert (Shopify gibt max.
+ *   250/Seite; bei 300+ sah man vorher nur die ersten 50).
+ */
+export async function fetchOrdersForPrintAll(
+  opts: { orderName?: string; maxTotal?: number } = {},
+): Promise<PrintAllOrder[]> {
   const query = `
-    query printAll($q: String!, $first: Int!) {
-      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: false) {
+    query printAll($q: String!, $first: Int!, $after: String) {
+      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: false, after: $after) {
         edges {
+          cursor
           node {
             name
             createdAt
@@ -1990,44 +2053,33 @@ export async function fetchOrdersForPrintAll(limit = 50): Promise<PrintAllOrder[
             }
           }
         }
+        pageInfo { hasNextPage endCursor }
       }
     }
   `;
-  const res = await shopifyGraphQL<{
-    orders: {
-      edges: {
-        node: {
-          name: string;
-          createdAt: string;
-          subtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
-          currentSubtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
-          totalDiscountsSet: { shopMoney: { amount: string; currencyCode: string } } | null;
-          currentTotalDiscountsSet: { shopMoney: { amount: string; currencyCode: string } } | null;
-          totalShippingPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
-          totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
-          currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
-          shippingAddress: PrintAllOrder["shippingAddress"];
-          lineItems: {
-            edges: {
-              node: {
-                title: string;
-                quantity: number;
-                currentQuantity?: number;
-                discountedUnitPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
-                variant: {
-                  title: string | null;
-                  product: { collections: { edges: { node: { handle: string } }[] } } | null;
-                } | null;
-              };
-            }[];
-          };
-        };
-      }[];
-    };
-  }>(query, { q: buildPackOrderQuery(), first: limit });
+  const single = opts.orderName ? opts.orderName.replace(/^#/, "") : null;
+  // Einzeldruck ohne Status-Filter → auch Nachdruck fulfilled/archivierter geht.
+  const q = single ? `name:${single}` : buildPackOrderQuery();
+  const maxTotal = opts.maxTotal ?? 5000;
+  const PAGE = single ? 1 : 100;
+  const maxPages = single ? 1 : Math.ceil(maxTotal / PAGE) + 1;
 
-  return (res.data?.orders.edges ?? []).map((e) => {
-    const o = e.node;
+  const nodes: PrintAllNode[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < maxPages; page++) {
+    const res: GraphQLResponse<{
+      orders: {
+        edges: { node: PrintAllNode }[];
+        pageInfo: { hasNextPage: boolean; endCursor: string };
+      };
+    }> = await shopifyGraphQL(query, { q, first: PAGE, after: cursor });
+    for (const e of res.data?.orders.edges ?? []) nodes.push(e.node);
+    if (single || nodes.length >= maxTotal) break;
+    if (!res.data?.orders.pageInfo.hasNextPage) break;
+    cursor = res.data.orders.pageInfo.endCursor;
+  }
+
+  return nodes.map((o) => {
     return {
       name: o.name,
       numberClean: o.name.replace(/^#/, ""),

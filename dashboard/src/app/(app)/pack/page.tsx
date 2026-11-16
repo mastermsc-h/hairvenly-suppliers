@@ -33,7 +33,7 @@ export default async function PackPage() {
   let fetchedCount = 0;
   try {
     [orders, unpaidOrders] = await Promise.all([
-      fetchUnfulfilledPaidOrders(100),
+      fetchUnfulfilledPaidOrders(), // alle offenen bezahlten Bestellungen (paginiert)
       fetchUnfulfilledUnpaidOrders(250),
     ]);
     fetchedCount = orders.length;

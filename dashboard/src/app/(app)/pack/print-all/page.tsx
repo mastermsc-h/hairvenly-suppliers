@@ -18,7 +18,10 @@ export default async function PrintAllPage({
 
   const { order: singleOrder } = await searchParams;
 
-  const orders = await fetchOrdersForPrintAll(50);
+  // Einzeldruck lädt gezielt NUR diese Bestellung (wird immer gefunden, auch
+  // wenn sie weit hinten in 300+ offenen Bestellungen steht); Massendruck
+  // paginiert alle offenen bezahlten Bestellungen.
+  const orders = await fetchOrdersForPrintAll(singleOrder ? { orderName: singleOrder } : {});
 
   // Einzeldruck: nur die angeforderte Bestellung (per ?order=<nummer>) —
   // druckt IMMER, auch wenn schon gedruckt (bewusster Nachdruck).
