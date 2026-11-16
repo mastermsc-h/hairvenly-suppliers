@@ -178,7 +178,7 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
               <th className="py-2 pr-3 text-right font-medium">− EUSt</th>
               <th className="py-2 pr-3 text-right font-medium">= berechnet</th>
               <th className="py-2 pr-3 text-right font-medium">Finanzamt</th>
-              <th className="py-2 text-right font-medium" title="Finanzamt minus berechnet">Differenz</th>
+              <th className="py-2 text-right font-medium" title="Finanzamt minus unsere Rechnung: + = Finanzamt wollte mehr (bzw. gab weniger zurück), − = Finanzamt wollte weniger (bzw. gab mehr zurück)">Abweichung</th>
             </tr>
           </thead>
           <tbody>
@@ -199,7 +199,11 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
                   <td className="py-2 pr-3 text-right tabular-nums text-rose-700">{eur(m.ust)}</td>
                   <td className="py-2 pr-3 text-right tabular-nums text-emerald-700">{eur(m.vorsteuer)}</td>
                   <td className="py-2 pr-3 text-right tabular-nums text-emerald-700">{eur(m.eust)}</td>
-                  <td className="py-2 pr-3 text-right"><Ergebnis wert={m.berechnet} klein /></td>
+                  <td className="py-2 pr-3 text-right">
+                    <span className="inline-block rounded-lg bg-neutral-100 px-2.5 py-1 ring-1 ring-neutral-200/70">
+                      <Ergebnis wert={m.berechnet} />
+                    </span>
+                  </td>
                   <td className="py-2 pr-3 text-right">
                     {m.finanzamt !== null ? (
                       <>
@@ -212,6 +216,9 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
                   </td>
                   <td className={`py-2 text-right tabular-nums text-xs ${diff === null ? "text-neutral-300" : Math.abs(diff) > 5000 ? "font-medium text-amber-700" : "text-neutral-500"}`}>
                     {diff === null ? "—" : `${diff > 0 ? "+" : diff < 0 ? "−" : ""}${eur(Math.abs(diff))}`}
+                    {diff !== null && Math.abs(diff) >= 1 && (
+                      <div className="text-[10.5px] font-normal text-neutral-400">{diff > 0 ? "Finanzamt höher" : "Finanzamt niedriger"}</div>
+                    )}
                   </td>
                 </tr>
               );
@@ -230,6 +237,11 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
           EUSt = Abbuchungen von DHL und Ungewitter ohne Zollanteil — im Monat der <i>Abbuchung</i>. Das Finanzamt rechnet die EUSt dagegen im Monat der{" "}
           <i>Einfuhr</i>; deshalb schwanken einzelne Monate stark (z.B. September: gerechnet Zahlung, tatsächlich Erstattung). Über mehrere Monate gleicht sich
           das aus. Maßgeblich ist immer die Spalte „Finanzamt“.
+        </p>
+        <p>
+          <b>Abweichung:</b> Finanzamt minus unsere Rechnung. Sie zeigt, wie weit die Schätzung daneben lag — nicht, dass zu viel oder zu wenig gezahlt
+          wurde. Gezahlt wurde immer der Betrag aus der Voranmeldung des Steuerberaters. Große Ausschläge in Nachbarmonaten mit umgekehrtem Vorzeichen
+          (z.B. April −17k, Mai +29k) sind meist Einfuhrumsatzsteuer, die in einem anderen Monat abgebucht als angerechnet wurde.
         </p>
       </div>
     </div>
