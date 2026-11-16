@@ -4,8 +4,12 @@ import { ladeEinstellungen, ladeKontoVerlauf, ladeRohdaten } from "@/lib/liquidi
 import { readVerkaufsanalyse } from "@/lib/stock-sheets";
 import { createServiceClient } from "@/lib/supabase/server";
 import Liquiditaet, { type Verbrauch } from "./liquiditaet";
+import UstMonate from "../ust-monate";
+import { ladeUstMonate } from "@/lib/steuer/ust-monate";
 
 export const dynamic = "force-dynamic";
+
+const heuteBerlinDatum = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
 
 async function ladeVerbrauch(): Promise<Verbrauch | null> {
   try {
@@ -25,7 +29,23 @@ export default async function LiquiditaetPage() {
   const profile = await requireFeature("finances");
   if (profile.role === "supplier") redirect("/");
   const sb = createServiceClient();
-  const [roh, einstellungen, verbrauch] = await Promise.all([ladeRohdaten(sb), ladeEinstellungen(sb), ladeVerbrauch()]);
+  const jahr = Number(heuteBerlinDatum().slice(0, 4));
+  const [roh, einstellungen, verbrauch, ustMonate] = await Promise.all([
+    ladeRohdaten(sb),
+    ladeEinstellungen(sb),
+    ladeVerbrauch(),
+    ladeUstMonate(jahr, sb).catch((e) => {
+      console.error("[liquiditaet] USt je Monat", e);
+      return [];
+    }),
+  ]);
   const verlauf = await ladeKontoVerlauf(sb, roh, einstellungen);
-  return <Liquiditaet roh={roh} gespeichert={einstellungen} verbrauch={verbrauch} verlauf={verlauf} />;
+  return (
+    <>
+      <Liquiditaet roh={roh} gespeichert={einstellungen} verbrauch={verbrauch} verlauf={verlauf} />
+      <div className="px-4 md:px-8 pb-8 max-w-6xl mx-auto">
+        <UstMonate jahr={jahr} monate={ustMonate} />
+      </div>
+    </>
+  );
 }
