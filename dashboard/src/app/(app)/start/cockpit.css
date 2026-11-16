@@ -1223,3 +1223,29 @@ a.ck-signal:hover { border-color: var(--s); }
 .sk-fuss { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 11.5px; color: var(--ck-matt); }
 .sk-fuss a { color: #6d4cff; font-weight: 650; display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
 @media (prefers-reduced-motion: reduce) { .sk-teil, .sk-blatt, .sk-countdown { animation: none; } }
+/* Steuerkasse · Jahr (ESt/GewSt) */
+.sk-jahr { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.75); border: 1px solid rgba(124, 92, 255, 0.12); }
+.sk-jahr-kopf { display: flex; justify-content: space-between; gap: 8px 14px; flex-wrap: wrap; align-items: baseline; }
+.sk-jahr-summen { display: inline-flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--ck-dim); }
+.sk-jahr-summen b { color: var(--ck-text); font-variant-numeric: tabular-nums; }
+.sk-gruen-b { color: #059669 !important; }
+.sk-offen-b { color: #c2410c !important; }
+.sk-jahr-zeile { display: grid; grid-template-columns: minmax(130px, 170px) 1fr auto; gap: 12px; align-items: center; }
+.sk-jahr-name { display: flex; gap: 8px; align-items: center; font-size: 13px; font-weight: 650; }
+.sk-jahr-name i { width: 10px; height: 10px; border-radius: 3px; background: var(--sk-farbe); flex: none; }
+.sk-jahr-name small { display: block; font-size: 11px; font-weight: 500; color: var(--ck-matt); }
+.sk-quartale { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 6px; }
+.sk-q { position: relative; border-radius: 11px; padding: 6px 9px; display: flex; flex-direction: column; gap: 1px; overflow: hidden;
+  background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--sk-farbe) 7%, #fff) 0 7px, #fff 7px 14px);
+  border: 1.5px dashed color-mix(in srgb, var(--sk-farbe) 55%, transparent); }
+.sk-q[data-bezahlt="true"] { background: color-mix(in srgb, var(--sk-farbe) 13%, #fff); border: 1.5px solid color-mix(in srgb, var(--sk-farbe) 30%, transparent); }
+.sk-q-name { font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em; color: var(--sk-farbe); }
+.sk-q b { font-size: 13px; font-variant-numeric: tabular-nums; }
+.sk-q small { font-size: 10.5px; color: var(--ck-matt); }
+.sk-q[data-bezahlt="true"] small { color: #059669; font-weight: 650; }
+.sk-q[data-bezahlt="false"] small { color: #c2410c; font-weight: 650; }
+.sk-jahr-offen { text-align: right; font-size: 15px; font-weight: 800; color: #c2410c; font-variant-numeric: tabular-nums; min-width: 92px; }
+.sk-jahr-offen small { display: block; font-size: 10.5px; font-weight: 600; color: var(--ck-matt); text-transform: uppercase; letter-spacing: 0.06em; }
+.sk-jahr-offen[data-null="true"] { color: #059669; font-size: 13px; }
+@container (max-width: 620px) { .sk-jahr-zeile { grid-template-columns: 1fr auto; } .sk-quartale { grid-column: 1 / -1; grid-row: 2; } }
+.sk { container-type: inline-size; }

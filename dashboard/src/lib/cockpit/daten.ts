@@ -733,6 +733,51 @@ export const ladeSteuerKasse = cache(async (horizont = 100): Promise<SteuerKasse
     .map((art) => ({ art, betrag: termine.flatMap((t) => t.posten).filter((p) => p.art === art && p.betrag > 0).reduce((s, p) => s + p.betrag, 0) }))
     .filter((x) => x.betrag > 0);
   const alle = termine.flatMap((t) => t.posten);
+
+  // Einkommen-/Gewerbesteuer des laufenden Jahres aus dem Steuer-Ledger: bezahlt = Ist mit Datum,
+  // offen = Soll bzw. (ohne Soll) der zuletzt bezahlte Quartalsbetrag dieser Steuer.
+  const jahrNr = Number(heute.slice(0, 4));
+  const { data: ledger } = await createServiceClient()
+    .from("steuer_posten")
+    .select("art, zeitraum, jahr, richtung, soll_betrag, faellig_am, ist_betrag, bezahlt_am")
+    .in("art", ["est_vz", "gewst_vz", "est_nachzahlung", "gewst_nachzahlung"])
+    .in("jahr", [jahrNr - 1, jahrNr]);
+  type LP = { art: string; zeitraum: string; jahr: number; richtung: string; soll_betrag: number | null; faellig_am: string | null; ist_betrag: number | null; bezahlt_am: string | null };
+  const lp = (ledger ?? []) as LP[];
+  const arten = (["est", "gewst"] as const).map((art) => {
+    const eigene = lp.filter((p) => p.art.startsWith(`${art}_`));
+    const letzter = eigene
+      .filter((p) => p.art === `${art}_vz` && p.bezahlt_am && Number(p.ist_betrag) > 0)
+      .sort((a, b) => String(a.bezahlt_am).localeCompare(String(b.bezahlt_am)))
+      .at(-1);
+    const posten = eigene
+      .filter((p) => p.jahr === jahrNr)
+      .map((p) => {
+        const vz = p.art === `${art}_vz`;
+        const vorz = p.richtung === "erstattung" ? -1 : 1;
+        const bezahlt = !!p.bezahlt_am;
+        const soll = Number(p.soll_betrag ?? 0);
+        const roh = bezahlt ? Number(p.ist_betrag ?? soll) : soll > 0 ? soll : vz ? Number(letzter?.ist_betrag ?? 0) : 0;
+        return {
+          zeitraum: vz ? p.zeitraum.slice(0, 2) : "Nachzahlung",
+          faellig: p.faellig_am ? String(p.faellig_am).slice(0, 10) : null,
+          betrag: r0(roh * vorz),
+          bezahlt,
+          bezahltAm: p.bezahlt_am ? String(p.bezahlt_am).slice(0, 10) : null,
+          // Vorauszahlungen sind festgesetzt: ohne Soll gilt der letzte Quartalsbetrag, keine Schätzung
+          geschaetzt: !bezahlt && soll <= 0 && !vz,
+        };
+      })
+      .filter((p) => p.betrag !== 0 || p.zeitraum !== "Nachzahlung")
+      .sort((a, b) => (a.faellig ?? "").localeCompare(b.faellig ?? "") || a.zeitraum.localeCompare(b.zeitraum));
+    return {
+      art,
+      posten,
+      bezahlt: posten.filter((p) => p.bezahlt).reduce((s, p) => s + p.betrag, 0),
+      offen: posten.filter((p) => !p.bezahlt).reduce((s, p) => s + p.betrag, 0),
+    };
+  }).filter((a) => a.posten.length);
+
   return {
     heute,
     konto: r0(start),
@@ -742,6 +787,7 @@ export const ladeSteuerKasse = cache(async (horizont = 100): Promise<SteuerKasse
     jeArt,
     zahlungen: alle.filter((p) => p.betrag > 0).reduce((s, p) => s + p.betrag, 0),
     erstattungen: -alle.filter((p) => p.betrag < 0).reduce((s, p) => s + p.betrag, 0),
+    jahr: { jahr: jahrNr, arten, bezahlt: arten.reduce((s, a) => s + a.bezahlt, 0), offen: arten.reduce((s, a) => s + a.offen, 0) },
   };
 });
 

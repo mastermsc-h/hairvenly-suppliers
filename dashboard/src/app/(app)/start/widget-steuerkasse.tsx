@@ -24,9 +24,57 @@ function countdown(t: SteuerKasseDaten["termine"][number]) {
   return `in ${t.tageBis} Tagen`;
 }
 
+const tm = (iso: string) => `${Number(iso.slice(8, 10))}.${Number(iso.slice(5, 7))}.`;
+
+/** Einkommen- und Gewerbesteuer im ganzen Jahr: je Quartal bezahlt (Häkchen) oder offen. */
+function JahrBlock({ j }: { j: SteuerKasseDaten["jahr"] }) {
+  if (!j.arten.length) return null;
+  const gesamt = j.bezahlt + j.offen;
+  return (
+    <section className="sk-jahr" aria-label={`Einkommen- und Gewerbesteuer ${j.jahr}`}>
+      <div className="sk-jahr-kopf">
+        <span className="ck-etikett">{j.jahr} · Einkommen- &amp; Gewerbesteuer</span>
+        <span className="sk-jahr-summen">
+          <span>bezahlt <b className="sk-gruen-b">{eur(j.bezahlt)}</b></span>
+          <span>offen <b className={j.offen > 0 ? "sk-offen-b" : ""}>{eur(j.offen)}</b></span>
+          <span>Jahr gesamt <b>{eur(gesamt)}</b></span>
+        </span>
+      </div>
+      {j.arten.map((a) => {
+        const summe = a.bezahlt + a.offen;
+        return (
+          <div key={a.art} className="sk-jahr-zeile" style={{ ["--sk-farbe" as string]: ART[a.art].farbe }}>
+            <div className="sk-jahr-name">
+              <i />
+              <span>{ART[a.art].name}<small>{eur(a.bezahlt)} von {eur(summe)} bezahlt</small></span>
+            </div>
+            <div className="sk-quartale">
+              {a.posten.map((p, k) => (
+                <div key={k} className="sk-q" data-bezahlt={p.bezahlt} title={p.bezahlt ? `Bezahlt am ${p.bezahltAm ? tm(p.bezahltAm) : "–"}` : p.faellig ? `Fällig am ${tm(p.faellig)}` : "Offen"}>
+                  <span className="sk-q-name">{p.zeitraum}</span>
+                  <b>{!p.bezahlt && p.geschaetzt ? "≈ " : ""}{eur(p.betrag)}</b>
+                  <small>{p.bezahlt ? <>✓ {p.bezahltAm ? tm(p.bezahltAm) : "bezahlt"}</> : p.faellig ? `fällig ${tm(p.faellig)}` : "offen"}</small>
+                </div>
+              ))}
+            </div>
+            <div className="sk-jahr-offen" data-null={a.offen <= 0}>
+              {a.offen > 0 ? <><small>offen</small>{eur(a.offen)}</> : <><small>Jahr</small>erledigt ✓</>}
+            </div>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
 export default function SteuerKasseWidget({ d }: { d: SteuerKasseDaten }) {
   if (!d.termine.length) {
-    return <div className="sk-leer">In den nächsten {d.tageHorizont} Tagen ist keine Zahlung ans Finanzamt geplant.</div>;
+    return (
+      <div className="sk">
+        <div className="sk-leer">In den nächsten {d.tageHorizont} Tagen ist keine Zahlung ans Finanzamt geplant.</div>
+        <JahrBlock j={d.jahr} />
+      </div>
+    );
   }
   const naechster = d.termine.find((t) => t.summe > 0) ?? d.termine[0];
   const frei = d.konto - d.zahlungen;
@@ -66,6 +114,8 @@ export default function SteuerKasseWidget({ d }: { d: SteuerKasseDaten }) {
           ))}
         </div>
       </div>
+
+      <JahrBlock j={d.jahr} />
 
       {/* Abreißkalender */}
       <div className="sk-blaetter">

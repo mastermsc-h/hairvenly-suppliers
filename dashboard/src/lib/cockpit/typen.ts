@@ -343,6 +343,18 @@ export interface SteuerKasseDaten {
   jeArt: Array<{ art: SteuerArt; betrag: number }>;
   zahlungen: number;
   erstattungen: number;
+  /** Einkommen- und Gewerbesteuer im laufenden Jahr: je Quartal bezahlt/offen. */
+  jahr: {
+    jahr: number;
+    arten: Array<{
+      art: "est" | "gewst";
+      posten: Array<{ zeitraum: string; faellig: string | null; betrag: number; bezahlt: boolean; bezahltAm: string | null; geschaetzt: boolean }>;
+      bezahlt: number;
+      offen: number;
+    }>;
+    bezahlt: number;
+    offen: number;
+  };
 }
 
 export interface PflichtPosten {
@@ -444,7 +456,7 @@ const STANDARD_LAYOUT_GROB: LayoutItem[] = [
   { i: "pflanze", x: 3, y: 111, w: 2, h: 9 },
   { i: "polaroid", x: 5, y: 111, w: 4, h: 9 },
   { i: "wetter", x: 9, y: 111, w: 3, h: 9 },
-  { i: "steuerkasse", x: 0, y: 120, w: 12, h: 14 },
+  { i: "steuerkasse", x: 0, y: 120, w: 12, h: 18 },
 ];
 
 /** Standard-Anordnung im feinen Raster (10-px-Zeilen). Überlappt noch – wird beim Aufbau einmal verdichtet. */
