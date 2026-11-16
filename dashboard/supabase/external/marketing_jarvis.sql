@@ -213,3 +213,41 @@ end $$;
 revoke all on function public.jarvis_marketing_tage(text, int) from public;
 grant execute on function public.jarvis_marketing_tage(text, int) to anon, authenticated;
 -- Rückbau: drop function if exists public.jarvis_marketing_tage(text, int);
+
+-- Je Meta-Kampagne die Haupt-Anzeige (meiste Kosten im Zeitraum) für Vorschaubilder.
+create or replace function public.jarvis_meta_anzeigen(p_key text, p_days int default 28)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  d   int  := greatest(1, least(coalesce(p_days, 28), 400));
+  bis date := (now() at time zone 'Europe/Berlin')::date;
+  von date := bis - d + 1;
+begin
+  if not exists (select 1 from public.jarvis_access where key_hash = encode(sha256(convert_to(coalesce(p_key, ''), 'UTF8')), 'hex')) then
+    raise exception 'kein Zugriff' using errcode = '42501';
+  end if;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'kampagne', coalesce(campaign, '—'),
+      'anzeigen', n,
+      'anzeige_id', ids[1],
+      'anzeige_name', namen[1],
+      'bild', bilder[1]
+    ))
+    from (
+      select campaign, count(*) n,
+             array_agg(ad_id order by s desc) ids,
+             array_agg(ad_name order by s desc) namen,
+             array_agg(img order by s desc) filter (where img like 'https://%') bilder
+      from (
+        select campaign, ad_id, max(ad_name) ad_name, sum(spend) s, max(image_url) img
+        from meta_ads where date between von and bis group by campaign, ad_id
+      ) a group by campaign
+    ) k
+  ), '[]'::jsonb);
+end $$;
+revoke all on function public.jarvis_meta_anzeigen(text, int) from public;
+grant execute on function public.jarvis_meta_anzeigen(text, int) to anon, authenticated;
+-- Rückbau: drop function if exists public.jarvis_meta_anzeigen(text, int);

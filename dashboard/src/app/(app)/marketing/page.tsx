@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { Megaphone, AlertTriangle, ExternalLink } from "lucide-react";
 import { requireAdmin } from "@/lib/auth";
-import { ladeHalo, ladeMarketing, dringendeAufgaben, type MktDaten, type HaloDaten } from "@/lib/marketing-extern";
+import { ladeHalo, ladeMarketing, ladeMetaAnzeigen, dringendeAufgaben, type MktDaten, type HaloDaten } from "@/lib/marketing-extern";
+import { ladeMetaVorschau, type MetaVorschau } from "@/lib/meta-vorschau";
+import VorschauKachel from "./vorschau-kachel";
 import MarketingChart from "./marketing-chart";
 import DringendListe from "./dringend-liste";
 
@@ -47,7 +49,13 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
   const sp = await searchParams;
   const tage = ZEITRAEUME.includes(Number(sp.tage) as (typeof ZEITRAEUME)[number]) ? Number(sp.tage) : 28;
 
-  const [mkt, halo] = await Promise.allSettled([ladeMarketing(tage), ladeHalo()]);
+  const [mkt, halo, vorschauErg] = await Promise.allSettled([
+    ladeMarketing(tage),
+    ladeHalo(),
+    ladeMetaAnzeigen(tage).then(ladeMetaVorschau),
+  ]);
+  // Vorschaubilder sind Zusatz: fehlen sie, bleibt die Tabelle wie bisher
+  const vorschau: Record<string, MetaVorschau> = vorschauErg.status === "fulfilled" ? Object.fromEntries(vorschauErg.value) : {};
   const m: MktDaten | null = mkt.status === "fulfilled" ? mkt.value : null;
   const h: HaloDaten | null = halo.status === "fulfilled" ? halo.value : null;
 
@@ -84,7 +92,7 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
       {!m ? (
         <section className={CARD}><Fehler text={mkt.status === "rejected" ? String(mkt.reason) : ""} /></section>
       ) : (
-        <MarketingZahlen m={m} />
+        <MarketingZahlen m={m} vorschau={vorschau} />
       )}
     </div>
   );
@@ -99,7 +107,7 @@ function Fehler({ text }: { text: string }) {
   );
 }
 
-function MarketingZahlen({ m }: { m: MktDaten }) {
+function MarketingZahlen({ m, vorschau }: { m: MktDaten; vorschau: Record<string, MetaVorschau> }) {
   const u = m.umsatz;
   const netto = u.brutto - u.erstattungen;
   const nettoVorher = u.vorher_brutto - u.vorher_erstattungen;
@@ -164,10 +172,32 @@ function MarketingZahlen({ m }: { m: MktDaten }) {
         </section>
         <section className={CARD}>
           <h2 className="font-semibold mb-3">Meta-Kampagnen</h2>
-          <Tabelle
-            kopf={["Kampagne", "Kosten", "Klicks", "Reichweite"]}
-            zeilen={m.werbung.meta_kampagnen.map((k) => [k.kampagne, eur2(k.kosten), num(k.klicks), num(k.reichweite)])}
-          />
+          {m.werbung.meta_kampagnen.length ? (
+            <ul className="divide-y divide-neutral-100">
+              {m.werbung.meta_kampagnen.map((k) => {
+                const v = vorschau[k.kampagne];
+                const titel = k.kampagne.replace(/^Instagram-Beitrag:\s*/i, "").replace(/\s+/g, " ");
+                return (
+                  <li key={k.kampagne} className="py-2 flex items-center gap-3">
+                    <VorschauKachel bild={v?.bild ?? null} link={v?.link ?? null} manager={v?.manager ?? null} typ={v?.typ ?? null} titel={titel} />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm text-neutral-900 truncate" title={k.kampagne}>{titel}</div>
+                      <div className="text-xs text-neutral-500">
+                        {/^Instagram-Beitrag:/i.test(k.kampagne) ? "Beworbener Beitrag" : "Kampagne"}
+                        {v && v.anzeigen > 1 ? ` · ${v.anzeigen} Anzeigen` : ""}
+                      </div>
+                    </div>
+                    <div className="text-right text-sm tabular-nums whitespace-nowrap">
+                      <div className="font-medium">{eur2(k.kosten)}</div>
+                      <div className="text-xs text-neutral-500">{num(k.klicks)} Klicks · {num(k.reichweite)} erreicht</div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="text-sm text-neutral-500">Keine Daten im Zeitraum.</p>
+          )}
           {m.werbung.google_kampagnen.length > 0 && (
             <>
               <h3 className="font-semibold mt-5 mb-2">Google-Kampagnen</h3>

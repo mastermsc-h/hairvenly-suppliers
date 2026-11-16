@@ -173,3 +173,9 @@ export const personName = (p: string | null) => (p ? PERSONEN[p] ?? p : "—");
 export function ladeWerbeteil(tage: number): Promise<Pick<MktDaten, "zeitraum" | "aktualitaet" | "werbung" | "tage">> {
   return mitWiederholung(() => rpc<MktDaten>("MKT", "jarvis_marketing", { p_days: tage, p_teil: "umsatz" }));
 }
+
+/** Je Meta-Kampagne die Haupt-Anzeige (für Vorschaubilder), RPC jarvis_meta_anzeigen. */
+export type MetaAnzeige = { kampagne: string; anzeigen: number; anzeige_id: string | null; anzeige_name: string | null; bild: string | null };
+export function ladeMetaAnzeigen(tage = 28): Promise<MetaAnzeige[]> {
+  return mitWiederholung(() => rpc<MetaAnzeige[]>("MKT", "jarvis_meta_anzeigen", { p_days: tage }));
+}
