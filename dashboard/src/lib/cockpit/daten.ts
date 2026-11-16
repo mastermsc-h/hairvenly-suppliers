@@ -810,6 +810,7 @@ export async function ladeLayout(userId: string): Promise<CockpitLayout | null> 
     items: l.items, aus: Array.isArray(l.aus) ? l.aus : [], adern: l.adern !== false,
     abstand: typeof l.abstand === "number" ? Math.max(4, Math.min(32, Math.round(l.abstand))) : 12,
     stil: l.stil === "glas" || l.stil === "aurora" ? l.stil : "standard",
+    raster: l.raster === 2 ? 2 : undefined,
   };
 }
 

@@ -867,15 +867,6 @@ a.ck-signal:hover { border-color: var(--s); }
 @keyframes sr-blitzt { 0%, 100% { opacity: 0.15; } 45% { opacity: 0.95; } 60% { opacity: 0.3; } 75% { opacity: 0.85; } }
 @keyframes sr-glanz { from { transform: translateX(0); } to { transform: translateX(110px); } }
 
-/* pulsierender Schein und kreisender Lichtkegel um die Kuppel */
-.sr-schein { position: absolute; left: 10px; top: 4px; width: 100px; height: 90px; border-radius: 50%; background: radial-gradient(closest-side, rgba(255, 40, 70, 0.5), rgba(255, 40, 70, 0)); animation: sr-pulsiert 0.9s ease-in-out infinite; }
-@keyframes sr-pulsiert { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.12); } }
-.sr-kegel {
-  position: absolute; left: 60px; top: 44px; width: 150px; height: 150px; margin: -75px 0 0 -75px; border-radius: 50%;
-  background: conic-gradient(from 0deg, rgba(255, 45, 75, 0.55), rgba(255, 45, 75, 0) 16%, rgba(255, 45, 75, 0) 50%, rgba(255, 45, 75, 0.55) 50%, rgba(255, 45, 75, 0) 66%, rgba(255, 45, 75, 0));
-  -webkit-mask-image: radial-gradient(closest-side, #000 20%, transparent 100%); mask-image: radial-gradient(closest-side, #000 20%, transparent 100%);
-  filter: blur(3px); animation: sr-dreht 1.8s linear infinite;
-}
 @keyframes sr-dreht { to { transform: rotate(360deg); } }
 
 /* Sterne auf einer schrägen Ellipse: hintere Hälfte hinter der Lampe, vordere davor */
@@ -1146,3 +1137,18 @@ a.ck-signal:hover { border-color: var(--s); }
 .ck-plus-wahl button:hover { background: var(--ck-panel-2); }
 .ck-plus-wahl b { display: block; font-size: 13px; color: var(--ck-text); }
 .ck-plus-wahl span { display: block; font-size: 11.5px; color: var(--ck-matt); }
+
+/* Feines Raster (10-px-Zeilen, frei platzierbar): der senkrechte Abstand entsteht, weil das
+   Fenster um --ck-abstand kürzer ist als sein Rasterplatz. */
+.ck-raster .react-grid-item > .ck-panel { height: calc(100% - var(--ck-abstand, 12px)); }
+.ck .ck-raster .react-grid-item > .react-resizable-handle-se { bottom: var(--ck-abstand, 12px); }
+.ck .ck-raster .react-grid-item > .react-resizable-handle-s { bottom: calc(var(--ck-abstand, 12px) - 2px); }
+.ck .ck-raster .react-grid-item > .react-resizable-handle-e { bottom: calc(22px + var(--ck-abstand, 12px)); }
+.ck .ck-raster .react-grid-item.react-grid-placeholder { background: transparent; border: 0; }
+.ck .ck-raster .react-grid-item.react-grid-placeholder::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; bottom: var(--ck-abstand, 12px);
+  background: rgba(124, 92, 255, 0.14); border: 2px dashed var(--ck-akzent); border-radius: 22px;
+}
+/* Plus auf freien Stellen gut sichtbar (nicht erst beim Drüberfahren) */
+.ck-plus-feld { border-color: rgba(124, 92, 255, 0.16); }
+.ck-plus-knopf { opacity: 0.55; }

@@ -3,7 +3,7 @@
 // Rahmen des Startbildschirms: Kopfzeile, verschiebbares Raster, Anpassen-Modus.
 // Die Inhalte der Widgets kommen fertig vom Server (inhalte[id]).
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import ReactGridLayout, { useContainerWidth, verticalCompactor, type Layout } from "react-grid-layout";
+import ReactGridLayout, { noCompactor, useContainerWidth, verticalCompactor, type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import {
   Activity, BadgePercent, CheckSquare, Compass, Eye, EyeOff, Flag, Gauge, Globe2, Camera, Newspaper, Repeat, Smile, Sprout, Images, CloudSun, CloudLightning, Inbox, Target, Megaphone, PackageX, HeartPulse, Lightbulb, MessageSquare,
@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { cockpitLayoutZuruecksetzen, speichereCockpitLayout } from "@/lib/actions/cockpit";
 import { Plus, X } from "lucide-react";
-import { KACHEL_STILE, MIN_GROESSE, STANDARD_LAYOUT, WIDGETS, type CockpitLayout, type KachelStil, type LayoutItem } from "@/lib/cockpit/typen";
+import { KACHEL_STILE, MIN_GROESSE, RASTER_FAKTOR, STANDARD_LAYOUT, WIDGETS, type CockpitLayout, type KachelStil, type LayoutItem } from "@/lib/cockpit/typen";
 import Adern from "./adern";
 import "./cockpit.css";
 
@@ -26,16 +26,29 @@ const ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
 const FREI = new Set(["hailey", "pflanze", "polaroid", "wetter"]);
 
 const SPALTEN = 12;
-const ZEILE = 28;
+/** Feines Raster: 10-px-Zeilen ohne senkrechten Rand. Der sichtbare Abstand nach unten entsteht,
+ *  weil jedes Fenster um „abstand" kürzer ist als sein Rasterplatz (CSS). So bleibt ein Fenster
+ *  genau dort, wo man es loslässt (kein automatisches Hochrutschen). */
+const ZEILE = 10;
 const ABSTAND_STANDARD = 12;
-// Zeilenhöhe + Abstand bleiben zusammen konstant (40 px): ein größerer Abstand macht die
-// Fenster nicht höher, sondern nur die Spalte dazwischen breiter.
 
-/** Gespeicherte Anordnung + neue Widgets (unten angehängt) − nicht erlaubte. */
+const nurPos = (l: ReadonlyArray<LayoutItem>): LayoutItem[] => l.map((x) => ({ i: x.i, x: x.x, y: x.y, w: x.w, h: x.h }));
+
+/** Gespeicherte Anordnung + neue Widgets (unten angehängt) − nicht erlaubte.
+ *  Alte Anordnungen (40-px-Zeilen) werden ×4 umgerechnet und einmal so verdichtet,
+ *  wie sie bisher angezeigt wurden – das Bild bleibt gleich. */
 function baueLayout(gespeichert: CockpitLayout | null, erlaubt: string[]): { items: LayoutItem[]; aus: string[] } {
   const ok = new Set(erlaubt);
   const aus = (gespeichert?.aus ?? []).filter((id) => ok.has(id));
-  const basis = (gespeichert?.items ?? STANDARD_LAYOUT).filter((it) => ok.has(it.i));
+  const fein = gespeichert?.raster === 2;
+  const roh = gespeichert
+    ? gespeichert.items.map((it) => (fein ? it : { ...it, y: it.y * RASTER_FAKTOR, h: it.h * RASTER_FAKTOR }))
+    : STANDARD_LAYOUT;
+  const gefiltert = roh.filter((it) => ok.has(it.i) && !aus.includes(it.i));
+  const basis = [
+    ...(fein ? gefiltert : nurPos(verticalCompactor.compact(gefiltert as Layout, SPALTEN) as LayoutItem[])),
+    ...roh.filter((it) => ok.has(it.i) && aus.includes(it.i)),
+  ];
   const da = new Set(basis.map((it) => it.i));
   let unten = basis.reduce((m, it) => Math.max(m, it.y + it.h), 0);
   const items = [...basis];
@@ -69,14 +82,14 @@ function Uhr() {
 }
 
 /**
- * Plus-Felder auf freien Stellen des Rasters: jede Lücke (mind. 2 Spalten × 3 Zeilen) und ein
+ * Plus-Felder auf freien Stellen des Rasters: jede Lücke (mind. 2 Spalten × 100 px) und ein
  * Feld unter dem letzten Fenster. Klick öffnet die Auswahl der nicht gezeigten Fenster.
  */
 function PlusFelder({ layout, breite, abstand, zeile, verfuegbar, offen, setOffen, hinzufuegen }: {
   layout: LayoutItem[]; breite: number; abstand: number; zeile: number;
   verfuegbar: ReadonlyArray<{ id: string; name: string; info: string }>;
   offen: string | null; setOffen: (k: string | null) => void;
-  hinzufuegen: (id: string, x: number, y: number, maxW: number) => void;
+  hinzufuegen: (id: string, x: number, y: number, maxW: number, maxH: number) => void;
 }) {
   if (!verfuegbar.length) return null;
   const PAD_X = 16, PAD_Y = 8;
@@ -96,31 +109,32 @@ function PlusFelder({ layout, breite, abstand, zeile, verfuegbar, offen, setOffe
     }
     for (const [a, e] of laeufe) {
       if (e - a < 2 || vorher.some(([va, ve]) => va === a && ve === e)) continue; // Lücke läuft von oben weiter
+      if (felder.some((f) => a < f.x + f.w && e > f.x && y < f.y + f.h)) continue; // schon von einem Feld abgedeckt
       let h = 0;
       while (y + h < unten && Array.from({ length: e - a }, (_, k) => a + k).every((x) => !belegt(x, y + h))) h++;
-      if (h >= 3) felder.push({ x: a, y, w: e - a, h: Math.min(h, 8) });
+      if (h >= 10) felder.push({ x: a, y, w: e - a, h: Math.min(h, 40) });
     }
     vorher = laeufe;
   }
-  felder.push({ x: 0, y: unten, w: SPALTEN, h: 3 });
+  felder.push({ x: 0, y: unten, w: SPALTEN, h: 12 });
   return (
     <div className="ck-plus-ebene" aria-label="Freie Stellen">
-      {felder.slice(0, 12).map((f) => {
+      {felder.slice(0, 16).map((f) => {
         const k = `${f.x}-${f.y}`;
         const style = {
           left: 8 + PAD_X + f.x * (spalteB + abstand),
-          top: 4 + PAD_Y + f.y * (zeile + abstand),
+          top: 4 + PAD_Y + f.y * zeile,
           width: f.w * spalteB + (f.w - 1) * abstand,
-          height: f.h * zeile + (f.h - 1) * abstand,
+          height: f.h * zeile - abstand,
         };
         return (
           <div key={k} className="ck-plus-feld" data-offen={offen === k} style={style}>
             <button type="button" className="ck-plus-knopf" onClick={() => setOffen(offen === k ? null : k)} aria-label="Fenster hier hinzufügen" title="Fenster hier hinzufügen"><Plus size={18} /></button>
             {offen === k && (
               <div className="ck-plus-wahl" role="menu">
-                <div className="ck-plus-wahl-kopf">Hier hinzufügen</div>
+                <div className="ck-plus-wahl-kopf">Hier hinzufügen oder hierher holen</div>
                 {verfuegbar.map((w) => (
-                  <button key={w.id} type="button" role="menuitem" onClick={() => hinzufuegen(w.id, f.x, f.y, f.w)}>
+                  <button key={w.id} type="button" role="menuitem" onClick={() => hinzufuegen(w.id, f.x, f.y, f.w, f.y + f.h >= unten ? 999 : f.h)}>
                     <b>{w.name}</b><span>{w.info}</span>
                   </button>
                 ))}
@@ -171,14 +185,14 @@ export default function CockpitGrid({
     if (timer.current) clearTimeout(timer.current);
     setStatus("speichert");
     timer.current = setTimeout(async () => {
-      const res = await speichereCockpitLayout({ items: neu, aus: neuAus, adern: adernRef.current, abstand: abstandRef.current, stil: stilRef.current });
+      const res = await speichereCockpitLayout({ items: neu, aus: neuAus, adern: adernRef.current, abstand: abstandRef.current, stil: stilRef.current, raster: 2 });
       setStatus(res.ok ? "gespeichert" : "fehler");
       if (res.ok) setTimeout(() => setStatus((s) => (s === "gespeichert" ? "" : s)), 1800);
     }, 700);
   }, []);
 
   const sichtbar = items.filter((it) => !aus.includes(it.i));
-  const layout: Layout = sichtbar.map((it) => ({ ...it, minW: MIN_GROESSE[it.i]?.w ?? 2, minH: MIN_GROESSE[it.i]?.h ?? 2 }));
+  const layout: Layout = sichtbar.map((it) => ({ ...it, minW: MIN_GROESSE[it.i]?.w ?? 2, minH: MIN_GROESSE[it.i]?.h ?? 2 * RASTER_FAKTOR }));
 
   /** Nach Ziehen/Größe ändern: Positionen übernehmen und speichern. */
   const uebernehmen = (l: Layout) => {
@@ -348,15 +362,15 @@ export default function CockpitGrid({
             {reihenfolge.map((it, i) => <div key={it.i}>{panel(it.i, i)}</div>)}
           </div>
         ) : (
-          <div className="ck-raster">
+          <div className="ck-raster" style={{ ["--ck-abstand" as string]: `${abstand}px` }}>
             <Adern aktiv={adern} abstand={abstand} />
             <ReactGridLayout
               width={width - 16}
               layout={layout}
-              gridConfig={{ cols: SPALTEN, rowHeight: ZEILE + ABSTAND_STANDARD - abstand, margin: [abstand, abstand], containerPadding: [16, 8] }}
+              gridConfig={{ cols: SPALTEN, rowHeight: ZEILE, margin: [abstand, 0], containerPadding: [16, 8] }}
               dragConfig={{ enabled: true, handle: ".ck-griff", cancel: ".ck-kein-zug" }}
               resizeConfig={{ enabled: true, handles: ["se", "e", "s"] }}
-              compactor={verticalCompactor}
+              compactor={noCompactor}
               onDragStop={(l) => uebernehmen(l)}
               onResizeStop={(l) => uebernehmen(l)}
               onLayoutChange={(l) => setAngezeigt(l.map((x) => ({ i: x.i, x: x.x, y: x.y, w: x.w, h: x.h })))}
@@ -367,14 +381,21 @@ export default function CockpitGrid({
               layout={angezeigt ?? sichtbar}
               breite={width - 16}
               abstand={abstand}
-              zeile={ZEILE + ABSTAND_STANDARD - abstand}
-              verfuegbar={WIDGETS.filter((w) => erlaubt.includes(w.id) && (aus.includes(w.id) || !items.some((it) => it.i === w.id)))}
+              zeile={ZEILE}
+              verfuegbar={[
+                // zuerst, was noch nicht zu sehen ist – danach alle gezeigten (die werden hierher verschoben)
+                ...WIDGETS.filter((w) => erlaubt.includes(w.id) && (aus.includes(w.id) || !items.some((it) => it.i === w.id))),
+                ...WIDGETS.filter((w) => erlaubt.includes(w.id) && !aus.includes(w.id) && items.some((it) => it.i === w.id))
+                  .map((w) => ({ id: w.id, name: w.name, info: "Schon zu sehen – wird hierher verschoben" })),
+              ]}
               offen={plusOffen}
               setOffen={setPlusOffen}
-              hinzufuegen={(id, x, y, maxW) => {
+              hinzufuegen={(id, x, y, maxW, maxH) => {
                 const std = STANDARD_LAYOUT.find((s) => s.i === id);
                 const min = MIN_GROESSE[id]?.w ?? 2;
-                const neu = { i: id, x, y, w: Math.max(min, Math.min(std?.w ?? 4, maxW)), h: std?.h ?? 8 };
+                const neu = { i: id, x, y, w: Math.max(min, Math.min(std?.w ?? 4, maxW)), h: Math.max(MIN_GROESSE[id]?.h ?? 8, Math.min(std?.h ?? 32, maxH)) };
+                const alt = items.find((it) => it.i === id && !aus.includes(id));
+                if (alt) { neu.w = Math.max(min, Math.min(alt.w, maxW)); neu.h = Math.max(MIN_GROESSE[id]?.h ?? 8, Math.min(alt.h, maxH)); }
                 const neuItems = [...items.filter((it) => it.i !== id), neu];
                 const neuAus = aus.filter((a) => a !== id);
                 setItems(neuItems);

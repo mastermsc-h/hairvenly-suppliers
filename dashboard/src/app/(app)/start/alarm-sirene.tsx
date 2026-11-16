@@ -1,11 +1,9 @@
 // Deko für "Totes Kapital" (Alternative zum Lava-Riss): eine moderne rote Rundumleuchte –
-// Glaskuppel auf Metallsockel, kreisender Lichtkegel, pulsierender Schein und kleine rote
+// Glaskuppel auf Metallsockel mit wanderndem Glanz im Inneren (ohne Strahlen nach außen) und kleine rote
 // Sterne, die auf einer schrägen Bahn um die Sirene kreisen (vorne groß/hell, hinten klein/blass).
 export default function AlarmSirene() {
   return (
     <div className="sr" aria-hidden>
-      <div className="sr-schein" />
-      <div className="sr-kegel" />
       <div className="sr-bahn sr-bahn-hinten">
         <div className="sr-kreis">
           {[0, 1, 2, 3, 4].map((i) => <span key={i} className="sr-stern" style={{ ["--i" as string]: i }}><span className="sr-tiefe"><Stern /></span></span>)}

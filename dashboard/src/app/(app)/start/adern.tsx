@@ -35,7 +35,7 @@ export default function Adern({ aktiv, abstand }: { aktiv: boolean; abstand: num
 
     const puls = () => {
       if (document.hidden || svg.childElementCount > 5) return;
-      const fenster = [...feld.querySelectorAll<HTMLElement>(".react-grid-item:not(.react-grid-placeholder)")];
+      const fenster = [...feld.querySelectorAll<HTMLElement>(".react-grid-item:not(.react-grid-placeholder) > .ck-panel")];
       if (!fenster.length) return;
       const basis = feld.getBoundingClientRect();
       // nur Fenster, die gerade (teilweise) zu sehen sind

@@ -51,6 +51,8 @@ export interface CockpitLayout {
   abstand?: number;
   /** Aussehen der Fenster (Standard: "standard"). */
   stil?: KachelStil;
+  /** Rasterversion: 2 = feine 10-px-Zeilen, frei platzierbar. Fehlt = alte 40-px-Zeilen. */
+  raster?: number;
 }
 
 export type KachelStil = "standard" | "glas" | "aurora";
@@ -382,8 +384,11 @@ export const WIDGETS = [
 
 export type WidgetId = (typeof WIDGETS)[number]["id"];
 
-/** Standard-Anordnung im 12er-Raster (Zeilenhöhe 28 px + 16 px Abstand). */
-export const STANDARD_LAYOUT: LayoutItem[] = [
+/** Zeilen des alten Rasters (40 px) in Zeilen des feinen Rasters (10 px). */
+export const RASTER_FAKTOR = 4;
+
+/** Standard-Anordnung im 12er-Raster, notiert in alten 40-px-Zeilen (wird unten umgerechnet). */
+const STANDARD_LAYOUT_GROB: LayoutItem[] = [
   { i: "sturm", x: 0, y: 3, w: 12, h: 11 },
   { i: "lage", x: 0, y: 0, w: 12, h: 3 },
   { i: "umsatz", x: 0, y: 3, w: 5, h: 8 },
@@ -415,8 +420,12 @@ export const STANDARD_LAYOUT: LayoutItem[] = [
   { i: "wetter", x: 9, y: 111, w: 3, h: 9 },
 ];
 
+/** Standard-Anordnung im feinen Raster (10-px-Zeilen). Überlappt noch – wird beim Aufbau einmal verdichtet. */
+export const STANDARD_LAYOUT: LayoutItem[] = STANDARD_LAYOUT_GROB.map((it) => ({ ...it, y: it.y * RASTER_FAKTOR, h: it.h * RASTER_FAKTOR }));
+
+/** Mindestgrößen im feinen Raster (h in 10-px-Zeilen). */
 export const MIN_GROESSE: Record<string, { w: number; h: number }> = {
-  hi: { w: 3, h: 7 },
-  lage: { w: 3, h: 2 },
-  liquiditaet: { w: 4, h: 5 },
+  hi: { w: 3, h: 28 },
+  lage: { w: 3, h: 8 },
+  liquiditaet: { w: 4, h: 20 },
 };
