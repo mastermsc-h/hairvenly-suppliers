@@ -1,6 +1,6 @@
 import { Mail, Camera, MessageCircle, Megaphone, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { requireAdmin } from "@/lib/auth";
-import { ladeNewsletter } from "@/lib/newsletter";
+import { ladeNewsletter, NEWSLETTER_EREIGNISSE } from "@/lib/newsletter";
 import { ladeIgAnfragen, ladeInstagram, ladeWerbung } from "@/lib/cockpit/daten";
 import NewsletterChart from "./newsletter-chart";
 
@@ -89,7 +89,7 @@ export default async function KennzahlenPage() {
 
           <section className={CARD}>
             <div className={`${LABEL} mb-3`}>Verlauf</div>
-            <NewsletterChart d={nl} />
+            <NewsletterChart d={nl} ereignisse={NEWSLETTER_EREIGNISSE} />
           </section>
 
           <section className={CARD}>

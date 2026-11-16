@@ -3,7 +3,7 @@
 // Newsletter-Verlauf: Anmeldungen nach oben (bestätigt kräftig, unbestätigt hell), Abmeldungen nach unten,
 // Linie = Abonnenten am Ende des Zeitraums. Umschaltbar Tage (90) / Wochen (26) / Monate (18).
 import { useState } from "react";
-import { Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, CartesianGrid, ComposedChart, Line, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { NewsletterDaten } from "@/lib/cockpit/typen";
 
 const zahl = (n: number) => new Intl.NumberFormat("de-DE").format(Math.round(n));
@@ -30,7 +30,7 @@ function Tipp({ active, payload }: { active?: boolean; payload?: Array<{ payload
   );
 }
 
-export default function NewsletterChart({ d }: { d: NewsletterDaten }) {
+export default function NewsletterChart({ d, ereignisse = [] }: { d: NewsletterDaten; ereignisse?: Array<{ von: string; bis: string; text: string }> }) {
   const [art, setArt] = useState<"tag" | "woche" | "monat">("monat");
   const daten: Punkt[] = (() => {
     if (art === "monat") return d.monate.map((m) => ({ label: `${MON[Number(m.monat.slice(5, 7)) - 1]} ${m.monat.slice(2, 4)}`, titel: m.monat, neu: m.neu, ausstehend: m.ausstehend, ab: -m.abmeldungen, abonniert: m.ende }));
@@ -46,6 +46,11 @@ export default function NewsletterChart({ d }: { d: NewsletterDaten }) {
     return [...m.values()].slice(-26);
   })();
   const ab = daten.map((x) => x.abonniert).filter((x): x is number => x != null);
+  // Ereignisse (z. B. Glücksrad-Pop-up) als Band – nur in der Monatsansicht, dort passen die Beschriftungen
+  const baender = art !== "monat" ? [] : ereignisse.flatMap((ev) => {
+    const im = daten.filter((p) => p.titel >= ev.von && p.titel <= ev.bis);
+    return im.length ? [{ x1: im[0].label, x2: im[im.length - 1].label, text: ev.text }] : [];
+  });
   return (
     <div>
       <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
@@ -71,6 +76,9 @@ export default function NewsletterChart({ d }: { d: NewsletterDaten }) {
             <YAxis yAxisId="z" width={44} tickLine={false} axisLine={false} fontSize={11} tickFormatter={zahl} />
             <YAxis yAxisId="a" orientation="right" width={52} tickLine={false} axisLine={false} fontSize={11} tickFormatter={zahl} domain={ab.length ? [Math.floor(Math.min(...ab) * 0.98), Math.ceil(Math.max(...ab) * 1.01)] : ["auto", "auto"]} />
             <Tooltip content={<Tipp />} cursor={{ fill: "rgba(124,92,255,0.06)" }} />
+            {baender.map((b) => (
+              <ReferenceArea key={b.text} yAxisId="z" x1={b.x1} x2={b.x2} fill="#fef3c7" fillOpacity={0.6} label={{ value: b.text, position: "insideTop", fill: "#92400e", fontSize: 11 }} />
+            ))}
             <ReferenceLine yAxisId="z" y={0} stroke="#d4d4d8" />
             <Bar yAxisId="z" dataKey="neu" stackId="s" fill="#7c3aed" />
             <Bar yAxisId="z" dataKey="ausstehend" stackId="s" fill="#ddd6fe" radius={[3, 3, 0, 0]} />

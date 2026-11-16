@@ -145,6 +145,12 @@ export async function ladeNewsletterTage(sb: SupabaseClient = createServiceClien
   return out;
 }
 
+/** Bekannte Ereignisse, die die Anmeldungen erklären (Angabe des Users). */
+export const NEWSLETTER_EREIGNISSE: Array<{ von: string; bis: string; text: string }> = [
+  // User 16.11.2026: Pop-up mit Gewinnspielrad, im April 2026 entfernt (Beginn laut Daten Nov 2025)
+  { von: "2025-11", bis: "2026-04", text: "Glücksrad-Pop-up" },
+];
+
 const MONATE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
 const zahl = (n: number) => new Intl.NumberFormat("de-DE").format(Math.round(n));
 
@@ -185,7 +191,16 @@ export function werteNewsletterAus(tage: NewsletterTag[]): NewsletterDaten {
   if (davor3.length === 3 && schnitt(davor3) > 0 && schnitt(letzte3) < schnitt(davor3) * 0.5) {
     hinweise.push({ ton: "warn", text: `Anmeldungen eingebrochen: Ø ${zahl(schnitt(letzte3))} pro Monat in den letzten 3 Monaten gegen Ø ${zahl(schnitt(davor3))} davor.` });
   }
-  if (spitze && spitze.neu > 3 * Math.max(schnitt(letzte3), 1)) {
+  // Bekannte Ereignisse: Monate mit und ohne vergleichen (laufender Monat ausgenommen)
+  for (const ev of NEWSLETTER_EREIGNISSE) {
+    const mit = voll.filter((m) => m.monat > ev.von && m.monat < ev.bis); // volle Monate mittendrin
+    const ohne = voll.filter((m) => m.monat > ev.bis);
+    if (mit.length && ohne.length && schnitt(mit) > 2 * Math.max(schnitt(ohne), 1)) {
+      const [y, m] = ev.bis.split("-");
+      hinweise.push({ ton: "info", text: `Mit dem ${ev.text} kamen Ø ${zahl(schnitt(mit))} neue Abonnenten pro Monat, seit es im ${MONATE[Number(m) - 1]} ${y} entfernt wurde Ø ${zahl(schnitt(ohne))} – rund ${zahl(schnitt(mit) - schnitt(ohne))} pro Monat weniger.` });
+    }
+  }
+  if (!NEWSLETTER_EREIGNISSE.length && spitze && spitze.neu > 3 * Math.max(schnitt(letzte3), 1)) {
     const [y, m] = spitze.monat.split("-");
     hinweise.push({ ton: "info", text: `Stärkster Monat war ${MONATE[Number(m) - 1]} ${y} mit ${zahl(spitze.neu)} neuen Abonnenten – was lief da anders (Pop-up, Gewinnspiel, Rabatt)?` });
   }
