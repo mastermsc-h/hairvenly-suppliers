@@ -897,3 +897,38 @@ a.ck-signal:hover { border-color: var(--s); }
   .sr-kern, .sr-wandert, .sr-schein, .sr-kegel, .sr-kreis, .sr-tiefe, .sr-tiefe svg { animation: none !important; }
   .sr-kern { opacity: 0.6; }
 }
+
+
+/* ── Newsletter als moderne Zeitung (klar, gut lesbar) ─────────────────── */
+.ck-panel[data-w="newsletter"] { --w: #1e2240; background: #fdfcfa; border-color: #ece8e1; }
+.ck-panel[data-w="newsletter"] .ck-abzeichen { background: #1e2240; box-shadow: none; }
+.zt { position: relative; color: #1e2240; display: flex; flex-direction: column; gap: 9px; }
+.zt-glanz { display: none; }
+.zt-titel { border-bottom: 2px solid #1e2240; padding-bottom: 7px; animation: zt-druck 0.6s ease both; }
+.zt-zeile-oben { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8a8fa8; }
+.zt-name { font-size: clamp(24px, 3vw, 34px); font-weight: 800; letter-spacing: -0.035em; line-height: 1.05; margin: 3px 0 1px; }
+.zt-name span { color: #7c5cff; }
+.zt-datum { font-size: 12px; color: #666c8c; }
+@keyframes zt-druck { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.zt-schlagzeile { margin: 0; font-family: Georgia, "Iowan Old Style", "Times New Roman", serif; font-size: clamp(19px, 2.2vw, 26px); font-weight: 700; line-height: 1.2; letter-spacing: -0.01em; }
+.zt-unterzeile { margin: 0; font-size: 13px; color: #4b5070; line-height: 1.45; padding-bottom: 8px; border-bottom: 1px solid #e6e2da; }
+.zt-spalten { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
+.zt-spalten > section { padding: 0; }
+.zt h4 { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #7c5cff; }
+.zt p { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; color: #3a3f5c; }
+.zt-gross { font-size: 36px; font-weight: 800; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.zt-reihe { display: flex; justify-content: space-between; gap: 6px; font-size: 13px; border-bottom: 1px solid #efebe4; padding: 4px 0; }
+.zt-reihe b { font-variant-numeric: tabular-nums; }
+.zt-klein { font-size: 11px !important; color: #8a8fa8 !important; }
+.zt-grafik { width: 100%; height: 64px; display: block; }
+.zt-achse { display: flex; font-size: 10px; color: #8a8fa8; }
+.zt-achse span { flex: 1; text-align: center; }
+.zt-anzeige { margin-top: 10px; border-radius: 12px; padding: 9px 11px; font-size: 12.5px; line-height: 1.4; background: #f3efff; color: #3b2d8f; }
+.zt-anzeige-kopf { font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 3px; }
+.zt-kommentar { margin: 0; padding: 9px 12px; border-left: 3px solid #7c5cff; background: #faf8f4; border-radius: 0 10px 10px 0; font-size: 12.5px; line-height: 1.5; color: #3a3f5c; }
+.zt-kommentar span { font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; font-size: 10.5px; margin-right: 6px; color: #1e2240; }
+.zt-fuss { text-align: right; font-size: 12.5px; font-weight: 600; }
+.zt-fuss a { color: #7c5cff; text-decoration: none; }
+.zt-fuss a:hover { text-decoration: underline; }
+.zt-leer { font-style: italic; padding: 10px 0; color: #666c8c; }
+@media (prefers-reduced-motion: reduce) { .zt-titel { animation: none; } }

@@ -8,6 +8,7 @@ import { fetchUnfulfilledUnpaidOrders } from "@/lib/shopify";
 import { hyBucket } from "@/lib/health";
 import { ladeInstagram, ladeKampagnen, ladeLiquiditaet, ladeUmsatz, ladeWerbung } from "./daten";
 import type { Auffaelligkeit, Bericht } from "./typen";
+import { ladeNewsletter } from "@/lib/newsletter";
 
 const S = {
   chatStunden: 4,             // Kundin wartet länger als so viele Stunden auf eine Antwort
@@ -367,6 +368,7 @@ const QUELLEN: Array<{ name: string; tabelle: string; spalte: string; maxTage: n
   { name: "Kontostände (Bank)", tabelle: "bank_salden", spalte: "abgerufen_am", maxTage: 4, href: "/finances/bank" },
   { name: "HY-Score", tabelle: "company_health_snapshots", spalte: "created_at", maxTage: 2, href: "/health" },
   { name: "Instagram-Statistik", tabelle: "instagram_tag", spalte: "stand", maxTage: 3 },
+  { name: "Newsletter-Abonnenten", tabelle: "newsletter_tag", spalte: "stand", maxTage: 3, href: "/marketing/kennzahlen" },
 ];
 const datenquellen: Pruefung = async () => {
   const sb = createServiceClient();
@@ -388,7 +390,39 @@ const datenquellen: Pruefung = async () => {
   }];
 };
 
+// ── Newsletter ──────────────────────────────────────────────────────────────
+const newsletter: Pruefung = async () => {
+  const d = await ladeNewsletter();
+  if (!d.bestand) return [];
+  const out: Auffaelligkeit[] = [];
+  const h = heute();
+  const voll = d.monate.filter((m) => m.monat < h.slice(0, 7));
+  const schnitt = (l: typeof voll) => (l.length ? l.reduce((s, m) => s + m.neu, 0) / l.length : 0);
+  const vorher3 = schnitt(voll.slice(-4, -1));
+  if (vorher3 > 0 && d.d30.neu < vorher3 * 0.5) out.push({
+    id: "newsletter-wenig", bereich: "werbung", schwere: "mittel",
+    titel: "Wenige neue Newsletter-Abonnenten",
+    detail: `${d.d30.neu} bestätigte Anmeldungen in 30 Tagen gegen Ø ${zahl(vorher3)} pro Monat davor.`,
+    href: "/marketing/kennzahlen",
+  });
+  const anm = d.d30.neu + d.d30.ausstehend;
+  if (anm >= 20 && d.d30.ausstehend > d.d30.neu) out.push({
+    id: "newsletter-unbestaetigt", bereich: "werbung", schwere: "mittel",
+    titel: `${d.d30.ausstehend} Newsletter-Anmeldungen unbestätigt`,
+    detail: `Von ${anm} Anmeldungen in 30 Tagen wurden nur ${d.d30.neu} bestätigt – Bestätigungs-E-Mail prüfen (Spam, Zustellung).`,
+    href: "/marketing/kennzahlen",
+  });
+  if (d.d30.abmeldungen > Math.max(10, d.d30.neu * 0.5)) out.push({
+    id: "newsletter-abmeldungen", bereich: "werbung", schwere: "mittel",
+    titel: "Viele Newsletter-Abmeldungen",
+    detail: `${d.d30.abmeldungen} Abmeldungen bei ${d.d30.neu} neuen Abonnenten in 30 Tagen.`,
+    href: "/marketing/kennzahlen",
+  });
+  return out;
+};
+
 const PRUEFUNGEN: Array<[string, Pruefung]> = [
+  ["Newsletter", newsletter],
   ["Datenquellen", datenquellen],
   ["Lager", lager], ["Chats", chats], ["Werbung", werbung], ["Aktionen", aktionen], ["Vorkasse", vorkasse],
   ["Liquidität", liquiditaet], ["Versand", versand], ["Retouren", retouren], ["Steuern", steuern],

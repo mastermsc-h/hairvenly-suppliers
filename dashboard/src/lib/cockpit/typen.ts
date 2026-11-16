@@ -221,6 +221,31 @@ export interface Bericht {
   fehler: string[];
 }
 
+export interface NewsletterZeitraum {
+  neu: number;
+  ausstehend: number;
+  abmeldungen: number;
+  vorNeu: number;
+  vorAusstehend: number;
+  vorAbmeldungen: number;
+}
+
+export interface NewsletterDaten {
+  bestand: { abonniert: number; ausstehend: number; abgemeldet: number; tag: string } | null;
+  d7: NewsletterZeitraum;
+  d30: NewsletterZeitraum;
+  /** Anteil bestätigter Anmeldungen an allen Anmeldungen der letzten 30 Tage (%). */
+  bestaetigt30: number | null;
+  /** Abonnenten vor 30 Tagen (rekonstruiert), für die Veränderung. */
+  abonniertVor30: number | null;
+  monate: Array<{ monat: string; neu: number; ausstehend: number; abmeldungen: number; ende: number | null }>;
+  tage: Array<{ tag: string; neu: number; ausstehend: number; abmeldungen: number; abonniert: number | null }>;
+  /** Automatische Einordnung (Einbruch, viele Unbestätigte …). */
+  hinweise: Array<{ ton: "gut" | "warn" | "info"; text: string }>;
+  schlagzeile: string;
+  unterzeile: string;
+}
+
 export interface BesucherDaten {
   verbunden: boolean;
   grund?: string;
@@ -305,6 +330,7 @@ export const WIDGETS = [
   { id: "instagram", name: "Instagram", info: "Follower, Zu- und Abgänge, wer folgt, beste Zeit", feature: "chatbot" },
   { id: "iganfragen", name: "Instagram-Anfragen", info: "DMs je Tag, gegen Vorwoche und Vorjahr", feature: "chatbot" },
   { id: "werbung", name: "Werbung", info: "Laufende Anzeigen bei Meta & Google, Kosten", feature: "finances" },
+  { id: "newsletter", name: "Newsletter", info: "Der Hairvenly Kurier: Abonnenten, neue, Abmeldungen", feature: "admin" },
   { id: "notizen", name: "Notizzettel", info: "Nur für dich", feature: null },
   { id: "ideen", name: "Ideen & Inspiration", info: "Sammelstelle fürs Team", feature: null },
   { id: "pfeiler", name: "Wachstumspfeiler", info: "Die großen Hebel des Unternehmens", feature: null },
@@ -342,6 +368,7 @@ export const STANDARD_LAYOUT: LayoutItem[] = [
   { i: "iganfragen", x: 0, y: 86, w: 7, h: 12 },
   { i: "werbung", x: 7, y: 86, w: 5, h: 12 },
   { i: "hi", x: 0, y: 63, w: 5, h: 11 },
+  { i: "newsletter", x: 0, y: 98, w: 6, h: 13 },
 ];
 
 export const MIN_GROESSE: Record<string, { w: number; h: number }> = {

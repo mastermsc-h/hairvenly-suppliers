@@ -259,6 +259,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                   href="/marketing"
                   items={[
                     { href: "/marketing", label: t(locale, "nav.marketing.overview"), exact: true },
+                    { href: "/marketing/kennzahlen", label: t(locale, "nav.marketing.kpis") },
                     { href: "/marketing/aufgaben", label: t(locale, "nav.marketing.tasks") },
                     { href: "/marketing/aktionen", label: t(locale, "nav.marketing.actions") },
                   ]}
