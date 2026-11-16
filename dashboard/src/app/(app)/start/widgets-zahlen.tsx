@@ -4,6 +4,7 @@
 import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import LavaRiss from "./lava-riss";
+import AlarmSirene from "./alarm-sirene";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, ComposedChart, Line } from "recharts";
 import {
   AlertTriangle, ArrowRight, Check, CheckCircle2, Globe2, Landmark, Lock, Package, ShoppingBag, ShoppingCart, Sparkles, TrendingDown,
@@ -915,7 +916,24 @@ export function InstagramWidget({ d }: { d: InstagramDaten }) {
 
 // ── Totes Kapital (Ladenhüter) ──────────────────────────────────────────────
 
+// Effekt im Fenster "Totes Kapital": Lava-Riss oder Alarmsirene – je Gerät gemerkt
+type TkEffekt = "riss" | "sirene";
+const tkEffektSpeicher = { wert: "riss" as TkEffekt };
+function tkEffektSetzen(e: TkEffekt) {
+  tkEffektSpeicher.wert = e;
+  try { localStorage.setItem("ck-tk-effekt", e); } catch { /* ohne Speicher: nur für diese Sitzung */ }
+  window.dispatchEvent(new Event("ck-tk-effekt"));
+}
+function useTkEffekt(): TkEffekt {
+  return useSyncExternalStore(
+    (cb) => { window.addEventListener("ck-tk-effekt", cb); return () => window.removeEventListener("ck-tk-effekt", cb); },
+    () => { try { return localStorage.getItem("ck-tk-effekt") === "sirene" ? "sirene" : "riss"; } catch { return tkEffektSpeicher.wert; } },
+    () => "riss" as const,
+  );
+}
+
 export function TotesKapitalWidget({ d }: { d: TotesKapitalDaten }) {
+  const effekt = useTkEffekt();
   if (!d.anzahl) return <Hinweis>Aktuell keine Ladenhüter – nichts liegt länger als nötig im Lager.</Hinweis>;
   const max = Math.max(...d.kollektionen.map((k) => k.wertEur), 1);
   const arten = [
@@ -924,7 +942,7 @@ export function TotesKapitalWidget({ d }: { d: TotesKapitalDaten }) {
   ];
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 10, position: "relative" }}>
-      <LavaRiss />
+      {effekt === "riss" ? <LavaRiss /> : <AlarmSirene />}
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <Ring anteil={d.anteilLager} groesse={62} dicke={8}><span className="ck-mono" style={{ fontSize: 13, fontWeight: 750 }}>{zahl(d.anteilLager)}<span style={{ fontSize: 9 }}> %</span></span></Ring>
         <div style={{ flex: 1 }}>
@@ -972,7 +990,14 @@ export function TotesKapitalWidget({ d }: { d: TotesKapitalDaten }) {
       )}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: "auto" }}>
-        <span className="ck-matt" style={{ fontSize: 11 }}>Lager × heutiger Verkaufspreis{d.ohnePreis ? ` · ${d.ohnePreis} ohne Preis nicht enthalten` : ""}</span>
+        <span className="ck-matt" style={{ fontSize: 11, display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          Lager × heutiger Verkaufspreis{d.ohnePreis ? ` · ${d.ohnePreis} ohne Preis nicht enthalten` : ""}
+          <span style={{ display: "inline-flex", gap: 2 }} role="group" aria-label="Effekt">
+            {(["riss", "sirene"] as const).map((e) => (
+              <button key={e} type="button" className="ck-chip" data-an={effekt === e} onClick={() => tkEffektSetzen(e)} style={{ padding: "1px 8px", fontSize: 10.5 }}>{e === "riss" ? "Riss" : "Sirene"}</button>
+            ))}
+          </span>
+        </span>
         <Mehr href="/stock/deadstock">Ladenhüter</Mehr>
       </div>
     </div>

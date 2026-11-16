@@ -857,3 +857,43 @@ a.ck-signal:hover { border-color: var(--s); }
   .lv-schein, .lv-lava, .lv-ader, .lv-rauch i, .lv-funken b { animation: none !important; }
   .lv-rauch i { opacity: 0.3; }
 }
+
+
+/* ── Totes Kapital: Alarmsirene mit kreisenden roten Sternen (Alternative zum Riss) ── */
+.sr { position: absolute; top: -6px; right: 4px; width: 120px; height: 104px; pointer-events: none; z-index: 2; }
+.sr-lampe { position: absolute; left: 20px; bottom: 6px; filter: drop-shadow(0 6px 8px rgba(120, 10, 30, 0.35)); }
+.sr-kern { animation: sr-blitzt 0.9s ease-in-out infinite; }
+.sr-wandert { animation: sr-glanz 1.8s linear infinite; }
+@keyframes sr-blitzt { 0%, 100% { opacity: 0.15; } 45% { opacity: 0.95; } 60% { opacity: 0.3; } 75% { opacity: 0.85; } }
+@keyframes sr-glanz { from { transform: translateX(0); } to { transform: translateX(110px); } }
+
+/* pulsierender Schein und kreisender Lichtkegel um die Kuppel */
+.sr-schein { position: absolute; left: 10px; top: 4px; width: 100px; height: 90px; border-radius: 50%; background: radial-gradient(closest-side, rgba(255, 40, 70, 0.5), rgba(255, 40, 70, 0)); animation: sr-pulsiert 0.9s ease-in-out infinite; }
+@keyframes sr-pulsiert { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.12); } }
+.sr-kegel {
+  position: absolute; left: 60px; top: 44px; width: 150px; height: 150px; margin: -75px 0 0 -75px; border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(255, 45, 75, 0.55), rgba(255, 45, 75, 0) 16%, rgba(255, 45, 75, 0) 50%, rgba(255, 45, 75, 0.55) 50%, rgba(255, 45, 75, 0) 66%, rgba(255, 45, 75, 0));
+  -webkit-mask-image: radial-gradient(closest-side, #000 20%, transparent 100%); mask-image: radial-gradient(closest-side, #000 20%, transparent 100%);
+  filter: blur(3px); animation: sr-dreht 1.8s linear infinite;
+}
+@keyframes sr-dreht { to { transform: rotate(360deg); } }
+
+/* Sterne auf einer schrägen Ellipse: hintere Hälfte hinter der Lampe, vordere davor */
+.sr-bahn { position: absolute; left: 60px; top: 52px; width: 0; height: 0; transform: scaleY(0.34) rotate(-8deg); }
+.sr-kreis { position: absolute; left: 0; top: 0; animation: sr-dreht 7s linear infinite; }
+.sr-stern { position: absolute; left: 0; top: 0; transform: rotate(calc(var(--i) * 72deg)) translateY(-52px); }
+.sr-tiefe { position: absolute; left: -6px; top: -6px; width: 12px; height: 12px; animation: sr-vorne 7s linear infinite; animation-delay: calc(var(--i) * -1.4s); }
+.sr-bahn-hinten .sr-tiefe { animation-name: sr-hinten; }
+.sr-tiefe svg { display: block; filter: drop-shadow(0 0 4px rgba(255, 40, 70, 0.9)); animation: sr-gegen 7s linear infinite; }
+@keyframes sr-gegen {
+  from { transform: rotate(calc(var(--i) * -72deg)) scaleY(2.94); }
+  to { transform: rotate(calc(var(--i) * -72deg - 360deg)) scaleY(2.94); }
+}
+/* Phase 0 % = hinten oben, 50 % = vorne unten */
+@keyframes sr-vorne { 0%, 24% { opacity: 0; transform: scale(0.6); } 26% { opacity: 0.8; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.35); } 74% { opacity: 0.8; transform: scale(0.9); } 76%, 100% { opacity: 0; transform: scale(0.6); } }
+@keyframes sr-hinten { 0% { opacity: 0.45; transform: scale(0.55); } 24% { opacity: 0.6; transform: scale(0.85); } 26%, 74% { opacity: 0; } 76% { opacity: 0.6; transform: scale(0.85); } 100% { opacity: 0.45; transform: scale(0.55); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .sr-kern, .sr-wandert, .sr-schein, .sr-kegel, .sr-kreis, .sr-tiefe, .sr-tiefe svg { animation: none !important; }
+  .sr-kern { opacity: 0.6; }
+}
