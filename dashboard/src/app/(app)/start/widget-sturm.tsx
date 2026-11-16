@@ -3,7 +3,7 @@
 // Fenster "Auffälligkeiten": täglicher Prüfbericht, dargestellt als Gewitter.
 // Je mehr ernste Punkte, desto dunkler der Himmel und desto öfter blitzt es.
 // Keine Auffälligkeiten → aufgeklarter Himmel.
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -11,6 +11,7 @@ import {
   Package, RefreshCw, RotateCcw, Sun, TrendingDown, Truck, Wallet, Zap,
 } from "lucide-react";
 import { berichtJetztPruefen } from "@/lib/actions/cockpit";
+import SturmZylinder from "./sturm-zylinder";
 import type { AuffaelligBereich, Bericht } from "@/lib/cockpit/typen";
 
 const ICON: Record<AuffaelligBereich, React.ComponentType<{ size?: number }>> = {
@@ -21,6 +22,14 @@ const BEREICH: Record<AuffaelligBereich, string> = {
   lager: "Lager", chats: "Chats", werbung: "Werbung", aktionen: "Aktionen", zahlungen: "Zahlungen", finanzen: "Finanzen",
   versand: "Versand", retouren: "Retouren", steuern: "Steuern", instagram: "Instagram", umsatz: "Umsatz", daten: "Datenquellen",
 };
+/** Fällt zurück, wenn der Browser keinen Speicher erlaubt (privates Fenster). */
+const ansichtSpeicher = { wert: "zylinder" as "zylinder" | "liste" };
+function ansichtMerken(a: "zylinder" | "liste") {
+  ansichtSpeicher.wert = a;
+  try { localStorage.setItem("ck-sturm-ansicht", a); } catch { /* ohne Speicher: nur für diese Sitzung */ }
+  window.dispatchEvent(new Event("ck-sturm-ansicht"));
+}
+
 const SCHWERE = { hoch: "Ernst", mittel: "Beachten", hinweis: "Hinweis" } as const;
 
 /** Blitz als gezackter Pfad von oben nach unten, zufällig verzweigt. */
@@ -84,6 +93,13 @@ export default function SturmWidget({ bericht, vorher, istAdmin }: { bericht: Be
   const [laeuft, starte] = useTransition();
   const [fehler, setFehler] = useState<string | null>(null);
   const [offen, setOffen] = useState<string | null>(null);
+  // Ansicht je Gerät merken (Zylinder ist Standard); auf dem Server immer Zylinder
+  const ansicht = useSyncExternalStore(
+    (cb) => { window.addEventListener("ck-sturm-ansicht", cb); return () => window.removeEventListener("ck-sturm-ansicht", cb); },
+    () => { try { return localStorage.getItem("ck-sturm-ansicht") === "liste" ? "liste" : "zylinder"; } catch { return ansichtSpeicher.wert; } },
+    () => "zylinder" as const,
+  );
+  const ansichtSetzen = ansichtMerken;
 
   const pruefen = () => starte(async () => {
     setFehler(null);
@@ -119,6 +135,13 @@ export default function SturmWidget({ bericht, vorher, istAdmin }: { bericht: Be
           </div>
           <div className="st-rechts">
             {stand && <span className="st-stand">Bericht von {stand}</span>}
+            {punkte.length > 0 && (
+              <span className="st-umschalter" role="group" aria-label="Ansicht">
+                {(["zylinder", "liste"] as const).map((a) => (
+                  <button key={a} type="button" aria-pressed={ansicht === a} onClick={() => ansichtSetzen(a)}>{a === "zylinder" ? "Zylinder" : "Liste"}</button>
+                ))}
+              </span>
+            )}
             {istAdmin && (
               <button type="button" className="st-knopf" onClick={pruefen} disabled={laeuft} title="Alle Prüfungen jetzt laufen lassen (dauert etwa 20 Sekunden)">
                 <RefreshCw size={13} className={laeuft ? "st-dreht" : undefined} /> {laeuft ? "Prüft …" : "Jetzt prüfen"}
@@ -131,7 +154,8 @@ export default function SturmWidget({ bericht, vorher, istAdmin }: { bericht: Be
         {!bericht && <div className="st-leer">Der Bericht entsteht jeden Tag gegen 12 Uhr.{istAdmin ? " Mit „Jetzt prüfen“ sofort." : ""}</div>}
         {bericht && ernst === 0 && punkte.length === 0 && <div className="st-leer">Alle Prüfungen ohne Befund – Lager, Chats, Zahlungen, Steuern, Werbung, Versand und Retouren sehen gut aus.</div>}
 
-        <div className="st-liste">
+        {ansicht === "zylinder" && punkte.length > 0 && <SturmZylinder punkte={punkte} icons={ICON} bereiche={BEREICH} schwereText={SCHWERE} />}
+        {ansicht === "liste" && <div className="st-liste">
           {punkte.map((p, i) => {
             const Icon = ICON[p.bereich] ?? Zap;
             const auf = offen === p.id;
@@ -161,7 +185,7 @@ export default function SturmWidget({ bericht, vorher, istAdmin }: { bericht: Be
               </div>
             );
           })}
-        </div>
+        </div>}
 
         {bericht && bericht.fehler.length > 0 && (
           <div className="st-fehlerliste" title={bericht.fehler.join("\n")}>
