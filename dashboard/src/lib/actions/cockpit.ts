@@ -131,3 +131,64 @@ export async function berichtJetztPruefen(): Promise<Ergebnis> {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
+
+// ── Routinen ────────────────────────────────────────────────────────────────
+
+/** Routine als erledigt markieren (heute). Ganzes Team. */
+export async function routineErledigt(id: string, rueckgaengig = false): Promise<Ergebnis> {
+  const profile = await team();
+  if (!profile) return { ok: false, error: "Kein Zugriff" };
+  const heute = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin" }).format(new Date());
+  const { error } = await createServiceClient().from("cockpit_routinen")
+    .update(rueckgaengig ? { letzte_erledigung: null, erledigt_von: null } : { letzte_erledigung: heute, erledigt_von: profile.display_name ?? profile.username ?? null })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/start");
+  return { ok: true };
+}
+
+/** Routine anlegen oder ändern. Ganzes Team. */
+export async function routineSpeichern(input: {
+  id?: string; titel: string; art: "intervall" | "lager"; intervallTage?: number | null; quelle?: string | null;
+  lieferzeitTage?: number | null; pufferTage?: number | null; produkte?: Array<{ handle: string; titel: string }>; notiz?: string; farbe?: string | null;
+}): Promise<Ergebnis> {
+  const profile = await team();
+  if (!profile) return { ok: false, error: "Kein Zugriff" };
+  const titel = (input.titel ?? "").trim().slice(0, 80);
+  if (!titel) return { ok: false, error: "Titel fehlt" };
+  const tage = (n: unknown, min: number, max: number) => (typeof n === "number" && Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : null);
+  const zeile = {
+    titel,
+    art: input.art === "lager" ? "lager" : "intervall",
+    intervall_tage: input.art === "lager" ? null : tage(input.intervallTage, 1, 730) ?? 30,
+    quelle: input.quelle?.trim().slice(0, 40) || null,
+    lieferzeit_tage: input.art === "lager" ? tage(input.lieferzeitTage, 1, 365) ?? 60 : null,
+    puffer_tage: tage(input.pufferTage, 0, 120) ?? 14,
+    produkte: (input.produkte ?? []).filter((p) => p?.handle && /^[a-z0-9-]+$/.test(p.handle)).slice(0, 40).map((p) => ({ handle: p.handle, titel: String(p.titel ?? p.handle).slice(0, 80) })),
+    notiz: (input.notiz ?? "").slice(0, 300),
+    ...(input.farbe && /^#[0-9a-f]{6}$/i.test(input.farbe) ? { farbe: input.farbe } : {}),
+  };
+  const sb = createServiceClient();
+  const { error } = input.id
+    ? await sb.from("cockpit_routinen").update(zeile).eq("id", input.id)
+    : await sb.from("cockpit_routinen").insert({ ...zeile, sort: Date.now() / 1000 });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/start");
+  return { ok: true };
+}
+
+export async function routineLoeschen(id: string): Promise<Ergebnis> {
+  const profile = await requireProfile();
+  if (profile.role !== "admin") return { ok: false, error: "Nur Admins" };
+  const { error } = await createServiceClient().from("cockpit_routinen").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/start");
+  return { ok: true };
+}
+
+export async function routineProduktSuche(text: string): Promise<Array<{ handle: string; titel: string; bestand: number }>> {
+  const profile = await team();
+  if (!profile) return [];
+  const { sucheProdukte } = await import("@/lib/cockpit/routinen");
+  try { return await sucheProdukte(text); } catch { return []; }
+}

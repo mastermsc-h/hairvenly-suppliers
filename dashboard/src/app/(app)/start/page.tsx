@@ -9,6 +9,8 @@ import { WIDGETS } from "@/lib/cockpit/typen";
 import CockpitGrid from "./cockpit-grid";
 import SturmWidget from "./widget-sturm";
 import ZeitungWidget from "./widget-zeitung";
+import RoutinenWidget from "./widget-routinen";
+import { ladeRoutinen } from "@/lib/cockpit/routinen";
 import { ladeNewsletter } from "@/lib/newsletter";
 import { ladeBericht } from "@/lib/cockpit/auffaelligkeiten";
 import HiKugel from "@/components/hi/hi-kugel";
@@ -62,6 +64,7 @@ export default async function StartPage() {
     philosophie: <PhilosophieWidget eintraege={eintraege} istAdmin={istAdmin} />,
   };
   if (istAdmin) inhalte.hi = <HiKugel />;
+  inhalte.routinen = warte(<Mit lade={ladeRoutinen}>{(d) => <RoutinenWidget routinen={d} istAdmin={istAdmin} />}</Mit>);
   if (istAdmin) inhalte.newsletter = warte(<Mit lade={() => ladeNewsletter()}>{(d) => <ZeitungWidget d={d} />}</Mit>);
   if (chatbot) {
     inhalte.chats = warte(<Mit lade={ladeChats}>{(d) => <ChatsWidget d={d} />}</Mit>);

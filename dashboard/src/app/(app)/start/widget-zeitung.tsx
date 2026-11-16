@@ -25,8 +25,10 @@ export default function ZeitungWidget({ d }: { d: NewsletterDaten }) {
   const kommentar = d.hinweise.find((h) => h.ton !== "gut") ?? d.hinweise[0];
 
   return (
+    <div className="zt-zeitung">
+      <div className="zt-rueck" aria-hidden><i /><i /><i /><i /><i /><i /></div>
+      <div className="zt-blatt">
     <div className="zt">
-      <div className="zt-glanz" aria-hidden />
       <header className="zt-titel">
         <div className="zt-zeile-oben"><span>Ausgabe Nr. {ausgabe}</span><span>Newsletter-Teil</span><span>Preis: 0 €</span></div>
         <div className="zt-name">Hairvenly <span>Kurier</span></div>
@@ -92,6 +94,8 @@ export default function ZeitungWidget({ d }: { d: NewsletterDaten }) {
         <p className="zt-kommentar"><span>Einordnung</span> {kommentar.text}</p>
       )}
       <div className="zt-fuss"><Link href="/marketing/kennzahlen">Ganze Ausgabe lesen →</Link></div>
+    </div>
+      </div>
     </div>
   );
 }

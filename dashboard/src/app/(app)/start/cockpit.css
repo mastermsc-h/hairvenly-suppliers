@@ -624,7 +624,7 @@ a.ck-signal:hover { border-color: var(--s); }
     #f5f2fc;
   background-attachment: fixed;
 }
-.ck[data-stil="glas"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]) {
+.ck[data-stil="glas"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]):not([data-w="newsletter"]) {
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.6));
   border: 1px solid rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(16px) saturate(1.15);
@@ -634,13 +634,13 @@ a.ck-signal:hover { border-color: var(--s); }
     inset 0 1px 0 #fff,
     0 18px 38px -26px rgba(60, 40, 120, 0.45);
 }
-.ck[data-stil="glas"] .ck-panel:not([data-w="hi"]):not([data-w="sturm"])::before {
+.ck[data-stil="glas"] .ck-panel:not([data-w="hi"]):not([data-w="sturm"]):not([data-w="newsletter"])::before {
   content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
   background: linear-gradient(115deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0) 28%);
 }
 
 /* Aurora: jedes Fenster leicht in seiner Farbe getönt, mit farbiger Lichtkante */
-.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]) {
+.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]):not([data-w="newsletter"]) {
   background:
     radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--w) 17%, transparent), transparent 60%),
     radial-gradient(100% 70% at 100% 100%, color-mix(in srgb, var(--w) 9%, transparent), transparent 60%),
@@ -648,7 +648,7 @@ a.ck-signal:hover { border-color: var(--s); }
   border: 1px solid color-mix(in srgb, var(--w) 26%, white);
   box-shadow: 0 1px 2px rgba(60, 40, 120, 0.05), 0 18px 40px -24px color-mix(in srgb, var(--w) 65%, transparent);
 }
-.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"])::before {
+.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]):not([data-w="newsletter"])::before {
   content: ""; position: absolute; left: 18px; right: 18px; top: 0; height: 2px; border-radius: 2px; pointer-events: none;
   background: linear-gradient(90deg, transparent, var(--w), transparent);
   opacity: 0.85;
@@ -900,11 +900,35 @@ a.ck-signal:hover { border-color: var(--s); }
 
 
 /* ── Newsletter als moderne Zeitung (klar, gut lesbar) ─────────────────── */
-.ck-panel[data-w="newsletter"] { --w: #1e2240; background: #fdfcfa; border-color: #ece8e1; }
+/* Das Fenster selbst ist unsichtbar – die Form gibt die Zeitung (Blatt + gefaltete zweite Seite) */
+.ck-panel[data-w="newsletter"] { --w: #1e2240; background: transparent; border-color: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.ck-panel[data-w="newsletter"]:hover { box-shadow: none; }
+.ck-panel[data-w="newsletter"] .ck-kopf { position: absolute; top: 4px; left: 6px; right: 34px; z-index: 5; opacity: 0; transition: opacity 0.2s; }
+.ck-panel[data-w="newsletter"]:hover .ck-kopf, .ck[data-anpassen="true"] .ck-panel[data-w="newsletter"] .ck-kopf { opacity: 1; }
+.ck-panel[data-w="newsletter"] .ck-kopf .ck-titel, .ck-panel[data-w="newsletter"] .ck-abzeichen { display: none; }
+.ck-panel[data-w="newsletter"] .ck-inhalt { padding: 2px; overflow: hidden; display: flex; }
+.zt-zeitung { position: relative; flex: 1; display: flex; min-height: 0; padding-right: 30px; animation: zt-druck 0.6s ease both; }
+.zt-blatt {
+  position: relative; z-index: 1; flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden;
+  background: #fdfcfa; border: 1px solid #e4dfd5; border-radius: 18px 18px 6px 18px;
+  padding: 14px 16px 12px; box-shadow: 0 1px 2px rgba(30, 34, 64, 0.06), 0 18px 34px -22px rgba(30, 34, 64, 0.45);
+  scrollbar-width: thin;
+}
+/* zweite Seite: schaut rechts heraus, oben kürzer, unten mit eingerollter Ecke */
+.zt-rueck {
+  position: absolute; z-index: 0; right: 2px; top: 30px; bottom: 0; width: 64px;
+  background: linear-gradient(90deg, #ece6da, #f6f2ea 35%, #fbf9f4);
+  border: 1px solid #e0d9cc; border-radius: 0 16px 26px 0;
+  box-shadow: 0 16px 30px -22px rgba(30, 34, 64, 0.5);
+  display: flex; flex-direction: column; justify-content: center; gap: 9px; padding: 0 10px 0 38px;
+}
+.zt-rueck i { display: block; height: 3px; border-radius: 2px; background: #ddd6c8; }
+.zt-rueck::after { content: ""; position: absolute; right: 9px; bottom: 7px; width: 16px; height: 16px; border-right: 2px solid #d3cbbb; border-bottom: 2px solid #d3cbbb; border-radius: 0 0 12px 0; }
+.zt-zeitung:hover .zt-rueck { transform: translateX(2px); transition: transform 0.3s; }
 .ck-panel[data-w="newsletter"] .ck-abzeichen { background: #1e2240; box-shadow: none; }
-.zt { position: relative; color: #1e2240; display: flex; flex-direction: column; gap: 9px; }
+.zt { position: relative; color: #1e2240; display: flex; flex-direction: column; gap: 9px; min-height: 100%; }
 .zt-glanz { display: none; }
-.zt-titel { border-bottom: 2px solid #1e2240; padding-bottom: 7px; animation: zt-druck 0.6s ease both; }
+.zt-titel { border-bottom: 2px solid #1e2240; padding-bottom: 7px; }
 .zt-zeile-oben { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8a8fa8; }
 .zt-name { font-size: clamp(24px, 3vw, 34px); font-weight: 800; letter-spacing: -0.035em; line-height: 1.05; margin: 3px 0 1px; }
 .zt-name span { color: #7c5cff; }
@@ -931,4 +955,61 @@ a.ck-signal:hover { border-color: var(--s); }
 .zt-fuss a { color: #7c5cff; text-decoration: none; }
 .zt-fuss a:hover { text-decoration: underline; }
 .zt-leer { font-style: italic; padding: 10px 0; color: #666c8c; }
-@media (prefers-reduced-motion: reduce) { .zt-titel { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .zt-zeitung { animation: none; } }
+
+
+/* ── Routinen: Ringe-Uhr + Liste ───────────────────────────────────────── */
+.ck-panel[data-w="routinen"] { --w: #7c5cff; }
+.rt { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.rt-uhr { position: relative; flex: none; margin: 4px auto 0; }
+.rt-bogen { transition: stroke-dashoffset 1.3s cubic-bezier(0.2, 0.7, 0.2, 1), stroke-width 0.2s; }
+.rt-ring { cursor: pointer; }
+.rt-ring[data-status="ueberfaellig"] .rt-bogen { filter: drop-shadow(0 0 5px var(--f)); animation: rt-puls 1.8s ease-in-out infinite; }
+.rt-ring[data-status="faellig"] .rt-bogen { filter: drop-shadow(0 0 3px var(--f)); }
+@keyframes rt-puls { 50% { stroke-opacity: 0.55; } }
+.rt-zeiger { position: absolute; inset: 0; border-radius: 50%; animation: ck-dreht-rt 60s linear infinite; pointer-events: none; }
+.rt-zeiger::before { content: ""; position: absolute; left: 50%; top: 1px; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: var(--w); box-shadow: 0 0 8px var(--w); }
+@keyframes ck-dreht-rt { to { transform: rotate(360deg); } }
+.rt-mitte { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; padding: 0 60px; }
+.rt-mitte-titel { font-size: 11px; font-weight: 600; color: var(--ck-dim); line-height: 1.2; }
+.rt-mitte-wert { font-size: 30px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.rt-mitte[data-status="ueberfaellig"] .rt-mitte-wert { color: var(--ck-alarm); }
+.rt-mitte[data-status="faellig"] .rt-mitte-wert { color: #d97706; }
+.rt-mitte-unter { font-size: 10.5px; color: var(--ck-matt); }
+.rt-liste { flex: 1 1 260px; min-width: 0; display: grid; gap: 7px; }
+.rt-zeile { border-radius: 13px; padding: 8px 10px; background: var(--ck-panel-2); border: 1px solid transparent; transition: border-color 0.2s, background 0.2s; }
+.rt-zeile[data-aktiv="true"] { border-color: var(--ck-linie-stark); }
+.rt-zeile[data-status="ueberfaellig"] { background: rgba(238, 63, 111, 0.08); border-color: rgba(238, 63, 111, 0.28); }
+.rt-zeile[data-status="faellig"] { background: rgba(239, 154, 12, 0.1); border-color: rgba(239, 154, 12, 0.3); }
+.rt-zeile-kopf { display: flex; gap: 9px; align-items: flex-start; }
+.rt-punkt { width: 10px; height: 10px; border-radius: 50%; flex: none; margin-top: 4px; }
+.rt-titel { font-size: 13.5px; font-weight: 650; }
+.rt-status { font-size: 12px; font-weight: 600; color: var(--ck-dim); }
+.rt-zeile[data-status="ueberfaellig"] .rt-status { color: var(--ck-alarm); }
+.rt-zeile[data-status="faellig"] .rt-status { color: #b45309; }
+.rt-detail { font-size: 11.5px; color: var(--ck-matt); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-knoepfe { display: flex; gap: 2px; align-items: center; flex: none; }
+.rt-erledigt { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 10px; border-radius: 999px; border: 0; background: var(--ck-ok); color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+.rt-erledigt:disabled { opacity: 0.6; }
+.rt-produktliste { margin: 8px 0 0 19px; display: grid; gap: 3px; }
+.rt-produkt { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; font-size: 12px; padding: 2px 0; border-bottom: 1px solid var(--ck-linie); }
+.rt-produkt span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-produkt b { font-variant-numeric: tabular-nums; min-width: 54px; text-align: right; }
+.rt-produkt[data-knapp="true"] b { color: var(--ck-alarm); }
+.rt-hinweis { font-size: 10.5px; color: var(--ck-matt); margin-top: 3px; }
+.rt-neu { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; border-radius: 12px; border: 1.5px dashed var(--ck-linie-stark); background: transparent; color: var(--ck-dim); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.rt-neu:hover { border-color: var(--w); color: var(--w); }
+.rt-form { display: grid; gap: 7px; }
+.rt-form input:not([type="number"]), .rt-form select { width: 100%; }
+.rt-form-zeile { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12.5px; }
+.rt-form-zeile select { width: auto; flex: 1; }
+.rt-form-zeile input[type="number"] { width: 64px; }
+.rt-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.rt-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; padding: 2px 4px 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--w) 12%, #fff); color: var(--ck-text); }
+.rt-chip button { border: 0; background: transparent; cursor: pointer; color: var(--ck-dim); display: grid; place-items: center; }
+.rt-treffer { display: grid; gap: 2px; max-height: 160px; overflow-y: auto; border: 1px solid var(--ck-linie); border-radius: 10px; padding: 4px; background: #fff; }
+.rt-treffer button { display: flex; gap: 6px; align-items: center; border: 0; background: transparent; text-align: left; font-size: 12px; padding: 4px 6px; border-radius: 7px; cursor: pointer; }
+.rt-treffer button:hover { background: var(--ck-panel-2); }
+.rt-treffer button span { margin-left: auto; color: var(--ck-matt); }
+.rt-fehler { color: var(--ck-alarm); font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .rt-zeiger, .rt-ring .rt-bogen { animation: none !important; } }

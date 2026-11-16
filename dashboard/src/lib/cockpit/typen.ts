@@ -246,6 +246,40 @@ export interface NewsletterDaten {
   unterzeile: string;
 }
 
+export interface RoutineProdukt {
+  handle: string;
+  titel: string;
+  bestand: number | null;
+  /** verkauft je Tag (Ø 60 Tage) */
+  proTag: number | null;
+  /** Tage, die der Bestand reicht; null = kein Verkauf */
+  reichtTage: number | null;
+}
+
+export interface Routine {
+  id: string;
+  titel: string;
+  art: "intervall" | "lager";
+  intervallTage: number | null;
+  quelle: string | null;
+  lieferzeitTage: number | null;
+  pufferTage: number;
+  notiz: string;
+  farbe: string;
+  letzteErledigung: string | null;
+  erledigtVon: string | null;
+  /** Bei Lieferanten-Routinen: Datum der letzten Bestellung im Dashboard. */
+  letzteBestellung: string | null;
+  /** Tag, an dem die Routine fällig ist/war (Intervall) bzw. bestellt werden muss (Lager). */
+  faellig: string | null;
+  /** Tage bis fällig (negativ = überfällig). */
+  tageBis: number | null;
+  /** 0 = gerade erledigt … 1 = fällig, > 1 = überfällig (für den Ring). */
+  fortschritt: number;
+  status: "ok" | "bald" | "faellig" | "ueberfaellig" | "ruht";
+  produkte: RoutineProdukt[];
+}
+
 export interface BesucherDaten {
   verbunden: boolean;
   grund?: string;
@@ -331,6 +365,7 @@ export const WIDGETS = [
   { id: "iganfragen", name: "Instagram-Anfragen", info: "DMs je Tag, gegen Vorwoche und Vorjahr", feature: "chatbot" },
   { id: "werbung", name: "Werbung", info: "Laufende Anzeigen bei Meta & Google, Kosten", feature: "finances" },
   { id: "newsletter", name: "Newsletter", info: "Der Hairvenly Kurier: Abonnenten, neue, Abmeldungen", feature: "admin" },
+  { id: "routinen", name: "Routinen", info: "Was regelmäßig dran ist: Bestellungen, Nachschub …", feature: null },
   { id: "notizen", name: "Notizzettel", info: "Nur für dich", feature: null },
   { id: "ideen", name: "Ideen & Inspiration", info: "Sammelstelle fürs Team", feature: null },
   { id: "pfeiler", name: "Wachstumspfeiler", info: "Die großen Hebel des Unternehmens", feature: null },
@@ -369,6 +404,7 @@ export const STANDARD_LAYOUT: LayoutItem[] = [
   { i: "werbung", x: 7, y: 86, w: 5, h: 12 },
   { i: "hi", x: 0, y: 63, w: 5, h: 11 },
   { i: "newsletter", x: 0, y: 98, w: 6, h: 13 },
+  { i: "routinen", x: 6, y: 98, w: 6, h: 13 },
 ];
 
 export const MIN_GROESSE: Record<string, { w: number; h: number }> = {
