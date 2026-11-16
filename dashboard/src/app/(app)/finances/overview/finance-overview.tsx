@@ -984,6 +984,7 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
             monat={monat}
             posten={jahrPosten}
             ustBerechnet={c.ustZahllast}
+            berechnetGrob={isPrefilled}
             personnelBrutto={c.personnelBrutto}
             onPostenSaved={(p) => updatePosten(jahr, p)}
           />
@@ -1372,6 +1373,7 @@ function FinanzamtAbgleich({
   monat,
   posten,
   ustBerechnet,
+  berechnetGrob = false,
   personnelBrutto,
   onPostenSaved,
 }: {
@@ -1380,6 +1382,8 @@ function FinanzamtAbgleich({
   monat: number;
   posten: SteuerPosten[];
   ustBerechnet: number;
+  /** Monat ist nicht erfasst — Rechner läuft mit übernommenen Werten eines anderen Monats. */
+  berechnetGrob?: boolean;
   personnelBrutto: number;
   onPostenSaved: (p: SteuerPosten) => void;
 }) {
@@ -1405,8 +1409,9 @@ function FinanzamtAbgleich({
 
   // ---- Hinweise (Abweichungen & Auffälligkeiten) ----
   const hints: Array<{ tone: "warn" | "info"; text: string }> = [];
-  const ustIst = Number(ustRow?.ist_betrag) || 0;
-  if (ustIst > 0 && Math.abs(ustIst - ustBerechnet) > Math.max(50, Math.abs(ustBerechnet) * 0.05)) {
+  // Erstattungen mit Minus: + = Zahlung ans Finanzamt, − = Erstattung (16.11.2026: Sep-Erstattung stand ohne Vorzeichen da)
+  const ustIst = (ustRow?.richtung === "erstattung" ? -1 : 1) * (Number(ustRow?.ist_betrag) || 0);
+  if (!berechnetGrob && ustIst !== 0 && Math.abs(ustIst - ustBerechnet) > Math.max(50, Math.abs(ustBerechnet) * 0.05)) {
     hints.push({
       tone: "warn",
       text: `${t(locale, "finance.fa.ust_diff_warn")} (${t(locale, "finance.fa.calculated")}: ${fmt(ustBerechnet)}, ${t(locale, "finance.fa.ist")}: ${fmt(ustIst)}, ${t(locale, "finance.fa.diff")}: ${fmt(ustIst - ustBerechnet)})`,
@@ -1494,16 +1499,25 @@ function FinanzamtAbgleich({
         </thead>
         <tbody>
           {rows.map(({ key, label, row, art, zeitraum: zr, berechnet }) => {
-            const ist = Number(row?.ist_betrag) || 0;
-            const vergleich = berechnet ?? (Number(row?.soll_betrag) || 0);
-            const diff = ist > 0 && vergleich !== 0 ? ist - vergleich : null;
+            const vz = row?.richtung === "erstattung" ? -1 : 1;
+            const ist = vz * (Number(row?.ist_betrag) || 0);
+            const soll = vz * (Number(row?.soll_betrag) || 0);
+            const vergleich = berechnet ?? soll;
+            const diff = ist !== 0 && vergleich !== 0 && !(berechnet !== null && berechnetGrob) ? ist - vergleich : null;
             const diffWarn = diff !== null && Math.abs(diff) > Math.max(50, Math.abs(vergleich) * 0.05);
             return (
               <tr key={key} className="border-b border-neutral-100">
                 <td className="py-1.5 text-neutral-700">{label}</td>
-                <td className="py-1.5 text-right tabular-nums">{berechnet !== null ? fmt(berechnet) : "—"}</td>
+                <td className="py-1.5 text-right tabular-nums">
+                  {berechnet !== null ? <BetragMitRichtung wert={berechnet} /> : "—"}
+                  {berechnet !== null && berechnetGrob && (
+                    <span className="block text-[10px] font-medium text-amber-700" title="Für diesen Monat sind keine eigenen Werte erfasst — der Rechner nutzt übernommene Werte. Nur grobe Orientierung.">
+                      ≈ grob, Monat nicht erfasst
+                    </span>
+                  )}
+                </td>
                 <td className="py-1.5 text-right tabular-nums text-neutral-500">
-                  {row && Number(row.soll_betrag) !== 0 ? fmt(Number(row.soll_betrag)) : "—"}
+                  {row && soll !== 0 ? <BetragMitRichtung wert={soll} /> : "—"}
                   {row && Number(row.soll_betrag) !== 0 && row.soll_schaetzung && (
                     <span className="block text-[10px] font-medium text-amber-700" title="Nur eine Schätzung — echten Wert in den Vorauszahlungen eintragen">
                       ≈ Schätzung
@@ -1553,6 +1567,16 @@ function FinanzamtAbgleich({
       )}
       <p className="text-xs text-neutral-400 mt-3">{t(locale, "finance.fa.ledger_hint")}</p>
     </SectionCard>
+  );
+}
+
+/** Betrag mit Richtung: positiv = Zahlung ans Finanzamt, negativ = Erstattung (grün, mit Minus). */
+function BetragMitRichtung({ wert }: { wert: number }) {
+  if (wert >= 0) return <>{fmt(wert)}</>;
+  return (
+    <span className="text-emerald-700" title="Erstattung vom Finanzamt">
+      −{fmt(-wert)} <span className="text-[10px] font-medium">Erstattung</span>
+    </span>
   );
 }
 
