@@ -63,6 +63,8 @@ export const KATEGORIEN: KategorieDef[] = [
   // Targobank-Gehaltskonto — der Übertrag dorthin ist selbst kein Aufwand.
   { key: "umbuchung_gehalt", label: "Übertrag Gehaltskonto (Targobank)", gruppe: "neutral" },
   { key: "privat", label: "Privatentnahme / -einlage", gruppe: "neutral" },
+  // Kaufpreis der Übernahme von Hairvenly (Rasoul Navaseri, 2025/26) — wird abgeschrieben, kein laufender Aufwand
+  { key: "investition", label: "Investition / Unternehmenskauf", gruppe: "neutral" },
   { key: "info", label: "Hinweise ohne Betrag", gruppe: "neutral" },
   { key: "unklar", label: "Noch nicht zugeordnet", gruppe: "neutral" },
 ];
