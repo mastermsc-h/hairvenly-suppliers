@@ -52,6 +52,72 @@ function Richtung({ wert }: { wert: number }) {
   );
 }
 
+function EstGewstKarte({ j }: { j: NonNullable<FinanzStart["estGewst"]> }) {
+  const pr = j.prognose;
+  const art = (a: "est" | "gewst") => j.arten.find((x) => x.art === a);
+  const zeilen = [
+    { key: "est" as const, titel: "Einkommensteuer (inkl. Soli)", erwartet: pr?.est ?? null, vz: pr?.vzEst ?? null, nach: pr?.nachEst ?? null },
+    { key: "gewst" as const, titel: "Gewerbesteuer", erwartet: pr?.gewst ?? null, vz: pr?.vzGewst ?? null, nach: pr?.nachGewst ?? null },
+  ];
+  const nachGesamt = pr ? pr.nachEst + pr.nachGewst : null;
+  return (
+    <Karte titel={`Einkommen- & Gewerbesteuer ${j.jahr}`} icon={<Landmark size={14} />} rechts={<Mehr href="/finances/overview">Gewinnrechnung</Mehr>}>
+      <div className="grid gap-3 md:grid-cols-4">
+        <div className="rounded-xl bg-neutral-50 p-3">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-neutral-500">Erwarteter Gewinn {j.jahr}</div>
+          <div className="mt-1 text-lg font-bold tabular-nums text-neutral-900">{pr ? eur(pr.gewinnJahr) : "—"}</div>
+          {pr && <div className="text-[11px] text-neutral-400">hochgerechnet aus {pr.monate} Monaten (bis {mName(pr.bisMonat)}: {kEur(pr.gewinnBisher)})</div>}
+        </div>
+        <div className="rounded-xl bg-neutral-50 p-3">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-neutral-500">Steuer darauf</div>
+          <div className="mt-1 text-lg font-bold tabular-nums text-rose-700">{pr ? eur(pr.est + pr.gewst) : "—"}</div>
+          {pr && <div className="text-[11px] text-neutral-400">ESt {kEur(pr.est)} · GewSt {kEur(pr.gewst)}</div>}
+        </div>
+        <div className="rounded-xl bg-neutral-50 p-3">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-neutral-500">Schon gezahlt</div>
+          <div className="mt-1 text-lg font-bold tabular-nums text-emerald-700">{eur(j.bezahlt)}</div>
+          <div className="text-[11px] text-neutral-400">Vorauszahlungen{j.offen > 0 ? ` · noch fällig ${eur(j.offen)}` : ""}</div>
+        </div>
+        <div className={`rounded-xl p-3 ${nachGesamt !== null && nachGesamt > 0 ? "bg-amber-50" : "bg-emerald-50"}`}>
+          <div className={`text-[11px] font-medium uppercase tracking-wide ${nachGesamt !== null && nachGesamt > 0 ? "text-amber-800" : "text-emerald-800"}`}>
+            {nachGesamt !== null && nachGesamt < 0 ? "Erstattung erwartet" : "Nachzahlung erwartet"}
+          </div>
+          <div className="mt-1 text-lg font-bold tabular-nums text-neutral-900">{nachGesamt !== null ? eur(Math.abs(nachGesamt)) : "—"}</div>
+          <div className="text-[11px] text-neutral-500">kommt mit dem Steuerbescheid {j.jahr}, meist im Folgejahr</div>
+        </div>
+      </div>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full min-w-[520px] text-sm">
+          <thead>
+            <tr className="text-left text-[11px] uppercase tracking-wide text-neutral-400">
+              <th className="py-1.5 font-medium"></th>
+              <th className="py-1.5 text-right font-medium">erwartet</th>
+              <th className="py-1.5 text-right font-medium">Vorauszahlungen</th>
+              <th className="py-1.5 text-right font-medium">davon gezahlt</th>
+              <th className="py-1.5 text-right font-medium">Nachzahlung</th>
+            </tr>
+          </thead>
+          <tbody className="tabular-nums">
+            {zeilen.map((z) => (
+              <tr key={z.key} className="border-t border-neutral-100">
+                <td className="py-1.5 text-neutral-800">{z.titel}</td>
+                <td className="py-1.5 text-right">{z.erwartet !== null ? eur(z.erwartet) : "—"}</td>
+                <td className="py-1.5 text-right text-neutral-600">{z.vz !== null ? eur(z.vz) : "—"}</td>
+                <td className="py-1.5 text-right text-emerald-700">{eur(art(z.key)?.bezahlt ?? 0)}</td>
+                <td className={`py-1.5 text-right font-semibold ${z.nach !== null && z.nach > 0 ? "text-rose-700" : "text-emerald-700"}`}>{z.nach !== null ? `${z.nach < 0 ? "−" : ""}${eur(Math.abs(z.nach))}` : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-[11px] text-neutral-400">
+        Gewinn aus „Einnahmen & Ausgaben“ (abgeschlossene Monate, auf 12 hochgerechnet), Steuer nach Tarif inkl. Gewerbesteuer-Anrechnung — dieselbe Rechnung wie die
+        Steuerkasse auf dem Startbildschirm. Die Personal-, Material- und Fixkosten sind dort teils noch Schätzwerte; je genauer die Monate, desto genauer die Nachzahlung.
+      </p>
+    </Karte>
+  );
+}
+
 export default function FinanzStartAnsicht({ d }: { d: FinanzStart }) {
   const monatGesamt = d.umsatz.shop + d.umsatz.salon;
   const jahrGesamt = d.umsatz.jahrShop + d.umsatz.jahrSalon;
@@ -178,6 +244,9 @@ export default function FinanzStartAnsicht({ d }: { d: FinanzStart }) {
           )}
         </Karte>
       </div>
+
+      {/* Einkommen- und Gewerbesteuer */}
+      {d.estGewst && <EstGewstKarte j={d.estGewst} />}
 
       <div className="grid gap-5 lg:grid-cols-2">
         {/* Fixkosten */}

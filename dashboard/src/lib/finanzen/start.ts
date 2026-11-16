@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { ladePrognose } from "@/lib/liquiditaet/daten";
-import { ladeHy } from "@/lib/cockpit/daten";
+import { ladeHy, ladeSteuerKasse } from "@/lib/cockpit/daten";
+import type { SteuerKasseDaten } from "@/lib/cockpit/typen";
 import { ladeUstMonate, type UstMonat } from "@/lib/steuer/ust-monate";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import { kontoZweck } from "@/lib/bank/konten";
@@ -18,6 +19,8 @@ export interface FinanzStart {
   cashflow: Array<{ monat: string; einnahmen: number; ware: number; steuern: number; kosten: number; kredit: number; ueberschuss: number }>;
   checks: Array<{ titel: string; wert: string; text: string; ampel: Ampel; href: string }>;
   hy: { score: number; delta30: number | null; kg: number; schulden: number } | null;
+  /** Einkommen- und Gewerbesteuer des Jahres: gezahlt, offen, Prognose aus dem Gewinn (gleiche Rechnung wie die Steuerkasse). */
+  estGewst: SteuerKasseDaten["jahr"] | null;
 }
 
 const r0 = (n: number) => Math.round(n);
@@ -47,7 +50,7 @@ export async function ladeFinanzStart(): Promise<FinanzStart> {
   const aktMonat = heute.slice(0, 7);
   const cfVon = `${plusMonate(aktMonat, -6)}-01`;
 
-  const [{ roh, einstellungen: e, ergebnis: p }, hy, ustMonate, tx, shop] = await Promise.all([
+  const [{ roh, einstellungen: e, ergebnis: p }, hy, ustMonate, tx, shop, kasse] = await Promise.all([
     ladePrognose(),
     ladeHy(),
     ladeUstMonate(jahr, sb),
@@ -55,6 +58,11 @@ export async function ladeFinanzStart(): Promise<FinanzStart> {
       sb.from("bank_transactions").select("account_iban, booking_date, amount, kategorie").gte("booking_date", cfVon).order("booking_date").order("id").range(from, to),
     ),
     sb.from("shopify_umsatz_monat").select("monat, netto").gte("monat", `${jahr - 1}-01`).then((r) => (r.data ?? []) as Array<{ monat: string; netto: number }>),
+    // ESt/GewSt-Jahr aus der Steuerkasse (ladePrognose ist per Request gecacht, kein Doppel-Laden)
+    ladeSteuerKasse().catch((err) => {
+      console.error("[finanzen/start] Steuerkasse", err);
+      return null;
+    }),
   ]);
 
   // ── Konten ──
@@ -216,5 +224,6 @@ export async function ladeFinanzStart(): Promise<FinanzStart> {
     cashflow,
     checks,
     hy: hy ? { score: hy.score, delta30: hy.delta30, kg: hy.kg, schulden: hy.schuldenEur } : null,
+    estGewst: kasse?.jahr ?? null,
   };
 }
