@@ -3,7 +3,7 @@
 // Rahmen des Startbildschirms: Kopfzeile, verschiebbares Raster, Anpassen-Modus.
 // Die Inhalte der Widgets kommen fertig vom Server (inhalte[id]).
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import ReactGridLayout, { noCompactor, useContainerWidth, verticalCompactor, type Layout } from "react-grid-layout";
+import ReactGridLayout, { useContainerWidth, verticalCompactor, type Compactor, type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import {
   Activity, BadgePercent, CheckSquare, Compass, Eye, EyeOff, Flag, Gauge, Globe2, Camera, Newspaper, Repeat, Smile, Sprout, Images, CloudSun, CloudLightning, Inbox, Target, Megaphone, PackageX, HeartPulse, Lightbulb, MessageSquare,
@@ -33,6 +33,39 @@ const ZEILE = 10;
 const ABSTAND_STANDARD = 12;
 
 const nurPos = (l: ReadonlyArray<LayoutItem>): LayoutItem[] => l.map((x) => ({ i: x.i, x: x.x, y: x.y, w: x.w, h: x.h }));
+
+type Geo = { x: number; y: number; w: number; h: number };
+type Aktiv = { id: string; start: Map<string, Geo> } | null;
+
+const ueberlappt = (a: Geo, b: Geo) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+/**
+ * Eigene Kollisionsauflösung für freies Platzieren (statt der Bibliotheks-Logik, die Fenster
+ * vertauscht, Verschiebungen aufsummiert und beim Größe-Ändern gar nicht auflöst):
+ *  - Während Ziehen/Größe ändern wird IMMER von der Anordnung beim Start der Geste ausgegangen,
+ *    nur das aktive Fenster nimmt seine neue Lage ein → nichts springt hin und her.
+ *  - Das aktive Fenster bleibt fest; alle anderen behalten ihre Lage, außer sie überlappen –
+ *    dann rutschen sie genau so weit nach unten wie nötig (nie seitlich, nie nach oben).
+ *  - Ohne Geste (Laden, Hinzufügen) werden vorhandene Überlappungen genauso aufgelöst.
+ */
+function freiAufloesen(layout: Layout, aktiv: Aktiv): Layout {
+  const neu = layout.map((it) => {
+    const s = aktiv && it.i !== aktiv.id ? aktiv.start.get(it.i) : undefined;
+    return { ...it, ...(s ?? {}), y: Math.max(0, s?.y ?? it.y), moved: false };
+  });
+  const fest = aktiv ? neu.filter((it) => it.i === aktiv.id) : [];
+  const rest = neu.filter((it) => !fest.includes(it)).sort((a, b) => a.y - b.y || a.x - b.x);
+  const platziert: Geo[] = [...fest];
+  for (const it of rest) {
+    for (let k = 0; k < 500; k++) {
+      const stoss = platziert.filter((p) => ueberlappt(p, it));
+      if (!stoss.length) break;
+      it.y = Math.max(...stoss.map((p) => p.y + p.h));
+    }
+    platziert.push(it);
+  }
+  return neu;
+}
 
 /** Gespeicherte Anordnung + neue Widgets (unten angehängt) − nicht erlaubte.
  *  Alte Anordnungen (40-px-Zeilen) werden ×4 umgerechnet und einmal so verdichtet,
@@ -174,6 +207,16 @@ export default function CockpitGrid({
   // Anordnung, wie das Raster sie gerade zeigt (nach dem Verdichten) – Grundlage für die Plus-Felder
   const [angezeigt, setAngezeigt] = useState<LayoutItem[] | null>(null);
   const [plusOffen, setPlusOffen] = useState<string | null>(null);
+  // Fenster, das gerade gezogen/in der Größe geändert wird, samt Anordnung beim Start der Geste
+  const aktivRef = useRef<Aktiv>(null);
+  const compactor = useMemo<Compactor>(() => ({
+    type: null,
+    allowOverlap: true, // Bibliothek schiebt selbst nichts – die Auflösung macht freiAufloesen
+    compact: (l) => freiAufloesen(l, aktivRef.current),
+  }), []);
+  const gesteStart = (l: Layout, it: { i: string } | null) => {
+    aktivRef.current = it ? { id: it.i, start: new Map(l.map((x) => [x.i, { x: x.x, y: x.y, w: x.w, h: x.h }])) } : null;
+  };
   const [status, setStatus] = useState<"" | "speichert" | "gespeichert" | "fehler">("");
   const jetzt = useJetzt();
   const stunde = jetzt ? Number(new Intl.DateTimeFormat("de-DE", { hour: "numeric", hour12: false, timeZone: "Europe/Berlin" }).format(jetzt)) : null;
@@ -370,15 +413,17 @@ export default function CockpitGrid({
               gridConfig={{ cols: SPALTEN, rowHeight: ZEILE, margin: [abstand, 0], containerPadding: [16, 8] }}
               dragConfig={{ enabled: true, handle: ".ck-griff", cancel: ".ck-kein-zug" }}
               resizeConfig={{ enabled: true, handles: ["se", "e", "s"] }}
-              compactor={noCompactor}
-              onDragStop={(l) => uebernehmen(l)}
-              onResizeStop={(l) => uebernehmen(l)}
+              compactor={compactor}
+              onDragStart={(l, alt) => gesteStart(l, alt)}
+              onResizeStart={(l, alt) => gesteStart(l, alt)}
+              onDragStop={(l) => { aktivRef.current = null; uebernehmen(l); }}
+              onResizeStop={(l) => { aktivRef.current = null; uebernehmen(l); }}
               onLayoutChange={(l) => setAngezeigt(l.map((x) => ({ i: x.i, x: x.x, y: x.y, w: x.w, h: x.h })))}
             >
               {reihenfolge.map((it, i) => <div key={it.i}>{panel(it.i, i)}</div>)}
             </ReactGridLayout>
             <PlusFelder
-              layout={angezeigt ?? sichtbar}
+              layout={angezeigt ?? (freiAufloesen(layout, null) as LayoutItem[])}
               breite={width - 16}
               abstand={abstand}
               zeile={ZEILE}
