@@ -612,6 +612,8 @@ export interface Ereignis {
   steuer?: "ust" | "lst" | "est" | "gewst";
   /** Betrag beruht auf einer Schätzung (Soll als Schätzung markiert bzw. Modell). */
   schaetzung?: boolean;
+  /** Steuern: Rechenweg des Betrags (Teilbeträge, + erhöht die Zahlung, − mindert sie). Nur zur Anzeige. */
+  rechnung?: Array<{ text: string; betrag: number }>;
   /** Ratenzahlung: welche Rechnungen diese Rate (anteilig) bezahlt. */
   orderIds?: string[];
   sofort?: boolean; // eigentlich schon fällig
@@ -1179,6 +1181,16 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
       const si = sollInfo(roh, `ust_va|${m}`);
       const soll = si.soll;
       const betrag = soll !== undefined ? r2(soll) : r2(ustBasis + (ustZusatz[m] ?? 0) - (eustProMonat[m] ?? 0) - eustAndere);
+      const eustBank = roh.steuern.eustBezahlt[m] ?? 0;
+      const rechnung = soll !== undefined
+        ? [{ text: si.schaetzung ? "Schätzung, eingetragen bei den Vorauszahlungen" : "Soll laut Vorauszahlungen (Steuerberater)", betrag: r2(soll) }]
+        : [
+            { text: e.ustBasisMonat ? "USt-Basis laut Einstellung" : `Ø USt vor Einfuhr-Verrechnung (${hist.length} Monate)`, betrag: r2(ustBasis) },
+            { text: "USt auf Aktion / Flaute danach", betrag: r2(ustZusatz[m] ?? 0) },
+            { text: "EUSt schon bezahlt (Konto)", betrag: r2(-eustBank) },
+            { text: "EUSt geplanter Einfuhren", betrag: r2(-((eustProMonat[m] ?? 0) - eustBank)) },
+            { text: "Ø EUSt übriger Lieferanten", betrag: r2(-eustAndere) },
+          ].filter((x, i) => i === 0 || Math.abs(x.betrag) >= 1);
       // Erstattung: von Hand eingetragener Eingangstermin, sonst ca. 3 Wochen nach dem Termin
       const eingetragen = roh.steuern.sollFaellig?.[`ust_va|${m}`];
       const datum = betrag >= 0 ? faellig : eingetragen && eingetragen !== faellig ? eingetragen : plusTage(faellig, 21);
@@ -1191,6 +1203,7 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
         sofort: datum < start,
         steuer: "ust",
         schaetzung: si.schaetzung,
+        rechnung,
       });
     }
   }
@@ -1211,6 +1224,9 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
         sofort: faellig < start,
         steuer: "lst",
         schaetzung: si.schaetzung,
+        rechnung: si.soll !== undefined
+          ? [{ text: si.schaetzung ? "Schätzung, eingetragen bei den Vorauszahlungen" : "Soll laut Vorauszahlungen", betrag: r2(si.soll) }]
+          : [{ text: `Ø der letzten ${roh.steuern.lstLetzte.length} Lohnsteuer-Anmeldungen (${roh.steuern.lstLetzte.map((x) => Math.round(x).toLocaleString("de-DE")).join(" · ")} €)`, betrag: lst }],
       });
     }
   }
@@ -1237,6 +1253,7 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
           label: `${name} ${zeitraum}${si.soll !== undefined ? si.zusatz : ""}`,
           steuer: art === "est_vz" ? "est" : "gewst",
           schaetzung: si.soll !== undefined && si.schaetzung,
+          rechnung: [{ text: si.soll !== undefined ? "Soll laut Vorauszahlungen" : "Festgesetzte Vorauszahlung (zuletzt bezahlter Quartalsbetrag)", betrag: r2(wert) }],
         });
       }
     }

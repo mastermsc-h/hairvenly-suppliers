@@ -1249,3 +1249,27 @@ a.ck-signal:hover { border-color: var(--s); }
 .sk-jahr-offen[data-null="true"] { color: #059669; font-size: 13px; }
 @container (max-width: 620px) { .sk-jahr-zeile { grid-template-columns: 1fr auto; } .sk-quartale { grid-column: 1 / -1; grid-row: 2; } }
 .sk { container-type: inline-size; }
+/* Steuerkasse · Kalenderblatt umdrehen (Rückseite = Rechenweg) */
+.sk-blatt { background: transparent !important; padding: 0 !important; box-shadow: none !important; perspective: 1100px; cursor: pointer; outline: none; }
+.sk-dreh { display: grid; transform-style: preserve-3d; transition: transform 0.7s cubic-bezier(.3,1.3,.5,1); }
+.sk-blatt[data-gedreht="true"] .sk-dreh { transform: rotateY(180deg); }
+.sk-seite {
+  grid-area: 1 / 1; position: relative; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  background: #fff; border-radius: 14px; padding: 0 12px 12px;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.04), 0 14px 26px -18px rgba(40, 30, 90, 0.55), 4px 4px 0 -1px #f1eefb, 4px 4px 0 0 rgba(124, 92, 255, 0.12);
+}
+.sk-blatt[data-erst="true"] .sk-seite { box-shadow: 0 0 0 2px var(--sk-kopf), 0 18px 32px -18px rgba(40, 30, 90, 0.65), 5px 5px 0 -1px #f1eefb, 5px 5px 0 0 rgba(124, 92, 255, 0.15); }
+.sk-blatt:focus-visible .sk-seite { box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.5); }
+.sk-hinten { transform: rotateY(180deg); background: linear-gradient(180deg, #fff, #fbfaff); }
+.sk-dreh-hinweis { position: absolute; right: 10px; top: 36px; display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 700; color: var(--ck-matt); opacity: 0; transition: opacity 0.2s; }
+.sk-blatt:hover .sk-dreh-hinweis { opacity: 1; }
+.sk-rechnung { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
+.sk-rechnung-titel { font-size: 10.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ck-matt); }
+.sk-rechnung-block { border-left: 3px solid var(--sk-farbe, #cbd5e1); padding-left: 8px; display: flex; flex-direction: column; gap: 3px; }
+.sk-rechnung-kopf { font-size: 12px; font-weight: 750; }
+.sk-rechnung-kopf small { font-weight: 500; color: var(--ck-matt); }
+.sk-rechnung-zeile { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--ck-dim); line-height: 1.3; }
+.sk-rechnung-zeile b { color: var(--ck-text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sk-rechnung-summe { border-top: 1px solid #ece9f7; padding-top: 3px; font-weight: 700; color: var(--ck-text); }
+.sk-rechnung-konto { --sk-farbe: #94a3b8; }
+@media (prefers-reduced-motion: reduce) { .sk-dreh { transition: none; } }

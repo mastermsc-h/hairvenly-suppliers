@@ -3,8 +3,9 @@
 // Steuerkasse: Was geht wann ans Finanzamt, und was bleibt danach auf dem Konto?
 // Oben ein „Konto-Streifen“ (heutiger Kontostand, davon für Steuern gebunden), darunter die
 // Termine als Abreißkalender-Blätter mit Countdown und Kontostand vorher → nachher.
+import { useState } from "react";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, RotateCw } from "lucide-react";
 import type { SteuerArt, SteuerKasseDaten } from "@/lib/cockpit/typen";
 import { Zahl, eur, kurzEur } from "./bausteine";
 
@@ -67,7 +68,38 @@ function JahrBlock({ j }: { j: SteuerKasseDaten["jahr"] }) {
   );
 }
 
+/** Rückseite eines Kalenderblatts: wie jede Zahl zustande kommt. */
+function Rueckseite({ t }: { t: SteuerKasseDaten["termine"][number] }) {
+  return (
+    <div className="sk-rechnung">
+      <div className="sk-rechnung-titel">So kommt die Zahl zustande</div>
+      {t.posten.map((p, k) => (
+        <div key={k} className="sk-rechnung-block" style={{ ["--sk-farbe" as string]: p.betrag < 0 ? "#10b981" : ART[p.art].farbe }}>
+          <div className="sk-rechnung-kopf">{p.titel} <small>{p.zeitraum}</small></div>
+          {p.rechnung.map((z, j) => (
+            <div key={j} className="sk-rechnung-zeile">
+              <span>{z.text}</span>
+              <b>{j > 0 ? (z.betrag < 0 ? "− " : "+ ") : z.betrag < 0 ? "− " : ""}{eur(Math.abs(z.betrag))}</b>
+            </div>
+          ))}
+          <div className="sk-rechnung-zeile sk-rechnung-summe">
+            <span>{p.betrag < 0 ? "= Erstattung" : "= ans Finanzamt"}</span>
+            <b>{p.geschaetzt ? "≈ " : ""}{eur(Math.abs(p.betrag))}</b>
+          </div>
+        </div>
+      ))}
+      <div className="sk-rechnung-block sk-rechnung-konto">
+        <div className="sk-rechnung-zeile"><span>Konto am Vortag (Vorschau)</span><b>{eur(t.kontoVorher)}</b></div>
+        <div className="sk-rechnung-zeile"><span>{t.summe < 0 ? "+ Erstattung" : "− Steuern an diesem Tag"}</span><b>{eur(Math.abs(t.summe))}</b></div>
+        <div className="sk-rechnung-zeile sk-rechnung-summe"><span>= danach</span><b>{eur(t.kontoNachher)}</b></div>
+      </div>
+    </div>
+  );
+}
+
 export default function SteuerKasseWidget({ d }: { d: SteuerKasseDaten }) {
+  const [gedreht, setGedreht] = useState<string[]>([]);
+  const drehen = (datum: string) => setGedreht((g) => (g.includes(datum) ? g.filter((x) => x !== datum) : [...g, datum]));
   if (!d.termine.length) {
     return (
       <div className="sk">
@@ -125,7 +157,16 @@ export default function SteuerKasseWidget({ d }: { d: SteuerKasseDaten }) {
           const kopf = t.summe < 0 ? "#10b981" : ART[t.posten[0].art].farbe;
           const hoch = Math.max(t.kontoVorher, t.kontoNachher, 1);
           return (
-            <article key={t.datum} className="sk-blatt" data-erst={t === naechster} data-ampel={ampel} style={{ ["--sk-kopf" as string]: kopf, ["--sk-i" as string]: i }}>
+            <article
+              key={t.datum} className="sk-blatt" data-erst={t === naechster} data-ampel={ampel} data-gedreht={gedreht.includes(t.datum)}
+              style={{ ["--sk-kopf" as string]: kopf, ["--sk-i" as string]: i }}
+              role="button" tabIndex={0} aria-pressed={gedreht.includes(t.datum)}
+              aria-label={`${t.datum}: ${gedreht.includes(t.datum) ? "Vorderseite zeigen" : "Rechnung zeigen"}`}
+              onClick={() => drehen(t.datum)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); drehen(t.datum); } }}
+            >
+             <div className="sk-dreh">
+              <div className="sk-seite sk-vorne">
               <div className="sk-ringe" aria-hidden><i /><i /></div>
               <header className="sk-blatt-kopf">
                 <span>{MON[dt.getUTCMonth()]}</span>
@@ -152,6 +193,14 @@ export default function SteuerKasseWidget({ d }: { d: SteuerKasseDaten }) {
                   <div className="sk-konto-zeile" data-ampel={ampel}>danach <b>{kurzEur(t.kontoNachher)}</b></div>
                 </div>
               </div>
+              <div className="sk-dreh-hinweis" aria-hidden><RotateCw size={11} /> Rechnung</div>
+              </div>
+              <div className="sk-seite sk-hinten" aria-hidden={!gedreht.includes(t.datum)}>
+                <div className="sk-ringe" aria-hidden><i /><i /></div>
+                <header className="sk-blatt-kopf"><span>{Number(t.datum.slice(8, 10))}. {MON[dt.getUTCMonth()]}</span><span><RotateCw size={12} /></span></header>
+                <Rueckseite t={t} />
+              </div>
+             </div>
             </article>
           );
         })}

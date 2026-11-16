@@ -333,7 +333,7 @@ export interface SteuerKasseDaten {
     datum: string;
     tageBis: number;
     ueberfaellig: boolean;
-    posten: Array<{ art: SteuerArt; titel: string; zeitraum: string; betrag: number; geschaetzt: boolean }>;
+    posten: Array<{ art: SteuerArt; titel: string; zeitraum: string; betrag: number; geschaetzt: boolean; rechnung: Array<{ text: string; betrag: number }> }>;
     /** Summe der Zahlungen (positiv) minus Erstattungen an diesem Tag. */
     summe: number;
     kontoVorher: number;

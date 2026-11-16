@@ -724,7 +724,7 @@ export const ladeSteuerKasse = cache(async (horizont = 100): Promise<SteuerKasse
       proTag.set(datum, t);
     }
     t.ueberfaellig = t.ueberfaellig || !!e.sofort;
-    t.posten.push({ art: e.steuer, titel: e.betrag > 0 ? `Erstattung ${e.steuer === "ust" ? "USt" : STEUER_TITEL[e.steuer]}` : STEUER_TITEL[e.steuer], zeitraum: steuerZeitraum(e.label), betrag: r0(-e.betrag), geschaetzt: !!e.schaetzung });
+    t.posten.push({ art: e.steuer, titel: e.betrag > 0 ? `Erstattung ${e.steuer === "ust" ? "USt" : STEUER_TITEL[e.steuer]}` : STEUER_TITEL[e.steuer], zeitraum: steuerZeitraum(e.label), betrag: r0(-e.betrag), geschaetzt: !!e.schaetzung, rechnung: (e.rechnung ?? []).map((x) => ({ text: x.text, betrag: r0(x.betrag) })) });
     t.summe += r0(-e.betrag);
   }
   const termine = [...proTag.values()].sort((a, b) => a.datum.localeCompare(b.datum));
