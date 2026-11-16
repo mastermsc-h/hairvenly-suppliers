@@ -3,6 +3,7 @@
 // Anzeige-Widgets des Startbildschirms: bekommen fertige Zahlen vom Server.
 import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
+import LavaRiss from "./lava-riss";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, ComposedChart, Line } from "recharts";
 import {
   AlertTriangle, ArrowRight, Check, CheckCircle2, Globe2, Landmark, Lock, Package, ShoppingBag, ShoppingCart, Sparkles, TrendingDown,
@@ -923,6 +924,7 @@ export function TotesKapitalWidget({ d }: { d: TotesKapitalDaten }) {
   ];
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 10 }}>
+      <LavaRiss />
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <Ring anteil={d.anteilLager} groesse={62} dicke={8}><span className="ck-mono" style={{ fontSize: 13, fontWeight: 750 }}>{zahl(d.anteilLager)}<span style={{ fontSize: 9 }}> %</span></span></Ring>
         <div style={{ flex: 1 }}>
