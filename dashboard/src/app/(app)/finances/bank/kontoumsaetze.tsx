@@ -1,5 +1,6 @@
 "use client";
 
+import { kontoZweck } from "@/lib/bank/konten";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { AlertTriangle, ChevronLeft, ChevronRight, Loader2, RefreshCw, RotateCcw, Search, Trash2, Wand2 } from "lucide-react";
@@ -274,7 +275,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
           <select value={kontoFilter} onChange={(e) => setKontoFilter(e.target.value)} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm bg-white">
             <option value="alle">Alle Konten</option>
             {konten.map((k) => (
-              <option key={k} value={k}>{konto(k)}</option>
+              <option key={k} value={k}>{konto(k)}{kontoZweck(k) ? ` · ${kontoZweck(k)}` : ""}</option>
             ))}
           </select>
           <button
@@ -448,7 +449,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
                 return (
                   <tr key={u.id} className={`border-b border-neutral-100 align-top ${kat === "unklar" ? "bg-amber-50/40" : ""}`}>
                     <td className="py-2 pr-2 tabular-nums text-neutral-600 whitespace-nowrap">{deDate(u.booking_date)}</td>
-                    <td className="py-2 pr-2 text-xs text-neutral-400 whitespace-nowrap">{konto(u.account_iban)}</td>
+                    <td className="py-2 pr-2 text-xs text-neutral-400 whitespace-nowrap" title={kontoZweck(u.account_iban) ?? undefined}>{konto(u.account_iban)}</td>
                     <td className="py-2 pr-2 max-w-[420px]">
                       <div className="text-neutral-800 truncate" title={u.counterparty_name ?? ""}>
                         {u.counterparty_name ?? <span className="text-neutral-400">{u.posting_text ?? "—"}</span>}
@@ -592,10 +593,11 @@ function KontostandLeiste({ salden }: { salden: KontoSaldo[] }) {
             <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">
               {b.iban === "PAYPAL" ? "PayPal-Guthaben" : konto(b.iban)}
             </div>
+            {kontoZweck(b.iban) && <div className="text-[11px] text-neutral-500">{kontoZweck(b.iban)}</div>}
             <div className={`text-lg font-bold mt-1 tabular-nums ${b.saldo < 0 ? "text-red-700" : "text-neutral-900"}`}>{fmt(b.saldo)}</div>
             <div className={`text-[11px] mt-0.5 ${alt ? "text-amber-700 font-medium" : "text-neutral-400"}`}>
               {alt ? "veraltet · " : ""}abgerufen {abgerufen}
-              {b.iban.slice(4, 12) === "30020900" && " · Gehaltskonto"}
+
             </div>
           </div>
         );

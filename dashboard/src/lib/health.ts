@@ -52,8 +52,8 @@ export interface HealthBerechnung {
 }
 
 const KONTO_NAMEN: Record<string, string> = {
-  DE55290501010084626019: "Sparkasse …6019 (Shop)",
-  DE56290501010084626001: "Sparkasse …6001 (Salon)",
+  DE55290501010084626019: "Sparkasse …6019 (Shopify-Konto)",
+  DE56290501010084626001: "Sparkasse …6001 (Treatwell-Konto)",
   DE21300209005360977267: "Targobank (Gehaltskonto)",
   PAYPAL: "PayPal",
 };

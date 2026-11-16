@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
 import { Area, Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
+import { kontoZweck } from "@/lib/bank/konten";
 import { LIQ_DEFAULTS, VERSAND_FRUEHESTENS_TAGE, bestellTage, ZOLL_NACH_VERSAND_TAGE, prognose, zahlGruppe, zerlegeRateSchluessel, type Ereignis, type LiqEinstellungen, type LiqRohdaten, type VerlaufTag, type ZahlGruppe } from "@/lib/liquiditaet/rechnung";
 import { SYMBOLE, TerminSymbol, symbolTyp, type SymbolTyp } from "./termin-symbol";
 import { AMPEL_STIL } from "../../orders/liquiditaet-badge";
@@ -342,12 +343,21 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
         <Kachel
           label={p.paypal?.eingerechnet ? "Sparkasse + PayPal" : "Kontostand Sparkasse"}
           value={eur(p.startSaldoGesamt)}
-          sub={roh.konten
-            .map((k) => {
-              const bank = roh.bankSalden.find((b) => b.iban === k.iban);
-              return `…${k.iban.slice(-4)} ${eur(k.saldo)}${bank && Math.abs(bank.saldo - k.saldo) > 1 ? ` (Bank ${eur(bank.saldo)})` : ""}`;
-            })
-            .join(" · ")}
+          sub={
+            <span className="flex flex-wrap justify-center gap-x-3 gap-y-1">
+              {roh.konten.map((k) => {
+                const bank = roh.bankSalden.find((b) => b.iban === k.iban);
+                const zweck = kontoZweck(k.iban);
+                return (
+                  <span key={k.iban} className="inline-block">
+                    …{k.iban.slice(-4)} {eur(k.saldo)}
+                    {bank && Math.abs(bank.saldo - k.saldo) > 1 ? ` (Bank ${eur(bank.saldo)})` : ""}
+                    {zweck && <span className="block text-[10px] text-neutral-400">{zweck}</span>}
+                  </span>
+                );
+              })}
+            </span>
+          }
         />
         <Kachel label="Ø Einnahmen / Tag" value={eur(p.einnahmenProTag)} sub={`${eur((p.einnahmenProTag * 365) / 12)} / Monat`} tone="green" />
         <Kachel label="Ø laufende Abgänge" value={eur(-laufendMonat)} sub="pro Monat (ohne Ware & Steuern)" />
@@ -1042,7 +1052,7 @@ function Schalter({ label, checked, onChange }: { label: string; checked: boolea
   );
 }
 
-function Kachel({ label, value, sub, tone = "neutral" }: { label: string; value: string; sub?: string; tone?: "green" | "red" | "amber" | "neutral" }) {
+function Kachel({ label, value, sub, tone = "neutral" }: { label: string; value: string; sub?: React.ReactNode; tone?: "green" | "red" | "amber" | "neutral" }) {
   const color = { green: "text-emerald-700", red: "text-red-700", amber: "text-amber-700", neutral: "text-neutral-900" }[tone];
   return (
     <div className="bg-neutral-50 rounded-xl p-3 text-center">
