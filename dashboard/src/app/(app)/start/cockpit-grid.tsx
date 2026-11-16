@@ -35,7 +35,7 @@ const ABSTAND_STANDARD = 12;
 const nurPos = (l: ReadonlyArray<LayoutItem>): LayoutItem[] => l.map((x) => ({ i: x.i, x: x.x, y: x.y, w: x.w, h: x.h }));
 
 type Geo = { x: number; y: number; w: number; h: number };
-type Aktiv = { id: string; start: Map<string, Geo> } | null;
+type Aktiv = { id: string; art: "zug" | "groesse"; start: Map<string, Geo> } | null;
 
 const ueberlappt = (a: Geo, b: Geo) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
@@ -46,6 +46,9 @@ const ueberlappt = (a: Geo, b: Geo) => a.x < b.x + b.w && a.x + a.w > b.x && a.y
  *    nur das aktive Fenster nimmt seine neue Lage ein → nichts springt hin und her.
  *  - Das aktive Fenster bleibt fest; alle anderen behalten ihre Lage, außer sie überlappen –
  *    dann rutschen sie genau so weit nach unten wie nötig (nie seitlich, nie nach oben).
+ *  - Beim Ziehen verdrängt das Fenster ein anderes nur, wenn seine Oberkante über dessen
+ *    Oberkante hinaus gezogen wird („überholt“). Ragt es nur von unten hinein, dockt es direkt
+ *    unter dem anderen an – sonst flöge das obere Fenster samt allem darunter weit nach unten.
  *  - Ohne Geste (Laden, Hinzufügen) werden vorhandene Überlappungen genauso aufgelöst.
  */
 function freiAufloesen(layout: Layout, aktiv: Aktiv): Layout {
@@ -54,6 +57,15 @@ function freiAufloesen(layout: Layout, aktiv: Aktiv): Layout {
     return { ...it, ...(s ?? {}), y: Math.max(0, s?.y ?? it.y), moved: false };
   });
   const fest = aktiv ? neu.filter((it) => it.i === aktiv.id) : [];
+  const a = fest[0];
+  if (a && aktiv?.art === "zug") {
+    const andere = neu.filter((it) => it !== a);
+    for (let k = 0; k < 200; k++) {
+      const drueber = andere.filter((o) => o.y < a.y && ueberlappt(o, a));
+      if (!drueber.length) break;
+      a.y = Math.max(...drueber.map((o) => o.y + o.h));
+    }
+  }
   const rest = neu.filter((it) => !fest.includes(it)).sort((a, b) => a.y - b.y || a.x - b.x);
   const platziert: Geo[] = [...fest];
   for (const it of rest) {
@@ -214,8 +226,8 @@ export default function CockpitGrid({
     allowOverlap: true, // Bibliothek schiebt selbst nichts – die Auflösung macht freiAufloesen
     compact: (l) => freiAufloesen(l, aktivRef.current),
   }), []);
-  const gesteStart = (l: Layout, it: { i: string } | null) => {
-    aktivRef.current = it ? { id: it.i, start: new Map(l.map((x) => [x.i, { x: x.x, y: x.y, w: x.w, h: x.h }])) } : null;
+  const gesteStart = (l: Layout, it: { i: string } | null, art: "zug" | "groesse") => {
+    aktivRef.current = it ? { id: it.i, art, start: new Map(l.map((x) => [x.i, { x: x.x, y: x.y, w: x.w, h: x.h }])) } : null;
   };
   const [status, setStatus] = useState<"" | "speichert" | "gespeichert" | "fehler">("");
   const jetzt = useJetzt();
@@ -414,8 +426,8 @@ export default function CockpitGrid({
               dragConfig={{ enabled: true, handle: ".ck-griff", cancel: ".ck-kein-zug" }}
               resizeConfig={{ enabled: true, handles: ["se", "e", "s"] }}
               compactor={compactor}
-              onDragStart={(l, alt) => gesteStart(l, alt)}
-              onResizeStart={(l, alt) => gesteStart(l, alt)}
+              onDragStart={(l, alt) => gesteStart(l, alt, "zug")}
+              onResizeStart={(l, alt) => gesteStart(l, alt, "groesse")}
               onDragStop={(l) => { aktivRef.current = null; uebernehmen(l); }}
               onResizeStop={(l) => { aktivRef.current = null; uebernehmen(l); }}
               onLayoutChange={(l) => setAngezeigt(l.map((x) => ({ i: x.i, x: x.x, y: x.y, w: x.w, h: x.h })))}
