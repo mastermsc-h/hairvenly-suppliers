@@ -5,7 +5,7 @@
 // Termine als Abreißkalender-Blätter mit Countdown und Kontostand vorher → nachher.
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowRight, RotateCw } from "lucide-react";
+import { ArrowRight, ChevronDown, RotateCw } from "lucide-react";
 import type { SteuerArt, SteuerKasseDaten } from "@/lib/cockpit/typen";
 import { Zahl, eur, kurzEur } from "./bausteine";
 
@@ -28,19 +28,57 @@ function countdown(t: SteuerKasseDaten["termine"][number]) {
 const tm = (iso: string) => `${Number(iso.slice(8, 10))}.${Number(iso.slice(5, 7))}.`;
 
 /** Einkommen- und Gewerbesteuer im ganzen Jahr: je Quartal bezahlt (Häkchen) oder offen. */
-function JahrBlock({ j }: { j: SteuerKasseDaten["jahr"] }) {
-  if (!j.arten.length) return null;
-  const gesamt = j.bezahlt + j.offen;
+const MON_LANG = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
+
+/** Hochrechnung aus dem Gewinn: was ESt/GewSt fürs Jahr kosten und was nach den Vorauszahlungen noch kommt. */
+function Prognose({ p, jahr }: { p: NonNullable<SteuerKasseDaten["jahr"]["prognose"]>; jahr: number }) {
+  const zeilen = [
+    { name: "Einkommensteuer inkl. Soli", farbe: ART.est.farbe, steuer: p.est, vz: p.vzEst, nach: p.nachEst },
+    { name: "Gewerbesteuer", farbe: ART.gewst.farbe, steuer: p.gewst, vz: p.vzGewst, nach: p.nachGewst },
+  ];
+  const gesamt = p.nachEst + p.nachGewst;
+  const bis = MON_LANG[Number(p.bisMonat.slice(5, 7)) - 1];
   return (
-    <section className="sk-jahr" aria-label={`Einkommen- und Gewerbesteuer ${j.jahr}`}>
-      <div className="sk-jahr-kopf">
-        <span className="ck-etikett">{j.jahr} · Einkommen- &amp; Gewerbesteuer</span>
+    <div className="sk-prognose">
+      <div className="sk-prognose-gewinn">
+        <span>Gewinn Januar–{bis}: <b>{eur(p.gewinnBisher)}</b></span>
+        <span>→ aufs Jahr hochgerechnet <b>{eur(p.gewinnJahr)}</b></span>
+      </div>
+      <div className="sk-prognose-tabelle" role="table">
+        <div className="sk-prognose-zeile sk-prognose-th" role="row"><span /><span>Steuer laut Gewinn</span><span>− Vorauszahlungen</span><span>= {jahr} noch</span></div>
+        {zeilen.map((z) => (
+          <div key={z.name} className="sk-prognose-zeile" role="row" style={{ ["--sk-farbe" as string]: z.farbe }}>
+            <span className="sk-prognose-name"><i />{z.name}</span>
+            <span>{eur(z.steuer)}</span>
+            <span>{eur(z.vz)}</span>
+            <b data-plus={z.nach > 0}>{z.nach > 0 ? `≈ ${eur(z.nach)}` : `≈ ${eur(-z.nach)} zurück`}</b>
+          </div>
+        ))}
+      </div>
+      <div className="sk-prognose-ergebnis" data-plus={gesamt > 0}>
+        <span>{gesamt > 0 ? `Voraussichtliche Nachzahlung für ${jahr}` : `Voraussichtliche Erstattung für ${jahr}`}</span>
+        <b>≈ {eur(Math.abs(gesamt))}</b>
+      </div>
+      <div className="sk-prognose-fuss">Wie in der Finanzübersicht: Gewinn aus Einnahmen und Ausgaben, ESt nach Grundtarif, GewSt mit Hebesatz und Freibetrag. Fällig wird das mit dem Steuerbescheid, meist im Folgejahr.</div>
+    </div>
+  );
+}
+
+function JahrBlock({ j }: { j: SteuerKasseDaten["jahr"] }) {
+  if (!j.arten.length && !j.prognose) return null;
+  const nach = j.prognose ? j.prognose.nachEst + j.prognose.nachGewst : null;
+  return (
+    <details className="sk-jahr" aria-label={`Einkommen- und Gewerbesteuer ${j.jahr}`}>
+      <summary className="sk-jahr-kopf">
+        <span className="sk-jahr-titel"><ChevronDown size={15} className="sk-pfeil" /> {j.jahr} · Einkommen- &amp; Gewerbesteuer</span>
         <span className="sk-jahr-summen">
           <span>bezahlt <b className="sk-gruen-b">{eur(j.bezahlt)}</b></span>
           <span>offen <b className={j.offen > 0 ? "sk-offen-b" : ""}>{eur(j.offen)}</b></span>
-          <span>Jahr gesamt <b>{eur(gesamt)}</b></span>
+          {nach != null && <span>{nach > 0 ? "Nachzahlung" : "Erstattung"} <b className={nach > 0 ? "sk-offen-b" : "sk-gruen-b"}>≈ {eur(Math.abs(nach))}</b></span>}
         </span>
-      </div>
+      </summary>
+      {j.prognose && <Prognose p={j.prognose} jahr={j.jahr} />}
+      <div className="sk-jahr-unter">Vorauszahlungen je Quartal</div>
       {j.arten.map((a) => {
         const summe = a.bezahlt + a.offen;
         return (
@@ -64,7 +102,7 @@ function JahrBlock({ j }: { j: SteuerKasseDaten["jahr"] }) {
           </div>
         );
       })}
-    </section>
+    </details>
   );
 }
 
@@ -147,8 +185,6 @@ export default function SteuerKasseWidget({ d }: { d: SteuerKasseDaten }) {
         </div>
       </div>
 
-      <JahrBlock j={d.jahr} />
-
       {/* Abreißkalender */}
       <div className="sk-blaetter">
         {d.termine.map((t, i) => {
@@ -205,6 +241,8 @@ export default function SteuerKasseWidget({ d }: { d: SteuerKasseDaten }) {
           );
         })}
       </div>
+
+      <JahrBlock j={d.jahr} />
 
       <div className="sk-fuss">
         <span>≈ geschätzt aus den letzten Monaten · „vorher“ = Kontostand laut Liquiditätsvorschau, „danach“ = vorher minus Steuer</span>

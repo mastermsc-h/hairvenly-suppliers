@@ -354,6 +354,19 @@ export interface SteuerKasseDaten {
     }>;
     bezahlt: number;
     offen: number;
+    /** Hochrechnung aus dem Gewinn der Finanzübersicht: Jahressteuer vs. Vorauszahlungen. */
+    prognose: {
+      monate: number;
+      bisMonat: string;
+      gewinnBisher: number;
+      gewinnJahr: number;
+      est: number;
+      gewst: number;
+      vzEst: number;
+      vzGewst: number;
+      nachEst: number;
+      nachGewst: number;
+    } | null;
   };
 }
 
@@ -456,7 +469,7 @@ const STANDARD_LAYOUT_GROB: LayoutItem[] = [
   { i: "pflanze", x: 3, y: 111, w: 2, h: 9 },
   { i: "polaroid", x: 5, y: 111, w: 4, h: 9 },
   { i: "wetter", x: 9, y: 111, w: 3, h: 9 },
-  { i: "steuerkasse", x: 0, y: 120, w: 12, h: 18 },
+  { i: "steuerkasse", x: 0, y: 120, w: 12, h: 15 },
 ];
 
 /** Standard-Anordnung im feinen Raster (10-px-Zeilen). Überlappt noch – wird beim Aufbau einmal verdichtet. */

@@ -1273,3 +1273,34 @@ a.ck-signal:hover { border-color: var(--s); }
 .sk-rechnung-summe { border-top: 1px solid #ece9f7; padding-top: 3px; font-weight: 700; color: var(--ck-text); }
 .sk-rechnung-konto { --sk-farbe: #94a3b8; }
 @media (prefers-reduced-motion: reduce) { .sk-dreh { transition: none; } }
+/* Steuerkasse · Jahr zugeklappt + Hochrechnung */
+.sk-blaetter { flex: 0 0 auto; }
+details.sk-jahr { flex: none; }
+details.sk-jahr > summary { list-style: none; cursor: pointer; user-select: none; }
+details.sk-jahr > summary::-webkit-details-marker { display: none; }
+.sk-jahr-titel { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 750; color: var(--ck-text); }
+.sk-pfeil { transition: transform 0.25s; transform: rotate(-90deg); color: var(--ck-matt); }
+details.sk-jahr[open] .sk-pfeil { transform: rotate(0deg); }
+details.sk-jahr[open] > summary { padding-bottom: 6px; border-bottom: 1px dashed #ebe7f7; }
+.sk-jahr-unter { font-size: 10.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ck-matt); margin-top: 2px; }
+.sk-prognose { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 13px; background: linear-gradient(135deg, #fff8f1, #fdf4ff); border: 1px solid rgba(236, 72, 153, 0.14); }
+.sk-prognose-gewinn { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--ck-dim); }
+.sk-prognose-gewinn b { color: var(--ck-text); }
+.sk-prognose-tabelle { display: flex; flex-direction: column; gap: 4px; }
+.sk-prognose-zeile { display: grid; grid-template-columns: minmax(150px, 1.4fr) repeat(3, minmax(90px, 1fr)); gap: 8px; align-items: center; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.sk-prognose-zeile > :not(:first-child) { text-align: right; }
+.sk-prognose-th { font-size: 10.5px; font-weight: 700; color: var(--ck-matt); text-transform: uppercase; letter-spacing: 0.05em; }
+.sk-prognose-name { display: inline-flex; align-items: center; gap: 7px; font-weight: 650; }
+.sk-prognose-name i { width: 9px; height: 9px; border-radius: 3px; background: var(--sk-farbe); }
+.sk-prognose-zeile b[data-plus="true"] { color: #c2410c; }
+.sk-prognose-zeile b[data-plus="false"] { color: #059669; }
+.sk-prognose-ergebnis { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding-top: 6px; border-top: 1px solid rgba(236, 72, 153, 0.18); font-size: 13px; font-weight: 650; }
+.sk-prognose-ergebnis b { font-size: 20px; font-weight: 800; color: #c2410c; }
+.sk-prognose-ergebnis[data-plus="false"] b { color: #059669; }
+.sk-prognose-fuss { font-size: 11px; color: var(--ck-matt); line-height: 1.35; }
+@container (max-width: 560px) { .sk-prognose-zeile { grid-template-columns: 1fr auto auto auto; font-size: 11.5px; } }
+.sk-hinten { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; }
+.sk-hinten::-webkit-scrollbar { width: 4px; }
+.sk-hinten::-webkit-scrollbar-thumb { background: #ddd6fe; border-radius: 4px; }
+.sk { min-width: 0; }
+.sk > * { min-width: 0; }

@@ -11,6 +11,9 @@ import { loadDeadStock } from "@/lib/stock-deadstock";
 import { FAST_TOT_STANDARD_MONATE } from "@/lib/deadstock-grenze";
 import { holeFollowerLive, type InstagramTag } from "@/lib/instagram-statistik";
 import { ladeWerbeteil } from "@/lib/marketing-extern";
+import { salonUmsatzJahr } from "@/lib/finanzen/salon-umsatz";
+import type { FinanzMonatsdaten } from "@/lib/types";
+import { compute, taxChain } from "@/lib/finanzen/steuerrechnung";
 import type {
   Ampel, AuslandDaten, BesucherDaten, ChatDaten, CockpitLayout, Eintrag, EintragArt, HyDaten, KampagneDaten,
   LiqGruppe, LiquiditaetDaten, PflichtenDaten, SteuerArt, SteuerKasseDaten, PflichtPosten, ShopifyDaten, Signal, TotesKapitalDaten, InstagramDaten, IgAnfragenDaten, IgAnfragenPeriode, WerbungDaten, UmsatzDaten,
@@ -778,6 +781,53 @@ export const ladeSteuerKasse = cache(async (horizont = 100): Promise<SteuerKasse
     };
   }).filter((a) => a.posten.length);
 
+  // Hochrechnung: Gewinn der abgeschlossenen Monate (Finanzübersicht, gleiche Rechnung) aufs Jahr,
+  // darauf ESt (inkl. Soli) + GewSt wie in der Übersicht, minus Vorauszahlungen = Nachzahlung.
+  let prognose: SteuerKasseDaten["jahr"]["prognose"] = null;
+  try {
+    const sb = createServiceClient();
+    const [rowsRes, shopRes, salon] = await Promise.all([
+      sb.from("finanz_monatsdaten").select("*").eq("jahr", jahrNr).order("monat"),
+      sb.from("shopify_umsatz_monat").select("monat, netto").gte("monat", `${jahrNr}-01`).lte("monat", `${jahrNr}-12`),
+      salonUmsatzJahr(jahrNr),
+    ]);
+    if (rowsRes.error) throw new Error(rowsRes.error.message);
+    const rows = (rowsRes.data ?? []) as FinanzMonatsdaten[];
+    const shop = ((shopRes.data ?? []) as Array<{ monat: string; netto: number }>).map((u) => ({ monat: String(u.monat), netto: Number(u.netto) || 0 }));
+    const aktMonat = Number(heute.slice(5, 7));
+    const fertig = rows.filter((r) => r.monat < aktMonat).sort((a, b) => a.monat - b.monat);
+    if (fertig.length) {
+      const ym = (m: number) => `${jahrNr}-${String(m).padStart(2, "0")}`;
+      let gewinnBisher = 0;
+      for (const r of fertig) {
+        let inp = r.daten;
+        const u = shop.find((x) => x.monat === ym(r.monat));
+        const sa = salon.find((x) => x.monat === ym(r.monat));
+        if (!inp.shopManuell && u) inp = { ...inp, shopBrutto: u.netto };
+        if (!inp.salonManuell && sa) inp = { ...inp, salonBrutto: sa.brutto };
+        gewinnBisher += compute(inp).gewinnVorSteuern;
+      }
+      const letzte = fertig[fertig.length - 1].daten;
+      const gewinnJahr = (gewinnBisher / fertig.length) * 12;
+      const tax = taxChain(gewinnJahr, letzte.gewstHebesatz, letzte.gewstFreibetrag);
+      const vz = (art: "est" | "gewst") => { const a = arten.find((x) => x.art === art); return a ? a.bezahlt + a.offen : 0; };
+      prognose = {
+        monate: fertig.length,
+        bisMonat: ym(fertig[fertig.length - 1].monat),
+        gewinnBisher: r0(gewinnBisher),
+        gewinnJahr: r0(gewinnJahr),
+        est: r0(tax.estGesamt),
+        gewst: r0(tax.gewstJahr),
+        vzEst: vz("est"),
+        vzGewst: vz("gewst"),
+        nachEst: r0(tax.estGesamt - vz("est")),
+        nachGewst: r0(tax.gewstJahr - vz("gewst")),
+      };
+    }
+  } catch (e) {
+    console.warn("[steuerkasse] Gewinn-Hochrechnung:", e instanceof Error ? e.message : e);
+  }
+
   return {
     heute,
     konto: r0(start),
@@ -787,7 +837,7 @@ export const ladeSteuerKasse = cache(async (horizont = 100): Promise<SteuerKasse
     jeArt,
     zahlungen: alle.filter((p) => p.betrag > 0).reduce((s, p) => s + p.betrag, 0),
     erstattungen: -alle.filter((p) => p.betrag < 0).reduce((s, p) => s + p.betrag, 0),
-    jahr: { jahr: jahrNr, arten, bezahlt: arten.reduce((s, a) => s + a.bezahlt, 0), offen: arten.reduce((s, a) => s + a.offen, 0) },
+    jahr: { jahr: jahrNr, arten, bezahlt: arten.reduce((s, a) => s + a.bezahlt, 0), offen: arten.reduce((s, a) => s + a.offen, 0), prognose },
   };
 });
 
