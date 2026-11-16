@@ -60,6 +60,14 @@ export async function GET(req: NextRequest) {
       ? { skipped: "time budget exceeded" }
       : await cronRevenueSync(supabase);
   }
+  // Vor dem Wiederkauf-Schritt (der nutzt das Budget bis zum Ende — danach wurde der Snapshot
+  // an manchen Tagen übersprungen). Leichtgewichtig (2 Sheet-Reads) — Lagerbestand-Snapshot für den
+  // Entwicklungs-Chart auf /stock.
+  if (!skip.includes("stocksnapshot")) {
+    results.stockSnapshot = overBudget()
+      ? { skipped: "time budget exceeded" }
+      : await cronStockSnapshot(supabase);
+  }
   // Incremental by design: it works newest-first and stops at the deadline,
   // so it always returns cleanly and continues on the next run. Previously it
   // tried to process every customer in one pass, never finished, and left
@@ -71,13 +79,6 @@ export async function GET(req: NextRequest) {
   }
   // Produkt-Verkäufe laufen seit 16.11.2026 im eigenen Cron /api/cron/product-sales — hier wurden
   // sie hinter dem Wiederkauf-Schritt (nutzt das Budget bis zum Ende) jede Nacht übersprungen.
-  // Leichtgewichtig (2 Sheet-Reads) — Lagerbestand-Snapshot für den
-  // Entwicklungs-Chart auf /stock.
-  if (!skip.includes("stocksnapshot")) {
-    results.stockSnapshot = overBudget()
-      ? { skipped: "time budget exceeded" }
-      : await cronStockSnapshot(supabase);
-  }
   // HY-Score-Eintrag läuft im eigenen Cron /api/cron/hy-score (hier wurde er vom Zeitbudget verdrängt).
 
   results.finishedAt = new Date().toISOString();
