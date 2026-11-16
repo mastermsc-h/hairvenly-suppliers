@@ -962,7 +962,10 @@ export async function fetchMonthlyCollectionSales(
       const order = e.node;
       // Skip cancelled orders — Shopify's gross_sales excludes them.
       if (order.cancelledAt) continue;
-      const month = order.createdAt.slice(0, 7) + "-01";
+      // Monat nach deutscher Zeit — die Abfrage (created_at:>=Datum) läuft ebenfalls in Shop-Zeit.
+      // Mit UTC landeten Bestellungen der letzten Stunden eines Monats als Schnipsel im Vormonat,
+      // und der Sync löschte dann diesen ganzen Vormonat (16.11.2026: Juli 2026 weg).
+      const month = new Date(order.createdAt).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }).slice(0, 7) + "-01";
       const monthMap = agg.get(month) ?? new Map();
 
       for (const liEdge of order.lineItems.edges) {
@@ -1109,7 +1112,10 @@ export async function fetchMonthlyProductSales(
     for (const e of edges) {
       const order = e.node;
       if (order.cancelledAt) continue;
-      const month = order.createdAt.slice(0, 7) + "-01";
+      // Monat nach deutscher Zeit — die Abfrage (created_at:>=Datum) läuft ebenfalls in Shop-Zeit.
+      // Mit UTC landeten Bestellungen der letzten Stunden eines Monats als Schnipsel im Vormonat,
+      // und der Sync löschte dann diesen ganzen Vormonat (16.11.2026: Juli 2026 weg).
+      const month = new Date(order.createdAt).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }).slice(0, 7) + "-01";
       const monthMap = agg.get(month) ?? new Map();
 
       for (const liEdge of order.lineItems.edges) {

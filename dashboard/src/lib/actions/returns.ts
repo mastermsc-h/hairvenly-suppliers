@@ -485,7 +485,7 @@ export async function syncReturnsFromShopify(fromDate?: string, toDate?: string)
   // previous good rows stay intact instead of being deleted.
   try {
     const syncStartedAt = new Date().toISOString();
-    const collRows = await fetchMonthlyCollectionSales(revenueFromMonth, revenueTo);
+    const collRows = (await fetchMonthlyCollectionSales(revenueFromMonth, revenueTo)).filter((r) => r.month >= revenueFromMonth.slice(0, 7) + "-01");
     if (collRows.length > 0) {
       const payload = collRows.map((r) => ({
         month: r.month,
@@ -556,7 +556,9 @@ export async function syncShopifyCollectionSales(
   try {
     // 1. Fetch EVERYTHING into memory first. If the Shopify fetch fails
     //    (timeout, rate limit) we bail out without touching existing rows.
-    const rows = await fetchMonthlyCollectionSales(effectiveFrom, effectiveTo);
+    // Nur Monate ab dem Fensterbeginn (angeschnittener Vormonat würde sonst gelöscht, siehe cron-tasks)
+    const vonMonat = effectiveFrom.slice(0, 7) + "-01";
+    const rows = (await fetchMonthlyCollectionSales(effectiveFrom, effectiveTo)).filter((r) => r.month >= vonMonat);
     if (rows.length === 0) {
       return { synced: 0, fromDate: effectiveFrom, toDate: effectiveTo };
     }

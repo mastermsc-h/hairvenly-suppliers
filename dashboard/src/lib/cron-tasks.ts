@@ -31,7 +31,8 @@ export async function cronCollectionSync(
     const fromDate = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-01`;
     const toDate = now.toISOString().slice(0, 10);
 
-    const rows = await fetchMonthlyCollectionSales(fromDate, toDate);
+    // Nur Monate ab dem Fensterbeginn: ein angeschnittener Vormonat würde sonst unten komplett gelöscht
+    const rows = (await fetchMonthlyCollectionSales(fromDate, toDate)).filter((r) => r.month >= fromDate);
     if (rows.length === 0) return { synced: 0 };
 
     const syncedAt = new Date().toISOString();
@@ -73,7 +74,8 @@ export async function cronProductSalesSync(
     const fromDate = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}-01`;
     const toDate = now.toISOString().slice(0, 10);
 
-    const rows = await fetchMonthlyProductSales(fromDate, toDate);
+    // Nur Monate ab dem Fensterbeginn (wie bei den Kollektionen, siehe oben)
+    const rows = (await fetchMonthlyProductSales(fromDate, toDate)).filter((r) => r.month >= fromDate);
     if (rows.length === 0) return { synced: 0 };
 
     // Collapse to the table's primary key (month, product_title): a product
