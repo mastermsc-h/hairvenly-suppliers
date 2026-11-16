@@ -320,6 +320,31 @@ export interface LiquiditaetDaten {
   marken: Array<{ datum: string; betrag: number; label: string; gruppe: LiqGruppe; geschaetzt: boolean }>;
 }
 
+export type SteuerArt = "ust" | "lst" | "est" | "gewst";
+
+/** Steuerkasse: kommende Zahlungen ans Finanzamt und was danach auf dem Konto bleibt. */
+export interface SteuerKasseDaten {
+  heute: string;
+  /** Konto heute (Sparkasse + ggf. PayPal, wie in der Liquiditätsvorschau). */
+  konto: number;
+  puffer: number;
+  tageHorizont: number;
+  termine: Array<{
+    datum: string;
+    tageBis: number;
+    ueberfaellig: boolean;
+    posten: Array<{ art: SteuerArt; titel: string; zeitraum: string; betrag: number; geschaetzt: boolean }>;
+    /** Summe der Zahlungen (positiv) minus Erstattungen an diesem Tag. */
+    summe: number;
+    kontoVorher: number;
+    kontoNachher: number;
+  }>;
+  /** Je Steuerart: Summe der Zahlungen im Horizont. */
+  jeArt: Array<{ art: SteuerArt; betrag: number }>;
+  zahlungen: number;
+  erstattungen: number;
+}
+
 export interface PflichtPosten {
   gruppe: "steuern" | "personal" | "fixkosten" | "gebuehren" | "lieferanten" | "einfuhr" | "sonstiges";
   label: string;
@@ -379,6 +404,7 @@ export const WIDGETS = [
   { id: "aktionen", name: "Aktuelle Aktionen", info: "Laufende und geplante Aktionen", feature: null },
   { id: "philosophie", name: "Firmenphilosophie", info: "Wofür Hairvenly steht", feature: null },
   { id: "liquiditaet", name: "Liquidität", info: "Kontostand der nächsten 90 Tage", feature: "finances" },
+  { id: "steuerkasse", name: "Steuerkasse", info: "Was ans Finanzamt geht – wann, wie viel, was danach bleibt", feature: "finances" },
   { id: "marketing", name: "Marketing (HALO)", info: "Dringende Aufgaben des Marketing-Teams", feature: "finances" },
 ] as const;
 
@@ -418,6 +444,7 @@ const STANDARD_LAYOUT_GROB: LayoutItem[] = [
   { i: "pflanze", x: 3, y: 111, w: 2, h: 9 },
   { i: "polaroid", x: 5, y: 111, w: 4, h: 9 },
   { i: "wetter", x: 9, y: 111, w: 3, h: 9 },
+  { i: "steuerkasse", x: 0, y: 120, w: 12, h: 14 },
 ];
 
 /** Standard-Anordnung im feinen Raster (10-px-Zeilen). Überlappt noch – wird beim Aufbau einmal verdichtet. */
@@ -428,4 +455,5 @@ export const MIN_GROESSE: Record<string, { w: number; h: number }> = {
   hi: { w: 3, h: 28 },
   lage: { w: 3, h: 8 },
   liquiditaet: { w: 4, h: 20 },
+  steuerkasse: { w: 5, h: 30 },
 };

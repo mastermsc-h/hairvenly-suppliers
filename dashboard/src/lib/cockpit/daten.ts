@@ -13,7 +13,7 @@ import { holeFollowerLive, type InstagramTag } from "@/lib/instagram-statistik";
 import { ladeWerbeteil } from "@/lib/marketing-extern";
 import type {
   Ampel, AuslandDaten, BesucherDaten, ChatDaten, CockpitLayout, Eintrag, EintragArt, HyDaten, KampagneDaten,
-  LiqGruppe, LiquiditaetDaten, PflichtenDaten, PflichtPosten, ShopifyDaten, Signal, TotesKapitalDaten, InstagramDaten, IgAnfragenDaten, IgAnfragenPeriode, WerbungDaten, UmsatzDaten,
+  LiqGruppe, LiquiditaetDaten, PflichtenDaten, SteuerArt, SteuerKasseDaten, PflichtPosten, ShopifyDaten, Signal, TotesKapitalDaten, InstagramDaten, IgAnfragenDaten, IgAnfragenPeriode, WerbungDaten, UmsatzDaten,
 } from "./typen";
 
 const berlin = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin" });
@@ -683,6 +683,65 @@ export const ladeLiquiditaet = cache(async (): Promise<LiquiditaetDaten> => {
     ampel: ampelFuer(ergebnis.tiefpunkt.saldo, einstellungen.puffer),
     tage: ergebnis.tage.map((t) => ({ datum: t.datum, saldo: r0(t.saldo) })),
     marken,
+  };
+});
+
+// ── Steuerkasse: Zahlungen ans Finanzamt ────────────────────────────────────
+
+const STEUER_TITEL: Record<SteuerArt, string> = { ust: "Umsatzsteuer", lst: "Lohnsteuer", est: "Einkommensteuer", gewst: "Gewerbesteuer" };
+
+/** "USt-VA 2026-09 (Soll …)" → "Sep 2026"; "ESt-Vorauszahlung Q4 2026" → "Q4 2026". */
+function steuerZeitraum(label: string): string {
+  const m = label.match(/(\d{4})-(\d{2})/);
+  if (m) return `${MONATE[Number(m[2]) - 1]} ${m[1]}`;
+  const q = label.match(/Q[1-4] \d{4}/);
+  return q ? q[0] : "";
+}
+
+export const ladeSteuerKasse = cache(async (horizont = 100): Promise<SteuerKasseDaten> => {
+  const { roh, einstellungen, ergebnis } = await ladePrognose();
+  const heute = roh.heute;
+  const bis = plusTage(heute, horizont);
+  const saldoAm = new Map(ergebnis.tage.map((t) => [t.datum, t.saldo]));
+  const erster = ergebnis.tage[0]?.datum ?? heute;
+  const start = ergebnis.startSaldoGesamt;
+  const proTag = new Map<string, SteuerKasseDaten["termine"][number]>();
+  for (const e of ergebnis.ereignisse) {
+    if (e.art !== "steuer" || !e.steuer || e.datum > bis) continue;
+    const datum = e.datum < erster ? erster : e.datum;
+    let t = proTag.get(datum);
+    if (!t) {
+      const vorher = saldoAm.get(plusTage(datum, -1)) ?? start;
+      t = {
+        datum,
+        tageBis: Math.max(0, Math.round((Date.parse(datum) - Date.parse(heute)) / 86_400_000)),
+        ueberfaellig: false,
+        posten: [],
+        summe: 0,
+        kontoVorher: r0(datum <= erster ? start : vorher),
+        kontoNachher: 0, // unten: davor minus Steuer (andere Zahlungen desselben Tages bleiben außen vor)
+      };
+      proTag.set(datum, t);
+    }
+    t.ueberfaellig = t.ueberfaellig || !!e.sofort;
+    t.posten.push({ art: e.steuer, titel: e.betrag > 0 ? `Erstattung ${e.steuer === "ust" ? "USt" : STEUER_TITEL[e.steuer]}` : STEUER_TITEL[e.steuer], zeitraum: steuerZeitraum(e.label), betrag: r0(-e.betrag), geschaetzt: !!e.schaetzung });
+    t.summe += r0(-e.betrag);
+  }
+  const termine = [...proTag.values()].sort((a, b) => a.datum.localeCompare(b.datum));
+  for (const t of termine) t.kontoNachher = t.kontoVorher - t.summe;
+  const jeArt = (["ust", "lst", "est", "gewst"] as SteuerArt[])
+    .map((art) => ({ art, betrag: termine.flatMap((t) => t.posten).filter((p) => p.art === art && p.betrag > 0).reduce((s, p) => s + p.betrag, 0) }))
+    .filter((x) => x.betrag > 0);
+  const alle = termine.flatMap((t) => t.posten);
+  return {
+    heute,
+    konto: r0(start),
+    puffer: einstellungen.puffer,
+    tageHorizont: horizont,
+    termine,
+    jeArt,
+    zahlungen: alle.filter((p) => p.betrag > 0).reduce((s, p) => s + p.betrag, 0),
+    erstattungen: -alle.filter((p) => p.betrag < 0).reduce((s, p) => s + p.betrag, 0),
   };
 });
 

@@ -7,7 +7,7 @@ import ReactGridLayout, { useContainerWidth, verticalCompactor, type Compactor, 
 import "react-grid-layout/css/styles.css";
 import {
   Activity, BadgePercent, CheckSquare, Compass, Eye, EyeOff, Flag, Gauge, Globe2, Camera, Newspaper, Repeat, Smile, Sprout, Images, CloudSun, CloudLightning, Inbox, Target, Megaphone, PackageX, HeartPulse, Lightbulb, MessageSquare,
-  MousePointerClick, RotateCcw, Settings2, SlidersHorizontal, Zap, ShoppingBag, StickyNote, TrendingUp, Wallet, Waves, Check, GripVertical, BrainCircuit,
+  MousePointerClick, Landmark, RotateCcw, Settings2, SlidersHorizontal, Zap, ShoppingBag, StickyNote, TrendingUp, Wallet, Waves, Check, GripVertical, BrainCircuit,
 } from "lucide-react";
 import { cockpitLayoutZuruecksetzen, speichereCockpitLayout } from "@/lib/actions/cockpit";
 import { Plus, X } from "lucide-react";
@@ -19,7 +19,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   hi: BrainCircuit,
   lage: Activity, umsatz: TrendingUp, chats: MessageSquare, hy: HeartPulse, aufgaben: CheckSquare, pflichten: Wallet,
   shopify: ShoppingBag, besucher: MousePointerClick, notizen: StickyNote, ideen: Lightbulb, pfeiler: Gauge,
-  meilensteine: Flag, ausland: Globe2, toteskapital: PackageX, marketing: Megaphone, instagram: Camera, sturm: CloudLightning, newsletter: Newspaper, routinen: Repeat, hailey: Smile, pflanze: Sprout, polaroid: Images, wetter: CloudSun, iganfragen: Inbox, werbung: Target, aktionen: BadgePercent, philosophie: Compass, liquiditaet: Waves,
+  meilensteine: Flag, ausland: Globe2, toteskapital: PackageX, marketing: Megaphone, instagram: Camera, sturm: CloudLightning, newsletter: Newspaper, routinen: Repeat, hailey: Smile, pflanze: Sprout, polaroid: Images, wetter: CloudSun, iganfragen: Inbox, werbung: Target, aktionen: BadgePercent, steuerkasse: Landmark, philosophie: Compass, liquiditaet: Waves,
 };
 
 /** Fenster ohne sichtbaren Rahmen: die Form gibt der Inhalt (Figur, Pflanze, Fotos, Kreis, Zeitung). */
