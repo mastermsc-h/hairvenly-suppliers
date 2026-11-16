@@ -125,6 +125,10 @@ check("Bank-Ist wird aktualisiert", K.ledgerUpdate({ ist_betrag: 100, soll_betra
 check("Erstattung dreht Richtung bei Soll 0", K.ledgerUpdate({ ist_betrag: 0, soll_betrag: 0, richtung: "zahlung", ist_quelle: "manuell" }, s(-18114.12)),
   { ist_betrag: 18114.12, bezahlt_am: "2026-09-16", ist_quelle: "bank", richtung: "erstattung" });
 check("Widerspruch zu Soll → nichts", K.ledgerUpdate({ ist_betrag: 0, soll_betrag: 500, richtung: "zahlung", ist_quelle: "manuell" }, s(-100)), {});
+// 16.11.2026: USt Sep geschätzt 18.200 € Zahlung, Finanzamt erstattet 10.815 € → Schätzung wird ersetzt
+const ers = K.ledgerUpdate({ ist_betrag: 0, soll_betrag: 18200, richtung: "zahlung", ist_quelle: "manuell", soll_schaetzung: true }, s(-10815));
+check("Widerspruch zu geschätztem Soll → Bank gilt", [ers.richtung, ers.ist_betrag, ers.soll_betrag, ers.soll_schaetzung, ers.ist_quelle], ["erstattung", 10815, 10815, false, "bank"]);
+check("Geschätztes Soll gleiche Richtung → Soll bleibt", "soll_betrag" in K.ledgerUpdate({ ist_betrag: 0, soll_betrag: 18200, richtung: "zahlung", ist_quelle: "manuell", soll_schaetzung: true }, s(17000)), false);
 check("Netto 0, manuell leer → nichts", K.ledgerUpdate({ ist_betrag: 0, soll_betrag: 0, richtung: "zahlung", ist_quelle: "manuell" }, s(0)), {});
 check("Netto 0, Bank-Ist → zurücksetzen", K.ledgerUpdate({ ist_betrag: 310, soll_betrag: 0, richtung: "zahlung", ist_quelle: "bank" }, s(0)),
   { ist_betrag: 0, bezahlt_am: null, ist_quelle: "bank" });

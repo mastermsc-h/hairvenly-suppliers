@@ -384,6 +384,8 @@ export interface LedgerPostenStand {
   soll_betrag: number;
   richtung: "zahlung" | "erstattung";
   ist_quelle: "manuell" | "bank";
+  /** Soll ist nur eine Schätzung (z.B. aus den Kontoeingängen) — die Bank darf sie ersetzen. */
+  soll_schaetzung?: boolean;
 }
 
 /**
@@ -394,7 +396,7 @@ export interface LedgerPostenStand {
 export function ledgerUpdate(
   posten: LedgerPostenStand,
   summe: SteuerBankSumme
-): { ist_betrag?: number; richtung?: "zahlung" | "erstattung"; bezahlt_am?: string | null; ist_quelle?: "bank" } {
+): { ist_betrag?: number; richtung?: "zahlung" | "erstattung"; bezahlt_am?: string | null; ist_quelle?: "bank"; soll_betrag?: number; soll_schaetzung?: boolean } {
   const manuell = posten.ist_quelle === "manuell" && Number(posten.ist_betrag) !== 0;
   if (manuell) return {};
   if (summe.netto === 0) {
@@ -403,13 +405,17 @@ export function ledgerUpdate(
   }
   const richtung = summe.netto > 0 ? "zahlung" : "erstattung";
   // Soll in die Gegenrichtung eingetragen (z.B. Zahlung erwartet, Bank zeigt Erstattung):
-  // Widerspruch → nichts überschreiben, nur bank_betrag anzeigen lassen.
-  if (richtung !== posten.richtung && Number(posten.soll_betrag) !== 0) return {};
+  // Widerspruch → nichts überschreiben, nur bank_betrag anzeigen lassen. Ausnahme: das Soll ist nur
+  // eine Schätzung — dann gilt das Finanzamt (16.11.2026: USt Sep geschätzt 18.200 € Zahlung,
+  // tatsächlich 10.815 € Erstattung; die Vorschau rechnete die Zahlung weiter als offen).
+  const gegen = richtung !== posten.richtung && Number(posten.soll_betrag) !== 0;
+  if (gegen && !posten.soll_schaetzung) return {};
   const patch: ReturnType<typeof ledgerUpdate> = {
     ist_betrag: Math.abs(summe.netto),
     bezahlt_am: summe.letzte_buchung,
     ist_quelle: "bank",
   };
   if (richtung !== posten.richtung) patch.richtung = richtung;
+  if (gegen) Object.assign(patch, { soll_betrag: Math.abs(summe.netto), soll_schaetzung: false });
   return patch;
 }

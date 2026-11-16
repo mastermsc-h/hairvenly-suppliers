@@ -132,6 +132,7 @@ interface PostenRow {
   ist_betrag: number;
   ist_quelle: "manuell" | "bank";
   bank_betrag: number | null;
+  soll_schaetzung: boolean | null;
 }
 
 /**
@@ -147,7 +148,7 @@ export async function syncSteuerLedger(sb: Sb = createServiceClient()): Promise<
   ).filter((t) => Array.isArray(t.steuer_split) && t.steuer_split.length > 0);
   const summen = summiereSteuern(txs);
   const posten = await selectAll<PostenRow>((from, to) =>
-    sb.from("steuer_posten").select("id, art, zeitraum, jahr, richtung, soll_betrag, ist_betrag, ist_quelle, bank_betrag").range(from, to)
+    sb.from("steuer_posten").select("id, art, zeitraum, jahr, richtung, soll_betrag, ist_betrag, ist_quelle, bank_betrag, soll_schaetzung").range(from, to)
   );
   const byKey = new Map(posten.map((p) => [`${p.art}|${p.zeitraum}`, p]));
   const seen = new Set<string>();
@@ -180,7 +181,7 @@ export async function syncSteuerLedger(sb: Sb = createServiceClient()): Promise<
       return;
     }
     const patch = {
-      ...ledgerUpdate({ ...p, ist_betrag: Number(p.ist_betrag), soll_betrag: Number(p.soll_betrag) }, s),
+      ...ledgerUpdate({ ...p, ist_betrag: Number(p.ist_betrag), soll_betrag: Number(p.soll_betrag), soll_schaetzung: !!p.soll_schaetzung }, s),
       bank_betrag: s.netto,
       bank_anzahl: s.anzahl,
       bank_letzte_buchung: s.letzte_buchung,
