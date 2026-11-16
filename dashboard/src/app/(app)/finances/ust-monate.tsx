@@ -52,6 +52,20 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
   const mitFa = monate.filter((m) => m.finanzamt !== null && m.quelle !== "schaetzung" && !m.laufend);
   const summe = (f: (m: UstMonat) => number, liste = monate) => liste.reduce((s, m) => s + f(m), 0);
   const umsatz = (m: UstMonat) => m.shopDe + m.salon + m.shopEu + m.shopDritt;
+  // Abgerechnet = Finanzamt-Wert steht fest; offen = noch keine Abrechnung (Schätzung im Ledger zählt als offen)
+  const abgerechnet = monate.filter((m) => m.finanzamt !== null && m.quelle !== "schaetzung");
+  const offen = monate.filter((m) => !(m.finanzamt !== null && m.quelle !== "schaetzung"));
+  const gezahlt = summe((m) => Math.max(0, m.finanzamt ?? 0), abgerechnet);
+  const erstattet = summe((m) => Math.max(0, -(m.finanzamt ?? 0)), abgerechnet);
+  const offenSumme = summe((m) => m.berechnet, offen);
+  // Mit Dauerfristverlängerung fällig am 10. des übernächsten Monats
+  const faellig = (m: string) => {
+    const [y, mo] = m.split("-").map(Number);
+    const d = new Date(Date.UTC(y, mo + 1, 10));
+    return `${String(d.getUTCDate()).padStart(2, "0")}.${String(d.getUTCMonth() + 1).padStart(2, "0")}.`;
+  };
+  // Wie weit lag die Rechnung bisher daneben (über alle abgerechneten Monate)
+  const abweichungSchnitt = abgerechnet.length ? summe((m) => (m.finanzamt ?? 0) - m.berechnet, abgerechnet) / abgerechnet.length : 0;
 
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
@@ -72,7 +86,7 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
           { l: "Umsätze brutto", w: summe(umsatz), cls: "text-neutral-900", sub: `Shop ${kurz(summe((m) => m.shopDe + m.shopEu + m.shopDritt))} · Salon ${kurz(summe((m) => m.salon))}` },
           { l: "USt abzuführen", w: summe((m) => m.ust), cls: "text-rose-700", sub: "19 % auf Shop Deutschland + Salon" },
           { l: "Vorsteuer + EUSt", w: summe((m) => m.vorsteuer + m.eust), cls: "text-emerald-700", sub: `EUSt ${kurz(summe((m) => m.eust))} · Inland ${kurz(summe((m) => m.vorsteuer))}` },
-          { l: "Ans Finanzamt (Saldo)", w: summe((m) => m.finanzamt ?? 0, mitFa), cls: "text-neutral-900", sub: `${mitFa.length} Monate abgerechnet` },
+          { l: offenSumme >= 0 ? "Noch zu zahlen (grob)" : "Kommt noch zurück (grob)", w: Math.abs(offenSumme), cls: offenSumme >= 0 ? "text-rose-700" : "text-emerald-700", sub: `${offen.length} Monat${offen.length === 1 ? "" : "e"} offen · ${abgerechnet.length} abgerechnet` },
         ].map((k) => (
           <div key={k.l} className="rounded-xl bg-neutral-50 p-3 text-center">
             <div className="text-xs font-medium uppercase tracking-wide text-neutral-500">{k.l}</div>
@@ -80,6 +94,51 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
             <div className="mt-0.5 text-[11px] leading-tight text-neutral-400">{k.sub}</div>
           </div>
         ))}
+      </div>
+
+      {/* Stand: was schon abgerechnet ist, was laut Umsätzen noch kommt */}
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border border-neutral-200 p-4">
+          <div className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+            Schon abgerechnet{abgerechnet.length ? ` · ${mName(abgerechnet[0].monat)}–${mName(abgerechnet[abgerechnet.length - 1].monat)}` : ""}
+          </div>
+          <div className="mt-2 space-y-1 text-sm">
+            <div className="flex justify-between"><span className="text-neutral-600">gezahlt</span><span className="tabular-nums text-rose-700">{eur(gezahlt)}</span></div>
+            <div className="flex justify-between"><span className="text-neutral-600">zurückbekommen</span><span className="tabular-nums text-emerald-700">{eur(erstattet)}</span></div>
+            <div className="flex justify-between border-t border-neutral-100 pt-1 font-semibold">
+              <span>unterm Strich</span>
+              <Ergebnis wert={gezahlt - erstattet} />
+            </div>
+          </div>
+        </div>
+        <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4">
+          <div className="text-xs font-medium uppercase tracking-wide text-amber-800">Noch offen · grob aus den Umsätzen gerechnet</div>
+          <div className="mt-2 space-y-1 text-sm">
+            {offen.map((m) => (
+              <div key={m.monat} className="flex items-baseline justify-between gap-2">
+                <span className="text-neutral-700">
+                  {mName(m.monat)}
+                  {m.laufend ? " (bis heute)" : ""}
+                  <span className="ml-1.5 text-[11px] text-neutral-400">fällig ca. {faellig(m.monat)}</span>
+                </span>
+                <span className="text-right">
+                  <Ergebnis wert={m.berechnet} klein />
+                  {m.quelle === "schaetzung" && m.finanzamt !== null && (
+                    <span className="block text-[10.5px] text-neutral-400">im Ledger geschätzt: {m.finanzamt >= 0 ? "Zahlung" : "Erstattung"} {eur(Math.abs(m.finanzamt))}</span>
+                  )}
+                </span>
+              </div>
+            ))}
+            <div className="flex justify-between border-t border-amber-200 pt-1 font-semibold">
+              <span>zusammen</span>
+              <Ergebnis wert={offenSumme} />
+            </div>
+          </div>
+          <p className="mt-2 text-[11px] leading-snug text-amber-800/80">
+            Grobe Orientierung: Bisher lag die Rechnung im Schnitt {eur(Math.abs(abweichungSchnitt))} pro Monat {abweichungSchnitt < 0 ? "über" : "unter"} dem
+            Finanzamt, einzelne Monate deutlich mehr (Einfuhrumsatzsteuer). Der laufende Monat zählt nur bis heute.
+          </p>
+        </div>
       </div>
 
       {/* Diagramm: USt nach oben, Abziehbares nach unten, Punkte = Finanzamt */}
