@@ -276,6 +276,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                   icon={<Landmark size={16} />}
                   href="/finances"
                   items={[
+                    { href: "/finances", label: t(locale, "nav.finances.start"), exact: true },
                     { href: "/finances/overview", label: t(locale, "nav.finances.overview") },
                     { href: "/finances/bwa", label: t(locale, "nav.finances.bwa") },
                     { href: "/finances/prepayments", label: t(locale, "nav.finances.prepayments") },

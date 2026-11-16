@@ -221,7 +221,7 @@ export function UmsatzWidget({ d }: { d: UmsatzDaten }) {
           <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><i className="ck-legende" style={{ background: "rgba(255,255,255,0.4)" }} />{d.jahr - 1}</span>
           <span>{tageAn ? "Bestellwert pro Tag, vor Erstattungen" : `bei gleichem Tempo ${kurzEur(d.hochrechnung)} im Monat`}</span>
         </span>
-        <Mehr href="/finances/overview">Finanzen</Mehr>
+        <Mehr href="/finances">Finanzen</Mehr>
       </div>
     </div>
   );
