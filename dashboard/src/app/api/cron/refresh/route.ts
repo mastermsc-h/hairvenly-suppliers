@@ -5,7 +5,6 @@ import {
   cronRevenueSync,
   cronRefundsSync,
   cronRepurchaseCompute,
-  cronProductSalesSync,
   cronStockSnapshot,
   cronShopifyLinkSync,
 } from "@/lib/cron-tasks";
@@ -70,14 +69,8 @@ export async function GET(req: NextRequest) {
       ? { skipped: "time budget exceeded" }
       : await cronRepurchaseCompute(supabase, 60, 7, startedMs + TIME_BUDGET_MS);
   }
-  // Only the last 2 months — a full 12-month product-sales pass takes minutes
-  // and would never finish inside the function limit. Older months stay as
-  // written by scripts/sync-product-sales.mjs and don't change retroactively.
-  if (!skip.includes("productsales")) {
-    results.productSales = overBudget()
-      ? { skipped: "time budget exceeded" }
-      : await cronProductSalesSync(supabase, 2);
-  }
+  // Produkt-Verkäufe laufen seit 16.11.2026 im eigenen Cron /api/cron/product-sales — hier wurden
+  // sie hinter dem Wiederkauf-Schritt (nutzt das Budget bis zum Ende) jede Nacht übersprungen.
   // Leichtgewichtig (2 Sheet-Reads) — Lagerbestand-Snapshot für den
   // Entwicklungs-Chart auf /stock.
   if (!skip.includes("stocksnapshot")) {
