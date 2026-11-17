@@ -1808,7 +1808,7 @@ function SalonHinweis({
     { l: "Sonstige", w: umsatz.sonstige },
   ].filter((t) => Math.abs(t.w) >= 1);
   return (
-    <div className={`rounded-lg px-3 py-2 text-xs ${aktiv ? "bg-emerald-50 text-emerald-900" : "bg-neutral-50 text-neutral-600"}`}>
+    <div className={`rounded-lg px-3 py-2 text-xs ${aktiv ? "bg-neutral-50 text-neutral-800" : "bg-neutral-50 text-neutral-600"}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span>
           {aktiv ? "Automatisch aus dem Treatwell-Konto" : "Von Hand eingetragen — Treatwell-Konto zeigt"}:{" "}
@@ -1861,7 +1861,7 @@ function ShopifyHinweis({
   });
   const kanaele = Object.entries(umsatz.kanaele).sort((a, b) => b[1] - a[1]);
   return (
-    <div className={`rounded-lg px-3 py-2 text-xs ${aktiv ? "bg-emerald-50 text-emerald-900" : "bg-neutral-50 text-neutral-600"}`}>
+    <div className={`rounded-lg px-3 py-2 text-xs ${aktiv ? "bg-neutral-50 text-neutral-800" : "bg-neutral-50 text-neutral-600"}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span>
           {aktiv ? "Automatisch aus Shopify" : "Von Hand eingetragen — Shopify meldet"}:{" "}
