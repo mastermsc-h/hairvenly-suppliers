@@ -521,7 +521,7 @@ export interface PriceListFull extends SupplierPriceList {
 }
 
 // ─── Mitarbeiter-Management ──────────────────────────────────────
-export type StaffTeam = "salon" | "marketing" | "kundenservice" | "lager";
+export type StaffTeam = "salon" | "marketing" | "kundenservice" | "lager" | "management";
 export type VacationStatus = "submitted" | "approved" | "rejected";
 export type SickCategory = "own" | "child";
 

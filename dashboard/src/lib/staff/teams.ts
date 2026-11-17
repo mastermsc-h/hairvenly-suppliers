@@ -5,6 +5,7 @@ export const TEAMS: { value: StaffTeam; label: string; chip: string; bar: string
   { value: "marketing",    label: "Marketing",    chip: "bg-violet-100 text-violet-800",   bar: "bg-violet-500" },
   { value: "kundenservice", label: "Kundenservice", chip: "bg-sky-100 text-sky-800",       bar: "bg-sky-500" },
   { value: "lager",        label: "Lager",        chip: "bg-amber-100 text-amber-800",     bar: "bg-amber-500" },
+  { value: "management",   label: "Management",   chip: "bg-slate-200 text-slate-800",     bar: "bg-slate-600" },
 ];
 
 export function teamMeta(team: string) {

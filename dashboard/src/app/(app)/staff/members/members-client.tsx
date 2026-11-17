@@ -156,14 +156,20 @@ export default function MembersClient({
                           {initials(m.name)}
                         </span>
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2 font-medium text-neutral-800">
-                            {m.name}
+                          <button
+                            type="button"
+                            onClick={() => setExpanded(expanded === m.id ? null : m.id)}
+                            title={expanded === m.id ? "Zuklappen" : "Details anzeigen"}
+                            className="flex items-center gap-1.5 font-medium text-neutral-800 hover:text-neutral-950 text-left"
+                          >
+                            <ChevronDown size={14} className={`shrink-0 text-neutral-400 transition-transform ${expanded === m.id ? "rotate-180" : ""}`} />
+                            <span className="truncate">{m.name}</span>
                             {m.is_trainee && (
                               <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
                                 <GraduationCap size={11} /> Azubi
                               </span>
                             )}
-                          </div>
+                          </button>
                           {isAdmin && (
                             <div className="mt-0.5">
                               <AdminSummary
@@ -215,47 +221,54 @@ export default function MembersClient({
                     </td>
                   </tr>
                   {expanded === m.id && (
-                    <tr className="border-t border-neutral-200 bg-gradient-to-b from-neutral-100/70 to-neutral-50/30">
-                      <td colSpan={9} className="px-4 py-4 space-y-4">
-                        {/* Panel-Kopf mit Schließen (sticky, damit immer erreichbar) */}
-                        <div className="sticky top-0 z-10 -mx-4 -mt-4 mb-1 px-4 py-2.5 flex items-center justify-between bg-white/85 backdrop-blur border-b border-neutral-200">
-                          <div className="flex items-center gap-2">
-                            <span className={`h-6 w-6 rounded-full grid place-items-center text-white text-[10px] font-semibold ${teamMeta(m.team).bar}`}>{initials(m.name)}</span>
-                            <span className="text-sm font-semibold text-neutral-800">{m.name}</span>
-                            <span className="text-xs text-neutral-400">· Personalakte</span>
+                    <tr className="bg-neutral-100/60">
+                      <td colSpan={9} className="px-3 pt-0 pb-4">
+                        {/* Eine klar abgegrenzte Box: dicker Rahmen + Schatten */}
+                        <div className="rounded-2xl border-2 border-neutral-300 bg-white shadow-lg overflow-hidden ring-1 ring-black/5">
+                          {/* Kopf-Leiste (sticky, immer erreichbar) */}
+                          <div className="sticky top-0 z-10 px-4 py-3 flex items-center justify-between border-b border-neutral-200 bg-gradient-to-b from-neutral-50 to-white/95 backdrop-blur">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className={`h-6 w-6 shrink-0 rounded-full grid place-items-center text-white text-[10px] font-semibold ${teamMeta(m.team).bar}`}>{initials(m.name)}</span>
+                              <span className="text-sm font-semibold text-neutral-800 truncate">{m.name}</span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${teamMeta(m.team).chip}`}>{teamMeta(m.team).label}</span>
+                              <span className="text-xs text-neutral-400 hidden sm:inline">· Personalakte</span>
+                            </div>
+                            <button onClick={() => setExpanded(null)} className="inline-flex items-center gap-1 rounded-lg bg-neutral-900 text-white px-3 py-1.5 text-xs font-medium hover:bg-neutral-800">
+                              <X size={14} /> Schließen
+                            </button>
                           </div>
-                          <button onClick={() => setExpanded(null)} className="inline-flex items-center gap-1 rounded-lg bg-neutral-900 text-white px-3 py-1.5 text-xs font-medium hover:bg-neutral-800">
-                            <X size={14} /> Schließen
-                          </button>
-                        </div>
-                        <MemberVacation
-                          member={m}
-                          requests={requestsByMember[m.id] ?? []}
-                          allRequests={requestsByMember}
-                          members={members}
-                          settings={settings}
-                          blackouts={blackouts}
-                          isAdmin={isAdmin}
-                          today={today}
-                          onChange={() => router.refresh()}
-                        />
-                        {isAdmin && (
-                          <AdminPanel
-                            member={m}
-                            salary={salaryByMember[m.id] ?? []}
-                            warnings={warningsByMember[m.id] ?? []}
-                            reviews={reviewsByMember[m.id] ?? []}
-                            goals={goalsByMember[m.id] ?? []}
-                            trainings={trainingsByMember[m.id] ?? []}
-                            meta={metaByMember[m.id] ?? null}
-                            today={today}
-                            onChange={() => router.refresh()}
-                          />
-                        )}
-                        <div className="flex justify-center pt-1">
-                          <button onClick={() => setExpanded(null)} className="inline-flex items-center gap-1 rounded-lg border border-neutral-300 bg-white px-4 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50">
-                            <ChevronDown size={14} className="rotate-180" /> {m.name} zuklappen
-                          </button>
+                          {/* Inhalt der Box */}
+                          <div className="p-4 space-y-4 bg-neutral-50/40">
+                            <MemberVacation
+                              member={m}
+                              requests={requestsByMember[m.id] ?? []}
+                              allRequests={requestsByMember}
+                              members={members}
+                              settings={settings}
+                              blackouts={blackouts}
+                              isAdmin={isAdmin}
+                              today={today}
+                              onChange={() => router.refresh()}
+                            />
+                            {isAdmin && (
+                              <AdminPanel
+                                member={m}
+                                salary={salaryByMember[m.id] ?? []}
+                                warnings={warningsByMember[m.id] ?? []}
+                                reviews={reviewsByMember[m.id] ?? []}
+                                goals={goalsByMember[m.id] ?? []}
+                                trainings={trainingsByMember[m.id] ?? []}
+                                meta={metaByMember[m.id] ?? null}
+                                today={today}
+                                onChange={() => router.refresh()}
+                              />
+                            )}
+                            <div className="flex justify-center pt-1">
+                              <button onClick={() => setExpanded(null)} className="inline-flex items-center gap-1 rounded-lg border border-neutral-300 bg-white px-4 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50">
+                                <ChevronDown size={14} className="rotate-180" /> {m.name} zuklappen
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       </td>
                     </tr>
