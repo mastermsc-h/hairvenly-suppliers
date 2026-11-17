@@ -137,3 +137,34 @@ export async function isForceToolsEnabled(): Promise<boolean> {
     return true; // im Fehlerfall AN (sicherer: lieber Tool-Zwang als Halluzination)
   }
 }
+
+/**
+ * Abend-/Wochenend-Bot (Analyse 17.11.2026: Team-Antwort in 10 % der Fälle
+ * erst nach > 40 h, 119 Chats ohne Antwort). Außerhalb der Öffnungszeit darf
+ * selective_auto auch Antworten ohne „konkrete Daten" (URL/Lager/Maß) senden —
+ * alle übrigen Sicherheitsregeln (Kategorie, Unsicherheit, Salon-Preise,
+ * Guards/needsManualReview) gelten unverändert.
+ *
+ *   off    — wie bisher (Entwurf)
+ *   shadow — Entwurf, aber als offhours_candidate markiert; die Lernschleife
+ *            vergleicht ihn später mit der Team-Antwort → Trefferquote auf
+ *            /chatbot/lernen (Default)
+ *   live   — wird gesendet
+ *
+ * Fehler → "off" (sicherer Default: nichts zusätzlich senden).
+ */
+export async function getOffhoursAutosendMode(): Promise<"off" | "shadow" | "live"> {
+  try {
+    const svc = createServiceClient();
+    const { data } = await svc
+      .from("chatbot_settings")
+      .select("offhours_autosend")
+      .eq("id", 1)
+      .maybeSingle();
+    const m = data?.offhours_autosend;
+    return m === "shadow" || m === "live" ? m : "off";
+  } catch (e) {
+    console.warn("[settings] offhours-autosend read failed:", (e as Error).message);
+    return "off";
+  }
+}

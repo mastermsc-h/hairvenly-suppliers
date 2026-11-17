@@ -981,7 +981,14 @@ function isToolConfirmationSafe(
  * Antwort wird NUR autonom gesendet wenn ALLE Kriterien erfüllt sind.
  * Lieber zu vorsichtig (Draft) als false-positive (autonom gesendet aber falsch).
  */
-function isHighConfidence(category: string | null, botReply: string): boolean {
+function isHighConfidence(
+  category: string | null,
+  botReply: string,
+  // relaxSpecificity: Abend-/Wochenend-Bot — Schritt 4 („Antwort muss konkrete
+  // Daten enthalten") entfällt, ALLE anderen Regeln bleiben. Siehe
+  // getOffhoursAutosendMode in lib/chatbot/settings.ts.
+  opts: { relaxSpecificity?: boolean } = {},
+): boolean {
   // 1. Nur unkritische Kategorien dürfen autonom raus
   //    color_advice ist hier SONDERFALL: autonom NUR im Preflight-Modus
   //    (Foto-Briefing/Rückfragen sammeln), niemals bei konkreten Farbempfehlungen.
@@ -1121,7 +1128,7 @@ function isHighConfidence(category: string | null, botReply: string): boolean {
     /\b(KW|kalenderwoche)\s?\d{1,2}\b/i.test(botReply);
   const hasSpecificAnswer = hasDateEta ||
     /\b(150g|200g|225g|125g|100g|60cm|65cm|55cm|45cm|85cm|5[-–]8\s*wochen|6[-–]8\s*wochen|6\s*monate)\b/i.test(botReply);
-  if (!hasUrl && !hasStockStatus && !hasSpecificAnswer) return false;
+  if (!opts.relaxSpecificity && !hasUrl && !hasStockStatus && !hasSpecificAnswer) return false;
 
   // 4b. SALON-DIENSTLEISTUNGSPREISE blocken — auch wenn andere konkrete
   //     Daten da sind. Bot soll bei Vor-Ort-Einarbeit-Preisen IMMER an
@@ -1246,6 +1253,7 @@ async function triggerBotResponse(
 
   // SELECTIVE_AUTO: Confidence-Check entscheidet ob senden oder Draft
   let finalMode = mode;
+  let offhoursCandidate = false;
   if (mode === "selective_auto") {
     const svc = createServiceClient();
     const { data: sessForCheck } = await svc
@@ -1271,6 +1279,25 @@ async function triggerBotResponse(
       || isHighConfidence(sessForCheck?.category || null, result.text);
     finalMode = confident ? "auto" : "assisted";
     console.log(`[meta-webhook] selective_auto → ${finalMode} (category=${sessForCheck?.category}, confident=${confident}, safeToolConfirm=${isSafeToolConfirmation})`);
+
+    // 🌙 ABEND-/WOCHENEND-BOT (Analyse 17.11.2026): außerhalb der Öffnungszeit
+    // wartet die Kundin sonst bis zum nächsten Werktag. Gelockert wird NUR die
+    // „konkrete Daten"-Pflicht; Kategorie-, Unsicherheits-, Salon-Preis- und
+    // alle respond.ts-Guards (needsManualReview) gelten weiter.
+    if (!confident && !result.needsManualReview) {
+      const { getBusinessHoursContext } = await import("@/lib/chatbot/business-hours");
+      if (!getBusinessHoursContext().isOpen && isHighConfidence(sessForCheck?.category || null, result.text, { relaxSpecificity: true })) {
+        const { getOffhoursAutosendMode } = await import("@/lib/chatbot/settings");
+        const offMode = await getOffhoursAutosendMode();
+        if (offMode === "live") {
+          finalMode = "auto";
+          console.log(`[meta-webhook] OFFHOURS-AUTOSEND live → senden (category=${sessForCheck?.category}) session=${sessionId.slice(0,8)}`);
+        } else if (offMode === "shadow") {
+          offhoursCandidate = true;
+          console.log(`[meta-webhook] OFFHOURS-AUTOSEND shadow → Entwurf als Kandidat markiert session=${sessionId.slice(0,8)}`);
+        }
+      }
+    }
   }
 
   // WAITLIST-PROMISE-OHNE-TOOL-CALL → IMMER zu Draft umwandeln (auch wenn
@@ -1304,6 +1331,7 @@ async function triggerBotResponse(
       tool_results:  result.toolResults && result.toolResults.length > 0 ? result.toolResults : null,
       trigger_message_id: triggerMessageId || null,
       status:        "pending",
+      offhours_candidate: offhoursCandidate,
     });
     console.log(`[meta-webhook] draft created for session ${sessionId}`);
     return;

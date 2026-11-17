@@ -75,6 +75,10 @@
     {
       "path": "/api/cron/chatbot-price-sync",
       "schedule": "50 4 * * *"
+    },
+    {
+      "path": "/api/cron/chatbot-lernen",
+      "schedule": "30 1 * * *"
     }
   ]
 }

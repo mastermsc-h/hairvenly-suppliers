@@ -3,6 +3,8 @@ import { createServiceClient } from "@/lib/supabase/server";
 import KillSwitchPanel from "./kill-switch-panel";
 import LeanPromptToggle from "./lean-prompt-toggle";
 import ReservationAutoNotifyToggle from "./reservation-auto-notify-toggle";
+import OffhoursToggle from "./offhours-toggle";
+import { AGREEING, type Verdict } from "@/lib/chatbot/learning-core";
 import { parseAutoNotifyMode } from "@/lib/reservations/auto-notify";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +31,7 @@ export default async function BotSettingsPage() {
   const { data } = await svc
     .from("chatbot_settings")
     .select(
-      "default_bot_mode, proactive_generation_enabled, proactive_safe_categories, use_lean_prompt, reservation_auto_notify, updated_at"
+      "default_bot_mode, proactive_generation_enabled, proactive_safe_categories, use_lean_prompt, reservation_auto_notify, offhours_autosend, updated_at"
     )
     .eq("id", 1)
     .maybeSingle();
@@ -39,8 +41,19 @@ export default async function BotSettingsPage() {
     proactive_safe_categories: [],
     use_lean_prompt: false,
     reservation_auto_notify: "off",
+    offhours_autosend: "off",
     updated_at: null,
   };
+  const { data: offhCompared } = await svc
+    .from("chat_drafts")
+    .select("comparison")
+    .eq("offhours_candidate", true)
+    .not("compared_at", "is", null);
+  const offhVerdicts = (offhCompared ?? [])
+    .map((d) => (d.comparison as { verdict?: Verdict } | null)?.verdict)
+    .filter((v): v is Verdict => !!v && v !== "not_comparable");
+  const offhAgreeing = offhVerdicts.filter((v) => AGREEING.includes(v)).length;
+  const offhMode = (["off", "shadow", "live"].includes(settings.offhours_autosend as string) ? settings.offhours_autosend : "off") as "off" | "shadow" | "live";
   const { count: wouldSend } = await svc
     .from("chat_reservations")
     .select("id", { count: "exact", head: true })
@@ -87,6 +100,8 @@ export default async function BotSettingsPage() {
       />
 
       <LeanPromptToggle initialEnabled={leanOn} />
+
+      <OffhoursToggle initialMode={offhMode} candidates={offhVerdicts.length} agreeing={offhAgreeing} />
 
       <ReservationAutoNotifyToggle initialMode={parseAutoNotifyMode(settings.reservation_auto_notify)} wouldSend={wouldSend ?? 0} />
 

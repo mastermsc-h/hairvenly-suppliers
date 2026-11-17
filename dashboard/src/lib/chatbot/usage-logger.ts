@@ -54,6 +54,7 @@ export type UsagePurpose =
   | "grammar"           // Grammatik-Check auf Knopfdruck
   | "critic_pass"       // Fact-Check vor Senden (Phase B6)
   | "training_insight"  // Insights aus Training generieren
+  | "learning_compare"  // Entwurf vs. Team-Antwort (Lernschleife)
   | "other";
 
 interface AnthropicUsage {
