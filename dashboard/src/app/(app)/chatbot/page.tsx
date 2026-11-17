@@ -1,6 +1,8 @@
 import { requireProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import PriceTable from "./price-table";
+import PriceSyncStatus from "./price-sync-status";
+import type { PriceSyncReport } from "@/lib/chatbot/price-sync-run";
 import FaqEditor from "./faq-editor";
 import { Bot, BookOpen, DollarSign } from "lucide-react";
 import type { PriceRow } from "@/lib/chatbot/pricing";
@@ -11,7 +13,7 @@ export default async function ChatbotPage() {
   await requireProfile();
   const supabase = await createClient();
 
-  const [{ data: prices }, { data: faqs }] = await Promise.all([
+  const [{ data: prices }, { data: faqs }, { data: syncRow }] = await Promise.all([
     supabase
       .from("chatbot_prices")
       .select("method, length_cm, gram_label, gram_per_pack, price_eur, supplier_line")
@@ -23,6 +25,11 @@ export default async function ChatbotPage() {
       .select("*")
       .order("order_idx")
       .order("created_at"),
+    supabase
+      .from("chatbot_settings")
+      .select("prices_synced_at, prices_sync_report")
+      .eq("id", 1)
+      .maybeSingle(),
   ]);
 
   const priceRows = (prices ?? []) as PriceRow[];
@@ -73,6 +80,10 @@ export default async function ChatbotPage() {
       <FaqEditor initialFaqs={faqs ?? []} />
 
       {/* Price-Table */}
+      <PriceSyncStatus
+        syncedAt={syncRow?.prices_synced_at ?? null}
+        report={(syncRow?.prices_sync_report as PriceSyncReport | null) ?? null}
+      />
       <PriceTable prices={priceRows} />
     </div>
   );
