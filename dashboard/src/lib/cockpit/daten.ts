@@ -805,11 +805,11 @@ export const ladeSteuerKasse = cache(async (horizont = 100): Promise<SteuerKasse
         const sa = salon.find((x) => x.monat === ym(r.monat));
         if (!inp.shopManuell && u) inp = { ...inp, shopBrutto: u.netto };
         if (!inp.salonManuell && sa) inp = { ...inp, salonBrutto: sa.brutto };
-        gewinnBisher += compute(inp).gewinnVorSteuern;
+        gewinnBisher += compute(inp, jahrNr).gewinnVorSteuern;
       }
       const letzte = fertig[fertig.length - 1].daten;
       const gewinnJahr = (gewinnBisher / fertig.length) * 12;
-      const tax = taxChain(gewinnJahr, letzte.gewstHebesatz, letzte.gewstFreibetrag);
+      const tax = taxChain(gewinnJahr, letzte.gewstHebesatz, letzte.gewstFreibetrag, jahrNr);
       const vz = (art: "est" | "gewst") => { const a = arten.find((x) => x.art === art); return a ? a.bezahlt + a.offen : 0; };
       prognose = {
         monate: fertig.length,

@@ -170,7 +170,7 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
   const salonAusKonto = !!salonMonat && !current.salonManuell;
   const isPrefilled = !isSaved && !isEdited;
 
-  const c = useMemo(() => compute(current), [current]);
+  const c = useMemo(() => compute(current, jahr), [current, jahr]);
 
   function update(patch: Partial<FinanzInput>) {
     setEdits((prev) => ({ ...prev, [k]: { ...current, ...patch } }));
@@ -217,7 +217,7 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
       Array.from({ length: 12 }, (_, i) => {
         const m = i + 1;
         const input = effective(jahr, m);
-        return { monat: m, input, calc: input ? compute(input) : null };
+        return { monat: m, input, calc: input ? compute(input, jahr) : null };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [jahr, saved, edits, shopify]
@@ -228,7 +228,7 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
   const yrUst = recorded.reduce((s, r) => s + r.calc!.ustZahllast, 0);
   const yrGewinn = recorded.reduce((s, r) => s + r.calc!.gewinnVorSteuern, 0);
   const lastRecorded = recorded.length ? recorded[recorded.length - 1].input! : DEFAULTS;
-  const yrTax = taxChain(yrGewinn, lastRecorded.gewstHebesatz, lastRecorded.gewstFreibetrag);
+  const yrTax = taxChain(yrGewinn, lastRecorded.gewstHebesatz, lastRecorded.gewstFreibetrag, jahr);
   const yrNettoGewinn = yrGewinn - yrTax.steuerGesamt;
 
   // Finanzamt-Ist des Jahres (aus dem Steuer-Ledger): Zahlungen minus Erstattungen.
@@ -849,20 +849,20 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
             <SubSection title={t(locale, "finance.tax.est")}>
               <div className="grid grid-cols-3 gap-y-1 text-sm">
                 <span className="text-neutral-600">{t(locale, "finance.tax.est.after_gewst")}</span>
-                <span className="text-right tabular-nums">{fmt(c.tax.gewinnNachGewSt)}</span>
+                <span className="text-right tabular-nums">{fmt(c.tax.zvE)}</span>
                 <span />
                 <span className="text-neutral-600">{t(locale, "finance.tax.est.tariff")}</span>
                 <span className="text-right tabular-nums">{fmt(c.tax.estRoh)}</span>
-                <span className="text-xs text-neutral-400 pl-2">Nach deutschem ESt-Tarif</span>
+                <span className="text-xs text-neutral-400 pl-2">Grundtarif, ohne Sonderausgaben</span>
                 <span className="text-neutral-600">{t(locale, "finance.tax.est.anrechnung")}</span>
                 <span className="text-right tabular-nums text-red-600">-{fmt(c.tax.gewstAnrechnung)}</span>
-                <span className="text-xs text-neutral-400 pl-2">3,8% vom Gewerbeertrag</span>
+                <span className="text-xs text-neutral-400 pl-2">4,0 × Messbetrag (§ 35 EStG)</span>
                 <span className="text-neutral-600">{t(locale, "finance.tax.est.reduced")}</span>
                 <span className="text-right tabular-nums">{fmt(c.tax.estGekuerzt)}</span>
                 <span className="text-xs text-neutral-400 pl-2">Nach Anrechnung</span>
                 <span className="text-neutral-600">{t(locale, "finance.tax.est.soli")}</span>
                 <span className="text-right tabular-nums">{fmt(c.tax.soli)}</span>
-                <span className="text-xs text-neutral-400 pl-2">5,5% auf ESt</span>
+                <span className="text-xs text-neutral-400 pl-2">5,5% auf ESt (nach Freigrenze)</span>
                 <span className="font-semibold text-neutral-900">{t(locale, "finance.tax.est.total")}</span>
                 <span className="text-right tabular-nums font-semibold">{fmt(c.tax.estGesamt)}</span>
                 <span />
