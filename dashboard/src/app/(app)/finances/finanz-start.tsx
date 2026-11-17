@@ -211,6 +211,15 @@ export default function FinanzStartAnsicht({ d }: { d: FinanzStart }) {
             </div>
           </div>
           <div className="mt-3 divide-y divide-neutral-100 text-sm">
+            {d.ust.salonNachmeldung && (
+              <div className="flex items-center justify-between gap-2 py-1.5">
+                <span className="font-medium text-rose-700">
+                  Salon {mName(d.ust.salonNachmeldung.von)}–{mName(d.ust.salonNachmeldung.bis)} nachmelden{" "}
+                  <span className="text-[11px] font-normal text-rose-700/70">fehlt in den Voranmeldungen</span>
+                </span>
+                <span className="flex items-center gap-2 tabular-nums">{eur(d.ust.salonNachmeldung.betrag)} <Richtung wert={d.ust.salonNachmeldung.betrag} /></span>
+              </div>
+            )}
             {d.ust.offeneMonate.map((m) => (
               <div key={m.monat} className="flex items-center justify-between gap-2 py-1.5">
                 <span className="text-neutral-700">{mName(m.monat)} <span className="text-[11px] text-neutral-400">fällig ca. {dt(m.faellig)}</span></span>

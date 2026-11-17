@@ -13,7 +13,14 @@ export interface FinanzStart {
   konten: { gesamt: number; liste: Array<{ name: string; saldo: number; stand: string }> };
   liquiditaet: { tiefpunkt: { datum: string; saldo: number }; puffer: number; ende: { datum: string; saldo: number } | null };
   umsatz: { monat: string; shop: number; salon: number; jahrShop: number; jahrSalon: number; vorjahrMonatShop: number | null };
-  ust: { monate: UstMonat[]; abgerechnet: number; offen: number; offeneMonate: Array<{ monat: string; betrag: number; faellig: string }> };
+  ust: {
+    monate: UstMonat[];
+    abgerechnet: number;
+    offen: number;
+    offeneMonate: Array<{ monat: string; betrag: number; faellig: string }>;
+    /** USt auf Salon-Umsätze, die in abgegebenen Voranmeldungen fehlen (offene Nachzahlung). */
+    salonNachmeldung: { von: string; bis: string; betrag: number } | null;
+  };
   steuerTermine: Array<{ datum: string; label: string; betrag: number; geschaetzt: boolean }>;
   fixkosten: { summe: number; posten: Array<{ label: string; monat: number; gruppe: "gehalt" | "betrieb" }> };
   cashflow: Array<{ monat: string; einnahmen: number; ware: number; steuern: number; kosten: number; kredit: number; ueberschuss: number }>;
@@ -96,11 +103,17 @@ export async function ladeFinanzStart(): Promise<FinanzStart> {
     return d.toISOString().slice(0, 10);
   };
   const offeneMonate = ustMonate.filter((m) => !fest(m)).map((m) => ({ monat: m.monat, betrag: m.berechnet, faellig: faellig(m.monat) }));
+  // Ohne Salon gemeldete Monate: USt auf den Salon ist eine offene Nachzahlung (siehe SALON_NICHT_GEMELDET)
+  const salonLuecke = ustMonate.filter((m) => m.salonFehlt && !m.salonNachgemeldet);
+  const salonNachmeldung = salonLuecke.length
+    ? { von: salonLuecke[0].monat, bis: salonLuecke[salonLuecke.length - 1].monat, betrag: r0(salonLuecke.reduce((s, m) => s + m.salonUst, 0)) }
+    : null;
   const ust = {
     monate: ustMonate,
     abgerechnet: r0(ustMonate.filter(fest).reduce((s, m) => s + (m.finanzamt ?? 0), 0)),
-    offen: r0(offeneMonate.reduce((s, m) => s + m.betrag, 0)),
+    offen: r0(offeneMonate.reduce((s, m) => s + m.betrag, 0) + (salonNachmeldung?.betrag ?? 0)),
     offeneMonate,
+    salonNachmeldung,
   };
 
   // ── Steuertermine (aus der Liquiditätsvorschau, nächste 60 Tage) ──

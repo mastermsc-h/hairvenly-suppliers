@@ -8,7 +8,20 @@ const EU = new Set(["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", 
  *  ohne Software/Werbung aus dem Ausland (Reverse-Charge: USt und Vorsteuer heben sich auf). */
 const VST_KATEGORIEN = new Set(["aus_versand", "aus_material", "aus_buero", "aus_steuerberater", "aus_telefon", "aus_energie", "aus_miete"]);
 /** Salon-Einnahmen kommen aufs Treatwell-Konto (User 12.11.2026). */
-const SALON_KONTO = "DE56290501010084626001";
+export const SALON_KONTO = "DE56290501010084626001";
+/**
+ * Monate, deren Voranmeldung OHNE die Salon-Umsätze (Treatwell-Konto) abgegeben wurde.
+ * Festgestellt 17.11.2026 an den Übermittlungsprotokollen: Kz. 81 Sep 143.922 / Okt 148.280 € = genau
+ * Shop Deutschland netto, Salon fehlt (seit Juli — Kartenzahlungen laufen seitdem über Nexi statt
+ * Treatwell). Jul/Aug: Finanzamt = Rechnung ohne Salon (±1,5k). Neue Monate NUR ergänzen, wenn sie
+ * nachweislich wieder ohne Salon gemeldet wurden. Die USt darauf ist eine offene Nachzahlung
+ * (Steuer-Ledger: art ust_nachzahlung, zeitraum SALON_NACHMELDUNG_ZEITRAUM).
+ */
+export const SALON_NICHT_GEMELDET = ["2026-07", "2026-08", "2026-09", "2026-10"];
+/** Ursprünglich gemeldete Zahllast dieser Monate (+ Zahlung, − Erstattung). Liegt das Finanzamt-Ist später
+ *  um mindestens die halbe Salon-USt darüber, ist die Berichtigung durch → Monat gilt als nachgemeldet. */
+const GEMELDET_OHNE_SALON: Record<string, number> = { "2026-07": 14091.52, "2026-08": 27454.56, "2026-09": -10815, "2026-10": -14321.17 };
+export const SALON_NACHMELDUNG_ZEITRAUM = "Salon Jul–Okt 2026";
 /** Anteil der EUSt an einer Zoll-Abbuchung (Rest = Zoll 2,2 % auf den Warenwert, nicht abziehbar). */
 const EUST_ANTEIL = (0.19 * 1.022) / (0.022 + 0.19 * 1.022);
 
@@ -24,6 +37,12 @@ export interface UstMonat {
   /** Abziehbar: Vorsteuer aus Inlandsrechnungen (geschätzt aus den Kontoumsätzen) + EUSt laut Abbuchungen. */
   vorsteuer: number;
   eust: number;
+  /** USt allein auf die Salon-Umsätze (Teil von ust). */
+  salonUst: number;
+  /** Voranmeldung wurde ohne Salon abgegeben (SALON_NICHT_GEMELDET) — die salonUst fehlt beim Finanzamt. */
+  salonFehlt: boolean;
+  /** Die Nachmeldung der Salon-USt ist bezahlt (Ledger-Posten hat ein Ist). */
+  salonNachgemeldet: boolean;
   /** ust − vorsteuer − eust (+ = Zahlung, − = Erstattung). */
   berechnet: number;
   /** Laut Finanzamt (+ Zahlung, − Erstattung); null = noch nicht bekannt. */
@@ -54,7 +73,7 @@ export async function ladeUstMonate(jahr: number, sb: Sb = createServiceClient()
   const monate = Array.from({ length: 12 }, (_, i) => `${jahr}-${String(i + 1).padStart(2, "0")}`).filter((m) => m <= bisMonat);
   if (!monate.length) return [];
 
-  const [bestellungen, buchungen, posten] = await Promise.all([
+  const [bestellungen, buchungen, posten, nachmeldung] = await Promise.all([
     alle<{ created_at: string; land: string | null; umsatz_eur: number; storniert: boolean }>((from, to) =>
       sb.from("kunden_bestellungen").select("created_at, land, umsatz_eur, storniert")
         .gte("created_at", `${jahr - 1}-12-31T00:00:00Z`).lt("created_at", `${jahr + 1}-01-01T23:00:00Z`).order("created_at").range(from, to),
@@ -66,7 +85,10 @@ export async function ladeUstMonate(jahr: number, sb: Sb = createServiceClient()
     alle<{ zeitraum: string; richtung: string; ist_betrag: number; soll_betrag: number; soll_schaetzung: boolean | null; ist_quelle: string | null }>((from, to) =>
       sb.from("steuer_posten").select("zeitraum, richtung, ist_betrag, soll_betrag, soll_schaetzung, ist_quelle").eq("art", "ust_va").eq("jahr", jahr).range(from, to),
     ),
+    sb.from("steuer_posten").select("ist_betrag").eq("art", "ust_nachzahlung").eq("zeitraum", SALON_NACHMELDUNG_ZEITRAUM).maybeSingle()
+      .then((r) => (r.data ?? null) as { ist_betrag: number } | null),
   ]);
+  const salonNachgemeldet = Number(nachmeldung?.ist_betrag ?? 0) > 0;
 
   const leer = () => ({ shopDe: 0, shopEu: 0, shopDritt: 0, salon: 0, vstBasis: 0, eustAbb: 0 });
   const acc = new Map(monate.map((m) => [m, leer()]));
@@ -114,6 +136,11 @@ export async function ladeUstMonate(jahr: number, sb: Sb = createServiceClient()
       shopDritt: r0(a.shopDritt),
       salon: r0(a.salon),
       ust: r0(ust),
+      salonUst: r0((a.salon * 19) / 119),
+      salonFehlt: SALON_NICHT_GEMELDET.includes(m),
+      salonNachgemeldet:
+        SALON_NICHT_GEMELDET.includes(m) &&
+        (salonNachgemeldet || (finanzamt !== null && m in GEMELDET_OHNE_SALON && finanzamt - GEMELDET_OHNE_SALON[m] >= (a.salon * 19) / 119 / 2)),
       vorsteuer: r0(vorsteuer),
       eust: r0(eust),
       berechnet: r0(ust - vorsteuer - eust),

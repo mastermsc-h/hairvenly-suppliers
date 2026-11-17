@@ -1259,6 +1259,38 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     }
   }
 
+  // 6) Einzelne offene Steuerposten ohne festen Rhythmus (Nachzahlungen, Nachmeldungen, Sonstiges):
+  //    eingetragenes Soll zum eingetragenen Fälligkeitsdatum — ein offener Posten darf nie still fehlen.
+  //    Verstrichenes Datum → sofort fällig.
+  const EINZELPOSTEN: Record<string, { name: string; steuer: Ereignis["steuer"] }> = {
+    ust_nachzahlung: { name: "USt-Nachzahlung", steuer: "ust" },
+    est_nachzahlung: { name: "ESt-Nachzahlung", steuer: "est" },
+    gewst_nachzahlung: { name: "GewSt-Nachzahlung", steuer: "gewst" },
+    sonstige: { name: "Steuer", steuer: undefined },
+  };
+  for (const [key, soll] of Object.entries(roh.steuern.sollOffen ?? {})) {
+    const [art, zeitraum] = key.split("|");
+    const info = EINZELPOSTEN[art];
+    if (!info || !soll) continue;
+    const faellig = roh.steuern.sollFaellig?.[key];
+    if (!faellig) {
+      hinweise.push(`${info.name} ${zeitraum}: kein Fälligkeitsdatum eingetragen — nicht in der Kurve.`);
+      continue;
+    }
+    if (faellig > ende) continue;
+    const si = sollInfo(roh, key);
+    ereignisse.push({
+      datum: faellig < start ? start : faellig,
+      betrag: -soll,
+      art: "steuer",
+      label: `${info.name} ${zeitraum}${si.zusatz}`,
+      sofort: faellig < start,
+      steuer: info.steuer,
+      schaetzung: si.schaetzung,
+      rechnung: [{ text: si.schaetzung ? "Schätzung, eingetragen bei den Vorauszahlungen" : "Soll laut Vorauszahlungen", betrag: r2(soll) }],
+    });
+  }
+
   // Innerhalb eines Tages: Eingänge vor Ausgängen, sonst stabil
   ereignisse.sort((a, b) => a.datum.localeCompare(b.datum) || Math.sign(b.betrag) - Math.sign(a.betrag));
   return { start, ende, fx, fxQuelle, ereignisse, ustBasis, eustAndereMonat, ustIstSchnitt, bestellInfo, hinweise, nachbestellKgMonat, ebruNachbestellKgMonat, einfuhrAndere, vermutungen, einnahmenKorrektur };

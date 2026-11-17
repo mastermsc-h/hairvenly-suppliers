@@ -57,7 +57,12 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
   const offen = monate.filter((m) => !(m.finanzamt !== null && m.quelle !== "schaetzung"));
   const gezahlt = summe((m) => Math.max(0, m.finanzamt ?? 0), abgerechnet);
   const erstattet = summe((m) => Math.max(0, -(m.finanzamt ?? 0)), abgerechnet);
-  const offenSumme = summe((m) => m.berechnet, offen);
+  // Monate, die ohne Salon gemeldet wurden: die USt auf den Salon fehlt beim Finanzamt → offene Nachzahlung
+  const luecke = monate.filter((m) => m.salonFehlt && !m.salonNachgemeldet);
+  const lueckeUst = summe((m) => m.salonUst, luecke);
+  const lueckeUmsatz = summe((m) => m.salon, luecke);
+  const lueckeVon = luecke.length ? `${mName(luecke[0].monat)}–${mName(luecke[luecke.length - 1].monat)}` : "";
+  const offenSumme = summe((m) => m.berechnet, offen) + lueckeUst;
   // Mit Dauerfristverlängerung fällig am 10. des übernächsten Monats
   const faellig = (m: string) => {
     const [y, mo] = m.split("-").map(Number);
@@ -65,7 +70,9 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
     return `${String(d.getUTCDate()).padStart(2, "0")}.${String(d.getUTCMonth() + 1).padStart(2, "0")}.`;
   };
   // Wie weit lag die Rechnung bisher daneben (über alle abgerechneten Monate)
-  const abweichungSchnitt = abgerechnet.length ? summe((m) => (m.finanzamt ?? 0) - m.berechnet, abgerechnet) / abgerechnet.length : 0;
+  // (Monate ohne Salon gegen die Rechnung ohne Salon, sonst zählt die Meldelücke als Rechenfehler)
+  const vergleich = (m: UstMonat) => m.berechnet - (m.salonFehlt ? m.salonUst : 0);
+  const abweichungSchnitt = abgerechnet.length ? summe((m) => (m.finanzamt ?? 0) - vergleich(m), abgerechnet) / abgerechnet.length : 0;
 
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm">
@@ -80,13 +87,27 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
         </span>
       </div>
 
+      {luecke.length > 0 && (
+        <div className="mt-4 rounded-xl border border-rose-300 bg-rose-50 p-4 text-sm text-rose-900">
+          <div className="font-semibold">
+            Salon-Umsätze {lueckeVon} nicht ans Finanzamt gemeldet — {eur(lueckeUst)} Umsatzsteuer nachzuzahlen
+          </div>
+          <p className="mt-1 text-[13px] leading-snug">
+            Die Voranmeldungen {luecke.map((m) => mName(m.monat)).join(", ")} enthalten nur die Shop-Umsätze (Kz. 81 = Shop Deutschland netto). Die Eingänge
+            auf dem Treatwell-Konto ({eur(lueckeUmsatz)} brutto, Karte/Nexi, Treatwell, Bar) fehlen. Der Steuerberater muss berichtigte Voranmeldungen
+            abgeben; die Nachzahlung steht unten bei „Noch offen“ und in der Liquiditätsvorschau. Dieselben Umsätze fehlen auch in seiner
+            Buchhaltung für Einkommen- und Gewerbesteuer ({eur(lueckeUmsatz / 1.19)} netto).
+          </p>
+        </div>
+      )}
+
       {/* Kacheln: Jahr bis jetzt */}
       <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
         {[
           { l: "Umsätze brutto", w: summe(umsatz), cls: "text-neutral-900", sub: `Shop ${kurz(summe((m) => m.shopDe + m.shopEu + m.shopDritt))} · Salon ${kurz(summe((m) => m.salon))}` },
           { l: "USt abzuführen", w: summe((m) => m.ust), cls: "text-rose-700", sub: "19 % auf Shop Deutschland + Salon" },
           { l: "Vorsteuer + EUSt", w: summe((m) => m.vorsteuer + m.eust), cls: "text-emerald-700", sub: `EUSt ${kurz(summe((m) => m.eust))} · Inland ${kurz(summe((m) => m.vorsteuer))}` },
-          { l: offenSumme >= 0 ? "Noch zu zahlen (grob)" : "Kommt noch zurück (grob)", w: Math.abs(offenSumme), cls: offenSumme >= 0 ? "text-rose-700" : "text-emerald-700", sub: `${offen.length} Monat${offen.length === 1 ? "" : "e"} offen · ${abgerechnet.length} abgerechnet` },
+          { l: offenSumme >= 0 ? "Noch zu zahlen (grob)" : "Kommt noch zurück (grob)", w: Math.abs(offenSumme), cls: offenSumme >= 0 ? "text-rose-700" : "text-emerald-700", sub: `${offen.length} Monat${offen.length === 1 ? "" : "e"} offen${lueckeUst > 0 ? " + Salon-Nachmeldung" : ""} · ${abgerechnet.length} abgerechnet` },
         ].map((k) => (
           <div key={k.l} className="rounded-xl bg-neutral-50 p-3 text-center">
             <div className="text-xs font-medium uppercase tracking-wide text-neutral-500">{k.l}</div>
@@ -114,6 +135,15 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
         <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4">
           <div className="text-xs font-medium uppercase tracking-wide text-amber-800">Noch offen · grob aus den Umsätzen gerechnet</div>
           <div className="mt-2 space-y-1 text-sm">
+            {lueckeUst > 0 && (
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-neutral-700">
+                  Salon {lueckeVon} nachmelden
+                  <span className="ml-1.5 text-[11px] text-neutral-400">nicht in den Voranmeldungen</span>
+                </span>
+                <Ergebnis wert={lueckeUst} klein />
+              </div>
+            )}
             {offen.map((m) => (
               <div key={m.monat} className="flex items-baseline justify-between gap-2">
                 <span className="text-neutral-700">
@@ -209,6 +239,11 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
                       <>
                         <Ergebnis wert={m.finanzamt} />
                         <div className="text-[10.5px] text-neutral-400">{QUELLE[m.quelle ?? "eingetragen"]}</div>
+                        {m.salonFehlt && (
+                          <div className={`text-[10.5px] font-medium ${m.salonNachgemeldet ? "text-neutral-500" : "text-rose-700"}`}>
+                            {m.salonNachgemeldet ? "Salon nachgemeldet" : `ohne Salon gemeldet · ${eur(m.salonUst)} fehlen`}
+                          </div>
+                        )}
                       </>
                     ) : (
                       <span className="text-xs text-neutral-400">noch offen</span>
@@ -241,7 +276,8 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
         <p>
           <b>Abweichung:</b> Finanzamt minus unsere Rechnung. Sie zeigt, wie weit die Schätzung daneben lag — nicht, dass zu viel oder zu wenig gezahlt
           wurde. Gezahlt wurde immer der Betrag aus der Voranmeldung des Steuerberaters. Große Ausschläge in Nachbarmonaten mit umgekehrtem Vorzeichen
-          (z.B. April −17k, Mai +29k) sind meist Einfuhrumsatzsteuer, die in einem anderen Monat abgebucht als angerechnet wurde.
+          (z.B. April −17k, Mai +29k) sind meist Einfuhrumsatzsteuer, die in einem anderen Monat abgebucht als angerechnet wurde. In Monaten, die ohne
+          Salon gemeldet wurden, steckt die fehlende Salon-USt in der Abweichung.
         </p>
       </div>
     </div>

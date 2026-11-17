@@ -33,6 +33,7 @@ import {
 } from "./rechnung";
 import { debtBucket } from "@/lib/order-debt";
 import type { OrderStatus } from "@/lib/types";
+import { SALON_KONTO, SALON_NICHT_GEMELDET } from "@/lib/steuer/ust-monate";
 
 type Sb = ReturnType<typeof createServiceClient>;
 
@@ -212,13 +213,21 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
   // ── Steuern ──
   const eustBezahlt: Record<string, number> = {};
   for (const t of tx) if (t.kategorie === "st_eust") eustBezahlt[t.booking_date.slice(0, 7)] = (eustBezahlt[t.booking_date.slice(0, 7)] ?? 0) - t.amount;
+  const salonUstMonat = (m: string) =>
+    (tx.filter((t) => t.account_iban === SALON_KONTO && (t.kategorie ?? "").startsWith("ein_") && t.booking_date.startsWith(m)).reduce((x, t) => x + t.amount, 0) * 19) / 119;
   const istSigned = (p: { richtung: string; ist_betrag: number }) => (p.richtung === "erstattung" ? -1 : 1) * Number(p.ist_betrag || 0);
   const erledigt = posten.filter((p) => Number(p.ist_betrag) !== 0);
   const ustPosten = erledigt.filter((p) => p.art === "ust_va" && /^\d{4}-\d{2}$/.test(p.zeitraum)).sort((a, b) => a.zeitraum.localeCompare(b.zeitraum));
   // Alle Monats-Voranmeldungen der letzten 12 Monate mit vollständigen Kontodaten (2025 war quartalsweise)
   const ustHistorie = ustPosten
     .filter((p) => p.zeitraum >= datenAb.slice(0, 7) && p.zeitraum >= plusTage(heute, -366).slice(0, 7))
-    .map((p) => ({ monat: p.zeitraum, ust: istSigned(p), eust: eustBezahlt[p.zeitraum] ?? 0 }));
+    .map((p) => ({
+      monat: p.zeitraum,
+      // Ohne Salon gemeldete Monate um die fehlende Salon-USt ergänzen — sonst rechnet die Vorschau künftige
+      // (korrekt gemeldete) Monate zu niedrig. Die Nachzahlung selbst steht als eigener Ledger-Posten drin.
+      ust: istSigned(p) + (SALON_NICHT_GEMELDET.includes(p.zeitraum) ? salonUstMonat(p.zeitraum) : 0),
+      eust: eustBezahlt[p.zeitraum] ?? 0,
+    }));
   const amandaImportUsd: Record<string, number> = {};
   for (const o of (amandaAnkuenfte ?? []) as Array<{ eta: string | null; invoice_total: number | null }>) {
     if (!o.eta || !(Number(o.invoice_total) > 0)) continue;
