@@ -6,7 +6,7 @@ import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, Pencil, Plus,
 import type { FinanzInput, FinanzMitarbeiter, FinanzMonatsdaten, SalonUmsatzMonat, ShopifyUmsatzMonat, SteuerArt, SteuerPosten } from "@/lib/types";
 import { aktualisiereShopifyUmsatz, fetchFinanzJahr, fetchSalonUmsatzJahr, fetchShopifyUmsatzJahr, saveFinanzMonat } from "@/lib/actions/finanzen";
 import { fetchSteuerPosten, upsertSteuerIst } from "@/lib/actions/steuer";
-import { compute, taxChain } from "@/lib/finanzen/steuerrechnung";
+import { compute, safeDiv, taxChain } from "@/lib/finanzen/steuerrechnung";
 
 // Gespeichert wird Netto; eingegeben wird (wie im Sheet) der Brutto-Rechnungsbetrag.
 function fromBrutto(label: string, brutto: number, ustRate: number) {
@@ -230,6 +230,36 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
   const lastRecorded = recorded.length ? recorded[recorded.length - 1].input! : DEFAULTS;
   const yrTax = taxChain(yrGewinn, lastRecorded.gewstHebesatz, lastRecorded.gewstFreibetrag, jahr);
   const yrNettoGewinn = yrGewinn - yrTax.steuerGesamt;
+
+  // ---- Monatsansicht: Jahreswerte = echte Summe der erfassten Monate (kein ×12) ----
+  // Der angezeigte Monat zählt mit seinen aktuellen Werten (auch vorbefüllt oder ungespeichert).
+  const jsMonate = yearMonths
+    .map((r) => (r.monat === monat ? { monat, input: current, calc: c } : r))
+    .filter((r) => r.calc);
+  const jsSumme = (f: (x: ReturnType<typeof compute>) => number) => jsMonate.reduce((s, r) => s + f(r.calc!), 0);
+  const js = {
+    netto: jsSumme((x) => x.totalNetto),
+    ausgaben: jsSumme((x) => x.totalExpensesNetto),
+    ust: jsSumme((x) => x.ustZahllast),
+    gewinn: jsSumme((x) => x.gewinnVorSteuern),
+  };
+  const jsTax = taxChain(js.gewinn, current.gewstHebesatz, current.gewstFreibetrag, jahr);
+  // Monatsanteil = Monatsgewinn × effektiver Steuersatz des Jahres → die Anteile aller Monate ergeben genau die Jahressteuer.
+  const jsSatz = (betrag: number) => safeDiv(betrag, js.gewinn > 0 ? js.gewinn : 0);
+  const anteil = {
+    est: c.gewinnVorSteuern * jsSatz(jsTax.estGesamt),
+    gewst: c.gewinnVorSteuern * jsSatz(jsTax.gewstJahr),
+    steuer: c.gewinnVorSteuern * jsSatz(jsTax.steuerGesamt),
+    nettoGewinn: c.gewinnVorSteuern * (1 - jsSatz(jsTax.steuerGesamt)),
+  };
+  const kurzMonat = (m: number) => new Date(2000, m - 1, 1).toLocaleDateString(LOCALE_TAG[locale], { month: "short" }).replace(".", "");
+  const jsLuecken = jsMonate.length > 0 && jsMonate[jsMonate.length - 1].monat - jsMonate[0].monat + 1 !== jsMonate.length;
+  const jsLabel = !jsMonate.length
+    ? ""
+    : jsMonate.length === 1
+      ? kurzMonat(jsMonate[0].monat)
+      : `${kurzMonat(jsMonate[0].monat)}–${kurzMonat(jsMonate[jsMonate.length - 1].monat)}${jsLuecken ? ` · ${jsMonate.length} Monate` : ""}`;
+  const jahrKopf = `${t(locale, "finance.pnl.annual")} ${jahr} · ${jsLabel}`;
 
   // Finanzamt-Ist des Jahres (aus dem Steuer-Ledger): Zahlungen minus Erstattungen.
   // Lohnsteuer und EUSt laufen separat: die Lohnsteuer steckt im Bruttolohn (Personalkosten),
@@ -777,7 +807,7 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
                 <span>{t(locale, "finance.vat.liability")}</span>
                 <div className="text-right">
                   <div className="tabular-nums">{fmt(c.ustZahllast)}</div>
-                  <div className="text-xs font-normal text-red-600 tabular-nums">{fmt(c.ustZahllast * 12)} / Jahr</div>
+                  <div className="text-xs font-normal text-red-600 tabular-nums">{fmt(js.ust)} im Jahr ({jsLabel})</div>
                 </div>
               </div>
             </div>
@@ -794,24 +824,24 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
                 <tr className="border-b border-neutral-200">
                   <Th>{""}</Th>
                   <Th right>{t(locale, "finance.pnl.monthly")}</Th>
-                  <Th right>{t(locale, "finance.pnl.annual")}</Th>
+                  <Th right>{jahrKopf}</Th>
                 </tr>
               </thead>
               <tbody>
                 <tr className="border-b border-neutral-100">
                   <td className="py-1.5 text-neutral-700">{t(locale, "finance.pnl.revenue")}</td>
                   <td className="py-1.5 text-right tabular-nums">{fmt(c.totalNetto)}</td>
-                  <td className="py-1.5 text-right tabular-nums">{fmt(c.totalNetto * 12)}</td>
+                  <td className="py-1.5 text-right tabular-nums">{fmt(js.netto)}</td>
                 </tr>
                 <tr className="border-b border-neutral-100">
                   <td className="py-1.5 text-neutral-700">{t(locale, "finance.pnl.expenses")}</td>
                   <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(c.totalExpensesNetto)}</td>
-                  <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(c.totalExpensesNetto * 12)}</td>
+                  <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(js.ausgaben)}</td>
                 </tr>
                 <tr className="bg-green-50 font-bold text-green-800">
                   <td className="py-2">{t(locale, "finance.pnl.profit")}</td>
                   <td className="py-2 text-right tabular-nums">{fmt(c.gewinnVorSteuern)}</td>
-                  <td className="py-2 text-right tabular-nums">{fmt(c.gewinnJahr)}</td>
+                  <td className="py-2 text-right tabular-nums">{fmt(js.gewinn)}</td>
                 </tr>
               </tbody>
             </table>
@@ -819,10 +849,13 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
 
           {/* STEUERN */}
           <SectionCard title={t(locale, "finance.tax")} color="red">
+            <p className="mb-3 text-xs text-neutral-500">
+              Gerechnet auf den Gewinn aller erfassten Monate {jahr} ({jsLabel}), nicht hochgerechnet. Fehlende Monate kommen noch dazu.
+            </p>
             <SubSection title={t(locale, "finance.tax.gewst")}>
               <div className="grid grid-cols-3 gap-y-1 text-sm items-center">
                 <span className="text-neutral-600">{t(locale, "finance.tax.gewst.profit")}</span>
-                <span className="text-right tabular-nums">{fmt(c.gewinnJahr)}</span>
+                <span className="text-right tabular-nums">{fmt(js.gewinn)}</span>
                 <span />
                 <span className="text-neutral-600">{t(locale, "finance.tax.gewst.freibetrag")}</span>
                 <span className="text-right">
@@ -830,10 +863,10 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
                 </span>
                 <span className="text-xs text-neutral-400 pl-2">Einzelunternehmen</span>
                 <span className="text-neutral-600">{t(locale, "finance.tax.gewst.basis")}</span>
-                <span className="text-right tabular-nums font-medium">{fmt(c.tax.gewstBasis)}</span>
+                <span className="text-right tabular-nums font-medium">{fmt(jsTax.gewstBasis)}</span>
                 <span />
                 <span className="text-neutral-600">{t(locale, "finance.tax.gewst.messbetrag")}</span>
-                <span className="text-right tabular-nums">{fmt(c.tax.gewstMessbetrag)}</span>
+                <span className="text-right tabular-nums">{fmt(jsTax.gewstMessbetrag)}</span>
                 <span />
                 <span className="text-neutral-600">{t(locale, "finance.tax.gewst.hebesatz")}</span>
                 <span className="text-right">
@@ -841,30 +874,30 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
                 </span>
                 <span className="text-xs text-neutral-400 pl-2">Bremen: 460</span>
                 <span className="font-semibold text-neutral-900">{t(locale, "finance.tax.gewst.amount2")}</span>
-                <span className="text-right tabular-nums font-semibold">{fmt(c.tax.gewstJahr)}</span>
-                <span className="text-right tabular-nums text-neutral-500">{fmt(c.gewstMonat)}/m</span>
+                <span className="text-right tabular-nums font-semibold">{fmt(jsTax.gewstJahr)}</span>
+                <span className="text-right tabular-nums text-neutral-500">{fmt(anteil.gewst)}/m</span>
               </div>
             </SubSection>
 
             <SubSection title={t(locale, "finance.tax.est")}>
               <div className="grid grid-cols-3 gap-y-1 text-sm">
                 <span className="text-neutral-600">{t(locale, "finance.tax.est.after_gewst")}</span>
-                <span className="text-right tabular-nums">{fmt(c.tax.zvE)}</span>
+                <span className="text-right tabular-nums">{fmt(jsTax.zvE)}</span>
                 <span />
                 <span className="text-neutral-600">{t(locale, "finance.tax.est.tariff")}</span>
-                <span className="text-right tabular-nums">{fmt(c.tax.estRoh)}</span>
+                <span className="text-right tabular-nums">{fmt(jsTax.estRoh)}</span>
                 <span className="text-xs text-neutral-400 pl-2">Grundtarif, ohne Sonderausgaben</span>
                 <span className="text-neutral-600">{t(locale, "finance.tax.est.anrechnung")}</span>
-                <span className="text-right tabular-nums text-red-600">-{fmt(c.tax.gewstAnrechnung)}</span>
+                <span className="text-right tabular-nums text-red-600">-{fmt(jsTax.gewstAnrechnung)}</span>
                 <span className="text-xs text-neutral-400 pl-2">4,0 × Messbetrag (§ 35 EStG)</span>
                 <span className="text-neutral-600">{t(locale, "finance.tax.est.reduced")}</span>
-                <span className="text-right tabular-nums">{fmt(c.tax.estGekuerzt)}</span>
+                <span className="text-right tabular-nums">{fmt(jsTax.estGekuerzt)}</span>
                 <span className="text-xs text-neutral-400 pl-2">Nach Anrechnung</span>
                 <span className="text-neutral-600">{t(locale, "finance.tax.est.soli")}</span>
-                <span className="text-right tabular-nums">{fmt(c.tax.soli)}</span>
+                <span className="text-right tabular-nums">{fmt(jsTax.soli)}</span>
                 <span className="text-xs text-neutral-400 pl-2">5,5% auf ESt (nach Freigrenze)</span>
                 <span className="font-semibold text-neutral-900">{t(locale, "finance.tax.est.total")}</span>
-                <span className="text-right tabular-nums font-semibold">{fmt(c.tax.estGesamt)}</span>
+                <span className="text-right tabular-nums font-semibold">{fmt(jsTax.estGesamt)}</span>
                 <span />
               </div>
             </SubSection>
@@ -872,8 +905,8 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
             <div className="flex justify-between items-center bg-red-50 rounded-lg px-4 py-3 font-bold text-red-800 mt-2">
               <span>{t(locale, "finance.tax.total")}</span>
               <div className="text-right">
-                <div className="tabular-nums">{fmt(c.tax.steuerGesamt)}</div>
-                <div className="text-xs font-normal text-red-600 tabular-nums">{fmt(c.steuerMonat)} / Monat</div>
+                <div className="tabular-nums">{fmt(jsTax.steuerGesamt)}</div>
+                <div className="text-xs font-normal text-red-600 tabular-nums">{fmt(anteil.steuer)} / Monat</div>
               </div>
             </div>
           </SectionCard>
@@ -897,19 +930,19 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
                 <tr className="border-b border-neutral-200">
                   <Th>{""}</Th>
                   <Th right>{t(locale, "finance.pnl.monthly")}</Th>
-                  <Th right>{t(locale, "finance.pnl.annual")}</Th>
+                  <Th right>{jahrKopf}</Th>
                 </tr>
               </thead>
               <tbody>
                 <tr className="border-b border-neutral-100">
                   <td className="py-1.5 text-neutral-700">{t(locale, "finance.net_profit.before_tax")}</td>
                   <td className="py-1.5 text-right tabular-nums">{fmt(c.gewinnVorSteuern)}</td>
-                  <td className="py-1.5 text-right tabular-nums">{fmt(c.gewinnJahr)}</td>
+                  <td className="py-1.5 text-right tabular-nums">{fmt(js.gewinn)}</td>
                 </tr>
                 <tr className="border-b border-neutral-100">
                   <td className="py-1.5 text-neutral-700">{t(locale, "finance.net_profit.taxes")}</td>
-                  <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(c.steuerMonat)}</td>
-                  <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(c.tax.steuerGesamt)}</td>
+                  <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(anteil.steuer)}</td>
+                  <td className="py-1.5 text-right tabular-nums text-red-600">-{fmt(jsTax.steuerGesamt)}</td>
                 </tr>
                 <tr className="bg-green-100 font-bold text-green-900">
                   <td className="py-2">
@@ -918,8 +951,8 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
                       <span className="text-xs font-normal text-green-700">{t(locale, "finance.net_profit.after_all")}</span>
                     </span>
                   </td>
-                  <td className="py-2 text-right tabular-nums text-lg">{fmt(c.nettoGewinnMonat)}</td>
-                  <td className="py-2 text-right tabular-nums text-lg">{fmt(c.nettoGewinnJahr)}</td>
+                  <td className="py-2 text-right tabular-nums text-lg">{fmt(anteil.nettoGewinn)}</td>
+                  <td className="py-2 text-right tabular-nums text-lg">{fmt(js.gewinn - jsTax.steuerGesamt)}</td>
                 </tr>
               </tbody>
             </table>
@@ -929,10 +962,10 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
           <SectionCard title={t(locale, "finance.kpi")} color="blue">
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               <KpiCard label={t(locale, "finance.kpi.gross_margin")} value={pct(c.bruttoMarge)} desc="Gewinn vor Steuern / Umsatz" />
-              <KpiCard label={t(locale, "finance.kpi.net_margin")} value={pct(c.nettoMarge)} desc="Nettogewinn / Umsatz" />
+              <KpiCard label={t(locale, "finance.kpi.net_margin")} value={pct(safeDiv(anteil.nettoGewinn, c.totalNetto))} desc="Nettogewinn / Umsatz" />
               <KpiCard label={t(locale, "finance.kpi.personnel_ratio")} value={pct(c.personalQuote)} desc="Personalkosten / Umsatz" />
               <KpiCard label={t(locale, "finance.kpi.material_ratio")} value={pct(c.materialQuote)} desc="Materialkosten / Umsatz" />
-              <KpiCard label={t(locale, "finance.kpi.effective_tax_rate")} value={pct(c.effSteuersatz)} desc="Steuern / Gewinn vor Steuern" />
+              <KpiCard label={t(locale, "finance.kpi.effective_tax_rate")} value={pct(safeDiv(jsTax.steuerGesamt, js.gewinn))} desc="Steuern / Gewinn vor Steuern" />
             </div>
           </SectionCard>
 
@@ -940,8 +973,8 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
           <RuecklageBox
             monatLabel={`${monthName(locale, monat)} ${jahr}`}
             ust={c.ustZahllast}
-            est={c.estMonat}
-            gewst={c.gewstMonat}
+            est={anteil.est}
+            gewst={anteil.gewst}
             lst={lstFor(jahrPosten, `${jahr}-${String(monat).padStart(2, "0")}`)}
           />
         </div>
@@ -1150,8 +1183,8 @@ function RuecklageBox({
   const gesamt = Math.max(0, ust + est + gewst + lst.amount);
   const lines: Array<{ label: string; hint: string; value: number | null }> = [
     { label: "Umsatzsteuer-Zahllast", hint: "USt-VA, mit Dauerfristverlängerung fällig am 10. des übernächsten Monats", value: ust },
-    { label: "Einkommensteuer inkl. Soli", hint: "Monatsanteil (Hochrechnung aufs Jahr)", value: est },
-    { label: "Gewerbesteuer", hint: "Monatsanteil (Hochrechnung aufs Jahr)", value: gewst },
+    { label: "Einkommensteuer inkl. Soli", hint: "Monatsanteil der Jahressteuer (Steuersatz aus der Summe der erfassten Monate)", value: est },
+    { label: "Gewerbesteuer", hint: "Monatsanteil der Jahressteuer (Steuersatz aus der Summe der erfassten Monate)", value: gewst },
     {
       label: "Lohnsteuer",
       hint:
