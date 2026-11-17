@@ -625,6 +625,13 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
                   </tr>
                 </tbody>
               </table>
+              <p className="mt-2 text-xs text-neutral-500">
+                Online-Shop: verkaufte kg (ohne zurückgeschickte Ware, die wieder ins Lager geht) × Einkaufspreis
+                (Amanda Ø 1.218 $/kg, Ebru 1.125 $/kg) ÷ Dollarkurs des Monats + 2,2 % Zoll, dazu Zubehör.
+                Der Einkaufspreis ist netto — „Netto“ ist der echte Aufwand. Die Einfuhrumsatzsteuer (19 %) wird beim Zoll
+                gezahlt und als Vorsteuer zurückgeholt; sie steht nur zur Info in den anderen Spalten.
+                Der Prozentsatz ist Wareneinsatz ÷ Shop-Umsatz (netto zu netto).
+              </p>
             </SubSection>
 
             {/* C. Shopify-Kosten */}
