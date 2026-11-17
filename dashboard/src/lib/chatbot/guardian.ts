@@ -128,7 +128,78 @@ export async function persistAlerts(sessionId: string, alerts: AlertOut[]): Prom
  * geschrieben hat und niemand geantwortet hat. Filtert triviale Antworten
  * (danke, ok, alles klar etc.) raus — die brauchen keine Antwort.
  */
-async function scanLongWaitSessions(maxAgeHours: number = 12 * 7 * 24): Promise<number> {
+/**
+ * Offene „wartet auf Antwort"-Alerts automatisch erledigen, sobald jemand
+ * (Team in der IG-App, Dashboard oder Bot) nach der letzten Kundennachricht
+ * geschrieben hat — und pro Session nur EINEN offenen Alert behalten.
+ *
+ * Analyse 17.11.2026: 1.364 Alerts seit August, alle „neu", 97 Sessions —
+ * jeder Tag ohne Antwort erzeugte einen weiteren Alert (Dedup nur pro Tag),
+ * erledigt wurde nie etwas, weil das Team in der IG-App antwortet. Ergebnis:
+ * niemand schaut mehr hin.
+ * Sibling-Sweep: missed_followup NICHT hier — der Typ meint auch „Team hat
+ * gefragt, Kundin schweigt", da wäre „zuletzt hat das Team geschrieben" gerade
+ * KEIN Erledigt-Signal (und es gibt nur 13 Stück, kein Duplikat-Problem).
+ */
+const SELF_RESOLVING_TYPES = ["long_wait_no_answer"];
+
+export async function autoResolveAnsweredAlerts(): Promise<{ resolved: number; duplicates: number }> {
+  // „duplicates" zählt auch Alerts, deren Kundennachricht älter als 14 Tage ist (verworfen).
+  const svc = createServiceClient();
+  const open: { id: string; session_id: string | null; alert_type: string; created_at: string }[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data } = await svc
+      .from("chatbot_guardian_alerts")
+      .select("id, session_id, alert_type, created_at")
+      .in("status", ["new", "acknowledged"])
+      .in("alert_type", SELF_RESOLVING_TYPES)
+      .order("created_at", { ascending: false })
+      .range(from, from + 999);
+    open.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  if (open.length === 0) return { resolved: 0, duplicates: 0 };
+
+  const sessionIds = [...new Set(open.map((a) => a.session_id).filter((x): x is string => !!x))];
+  const answered = new Set<string>();
+  const lastCustomerAt = new Map<string, number>();
+  for (let i = 0; i < sessionIds.length; i += 200) {
+    const { data } = await svc
+      .from("chat_sessions")
+      .select("id, last_message_at, last_customer_msg_at, status")
+      .in("id", sessionIds.slice(i, i + 200));
+    for (const s of data ?? []) {
+      const replied = !!s.last_customer_msg_at && !!s.last_message_at && new Date(s.last_message_at) > new Date(s.last_customer_msg_at);
+      if (replied || s.status === "closed") answered.add(s.id);
+      if (s.last_customer_msg_at) lastCustomerAt.set(s.id, new Date(s.last_customer_msg_at).getTime());
+    }
+  }
+
+  const toResolve: string[] = [];
+  const toDismiss: string[] = [];
+  const kept = new Set<string>();
+  const expiredBefore = Date.now() - LONG_WAIT_MAX_AGE_HOURS * 3600 * 1000;
+  for (const a of open) { // neueste zuerst
+    if (a.session_id && answered.has(a.session_id)) { toResolve.push(a.id); continue; }
+    const waitingSince = a.session_id ? lastCustomerAt.get(a.session_id) : undefined;
+    if (waitingSince !== undefined && waitingSince < expiredBefore) { toDismiss.push(a.id); continue; }
+    const key = `${a.session_id}|${a.alert_type}`;
+    if (kept.has(key)) toDismiss.push(a.id); else kept.add(key);
+  }
+  const now = new Date().toISOString();
+  for (let i = 0; i < toResolve.length; i += 200) {
+    await svc.from("chatbot_guardian_alerts").update({ status: "resolved", resolved_at: now }).in("id", toResolve.slice(i, i + 200));
+  }
+  for (let i = 0; i < toDismiss.length; i += 200) {
+    await svc.from("chatbot_guardian_alerts").update({ status: "dismissed", resolved_at: now }).in("id", toDismiss.slice(i, i + 200));
+  }
+  return { resolved: toResolve.length, duplicates: toDismiss.length };
+}
+
+/** Nach 14 Tagen ohne Antwort ist die Anfrage kein Handlungsauftrag mehr (Analyse 17.11.: offene Alerts bis 2.000 h alt, v.a. Gewinnspiel-Kommentare). */
+export const LONG_WAIT_MAX_AGE_HOURS = 14 * 24;
+
+async function scanLongWaitSessions(maxAgeHours: number = LONG_WAIT_MAX_AGE_HOURS): Promise<number> {
   const svc = createServiceClient();
   // Trigger erhöht auf 18h (von 12h) — User-Anweisung. Nur Sessions wo die
   // Kundin LÄNGER als 18h Realzeit gewartet hat.
@@ -316,15 +387,33 @@ CHAT (chronologisch, letzte Nachricht ist relevant):
 
     const hoursWaiting = Math.round((Date.now() - new Date(s.last_customer_msg_at).getTime()) / 3600 / 1000);
     const customerDisplay = s.customer_full_name || s.customer_name || "Kundin";
-    const { error } = await svc.from("chatbot_guardian_alerts").insert({
-      session_id: s.id,
+    const alertFields = {
       severity: hoursWaiting > 48 ? "critical" : "warning",
-      alert_type: "long_wait_no_answer",
       description: `${customerDisplay} wartet seit ${hoursWaiting}h auf eine Antwort: „${lastUserText.slice(0, 120)}…"`,
       suggestion: `Session öffnen und antworten — bei >48h ist's kritisch. Falls keine Antwort nötig (Höflichkeitsfloskel), als erledigt markieren.`,
+    };
+    // Ein offener Alert pro Session: vorhandenen aktualisieren statt täglich
+    // einen neuen anzulegen. Erledigt/verworfen bleibt erledigt — erst eine
+    // NEUE Kundennachricht nach dem Erledigen erzeugt wieder einen Alert.
+    const { data: existing } = await svc
+      .from("chatbot_guardian_alerts")
+      .select("id, status, resolved_at")
+      .eq("session_id", s.id)
+      .eq("alert_type", "long_wait_no_answer")
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const prev = existing?.[0];
+    if (prev && (prev.status === "new" || prev.status === "acknowledged")) {
+      await svc.from("chatbot_guardian_alerts").update(alertFields).eq("id", prev.id);
+      continue;
+    }
+    if (prev?.resolved_at && new Date(prev.resolved_at) >= new Date(s.last_customer_msg_at)) continue;
+    const { error } = await svc.from("chatbot_guardian_alerts").insert({
+      session_id: s.id,
+      alert_type: "long_wait_no_answer",
+      ...alertFields,
     });
     if (!error) inserted++;
-    // Duplicate-Index dedupt automatisch (gleicher type + session + Tag)
   }
   return inserted;
 }
@@ -347,6 +436,14 @@ export async function runGuardianScan(opts: { limit?: number; hours?: number } =
 
   let scanned = 0;
   let totalAlerts = 0;
+
+  // Schritt 0: beantwortete Sessions erledigen, Duplikate zusammenfassen
+  try {
+    const r = await autoResolveAnsweredAlerts();
+    console.log(`[guardian] auto-resolve: ${r.resolved} erledigt, ${r.duplicates} Duplikate verworfen`);
+  } catch (e) {
+    console.error("[guardian] auto-resolve failed:", e);
+  }
 
   // Schritt 1: deterministischer Wait-Time-Check (kein LLM nötig)
   try {
