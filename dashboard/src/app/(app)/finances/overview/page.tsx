@@ -1,6 +1,6 @@
 import { requireFeature } from "@/lib/auth";
 import { type Locale } from "@/lib/i18n";
-import { fetchFinanzJahr, fetchSalonUmsatzJahr, fetchShopifyUmsatzJahr, fetchStaffGehaelter } from "@/lib/actions/finanzen";
+import { fetchFinanzJahr, fetchSalonUmsatzJahr, fetchShopifyUmsatzJahr, fetchStaffGehaelter, fetchStaffGehaltsVerlauf } from "@/lib/actions/finanzen";
 import { fetchSteuerPosten } from "@/lib/actions/steuer";
 import FinanceOverview from "./finance-overview";
 
@@ -9,12 +9,13 @@ export default async function FinanceOverviewPage() {
   const locale = (profile.language ?? "de") as Locale;
   const now = new Date();
   const jahr = now.getFullYear();
-  const [rows, posten, shopify, salon, staffEmployees] = await Promise.all([
+  const [rows, posten, shopify, salon, staffEmployees, staffVerlauf] = await Promise.all([
     fetchFinanzJahr(jahr),
     fetchSteuerPosten(jahr),
     fetchShopifyUmsatzJahr(jahr),
     fetchSalonUmsatzJahr(jahr),
     fetchStaffGehaelter(), // liefert [] für Nicht-Admins (Gehälter sind Admin-only)
+    fetchStaffGehaltsVerlauf(), // ebenso nur Admin
   ]);
 
   return (
@@ -27,6 +28,7 @@ export default async function FinanceOverviewPage() {
       initialShopify={shopify}
       initialSalon={salon}
       staffEmployees={staffEmployees}
+      staffVerlauf={staffVerlauf}
     />
   );
 }

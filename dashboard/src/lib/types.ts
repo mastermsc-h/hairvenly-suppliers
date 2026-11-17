@@ -815,3 +815,14 @@ export interface LieferantenPreisliste {
   /** Kurzlebiger signierter Link (1 h) zum Ansehen/Herunterladen. */
   url: string | null;
 }
+
+/** Mitarbeiter mit Gehaltsverlauf (Bereich Mitarbeiter) — für den Personalkosten-Abgleich je Monat. */
+export interface MitarbeiterGehaltsVerlauf {
+  name: string;
+  team: string | null;
+  azubi: boolean;
+  /** Eintrittsdatum (YYYY-MM-DD) oder null, wenn nicht hinterlegt */
+  start: string | null;
+  /** Gehaltsänderungen aufsteigend: ab Datum (YYYY-MM-DD) gilt Bruttogehalt/Monat */
+  gehaelter: Array<{ ab: string; brutto: number }>;
+}

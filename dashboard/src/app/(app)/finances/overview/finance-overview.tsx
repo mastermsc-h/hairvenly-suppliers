@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { t, type Locale } from "@/lib/i18n";
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, Pencil, Plus, RefreshCw, Trash2, Users } from "lucide-react";
-import type { FinanzInput, FinanzMitarbeiter, FinanzMonatsdaten, SalonUmsatzMonat, ShopifyUmsatzMonat, SteuerArt, SteuerPosten } from "@/lib/types";
+import { AlertTriangle, Check, ChevronDown, ChevronLeft, ChevronRight, Loader2, Pencil, Plus, RefreshCw, Trash2, Users } from "lucide-react";
+import type { FinanzInput, FinanzMitarbeiter, FinanzMonatsdaten, MitarbeiterGehaltsVerlauf, SalonUmsatzMonat, ShopifyUmsatzMonat, SteuerArt, SteuerPosten } from "@/lib/types";
 import { aktualisiereShopifyUmsatz, fetchFinanzJahr, fetchSalonUmsatzJahr, fetchShopifyUmsatzJahr, saveFinanzMonat } from "@/lib/actions/finanzen";
 import { fetchSteuerPosten, upsertSteuerIst } from "@/lib/actions/steuer";
 import { compute, safeDiv, taxChain } from "@/lib/finanzen/steuerrechnung";
@@ -73,9 +73,11 @@ type Props = {
   initialShopify: ShopifyUmsatzMonat[];
   initialSalon: SalonUmsatzMonat[];
   staffEmployees: FinanzMitarbeiter[];
+  staffVerlauf?: MitarbeiterGehaltsVerlauf[];
 };
 
-export default function FinanceOverview({ locale, initialJahr, initialMonat, initialRows, initialSteuerPosten, initialShopify, initialSalon, staffEmployees }: Props) {
+export default function FinanceOverview({ locale, initialJahr, initialMonat, initialRows, initialSteuerPosten, initialShopify, initialSalon, staffEmployees, staffVerlauf = [] }: Props) {
+  const [personalOffen, setPersonalOffen] = useState(false);
   const [jahr, setJahr] = useState(initialJahr);
   const [monat, setMonat] = useState(initialMonat);
   const [view, setView] = useState<"month" | "year">("month");
@@ -562,8 +564,17 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
                       </td>
                     </tr>
                   ))}
-                  <tr className="bg-yellow-50 font-semibold text-yellow-800">
-                    <td className="py-2">{t(locale, "finance.expenses.personnel.sum")}</td>
+                  <tr
+                    className="bg-yellow-50 font-semibold text-yellow-800 cursor-pointer select-none hover:bg-yellow-100"
+                    onClick={() => setPersonalOffen((o) => !o)}
+                    title="Alle Mitarbeiter mit Bruttogehalt anzeigen"
+                  >
+                    <td className="py-2">
+                      <span className="inline-flex items-center gap-1">
+                        {personalOffen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        {t(locale, "finance.expenses.personnel.sum")}
+                      </span>
+                    </td>
                     <td className="py-2 text-right tabular-nums">{fmt(c.personnelBrutto)}</td>
                     <td className="py-2 text-right tabular-nums">{fmt(c.personnelAg)}</td>
                     <td className="py-2 text-right tabular-nums">{fmt(c.personnelTotal)}</td>
@@ -571,6 +582,9 @@ export default function FinanceOverview({ locale, initialJahr, initialMonat, ini
                   </tr>
                 </tbody>
               </table>
+              {personalOffen && (
+                <PersonalAbgleich verlauf={staffVerlauf} jahr={jahr} monat={monat} kontoGesamt={c.personnelTotal} monatLabel={`${monthName(locale, monat)} ${jahr}`} />
+              )}
               <button
                 onClick={() => update({ employees: [...current.employees, { name: "", brutto: 0 }] })}
                 className="mt-2 flex items-center gap-1 text-xs font-medium text-neutral-600 hover:text-neutral-900"
@@ -1299,6 +1313,106 @@ function SteuerMonatKumuliert({
   );
 }
 
+// ---- Personalkosten: Mitarbeiterliste (Bereich Mitarbeiter) gegen die Kosten laut Konto ----
+// Gehalt des Monats = letzte Gehaltsänderung bis Monatsende. AG-Anteil ist eine Näherung
+// (KV, RV, AV, PV ≈ 21 % + Umlagen U1–U3 ≈ 2 %).
+const AG_ANTEIL_CA = 0.23;
+function PersonalAbgleich({
+  verlauf,
+  jahr,
+  monat,
+  kontoGesamt,
+  monatLabel,
+}: {
+  verlauf: MitarbeiterGehaltsVerlauf[];
+  jahr: number;
+  monat: number;
+  kontoGesamt: number;
+  monatLabel: string;
+}) {
+  if (!verlauf.length) {
+    return <p className="mt-3 text-xs text-neutral-500">Keine Mitarbeiter-Gehälter sichtbar (nur für Admins).</p>;
+  }
+  const letzterTag = new Date(Date.UTC(jahr, monat, 0)).toISOString().slice(0, 10);
+  const datum = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
+  const zeilen = verlauf
+    .filter((m) => !m.start || m.start <= letzterTag)
+    .map((m) => {
+      const gueltig = m.gehaelter.filter((g) => g.ab <= letzterTag);
+      const akt = gueltig.length ? gueltig[gueltig.length - 1] : null;
+      const spaeter = !akt && m.gehaelter.length ? m.gehaelter[0] : null;
+      return { ...m, brutto: akt?.brutto ?? 0, ab: akt?.ab ?? null, spaeter };
+    })
+    .sort((a, b) => b.brutto - a.brutto);
+  const brutto = zeilen.reduce((s, z) => s + z.brutto, 0);
+  const ag = brutto * AG_ANTEIL_CA;
+  const gesamt = brutto + ag;
+  const diff = kontoGesamt - gesamt;
+  const ohneGehalt = zeilen.filter((z) => z.spaeter);
+  return (
+    <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3 md:p-4">
+      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
+        Mitarbeiter laut Bereich „Mitarbeiter“ · {monatLabel}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-neutral-200 text-xs text-neutral-500">
+              <th className="py-1.5 text-left font-medium">Mitarbeiter</th>
+              <th className="py-1.5 text-left font-medium">Team</th>
+              <th className="py-1.5 text-right font-medium">Bruttogehalt</th>
+              <th className="py-1.5 text-right font-medium">+ AG-Anteil ca. {Math.round(AG_ANTEIL_CA * 100)} %</th>
+              <th className="py-1.5 text-right font-medium">Kosten</th>
+            </tr>
+          </thead>
+          <tbody>
+            {zeilen.map((z) => (
+              <tr key={z.name} className="border-b border-neutral-100">
+                <td className="py-1.5 text-neutral-800">
+                  {z.name}
+                  {z.azubi && <span className="ml-1 text-xs text-neutral-400">(Azubi)</span>}
+                  {z.spaeter && <span className="ml-1 text-xs text-amber-600">Gehalt erst ab {datum(z.spaeter.ab)} hinterlegt</span>}
+                  {z.ab && z.ab.slice(0, 7) === letzterTag.slice(0, 7) && (
+                    <span className="ml-1 text-xs text-neutral-400">neu ab {datum(z.ab)}</span>
+                  )}
+                </td>
+                <td className="py-1.5 text-xs text-neutral-500 capitalize">{z.team ?? "–"}</td>
+                <td className="py-1.5 text-right tabular-nums">{fmt(z.brutto)}</td>
+                <td className="py-1.5 text-right tabular-nums text-neutral-500">{fmt(z.brutto * AG_ANTEIL_CA)}</td>
+                <td className="py-1.5 text-right tabular-nums">{fmt(z.brutto * (1 + AG_ANTEIL_CA))}</td>
+              </tr>
+            ))}
+            <tr className="font-semibold text-neutral-900">
+              <td className="py-2" colSpan={2}>
+                Summe laut Mitarbeiterliste ({zeilen.length})
+              </td>
+              <td className="py-2 text-right tabular-nums">{fmt(brutto)}</td>
+              <td className="py-2 text-right tabular-nums">{fmt(ag)}</td>
+              <td className="py-2 text-right tabular-nums">{fmt(gesamt)}</td>
+            </tr>
+            <tr className="text-neutral-700">
+              <td className="py-1" colSpan={4}>Personalkosten laut Konto (oben)</td>
+              <td className="py-1 text-right tabular-nums">{fmt(kontoGesamt)}</td>
+            </tr>
+            <tr className={Math.abs(diff) > gesamt * 0.05 ? "font-semibold text-amber-700" : "text-neutral-500"}>
+              <td className="py-1" colSpan={4}>
+                Unterschied {diff > 0 ? "(Konto höher)" : "(Liste höher)"}
+              </td>
+              <td className="py-1 text-right tabular-nums">{fmt(diff)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-xs text-neutral-500">
+        Gehalt je Monat = letzte Gehaltsänderung bis Monatsende. Unterschiede entstehen z. B. durch Mitarbeiter, die in der Liste
+        fehlen oder schon ausgeschieden sind, Minijobs, Nachzahlungen, Krankengeld-Erstattungen (AAG) oder Abbuchungen der
+        Krankenkassen für einen anderen Monat.
+        {ohneGehalt.length > 0 && ` ${ohneGehalt.length} Mitarbeiter haben für diesen Monat noch kein Gehalt hinterlegt.`}
+      </p>
+    </div>
+  );
+}
+
 function RuecklageBox({
   monatLabel,
   ust,
@@ -1312,9 +1426,9 @@ function RuecklageBox({
   gewst: number;
   lst: LstInfo;
 }) {
-  const gesamt = Math.max(0, ust + est + gewst + lst.amount);
+  // Aufs Steuer-Extrakonto: alle Steuern außer der Umsatzsteuer (die geht laufend per USt-VA vom Geschäftskonto ab).
+  const gesamt = Math.max(0, est + gewst + lst.amount);
   const lines: Array<{ label: string; hint: string; value: number | null }> = [
-    { label: "Umsatzsteuer-Zahllast", hint: "USt-VA, mit Dauerfristverlängerung fällig am 10. des übernächsten Monats", value: ust },
     { label: "Einkommensteuer inkl. Soli", hint: "Monatsanteil der Jahressteuer (Steuersatz aus der Summe der erfassten Monate)", value: est },
     { label: "Gewerbesteuer", hint: "Monatsanteil der Jahressteuer (Steuersatz aus der Summe der erfassten Monate)", value: gewst },
     {
@@ -1340,9 +1454,9 @@ function RuecklageBox({
           </div>
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-red-700">
-              Für Steuern beiseitelegen — {monatLabel}
+              Aufs Steuerkonto legen — {monatLabel}
             </div>
-            <div className="text-xs text-red-600/80">Dieses Geld gehört dem Finanzamt, nicht dem Gewinn.</div>
+            <div className="text-xs text-red-600/80">Alle Steuern außer der Umsatzsteuer. Dieses Geld gehört dem Finanzamt, nicht dem Gewinn.</div>
           </div>
         </div>
         <div className="text-3xl font-bold tabular-nums text-red-800">{fmt(gesamt)}</div>
@@ -1360,11 +1474,12 @@ function RuecklageBox({
             </div>
           ))}
         </div>
-        {ust < 0 && (
-          <p className="mt-2 text-xs text-blue-700">
-            Die USt-Zahllast ist negativ — das Finanzamt erstattet {fmt(-ust)}; das mindert die Rücklage.
-          </p>
-        )}
+        <p className="mt-3 border-t border-red-100 pt-2 text-xs text-neutral-500">
+          Randnotiz, nicht in der Summe: Umsatzsteuer-Zahllast {monatLabel}{" "}
+          <span className="tabular-nums font-medium text-neutral-700">{fmt(ust)}</span>
+          {ust < 0 ? " (Erstattung vom Finanzamt)" : ""} — geht per USt-Voranmeldung direkt vom Geschäftskonto ab,
+          mit Dauerfristverlängerung am 10. des übernächsten Monats.
+        </p>
       </div>
     </div>
   );

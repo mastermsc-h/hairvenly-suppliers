@@ -5,7 +5,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireFeature } from "@/lib/auth";
 import { syncShopifyUmsatz } from "@/lib/shopify-umsatz";
 import { salonUmsatzJahr } from "@/lib/finanzen/salon-umsatz";
-import type { FinanzInput, FinanzMitarbeiter, FinanzMonatsdaten, SalonUmsatzMonat, ShopifyUmsatzMonat } from "@/lib/types";
+import type { FinanzInput, FinanzMitarbeiter, FinanzMonatsdaten, MitarbeiterGehaltsVerlauf, SalonUmsatzMonat, ShopifyUmsatzMonat } from "@/lib/types";
 
 const PATH = "/finances/overview";
 
@@ -114,6 +114,28 @@ export async function fetchStaffGehaelter(): Promise<FinanzMitarbeiter[]> {
   return (members ?? []).map((m) => ({
     name: m.is_trainee ? `${m.name} (Azubi)` : m.name,
     brutto: current.get(m.id) ?? 0,
+  }));
+}
+
+/** Alle aktiven Mitarbeiter mit komplettem Gehaltsverlauf (nur Admin — Gehälter sind Admin-only). */
+export async function fetchStaffGehaltsVerlauf(): Promise<MitarbeiterGehaltsVerlauf[]> {
+  const profile = await requireFeature("finances");
+  if (profile.role !== "admin") return [];
+  const svc = createServiceClient();
+  const [{ data: members, error }, { data: salaries, error: err2 }] = await Promise.all([
+    svc.from("staff_members").select("id, name, team, is_trainee, employment_start").eq("active", true).order("name", { ascending: true }),
+    svc.from("staff_salary_changes").select("staff_id, amount, effective_date").order("effective_date", { ascending: true }),
+  ]);
+  if (error) throw new Error(error.message);
+  if (err2) throw new Error(err2.message);
+  return (members ?? []).map((m) => ({
+    name: m.name,
+    team: m.team ?? null,
+    azubi: !!m.is_trainee,
+    start: m.employment_start ? String(m.employment_start).slice(0, 10) : null,
+    gehaelter: (salaries ?? [])
+      .filter((s) => s.staff_id === m.id && s.effective_date)
+      .map((s) => ({ ab: String(s.effective_date).slice(0, 10), brutto: Number(s.amount) || 0 })),
   }));
 }
 
