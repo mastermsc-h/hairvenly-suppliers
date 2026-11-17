@@ -3,6 +3,8 @@ import { loadPriceLists } from "@/lib/actions/prices";
 import { loadAllCatalogs } from "@/lib/actions/catalog";
 import { loadSupplierColors } from "@/lib/actions/prices";
 import PriceTables from "./price-tables";
+import PreislistenDokumente from "./preislisten-dokumente";
+import { ladePreislistenDokumente } from "@/lib/actions/preislisten-dokumente";
 import type { Locale } from "@/lib/i18n";
 
 export default async function PricesPage() {
@@ -14,6 +16,8 @@ export default async function PricesPage() {
   // (role==='employee', auch wenn is_admin=true in DB) sehen die Preistabelle
   // ohne EK / Zoll / Aufschlag / Marge — nur Verkaufspreise + Farb-Mappings.
   const canSeeCostPrices = profile.role === "admin";
+  // Original-Preislisten (PDF/Bild) enthalten Einkaufspreise → nur für Admins laden
+  const dokumente = canSeeCostPrices ? await ladePreislistenDokumente() : [];
 
   // Sanitize: EK-Werte serverseitig leeren wenn keine Berechtigung — so kommen
   // die Einkaufspreise gar nicht erst im Client-JS an (kein Reverse-Engineering
@@ -47,6 +51,7 @@ export default async function PricesPage() {
       <h1 className="text-xl font-semibold text-neutral-900">
         {locale === "de" ? "Preistabellen" : locale === "tr" ? "Fiyat Tabloları" : "Price Tables"}
       </h1>
+      {canSeeCostPrices && <PreislistenDokumente dokumente={dokumente} locale={locale} />}
       <PriceTables
         priceLists={priceLists}
         supplierColors={supplierColors}

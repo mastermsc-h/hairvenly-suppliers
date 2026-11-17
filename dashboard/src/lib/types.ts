@@ -801,3 +801,17 @@ export interface ZBonStatus {
   einstellungen: { pruef_ab: string; nexi_wochentage: number[] };
   letztePruefung: { von: string; bis: string; fehlend: ZBonFehlend[]; geprueft_am: string; mail_status: string | null } | null;
 }
+
+/** Preisliste eines Lieferanten als Dokument (PDF/Bild), Ablage unter /prices. */
+export interface LieferantenPreisliste {
+  id: string;
+  lieferant: string;
+  titel: string;
+  gueltig_ab: string | null;
+  dateiname: string;
+  mime: string;
+  groesse: number;
+  created_at: string;
+  /** Kurzlebiger signierter Link (1 h) zum Ansehen/Herunterladen. */
+  url: string | null;
+}
