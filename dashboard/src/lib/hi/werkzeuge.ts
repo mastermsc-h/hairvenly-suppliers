@@ -185,7 +185,7 @@ async function liquiditaet(nurBis?: string, details = false) {
       nachbestellungen: { amanda: einstellungen.nachbestellungenEinrechnen, ebru: einstellungen.ebruNachbestellungenEinrechnen, abstandTage: einstellungen.nachbestellAbstandTage, amandaKgMonat: p.nachbestellKgMonat, ebruKgMonat: p.ebruNachbestellKgMonat },
       aktion: einstellungen.aktion,
       weitereAktionen: einstellungen.weitereAktionen,
-      steuerNachzahlung: einstellungen.steuerNachzahlung,
+      steuerNachzahlungen: einstellungen.steuerNachzahlungen,
       reserve: einstellungen.puffer,
       ausgeblendeteKategorien: einstellungen.ausgeblendeteKategorien,
     },

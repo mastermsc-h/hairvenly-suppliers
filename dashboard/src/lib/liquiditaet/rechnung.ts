@@ -98,8 +98,10 @@ export interface LiqEinstellungen {
   ebruUsdProKg: number | null; // null = Ø der letzten Bestellungen
   /** Weitere geplante Aktionen (z.B. Ladenhüter-Sale), gleiche Rechnung wie `aktion`. */
   weitereAktionen: LiqAktion[];
-  /** Erwartete ESt-/GewSt-Nachzahlung eines Jahres (Hochrechnung) — null = nicht eingeplant. */
-  steuerNachzahlung: LiqSteuerNachzahlung | null;
+  /** Erwartete ESt-/GewSt-Nachzahlungen je Steuerjahr (z.B. 2025 im März 2027, 2026 im März 2028). */
+  steuerNachzahlungen: LiqSteuerNachzahlung[];
+  /** @deprecated alte Einzel-Einstellung (bis 19.11.2026) → steuerNachzahlungen */
+  steuerNachzahlung?: LiqSteuerNachzahlung | null;
 }
 
 /** Erwartete Nachzahlung Einkommen-/Gewerbesteuer laut Bescheid. */
@@ -213,11 +215,15 @@ export const LIQ_DEFAULTS: LiqEinstellungen = {
   ebruNachbestellKgMonat: null,
   ebruUsdProKg: null,
   weitereAktionen: [],
-  steuerNachzahlung: null,
+  steuerNachzahlungen: [],
 };
 
 export function mitDefaults(e: Partial<LiqEinstellungen> | null | undefined): LiqEinstellungen {
-  return { ...LIQ_DEFAULTS, ...(e ?? {}) };
+  const { steuerNachzahlung: alt, ...rest } = e ?? {};
+  const out: LiqEinstellungen = { ...LIQ_DEFAULTS, ...rest };
+  // Alte Einzel-Einstellung übernehmen, solange es noch keine Liste gibt
+  if (!rest.steuerNachzahlungen && alt) out.steuerNachzahlungen = [alt];
+  return out;
 }
 
 // ── Rohdaten (vom Server gesammelt) ─────────────────────────────────────────
@@ -1279,19 +1285,29 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     }
   }
 
-  // 5) ESt-/GewSt-Vorauszahlungen: letzter Betrag je Quartal. Mit eingeplanter Nachzahlung (Bescheid) steigen
-  //    die Quartale ab dem Bescheid auf Jahressteuer/4; schon fällige Quartale des Folgejahres werden nachgefordert.
+  // 5) ESt-/GewSt-Vorauszahlungen: letzter Betrag je Quartal. Mit eingeplanter Nachzahlung (Bescheid) setzt das
+  //    Finanzamt die Vorauszahlungen der Folgejahre auf Jahressteuer/4: Quartale ab dem Bescheid zum neuen Betrag,
+  //    schon fällige Quartale (Folgejahre) werden mit dem Bescheid nachgefordert.
   const [sy] = start.split("-").map(Number);
-  const nz = e.steuerNachzahlung?.aktiv ? e.steuerNachzahlung : null;
   const sp = roh.steuerPrognose ?? null;
-  const nzBetrag = (art: "est" | "gewst") => (art === "est" ? nz?.estEur ?? (sp && sp.jahr === nz?.jahr ? sp.nachEst : null) : nz?.gewstEur ?? (sp && sp.jahr === nz?.jahr ? sp.nachGewst : null));
-  const neuVz = (art: "est" | "gewst"): number | null => {
-    const nach = nzBetrag(art);
-    if (!nz?.vzAnpassen || nach === null || !sp) return null;
+  type Kurz = "est" | "gewst";
+  const bescheide = (e.steuerNachzahlungen ?? []).filter((x) => x.aktiv).sort((a, b) => a.datum.localeCompare(b.datum) || a.jahr - b.jahr);
+  const nzBetrag = (nz: LiqSteuerNachzahlung, art: Kurz): number | null => {
+    const eigen = art === "est" ? nz.estEur : nz.gewstEur;
+    if (eigen !== null && eigen !== undefined) return eigen;
+    return sp && sp.jahr === nz.jahr ? (art === "est" ? sp.nachEst : sp.nachGewst) : null;
+  };
+  // Neue Vorauszahlung je Quartal nach diesem Bescheid (nur mit Hochrechnung des Jahres)
+  const neuVz = (nz: LiqSteuerNachzahlung, art: Kurz): number | null => {
+    const nach = nzBetrag(nz, art);
+    if (!nz.vzAnpassen || nach === null || !sp || sp.jahr !== nz.jahr) return null;
     const jahresSteuer = nach + (art === "est" ? sp.vzEst : sp.vzGewst);
     return jahresSteuer > 0 ? r2(jahresSteuer / 4) : null;
   };
-  const nachgefordert: Record<"est" | "gewst", number> = { est: 0, gewst: 0 };
+  // Welcher Bescheid bestimmt am Stichtag die Vorauszahlung eines Quartals? Der jüngste Steuerjahr-Bescheid, der schon da ist.
+  const massgeblich = (art: Kurz, quartalsJahr: number, vorDatum: (d: string) => boolean) =>
+    bescheide.filter((b) => b.jahr < quartalsJahr && vorDatum(b.datum) && neuVz(b, art) !== null).sort((a, b) => a.jahr - b.jahr || a.datum.localeCompare(b.datum)).at(-1) ?? null;
+  const nachgefordert = new Map<LiqSteuerNachzahlung, Record<Kurz, number>>(bescheide.map((b) => [b, { est: 0, gewst: 0 }]));
   for (const jahr of [sy, sy + 1, sy + 2]) {
     for (let q = 1; q <= 4; q++) {
       for (const [art, betrag, name] of [
@@ -1301,13 +1317,21 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
         const zeitraum = `Q${q} ${jahr}`;
         const faellig = faelligkeit(art, zeitraum);
         const si = sollInfo(roh, `${art}|${zeitraum}`);
-        const kurz = art === "est_vz" ? "est" : "gewst";
-        const angepasst = si.soll === undefined && nz && jahr > nz.jahr ? neuVz(kurz) : null;
-        // Quartal des Folgejahres schon vor dem Bescheid fällig: alter Betrag jetzt, Erhöhung kommt mit dem Bescheid
-        if (angepasst !== null && faellig && faellig < nz!.datum && jahr === nz!.jahr + 1) {
-          nachgefordert[kurz] += Math.max(0, angepasst - (betrag ?? 0));
+        const kurz: Kurz = art === "est_vz" ? "est" : "gewst";
+        if (faellig && si.soll === undefined) {
+          // Nachforderung: Bescheid kommt nach der Fälligkeit → Differenz zum damals gültigen Betrag kommt mit dem Bescheid
+          for (const b of bescheide) {
+            const neu = neuVz(b, kurz);
+            if (neu === null || jahr <= b.jahr || faellig >= b.datum) continue;
+            if (massgeblich(kurz, jahr, (d) => d <= b.datum) !== b) continue; // ein jüngerer Bescheid regelt das Quartal schon
+            const vorher = massgeblich(kurz, jahr, (d) => d < b.datum);
+            const alt = vorher ? (neuVz(vorher, kurz) ?? 0) : (betrag ?? 0);
+            const r = nachgefordert.get(b)!;
+            r[kurz] = r2(r[kurz] + Math.max(0, neu - alt));
+          }
         }
-        const neu = angepasst !== null && faellig && faellig >= nz!.datum ? angepasst : null;
+        const regel = si.soll === undefined && faellig ? massgeblich(kurz, jahr, (d) => d <= faellig) : null;
+        const neu = regel ? neuVz(regel, kurz) : null;
         // Ohne Soll = letzter Bescheidbetrag (Vorauszahlungen sind festgesetzt, keine echte Schätzung)
         const wert = si.soll ?? neu ?? betrag;
         if (!wert || !faellig || faellig < start || faellig > ende) continue;
@@ -1316,12 +1340,12 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
           datum: faellig,
           betrag: -wert,
           art: "steuer",
-          label: `${name} ${zeitraum}${si.soll !== undefined ? si.zusatz : neu !== null ? ` (angepasst nach Bescheid ${nz!.jahr})` : ""}`,
+          label: `${name} ${zeitraum}${si.soll !== undefined ? si.zusatz : regel ? ` (angepasst nach Bescheid ${regel.jahr})` : ""}`,
           steuer: kurz,
-          schaetzung: (si.soll !== undefined && si.schaetzung) || neu !== null,
+          schaetzung: (si.soll !== undefined && si.schaetzung) || !!regel,
           rechnung: [
-            neu !== null
-              ? { text: `Jahressteuer ${nz!.jahr} laut Hochrechnung ÷ 4 (Finanzamt passt die Vorauszahlungen mit dem Bescheid an)`, betrag: r2(wert) }
+            regel
+              ? { text: `Jahressteuer ${regel.jahr} laut Hochrechnung ÷ 4 (Finanzamt passt die Vorauszahlungen mit dem Bescheid an)`, betrag: r2(wert) }
               : { text: si.soll !== undefined ? "Soll laut Vorauszahlungen" : "Festgesetzte Vorauszahlung (zuletzt bezahlter Quartalsbetrag)", betrag: r2(wert) },
           ],
         });
@@ -1361,30 +1385,30 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     });
   }
 
-  // 6b) Erwartete ESt-/GewSt-Nachzahlung (Hochrechnung) — nur wenn kein Soll im Steuer-Ledger steht
-  if (nz) {
+  // 6b) Erwartete ESt-/GewSt-Nachzahlungen (je Steuerjahr) — nur wenn kein Soll im Steuer-Ledger steht
+  for (const nz of bescheide) {
     for (const [kurz, art, name] of [["est", "est_nachzahlung", "ESt-Nachzahlung"], ["gewst", "gewst_nachzahlung", "GewSt-Nachzahlung"]] as const) {
       const imLedger = Object.keys(roh.steuern.sollOffen ?? {}).some((k) => k.startsWith(`${art}|`) && k.includes(String(nz.jahr)));
       if (imLedger) continue;
-      const betrag = nzBetrag(kurz);
+      const betrag = nzBetrag(nz, kurz);
       if (betrag === null) {
-        hinweise.push(`${name} ${nz.jahr}: keine Hochrechnung verfügbar — Betrag bei „Steuer-Nachzahlung“ eintragen.`);
+        hinweise.push(`${name} ${nz.jahr}: keine Hochrechnung verfügbar — Betrag bei „Erwartete Nachzahlung“ eintragen.`);
         continue;
       }
       const datum = amStart(nz.datum);
-      const extra = nachgefordert[kurz];
+      const extra = nachgefordert.get(nz)?.[kurz] ?? 0;
       if (datum > ende || betrag + extra <= 0.5) continue;
-      const auto = (kurz === "est" ? nz.estEur : nz.gewstEur) === null;
+      const auto = (kurz === "est" ? nz.estEur : nz.gewstEur) == null;
       ereignisse.push({
         datum,
         betrag: -r2(Math.max(0, betrag) + extra),
         art: "steuer",
-        label: `${name} ${nz.jahr}${extra > 0 ? ` + nachgeforderte Vorauszahlungen ${nz.jahr + 1}` : ""} (erwartet)`,
+        label: `${name} ${nz.jahr}${extra > 0 ? " + nachgeforderte Vorauszahlungen" : ""} (erwartet)`,
         steuer: kurz,
         schaetzung: true,
         rechnung: [
           { text: auto && sp ? `Jahressteuer ${nz.jahr} laut Hochrechnung (${sp.monate} Monate) minus gezahlte Vorauszahlungen` : "Betrag laut Eingabe", betrag: r2(Math.max(0, betrag)) },
-          ...(extra > 0 ? [{ text: `Erhöhung der schon fälligen Vorauszahlungen ${nz.jahr + 1} (rückwirkend mit dem Bescheid)`, betrag: r2(extra) }] : []),
+          ...(extra > 0 ? [{ text: "Erhöhung der schon fälligen Vorauszahlungen der Folgejahre (rückwirkend mit dem Bescheid)", betrag: r2(extra) }] : []),
         ],
       });
     }

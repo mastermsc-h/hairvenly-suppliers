@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
-import { Area, Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, Bar, CartesianGrid, ComposedChart, Line, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import { kontoZweck } from "@/lib/bank/konten";
 import { LIQ_DEFAULTS, VERSAND_FRUEHESTENS_TAGE, bestellTage, ZOLL_NACH_VERSAND_TAGE, prognose, zahlGruppe, zerlegeRateSchluessel, type Ereignis, type LiqAktion, type LiqEinstellungen, type LiqRohdaten, type LiqSzenario, type VerlaufTag, type ZahlGruppe } from "@/lib/liquiditaet/rechnung";
@@ -284,6 +284,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
   ].sort((a, b) => a.datum.localeCompare(b.datum));
   const setAktion = (patch: Partial<NonNullable<LiqEinstellungen["aktion"]>>) =>
     e.aktion && set("aktion", { ...e.aktion, ...patch });
+  // Alle Aktionen (Black Friday + weitere) für die Knöpfe und Flächen im Diagramm
+  const alleAktionen = [...(e.aktion ? [e.aktion] : []), ...(e.weitereAktionen ?? [])];
   const offenAmanda = p.bestellungen.filter((b) => !b.bezahlt).reduce((s, b) => s + b.betragEur, 0);
   const ebruGeschaetztUsd = (roh.ratenPositionen ?? []).filter((x) => x.geschaetzt).reduce((s, x) => s + x.restUsd, 0);
   const einfuhrAndereSumme = p.einfuhrAndere.reduce((s, b) => s + (b.einfuhr ? b.einfuhr.eust + b.einfuhr.zoll : 0), 0);
@@ -474,6 +476,15 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
             </button>
           )}
         </div>
+        <AktionenLeiste
+          aktionen={alleAktionen}
+          onUmschalten={(i) => (i === 0 && e.aktion ? setAktion({ aktiv: !e.aktion.aktiv }) : set("weitereAktionen", (e.weitereAktionen ?? []).map((a, j) => (j === i - (e.aktion ? 1 : 0) ? { ...a, aktiv: !a.aktiv } : a))))}
+          onNeu={() => {
+            set("weitereAktionen", [...(e.weitereAktionen ?? []), NEUE_AKTION(e.weitereAktionen ?? [])]);
+            requestAnimationFrame(() => document.getElementById("aktionen-karte")?.scrollIntoView({ behavior: "smooth", block: "center" }));
+          }}
+          eingang={(label) => p.ereignisse.filter((x) => x.art === "aktion" && aktionName(x.label) === label).reduce((s, x) => s + x.betrag, 0)}
+        />
         <SzenarioLeiste sz={sz} setSz={setSz} p={p} pOhne={pOhne} puffer={e.puffer} roh={roh} e={e} />
         <div className="relative cursor-pointer [&_*:focus]:outline-none" style={{ width: "100%", height: 300 }}>
           <ResponsiveContainer>
@@ -528,6 +539,21 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
                   );
                 }}
               />
+              {/* Aktionszeiträume als grüne Fläche */}
+              {alleAktionen
+                .filter((a) => a.aktiv && a.bis >= fensterVon && a.von <= fensterBis)
+                .map((a, i) => (
+                  <ReferenceArea
+                    key={`akt-${i}`}
+                    x1={a.von < fensterVon ? fensterVon : a.von}
+                    x2={a.bis > fensterBis ? fensterBis : a.bis}
+                    fill="#10b981"
+                    fillOpacity={0.12}
+                    stroke="#10b981"
+                    strokeOpacity={0.3}
+                    label={{ value: a.label, position: "insideBottom", fontSize: 10, fill: "#047857" }}
+                  />
+                ))}
               <ReferenceLine y={0} stroke="#dc2626" strokeWidth={1.5} />
               {pin && <ReferenceLine x={pin.datum} stroke="#171717" strokeWidth={1.5} />}
               {versatz > 0 && fensterBis >= p.start && (
@@ -895,7 +921,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
       )}
 
       <WeitereAktionen liste={e.weitereAktionen ?? []} onChange={(l) => set("weitereAktionen", l)} p={p} />
-      <SteuerNachzahlungKarte nz={e.steuerNachzahlung} sp={roh.steuerPrognose ?? null} onChange={(v) => set("steuerNachzahlung", v)} p={p} />
+      <SteuerNachzahlungKarte liste={e.steuerNachzahlungen ?? []} sp={roh.steuerPrognose ?? null} onChange={(v) => set("steuerNachzahlungen", v)} p={p} />
 
       {manuellRaten.length > 0 && (
         <Card title="Ratenplan offene Rechnungen" accent="border-l-amber-400">
@@ -1014,7 +1040,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
             {saving ? <Loader2 size={14} className="animate-spin" /> : msg?.ok ? <Check size={14} /> : null}
             Speichern
           </button>
-          <button onClick={() => setE({ ...LIQ_DEFAULTS, aktion: e.aktion, weitereAktionen: e.weitereAktionen, steuerNachzahlung: e.steuerNachzahlung })} className="text-sm text-neutral-500 hover:text-neutral-900">Standardwerte</button>
+          <button onClick={() => setE({ ...LIQ_DEFAULTS, aktion: e.aktion, weitereAktionen: e.weitereAktionen, steuerNachzahlungen: e.steuerNachzahlungen })} className="text-sm text-neutral-500 hover:text-neutral-900">Standardwerte</button>
           {geaendert && !saving && <span className="text-xs text-amber-700">Vorschau zeigt ungespeicherte Annahmen</span>}
           {msg && <span className={`text-xs ${msg.ok ? "text-emerald-700" : "text-red-700"}`}>{msg.text}</span>}
         </div>
@@ -1144,11 +1170,39 @@ const NEUE_AKTION = (liste: LiqAktion[]): LiqAktion => ({
   nachlauf: null,
 });
 
+/** Knöpfe am Diagramm: jede Aktion ein-/ausschalten, neue Aktion anlegen. */
+function AktionenLeiste({ aktionen, onUmschalten, onNeu, eingang }: { aktionen: LiqAktion[]; onUmschalten: (i: number) => void; onNeu: () => void; eingang: (label: string) => number }) {
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+      <span className="mr-1 text-neutral-500">Aktionen:</span>
+      {aktionen.map((a, i) => {
+        const plus = eingang(a.label);
+        return (
+          <button
+            key={i}
+            onClick={() => onUmschalten(i)}
+            aria-pressed={a.aktiv}
+            title={`${a.label}: ${kurzDatum(a.von)}–${kurzDatum(a.bis)}, Mehrumsatz ${euro(a.mehrumsatzBrutto)} brutto${a.aktiv ? "" : " (ausgeschaltet)"}`}
+            className={`rounded-full border px-2.5 py-0.5 font-medium transition-colors ${a.aktiv ? "border-emerald-600 bg-emerald-600 text-white" : "border-emerald-600 bg-white text-emerald-700 hover:bg-emerald-50"}`}
+          >
+            {a.label} · {kurzDatum(a.von).slice(0, 6)}
+            {a.aktiv && plus > 0 && <span className="ml-1 opacity-80">+{Math.round(plus / 1000)}k</span>}
+          </button>
+        );
+      })}
+      <button onClick={onNeu} className="rounded-full border border-dashed border-emerald-600 px-2.5 py-0.5 font-medium text-emerald-700 hover:bg-emerald-50">
+        + Aktion
+      </button>
+    </div>
+  );
+}
+
 function WeitereAktionen({ liste, onChange, p }: { liste: LiqAktion[]; onChange: (l: LiqAktion[]) => void; p: ReturnType<typeof prognose> }) {
   const setA = (i: number, patch: Partial<LiqAktion>) => onChange(liste.map((a, j) => (j === i ? { ...a, ...patch } : a)));
   const eingang = (label: string) => p.ereignisse.filter((x) => x.art === "aktion" && aktionName(x.label) === label).reduce((s, x) => s + x.betrag, 0);
   const inp = "mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 focus:outline-none";
   return (
+    <div id="aktionen-karte">
     <Card title="Geplante Aktionen (Sales)" accent="border-l-emerald-500">
       {liste.length === 0 && <p className="text-sm text-neutral-500">Noch keine weitere Aktion eingeplant.</p>}
       <div className="space-y-4">
@@ -1197,86 +1251,93 @@ function WeitereAktionen({ liste, onChange, p }: { liste: LiqAktion[]; onChange:
         </span>
       </div>
     </Card>
+    </div>
   );
 }
 
 function SteuerNachzahlungKarte({
-  nz, sp, onChange, p,
+  liste, sp, onChange, p,
 }: {
-  nz: LiqEinstellungen["steuerNachzahlung"];
+  liste: LiqEinstellungen["steuerNachzahlungen"];
   sp: NonNullable<LiqRohdaten["steuerPrognose"]> | null;
-  onChange: (v: LiqEinstellungen["steuerNachzahlung"]) => void;
+  onChange: (v: LiqEinstellungen["steuerNachzahlungen"]) => void;
   p: ReturnType<typeof prognose>;
 }) {
-  const jahr = nz?.jahr ?? sp?.jahr ?? new Date().getFullYear();
-  if (!nz) {
-    return (
-      <Card title="Erwartete Nachzahlung Einkommen- und Gewerbesteuer" accent="border-l-red-500">
-        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-          <span className="text-neutral-600">
-            {sp
-              ? <>Hochrechnung {sp.jahr}: ESt {euro(sp.nachEst)} + GewSt {euro(sp.nachGewst)} Nachzahlung — noch nicht in der Vorschau.</>
-              : "Noch nicht in der Vorschau."}
-          </span>
-          <button
-            onClick={() => onChange({ aktiv: true, jahr, datum: `${jahr + 1}-06-30`, estEur: null, gewstEur: null, vzAnpassen: true })}
-            className="rounded-lg bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white"
-          >
-            Einplanen
-          </button>
-        </div>
-      </Card>
-    );
-  }
-  const set = (patch: Partial<NonNullable<typeof nz>>) => onChange({ ...nz, ...patch });
-  const evs = p.ereignisse.filter((x) => x.art === "steuer" && (x.label.includes(`Nachzahlung ${nz.jahr}`) || x.label.includes(`nach Bescheid ${nz.jahr}`)));
+  const setN = (i: number, patch: Partial<LiqEinstellungen["steuerNachzahlungen"][number]>) => onChange(liste.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const ende = p.tage.at(-1)?.datum ?? "";
-  const autoEst = sp && sp.jahr === nz.jahr ? sp.nachEst : null;
-  const autoGew = sp && sp.jahr === nz.jahr ? sp.nachGewst : null;
-  const estJahr = sp && sp.jahr === nz.jahr ? (nz.estEur ?? sp.nachEst) + sp.vzEst : null;
-  const gewJahr = sp && sp.jahr === nz.jahr ? (nz.gewstEur ?? sp.nachGewst) + sp.vzGewst : null;
+  const jahre = new Set(liste.map((x) => x.jahr));
+  const vorschlag = sp && !jahre.has(sp.jahr) ? sp.jahr : Math.min(...[...jahre, new Date().getFullYear()]) - 1;
+  const inp = "mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 focus:outline-none";
+  const sortiert = liste.map((x, i) => ({ x, i })).sort((a, b) => a.x.jahr - b.x.jahr);
   return (
-    <Card title={`Erwartete Nachzahlung Einkommen- und Gewerbesteuer ${nz.jahr}`} accent="border-l-red-500">
-      <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
-        <div className="space-y-2 pt-5">
-          <Schalter label="einrechnen" checked={nz.aktiv} onChange={(v) => set({ aktiv: v })} />
-          <Schalter label="Vorauszahlungen danach anheben" checked={nz.vzAnpassen} onChange={(v) => set({ vzAnpassen: v })} />
-        </div>
-        <label className="block">
-          <span className="text-xs font-medium text-neutral-600">Erwarteter Zahltag (Bescheid + ~1 Monat)</span>
-          <input type="date" value={nz.datum} onChange={(ev) => ev.target.value && set({ datum: ev.target.value })} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 focus:outline-none" />
-        </label>
-        <Feld label={`ESt-Nachzahlung (leer = Hochrechnung ${autoEst != null ? euro(autoEst) : "—"})`} value={nz.estEur} optional step={1000} onChange={(v) => set({ estEur: v })} />
-        <Feld label={`GewSt-Nachzahlung (leer = Hochrechnung ${autoGew != null ? euro(autoGew) : "—"})`} value={nz.gewstEur} optional step={1000} onChange={(v) => set({ gewstEur: v })} />
-      </div>
-      {sp && sp.jahr === nz.jahr && (
-        <p className="mt-3 text-xs text-neutral-600">
-          Hochrechnung aus „Einnahmen &amp; Ausgaben“ ({sp.monate} Monate): Gewinn {nz.jahr} ≈ {euro(sp.gewinnJahr)} → ESt inkl. Soli {euro(sp.est)}, GewSt {euro(sp.gewst)};
-          gezahlte/festgesetzte Vorauszahlungen ESt {euro(sp.vzEst)}, GewSt {euro(sp.vzGewst)}.
-          {nz.vzAnpassen && estJahr != null && gewJahr != null && (
-            <> Mit dem Bescheid setzt das Finanzamt die Vorauszahlungen {nz.jahr + 1} meist auf ein Viertel der Jahressteuer: ESt {euro(estJahr / 4)} + GewSt {euro(gewJahr / 4)} pro Quartal.
-            Schon fällige Quartale {nz.jahr + 1} fordert es mit dem Bescheid nach — das ist in der Nachzahlung oben enthalten.</>
-          )}
-        </p>
-      )}
-      {evs.length > 0 ? (
-        <div className="mt-3 divide-y divide-neutral-100 text-sm">
-          {evs.map((x, i) => (
-            <div key={i} className="flex items-center justify-between gap-3 py-1">
-              <span className="tabular-nums text-neutral-500 w-20 shrink-0">{kurzDatum(x.datum)}</span>
-              <span className="flex-1 min-w-0 truncate text-neutral-800">{x.label}</span>
-              <span className="font-medium tabular-nums">{euro(-x.betrag)}</span>
+    <Card title="Erwartete Nachzahlungen Einkommen- und Gewerbesteuer" accent="border-l-red-500">
+      {liste.length === 0 && <p className="text-sm text-neutral-500">Noch keine Nachzahlung eingeplant.</p>}
+      <div className="space-y-4">
+        {sortiert.map(({ x: nz, i }) => {
+          const hr = sp && sp.jahr === nz.jahr ? sp : null;
+          const evs = p.ereignisse.filter((ev) => ev.art === "steuer" && (ev.label.includes(`Nachzahlung ${nz.jahr}`) || ev.label.includes(`nach Bescheid ${nz.jahr}`)));
+          const estJahr = hr ? (nz.estEur ?? hr.nachEst) + hr.vzEst : null;
+          const gewJahr = hr ? (nz.gewstEur ?? hr.nachGewst) + hr.vzGewst : null;
+          return (
+            <div key={i} className="rounded-xl border border-neutral-200 p-3">
+              <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-5">
+                <Feld label="Steuerjahr" value={nz.jahr} onChange={(v) => setN(i, { jahr: Math.round(v ?? nz.jahr) })} />
+                <label className="block">
+                  <span className="text-xs font-medium text-neutral-600">Fällig am</span>
+                  <input type="date" value={nz.datum} onChange={(ev) => ev.target.value && setN(i, { datum: ev.target.value })} className={inp} />
+                </label>
+                <Feld label={`ESt-Nachzahlung (${hr ? `leer = Hochrechnung ${euro(hr.nachEst)}` : "€"})`} value={nz.estEur} optional={!!hr} step={1000} onChange={(v) => setN(i, { estEur: v })} />
+                <Feld label={`GewSt-Nachzahlung (${hr ? `leer = Hochrechnung ${euro(hr.nachGewst)}` : "€"})`} value={nz.gewstEur} optional={!!hr} step={1000} onChange={(v) => setN(i, { gewstEur: v })} />
+                <div className="space-y-2 pt-5">
+                  <Schalter label="einrechnen" checked={nz.aktiv} onChange={(v) => setN(i, { aktiv: v })} />
+                  {hr && <Schalter label="Vorauszahlungen anheben" checked={nz.vzAnpassen} onChange={(v) => setN(i, { vzAnpassen: v })} />}
+                </div>
+              </div>
+              {hr && (
+                <p className="mt-2 text-xs text-neutral-600">
+                  Hochrechnung aus „Einnahmen &amp; Ausgaben“ ({hr.monate} Monate): Gewinn {nz.jahr} ≈ {euro(hr.gewinnJahr)} → ESt inkl. Soli {euro(hr.est)}, GewSt {euro(hr.gewst)};
+                  Vorauszahlungen {nz.jahr}: ESt {euro(hr.vzEst)}, GewSt {euro(hr.vzGewst)}.
+                  {nz.vzAnpassen && estJahr != null && gewJahr != null && (
+                    <> Mit dem Bescheid setzt das Finanzamt die Vorauszahlungen der Folgejahre meist auf ein Viertel der Jahressteuer: ESt {euro(estJahr / 4)} + GewSt {euro(gewJahr / 4)} pro Quartal.
+                    Quartale, die vor dem Bescheid schon fällig waren, fordert es mit dem Bescheid nach — das steckt in der Nachzahlung unten.</>
+                  )}
+                </p>
+              )}
+              {!hr && (nz.estEur ?? 0) + (nz.gewstEur ?? 0) === 0 && (
+                <p className="mt-2 text-xs text-amber-700">Für {nz.jahr} gibt es keine Hochrechnung — Betrag eintragen, sobald der Steuerberater ihn kennt.</p>
+              )}
+              {evs.length > 0 ? (
+                <div className="mt-2 divide-y divide-neutral-100 text-sm">
+                  {evs.map((ev, k) => (
+                    <div key={k} className="flex items-center justify-between gap-3 py-1">
+                      <span className="tabular-nums text-neutral-500 w-20 shrink-0">{kurzDatum(ev.datum)}</span>
+                      <span className="flex-1 min-w-0 truncate text-neutral-800">{ev.label}</span>
+                      <span className="font-medium tabular-nums">{euro(-ev.betrag)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                nz.aktiv && nz.datum > ende && (hr || (nz.estEur ?? 0) + (nz.gewstEur ?? 0) > 0) && <p className="mt-2 text-xs text-amber-700">Liegt nach dem Vorschau-Zeitraum (bis {kurzDatum(ende)}) — oben am Diagramm „18 M“ wählen.</p>
+              )}
+              <div className="mt-2 text-right">
+                <button onClick={() => onChange(liste.filter((_, j) => j !== i))} className="text-xs text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-red-700">entfernen</button>
+              </div>
             </div>
-          ))}
-        </div>
-      ) : (
-        nz.aktiv && nz.datum > ende && <p className="mt-3 text-xs text-amber-700">Der Zahltag liegt nach dem Vorschau-Zeitraum (bis {kurzDatum(ende)}) — oben am Diagramm „12 M“ oder „18 M“ wählen.</p>
-      )}
-      <p className="mt-3 text-xs text-neutral-500">
-        Wann der Bescheid kommt, hängt an der Abgabe der Erklärung {nz.jahr}: mit Steuerberater spätestens bis Ende Februar {nz.jahr + 2}, oft früher. Gezahlt wird ca. einen Monat
-        nach dem Bescheid. Das Datum ist eine Annahme — trag ein, was der Steuerberater sagt. Steht die Nachzahlung schon bei den Vorauszahlungen (Soll), zählt nur diese.
-        Den Verlustvortrag bzw. die richtige Buchung des Kaufvertrags (Ware statt Firmenwert) kennt die Hochrechnung noch nicht.
-      </p>
+          );
+        })}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <button
+          onClick={() => onChange([...liste, { aktiv: true, jahr: vorschlag, datum: `${vorschlag + 2}-03-31`, estEur: sp && sp.jahr === vorschlag ? null : 0, gewstEur: sp && sp.jahr === vorschlag ? null : 0, vzAnpassen: !!sp && sp.jahr === vorschlag }])}
+          className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+        >
+          + Steuerjahr hinzufügen
+        </button>
+        <span className="text-xs text-neutral-500">
+          Fällig, wenn der Bescheid nach dem Jahresabschluss kommt (2025 → März 2027, 2026 → März 2028). Steht eine Nachzahlung schon bei den Vorauszahlungen (Soll), zählt nur diese.
+          Die Hochrechnung kennt die richtige Buchung des Kaufvertrags (Ware statt Firmenwert) noch nicht. Mit „Speichern“ unten übernehmen.
+        </span>
+      </div>
     </Card>
   );
 }

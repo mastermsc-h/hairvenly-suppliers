@@ -76,18 +76,21 @@ export async function saveLiquiditaetEinstellungen(input: Partial<LiqEinstellung
     .slice(0, 12)
     .map((a) => aktionSauber(a))
     .filter((a) => a && a.von! <= a.bis!);
-  const nz = input.steuerNachzahlung;
-  out.steuerNachzahlung =
-    nz && typeof nz === "object" && datum(nz.datum)
-      ? {
-          aktiv: nz.aktiv === true,
-          jahr: Math.min(2100, Math.max(2020, Math.round(Number(nz.jahr) || 0))),
-          datum: datum(nz.datum),
-          estEur: nz.estEur === null || nz.estEur === undefined || !Number.isFinite(Number(nz.estEur)) ? null : Math.min(10_000_000, Math.max(0, Number(nz.estEur))),
-          gewstEur: nz.gewstEur === null || nz.gewstEur === undefined || !Number.isFinite(Number(nz.gewstEur)) ? null : Math.min(10_000_000, Math.max(0, Number(nz.gewstEur))),
-          vzAnpassen: nz.vzAnpassen === true,
-        }
-      : null;
+  const nzSauber = (nz: unknown) => {
+    const n = nz as Record<string, unknown> | null;
+    if (!n || typeof n !== "object" || !datum(n.datum)) return null;
+    const betrag = (v: unknown) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Math.min(10_000_000, Math.max(0, Number(v))));
+    return {
+      aktiv: n.aktiv === true,
+      jahr: Math.min(2100, Math.max(2020, Math.round(Number(n.jahr) || 0))),
+      datum: datum(n.datum),
+      estEur: betrag(n.estEur),
+      gewstEur: betrag(n.gewstEur),
+      vzAnpassen: n.vzAnpassen === true,
+    };
+  };
+  const nzListe = Array.isArray(input.steuerNachzahlungen) ? input.steuerNachzahlungen : input.steuerNachzahlung ? [input.steuerNachzahlung] : [];
+  out.steuerNachzahlungen = nzListe.slice(0, 6).map(nzSauber).filter(Boolean);
   // Ratenregeln (Ebru …) — wurden bis 12.11.2026 nicht gespeichert, die Felder fielen still auf den Standard zurück
   const zahl = (v: unknown, min: number, max: number, std: number) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Math.min(max, Math.max(min, Number(v))) : std);
   out.ratenLieferanten = (Array.isArray(input.ratenLieferanten) ? input.ratenLieferanten : LIQ_DEFAULTS.ratenLieferanten)

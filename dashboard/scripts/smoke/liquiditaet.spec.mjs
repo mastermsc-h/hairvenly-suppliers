@@ -487,8 +487,8 @@ const stRoh = (o = {}) => roh({ steuern: { ...roh().steuern, estLetzte: 1735, ge
 const NZ = { aktiv: true, jahr: 2026, datum: "2027-06-30", estEur: null, gewstEur: null, vzAnpassen: true };
 const pnz = L.prognose(stRoh(), { ...E0, horizontTage: 365, steuerNachzahlung: NZ });
 const stz = (pp, re) => pp.ereignisse.filter((x) => x.art === "steuer" && re.test(x.label)).map((x) => [x.label.split(" (")[0], -x.betrag]);
-check("Nachzahlung ESt inkl. nachgeforderter VZ Q1+Q2 2027", stz(pnz, /ESt-Nachzahlung/), [["ESt-Nachzahlung 2026 + nachgeforderte Vorauszahlungen 2027", 113000 + 2 * (30000 - 1735)]]);
-check("Nachzahlung GewSt inkl. nachgeforderter VZ Q1+Q2 2027", stz(pnz, /GewSt-Nachzahlung/), [["GewSt-Nachzahlung 2026 + nachgeforderte Vorauszahlungen 2027", 56000 + 2 * (15000 - 1025)]]);
+check("Nachzahlung ESt inkl. nachgeforderter VZ Q1+Q2 2027", stz(pnz, /ESt-Nachzahlung/), [["ESt-Nachzahlung 2026 + nachgeforderte Vorauszahlungen", 113000 + 2 * (30000 - 1735)]]);
+check("Nachzahlung GewSt inkl. nachgeforderter VZ Q1+Q2 2027", stz(pnz, /GewSt-Nachzahlung/), [["GewSt-Nachzahlung 2026 + nachgeforderte Vorauszahlungen", 56000 + 2 * (15000 - 1025)]]);
 check("ESt-VZ: vor Bescheid alt, danach Jahressteuer/4", stz(pnz, /^ESt-Vorauszahlung/).map((x) => x[1]), [1735, 1735, 1735, 30000]);
 check("GewSt-VZ: Q3 2027 angepasst", stz(pnz, /^GewSt-Vorauszahlung Q3 2027/).map((x) => x[1]), [15000]);
 const pnzOhneVz = L.prognose(stRoh(), { ...E0, horizontTage: 365, steuerNachzahlung: { ...NZ, vzAnpassen: false } });
@@ -497,6 +497,18 @@ check("Eigener Betrag hat Vorrang", stz(L.prognose(stRoh(), { ...E0, horizontTag
 check("Soll im Ledger → keine doppelte Nachzahlung", stz(L.prognose(stRoh({ sollOffen: { "est_nachzahlung|2026": 100000 }, sollFaellig: { "est_nachzahlung|2026": "2027-05-01" } }), { ...E0, horizontTage: 365, steuerNachzahlung: { ...NZ, vzAnpassen: false } }), /ESt-Nachzahlung/).length, 1);
 check("Nachzahlung inaktiv: nichts", stz(L.prognose(stRoh(), { ...E0, horizontTage: 365, steuerNachzahlung: { ...NZ, aktiv: false } }), /Nachzahlung/).length, 0);
 check("Ohne Hochrechnung: Hinweis statt stiller Lücke", L.prognose(roh(), { ...E0, horizontTage: 365, steuerNachzahlung: NZ }).hinweise.some((h) => h.includes("keine Hochrechnung")), true);
+
+// User 19.11.2026: Nachzahlung 2026 erst März 2028 (Abgabe Jahresabschluss), 2025 im März 2027 (klein wegen Kaufvertrag)
+const N26 = { aktiv: true, jahr: 2026, datum: "2028-03-31", estEur: null, gewstEur: null, vzAnpassen: true };
+const N25 = { aktiv: true, jahr: 2025, datum: "2027-03-31", estEur: 5000, gewstEur: 2000, vzAnpassen: true };
+const p28 = L.prognose(stRoh(), { ...E0, horizontTage: 548, steuerNachzahlungen: [N25, N26] });
+check("März 2028: ganzes Jahr 2027 + Q1 2028 nachgefordert (ESt)", stz(p28, /ESt-Nachzahlung 2026/).map((x) => x[1]), [113000 + 5 * (30000 - 1735)]);
+check("März 2028: GewSt nachgefordert (Q1 2028 am 15.02. schon fällig)", stz(p28, /GewSt-Nachzahlung 2026/).map((x) => x[1]), [56000 + 5 * (15000 - 1025)]);
+check("Vorauszahlungen 2027 bleiben bis zum Bescheid alt", stz(p28, /^ESt-Vorauszahlung Q[1-4] 2027/).map((x) => x[1]), [1735, 1735, 1735, 1735]);
+check("2025: fester Betrag im März 2027, ohne Hochrechnung keine VZ-Änderung", stz(p28, /Nachzahlung 2025/).map((x) => [x[0], x[1]]), [["ESt-Nachzahlung 2025", 5000], ["GewSt-Nachzahlung 2025", 2000]]);
+check("2025 mit 0 €: kein Termin", stz(L.prognose(stRoh(), { ...E0, horizontTage: 548, steuerNachzahlungen: [{ ...N25, estEur: 0, gewstEur: 0 }] }), /Nachzahlung 2025/).length, 0);
+check("Alte Einzel-Einstellung wird übernommen", L.mitDefaults({ steuerNachzahlung: N26 }).steuerNachzahlungen, [N26]);
+check("Liste hat Vorrang vor alter Einstellung", L.mitDefaults({ steuerNachzahlung: N26, steuerNachzahlungen: [] }).steuerNachzahlungen, []);
 
 // Defaults
 check("Defaults vollständig", Object.keys(L.mitDefaults({})).length, Object.keys(L.LIQ_DEFAULTS).length);
