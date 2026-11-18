@@ -184,6 +184,8 @@ async function liquiditaet(nurBis?: string, details = false) {
       ebruRaten: einstellungen.ratenLieferanten,
       nachbestellungen: { amanda: einstellungen.nachbestellungenEinrechnen, ebru: einstellungen.ebruNachbestellungenEinrechnen, abstandTage: einstellungen.nachbestellAbstandTage, amandaKgMonat: p.nachbestellKgMonat, ebruKgMonat: p.ebruNachbestellKgMonat },
       aktion: einstellungen.aktion,
+      weitereAktionen: einstellungen.weitereAktionen,
+      steuerNachzahlung: einstellungen.steuerNachzahlung,
       reserve: einstellungen.puffer,
       ausgeblendeteKategorien: einstellungen.ausgeblendeteKategorien,
     },

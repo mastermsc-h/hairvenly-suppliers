@@ -13,7 +13,7 @@ const ZAHLEN: Array<[keyof LiqEinstellungen, number, number]> = [
   ["zollSatz", 0, 30],
   ["frachtProzent", 0, 100],
   ["puffer", 0, 10_000_000],
-  ["horizontTage", 14, 365],
+  ["horizontTage", 14, 550],
   ["restNachAnzahlungTage", 1, 180],
   ["manuellRateUsd", 1000, 10_000_000],
   ["manuellFristTage", 0, 365],
@@ -45,9 +45,8 @@ export async function saveLiquiditaetEinstellungen(input: Partial<LiqEinstellung
     out[k] = v === null || !Number.isFinite(v) ? null : Math.min(max, Math.max(min, v));
   }
   for (const k of SCHALTER) out[k] = input[k] === true;
-  const a = input.aktion;
   const datum = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
-  out.aktion =
+  const aktionSauber = (a: LiqEinstellungen["aktion"] | undefined) =>
     a && typeof a === "object" && datum(a.von) && datum(a.bis)
       ? {
           aktiv: a.aktiv === true,
@@ -70,6 +69,23 @@ export async function saveLiquiditaetEinstellungen(input: Partial<LiqEinstellung
                   quelle: String(a.nachlauf.quelle ?? "").slice(0, 200),
                 }
               : null,
+        }
+      : null;
+  out.aktion = aktionSauber(input.aktion);
+  out.weitereAktionen = (Array.isArray(input.weitereAktionen) ? input.weitereAktionen : [])
+    .slice(0, 12)
+    .map((a) => aktionSauber(a))
+    .filter((a) => a && a.von! <= a.bis!);
+  const nz = input.steuerNachzahlung;
+  out.steuerNachzahlung =
+    nz && typeof nz === "object" && datum(nz.datum)
+      ? {
+          aktiv: nz.aktiv === true,
+          jahr: Math.min(2100, Math.max(2020, Math.round(Number(nz.jahr) || 0))),
+          datum: datum(nz.datum),
+          estEur: nz.estEur === null || nz.estEur === undefined || !Number.isFinite(Number(nz.estEur)) ? null : Math.min(10_000_000, Math.max(0, Number(nz.estEur))),
+          gewstEur: nz.gewstEur === null || nz.gewstEur === undefined || !Number.isFinite(Number(nz.gewstEur)) ? null : Math.min(10_000_000, Math.max(0, Number(nz.gewstEur))),
+          vzAnpassen: nz.vzAnpassen === true,
         }
       : null;
   // Ratenregeln (Ebru …) — wurden bis 12.11.2026 nicht gespeichert, die Felder fielen still auf den Standard zurück

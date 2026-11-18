@@ -913,10 +913,13 @@ export const ladeKampagnen = cache(async (): Promise<KampagneDaten[]> => {
     if ((bis ?? von) < plusTage(heute, -7)) continue;
     out.push({ id: c.id, name: c.name, von, bis, farbe: c.color, notiz: c.note, quelle: "chatbot" });
   }
-  const aktion = (einst?.daten as { aktion?: { aktiv: boolean; label: string; von: string; bis: string; mehrumsatzBrutto: number } | null } | null)?.aktion;
-  if (aktion?.aktiv && aktion.bis >= plusTage(heute, -7)) {
+  type LiqAkt = { aktiv: boolean; label: string; von: string; bis: string; mehrumsatzBrutto: number };
+  const ld = einst?.daten as { aktion?: LiqAkt | null; weitereAktionen?: LiqAkt[] } | null;
+  // Black Friday + weitere geplante Aktionen (Sales) aus der Liquiditätsvorschau
+  for (const [i, aktion] of [ld?.aktion, ...(ld?.weitereAktionen ?? [])].entries()) {
+    if (!aktion?.aktiv || aktion.bis < plusTage(heute, -7)) continue;
     out.push({
-      id: "liq-aktion",
+      id: i === 0 ? "liq-aktion" : `liq-aktion-${i}`,
       name: aktion.label,
       von: aktion.von,
       bis: aktion.bis,

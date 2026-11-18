@@ -446,6 +446,58 @@ check("Flaute: Summe im Ergebnis", Math.round(nlMit.nachlaufSumme), -Math.round(
 check("Flaute aus: nichts", L.prognose(roh(), aktNl({ aktiv: false, quelle: "", abschnitte: [{ von: "2026-12-08", bis: "2026-12-17", faktor: 0.5 }] })).nachlaufSumme, 0);
 check("Flaute vor dem Start zählt nicht", L.prognose(roh(), aktNl({ aktiv: true, quelle: "", abschnitte: [{ von: "2026-10-01", bis: "2026-10-10", faktor: 0.5 }] })).nachlaufSumme, 0);
 
+// ── Szenario: Lieferanten glätten (User 18.11.2026: "so bezahlen, dass wir keine Engpässe bekommen") ──
+const zweiBest = [best({ id: "a", label: "A", eta: "2026-10-25", invoiceUsd: 150000, restUsd: 150000 }), best({ id: "b", label: "Bb", eta: "2026-10-30", invoiceUsd: 25000, restUsd: 25000 })];
+const SZ = { glaetten: true, minTeilEur: 5000, nurNoetigstes: false, amandaKgMonat: 0, ebruKgMonat: 0 };
+const ohneG = L.prognose(roh({ bestellungen: zweiBest }), E0);
+const mitG = L.prognose(roh({ bestellungen: zweiBest }), E0, SZ);
+check("Glätten: ohne Szenario Lücke", ohneG.tiefpunkt.saldo < 0, true);
+check("Glätten: Konto bleibt über der Reserve", mitG.tiefpunkt.saldo >= 20000 - 0.01, true);
+check("Glätten: nie früher als geplant", mitG.ereignisse.filter((x) => x.art === "lieferant").every((x) => !x.glattVon || x.datum >= x.glattVon), true);
+const liefSum = (pp) => -pp.ereignisse.filter((x) => x.art === "lieferant").reduce((s, x) => s + x.betrag, 0);
+check("Glätten: bezahlt + offen am Ende = vorher", Math.round(liefSum(mitG) + mitG.glaettung.offenAmEnde), Math.round(liefSum(ohneG)));
+check("Glätten: Reihenfolge — ältere Bestellung zuerst fertig", mitG.ereignisse.filter((x) => x.orderId === "b" && x.art === "lieferant").every((x) => x.datum >= mitG.ereignisse.filter((y) => y.orderId === "a" && y.art === "lieferant").map((y) => y.datum).sort().at(-1)), true);
+check("Glätten: Teilzahlungen ≥ Mindestbetrag (außer Restbetrag)", mitG.ereignisse.filter((x) => x.art === "lieferant" && x.label.includes("Teilzahlung")).slice(0, -1).every((x) => -x.betrag >= 5000), true);
+const klein = L.prognose(roh({ bestellungen: [best({ invoiceUsd: 10000, restUsd: 10000 })] }), E0, SZ);
+check("Glätten ohne Engpass: nichts verschoben", [klein.glaettung.verschoben, klein.glaettung.geteilt, klein.glaettung.offenAmEnde], [0, 0, 0]);
+check("Glätten ohne Engpass: gleiche Kurve", klein.tage.at(-1).saldo, L.prognose(roh({ bestellungen: [best({ invoiceUsd: 10000, restUsd: 10000 })] }), E0).tage.at(-1).saldo);
+check("Glätten aus = Szenario null", L.prognose(roh({ bestellungen: zweiBest }), E0, { ...SZ, glaetten: false }).tiefpunkt, ohneG.tiefpunkt);
+
+const spaet = L.prognose(roh({ bestellungen: [best({ id: "s", eta: "2027-03-01", invoiceUsd: 10000, restUsd: 10000 })] }), E0, SZ);
+check("Glätten: Zahlung nach dem Vorschau-Ende zählt nicht als 'passt nicht mehr'", [spaet.glaettung.offenAmEnde, spaet.ereignisse.filter((x) => x.orderId === "s" && x.art === "lieferant").map((x) => x.datum)], [0, ["2027-02-22"]]);
+
+// ── Szenario: nur das Nötigste nachbestellen ────────────────────────────────
+const nbRoh = roh({ nachbestellung: { kgProMonatAuto: 40, kgVerbrauchMonat: 30, usdProKgAuto: 1000, leadWochen: 2, letzteBestellung: "2026-10-10" } });
+const nbSum = (pp) => -pp.ereignisse.filter((x) => x.art === "nachbestellung").reduce((s, x) => s + x.betrag, 0);
+const nbVoll = L.prognose(nbRoh, { ...E0, nachbestellungenEinrechnen: true });
+const nbMin = L.prognose(nbRoh, { ...E0, nachbestellungenEinrechnen: true }, { ...SZ, glaetten: false, nurNoetigstes: true, amandaKgMonat: 5, ebruKgMonat: 0 });
+check("Nötigstes: ein Sechstel der Verbrauchs-Bestellungen", Math.round(nbSum(nbMin) * 6), Math.round(nbSum(nbVoll)));
+check("Nötigstes: kg/Monat im Ergebnis", nbMin.nachbestellKgMonat, 5);
+
+// ── Weitere Aktionen (Ladenhüter-Sale 12.–15.01.2027) ───────────────────────
+const sale = { aktiv: true, label: "Sale", von: "2026-11-01", bis: "2026-11-04", mehrumsatzBrutto: 40000, profil: [], verzugTage: 2, auszahlungProzent: 100, quelle: "" };
+const mitSale = L.prognose(roh(), { ...E0, weitereAktionen: [sale] });
+check("Weitere Aktion: Eingänge = Mehrumsatz", Math.round(mitSale.ereignisse.filter((x) => x.art === "aktion").reduce((s, x) => s + x.betrag, 0)), 40000);
+check("Weitere Aktion: gleichmäßig, mit Verzug", mitSale.ereignisse.filter((x) => x.art === "aktion").map((x) => [x.datum, x.betrag]), [["2026-11-03", 10000], ["2026-11-04", 10000], ["2026-11-05", 10000], ["2026-11-06", 10000]]);
+check("Weitere Aktion inaktiv: nichts", L.prognose(roh(), { ...E0, weitereAktionen: [{ ...sale, aktiv: false }] }).ereignisse.filter((x) => x.art === "aktion").length, 0);
+check("BF + weitere Aktion zusammen", L.prognose(roh(), { ...E0, aktion: { ...sale, label: "BF", von: "2026-11-20", bis: "2026-11-20", mehrumsatzBrutto: 5000 }, weitereAktionen: [sale] }).ereignisse.filter((x) => x.art === "aktion").length, 5);
+
+// ── Erwartete ESt-/GewSt-Nachzahlung + angepasste Vorauszahlungen ───────────
+const stRoh = (o = {}) => roh({ steuern: { ...roh().steuern, estLetzte: 1735, gewstLetzte: 1025, ...o }, steuerPrognose: { jahr: 2026, est: 120000, gewst: 60000, vzEst: 7000, vzGewst: 4000, nachEst: 113000, nachGewst: 56000, gewinnJahr: 400000, monate: 10 } });
+const NZ = { aktiv: true, jahr: 2026, datum: "2027-06-30", estEur: null, gewstEur: null, vzAnpassen: true };
+const pnz = L.prognose(stRoh(), { ...E0, horizontTage: 365, steuerNachzahlung: NZ });
+const stz = (pp, re) => pp.ereignisse.filter((x) => x.art === "steuer" && re.test(x.label)).map((x) => [x.label.split(" (")[0], -x.betrag]);
+check("Nachzahlung ESt inkl. nachgeforderter VZ Q1+Q2 2027", stz(pnz, /ESt-Nachzahlung/), [["ESt-Nachzahlung 2026 + nachgeforderte Vorauszahlungen 2027", 113000 + 2 * (30000 - 1735)]]);
+check("Nachzahlung GewSt inkl. nachgeforderter VZ Q1+Q2 2027", stz(pnz, /GewSt-Nachzahlung/), [["GewSt-Nachzahlung 2026 + nachgeforderte Vorauszahlungen 2027", 56000 + 2 * (15000 - 1025)]]);
+check("ESt-VZ: vor Bescheid alt, danach Jahressteuer/4", stz(pnz, /^ESt-Vorauszahlung/).map((x) => x[1]), [1735, 1735, 1735, 30000]);
+check("GewSt-VZ: Q3 2027 angepasst", stz(pnz, /^GewSt-Vorauszahlung Q3 2027/).map((x) => x[1]), [15000]);
+const pnzOhneVz = L.prognose(stRoh(), { ...E0, horizontTage: 365, steuerNachzahlung: { ...NZ, vzAnpassen: false } });
+check("Ohne VZ-Anpassung: nur Nachzahlung", stz(pnzOhneVz, /Nachzahlung/).map((x) => x[1]), [113000, 56000]);
+check("Eigener Betrag hat Vorrang", stz(L.prognose(stRoh(), { ...E0, horizontTage: 365, steuerNachzahlung: { ...NZ, vzAnpassen: false, estEur: 90000 } }), /ESt-Nachzahlung/).map((x) => x[1]), [90000]);
+check("Soll im Ledger → keine doppelte Nachzahlung", stz(L.prognose(stRoh({ sollOffen: { "est_nachzahlung|2026": 100000 }, sollFaellig: { "est_nachzahlung|2026": "2027-05-01" } }), { ...E0, horizontTage: 365, steuerNachzahlung: { ...NZ, vzAnpassen: false } }), /ESt-Nachzahlung/).length, 1);
+check("Nachzahlung inaktiv: nichts", stz(L.prognose(stRoh(), { ...E0, horizontTage: 365, steuerNachzahlung: { ...NZ, aktiv: false } }), /Nachzahlung/).length, 0);
+check("Ohne Hochrechnung: Hinweis statt stiller Lücke", L.prognose(roh(), { ...E0, horizontTage: 365, steuerNachzahlung: NZ }).hinweise.some((h) => h.includes("keine Hochrechnung")), true);
+
 // Defaults
 check("Defaults vollständig", Object.keys(L.mitDefaults({})).length, Object.keys(L.LIQ_DEFAULTS).length);
 

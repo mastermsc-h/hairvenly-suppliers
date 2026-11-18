@@ -96,6 +96,36 @@ export interface LiqEinstellungen {
   nachbestellAbstandTage: number;
   ebruNachbestellKgMonat: number | null; // null = Ø Bestellungen der letzten 6 Monate
   ebruUsdProKg: number | null; // null = Ø der letzten Bestellungen
+  /** Weitere geplante Aktionen (z.B. Ladenhüter-Sale), gleiche Rechnung wie `aktion`. */
+  weitereAktionen: LiqAktion[];
+  /** Erwartete ESt-/GewSt-Nachzahlung eines Jahres (Hochrechnung) — null = nicht eingeplant. */
+  steuerNachzahlung: LiqSteuerNachzahlung | null;
+}
+
+/** Erwartete Nachzahlung Einkommen-/Gewerbesteuer laut Bescheid. */
+export interface LiqSteuerNachzahlung {
+  aktiv: boolean;
+  /** Steuerjahr, z.B. 2026. */
+  jahr: number;
+  /** Erwarteter Zahltag (Bescheid + ca. 1 Monat). */
+  datum: string;
+  /** null = Hochrechnung (Finanzübersicht) minus Vorauszahlungen. */
+  estEur: number | null;
+  gewstEur: number | null;
+  /** Mit dem Bescheid steigen die Vorauszahlungen des Folgejahres auf Jahressteuer/4 — schon fällige Quartale werden nachgefordert. */
+  vzAnpassen: boolean;
+}
+
+/** Was-wäre-wenn (nur Anzeige, nicht gespeichert, nicht in der Ampel an den Bestellungen). */
+export interface LiqSzenario {
+  /** Lieferanten (Amanda, Ebru-Raten, Nachbestellungen) erst zahlen, wenn das Konto dabei über der Reserve bleibt. */
+  glaetten: boolean;
+  /** Kleinste Teilzahlung (€). */
+  minTeilEur: number;
+  /** Nachbestellungen nur noch im Mindestbedarf (kg/Monat statt Verbrauch). */
+  nurNoetigstes: boolean;
+  amandaKgMonat: number;
+  ebruKgMonat: number;
 }
 
 export interface LiqRatenRegel {
@@ -182,6 +212,8 @@ export const LIQ_DEFAULTS: LiqEinstellungen = {
   nachbestellAbstandTage: 14,
   ebruNachbestellKgMonat: null,
   ebruUsdProKg: null,
+  weitereAktionen: [],
+  steuerNachzahlung: null,
 };
 
 export function mitDefaults(e: Partial<LiqEinstellungen> | null | undefined): LiqEinstellungen {
@@ -519,6 +551,8 @@ export interface LiqRohdaten {
     /** Datum aus dem Steuer-Ledger je offenem Soll, "art|zeitraum" → YYYY-MM-DD. */
     sollFaellig?: Record<string, string>;
   };
+  /** Hochrechnung ESt/GewSt des laufenden Jahres (Finanzübersicht) — nur auf der Liquiditätsseite geladen. */
+  steuerPrognose?: { jahr: number; est: number; gewst: number; vzEst: number; vzGewst: number; nachEst: number; nachGewst: number; gewinnJahr: number; monate: number } | null;
   nachbestellung: {
     /** Ø bestellte kg/Monat (letzte 3 Monate) — war zuletzt Black-Friday-Vorrat, nicht Verbrauch. */
     kgProMonatAuto: number;
@@ -627,6 +661,8 @@ export interface Ereignis {
   teil?: "anzahlung" | "rest";
   /** An der Bestellung als bezahlt eingetragen, aber noch nicht auf dem Konto — keine offene Schuld mehr. */
   unterwegs?: boolean;
+  /** Szenario "Lieferanten glätten": ursprünglicher Termin (Zahlung verschoben bzw. geteilt). */
+  glattVon?: string;
 }
 
 export type Ampel = "ok" | "knapp" | "luecke";
@@ -699,6 +735,17 @@ export interface PrognoseErgebnis {
   /** Tiefpunkt, wenn andere Lieferanten (Ø) zusätzlich eingerechnet würden — als Warnung. */
   tiefpunktMitAnderen: { datum: string; saldo: number };
   hinweise: string[];
+  /** Szenario "Lieferanten glätten": was verschoben wurde. */
+  glaettung: Glaettung | null;
+}
+
+export interface Glaettung {
+  verschoben: number;
+  geteilt: number;
+  /** Ø Tage später als geplant (gewichtet nach Betrag). */
+  verzugTageSchnitt: number;
+  /** Im Vorschau-Zeitraum nicht mehr bezahlt (€). */
+  offenAmEnde: number;
 }
 
 export interface EinfuhrPrognose {
@@ -1126,17 +1173,18 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
   //     Die USt auf den Mehrumsatz erhöht die USt-VA des Aktionsmonats.
   const ustZusatz: Record<string, number> = {};
   const a = e.aktion;
-  if (a && a.aktiv && a.mehrumsatzBrutto > 0 && a.von <= a.bis) {
-    const tage = tageZwischen(a.von, a.bis) + 1;
-    const profil = a.profil.length === tage && a.profil.some((x) => x > 0) ? a.profil.map((x) => Math.max(0, x)) : Array(tage).fill(1);
+  for (const ak of [a, ...(e.weitereAktionen ?? [])]) {
+    if (!ak || !ak.aktiv || !(ak.mehrumsatzBrutto > 0) || ak.von > ak.bis) continue;
+    const tage = tageZwischen(ak.von, ak.bis) + 1;
+    const profil = ak.profil.length === tage && ak.profil.some((x) => x > 0) ? ak.profil.map((x) => Math.max(0, x)) : Array(tage).fill(1);
     const summe = profil.reduce((s, x) => s + x, 0);
     for (let i = 0; i < tage; i++) {
-      const tag = plusTage(a.von, i);
-      const brutto = (a.mehrumsatzBrutto * profil[i]) / summe;
+      const tag = plusTage(ak.von, i);
+      const brutto = (ak.mehrumsatzBrutto * profil[i]) / summe;
       if (brutto <= 0) continue;
-      const eingang = plusTage(tag, a.verzugTage);
+      const eingang = plusTage(tag, ak.verzugTage);
       if (eingang >= start && eingang <= ende) {
-        ereignisse.push({ datum: eingang, betrag: r2((brutto * a.auszahlungProzent) / 100), art: "aktion", label: `${a.label} Mehrumsatz ${tag.slice(8, 10)}.${tag.slice(5, 7)}.` });
+        ereignisse.push({ datum: eingang, betrag: r2((brutto * ak.auszahlungProzent) / 100), art: "aktion", label: `${ak.label} Mehrumsatz ${tag.slice(8, 10)}.${tag.slice(5, 7)}.` });
       }
       ustZusatz[monatVon(tag)] = (ustZusatz[monatVon(tag)] ?? 0) + (brutto * 19) / 119;
     }
@@ -1231,9 +1279,20 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     }
   }
 
-  // 5) ESt-/GewSt-Vorauszahlungen: letzter Betrag je Quartal
+  // 5) ESt-/GewSt-Vorauszahlungen: letzter Betrag je Quartal. Mit eingeplanter Nachzahlung (Bescheid) steigen
+  //    die Quartale ab dem Bescheid auf Jahressteuer/4; schon fällige Quartale des Folgejahres werden nachgefordert.
   const [sy] = start.split("-").map(Number);
-  for (const jahr of [sy, sy + 1]) {
+  const nz = e.steuerNachzahlung?.aktiv ? e.steuerNachzahlung : null;
+  const sp = roh.steuerPrognose ?? null;
+  const nzBetrag = (art: "est" | "gewst") => (art === "est" ? nz?.estEur ?? (sp && sp.jahr === nz?.jahr ? sp.nachEst : null) : nz?.gewstEur ?? (sp && sp.jahr === nz?.jahr ? sp.nachGewst : null));
+  const neuVz = (art: "est" | "gewst"): number | null => {
+    const nach = nzBetrag(art);
+    if (!nz?.vzAnpassen || nach === null || !sp) return null;
+    const jahresSteuer = nach + (art === "est" ? sp.vzEst : sp.vzGewst);
+    return jahresSteuer > 0 ? r2(jahresSteuer / 4) : null;
+  };
+  const nachgefordert: Record<"est" | "gewst", number> = { est: 0, gewst: 0 };
+  for (const jahr of [sy, sy + 1, sy + 2]) {
     for (let q = 1; q <= 4; q++) {
       for (const [art, betrag, name] of [
         ["est_vz", roh.steuern.estLetzte, "ESt-Vorauszahlung"],
@@ -1242,18 +1301,29 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
         const zeitraum = `Q${q} ${jahr}`;
         const faellig = faelligkeit(art, zeitraum);
         const si = sollInfo(roh, `${art}|${zeitraum}`);
+        const kurz = art === "est_vz" ? "est" : "gewst";
+        const angepasst = si.soll === undefined && nz && jahr > nz.jahr ? neuVz(kurz) : null;
+        // Quartal des Folgejahres schon vor dem Bescheid fällig: alter Betrag jetzt, Erhöhung kommt mit dem Bescheid
+        if (angepasst !== null && faellig && faellig < nz!.datum && jahr === nz!.jahr + 1) {
+          nachgefordert[kurz] += Math.max(0, angepasst - (betrag ?? 0));
+        }
+        const neu = angepasst !== null && faellig && faellig >= nz!.datum ? angepasst : null;
         // Ohne Soll = letzter Bescheidbetrag (Vorauszahlungen sind festgesetzt, keine echte Schätzung)
-        const wert = si.soll ?? betrag;
+        const wert = si.soll ?? neu ?? betrag;
         if (!wert || !faellig || faellig < start || faellig > ende) continue;
         if (roh.steuern.quartaleErledigt.includes(`${art}|${zeitraum}`)) continue;
         ereignisse.push({
           datum: faellig,
           betrag: -wert,
           art: "steuer",
-          label: `${name} ${zeitraum}${si.soll !== undefined ? si.zusatz : ""}`,
-          steuer: art === "est_vz" ? "est" : "gewst",
-          schaetzung: si.soll !== undefined && si.schaetzung,
-          rechnung: [{ text: si.soll !== undefined ? "Soll laut Vorauszahlungen" : "Festgesetzte Vorauszahlung (zuletzt bezahlter Quartalsbetrag)", betrag: r2(wert) }],
+          label: `${name} ${zeitraum}${si.soll !== undefined ? si.zusatz : neu !== null ? ` (angepasst nach Bescheid ${nz!.jahr})` : ""}`,
+          steuer: kurz,
+          schaetzung: (si.soll !== undefined && si.schaetzung) || neu !== null,
+          rechnung: [
+            neu !== null
+              ? { text: `Jahressteuer ${nz!.jahr} laut Hochrechnung ÷ 4 (Finanzamt passt die Vorauszahlungen mit dem Bescheid an)`, betrag: r2(wert) }
+              : { text: si.soll !== undefined ? "Soll laut Vorauszahlungen" : "Festgesetzte Vorauszahlung (zuletzt bezahlter Quartalsbetrag)", betrag: r2(wert) },
+          ],
         });
       }
     }
@@ -1291,6 +1361,35 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     });
   }
 
+  // 6b) Erwartete ESt-/GewSt-Nachzahlung (Hochrechnung) — nur wenn kein Soll im Steuer-Ledger steht
+  if (nz) {
+    for (const [kurz, art, name] of [["est", "est_nachzahlung", "ESt-Nachzahlung"], ["gewst", "gewst_nachzahlung", "GewSt-Nachzahlung"]] as const) {
+      const imLedger = Object.keys(roh.steuern.sollOffen ?? {}).some((k) => k.startsWith(`${art}|`) && k.includes(String(nz.jahr)));
+      if (imLedger) continue;
+      const betrag = nzBetrag(kurz);
+      if (betrag === null) {
+        hinweise.push(`${name} ${nz.jahr}: keine Hochrechnung verfügbar — Betrag bei „Steuer-Nachzahlung“ eintragen.`);
+        continue;
+      }
+      const datum = amStart(nz.datum);
+      const extra = nachgefordert[kurz];
+      if (datum > ende || betrag + extra <= 0.5) continue;
+      const auto = (kurz === "est" ? nz.estEur : nz.gewstEur) === null;
+      ereignisse.push({
+        datum,
+        betrag: -r2(Math.max(0, betrag) + extra),
+        art: "steuer",
+        label: `${name} ${nz.jahr}${extra > 0 ? ` + nachgeforderte Vorauszahlungen ${nz.jahr + 1}` : ""} (erwartet)`,
+        steuer: kurz,
+        schaetzung: true,
+        rechnung: [
+          { text: auto && sp ? `Jahressteuer ${nz.jahr} laut Hochrechnung (${sp.monate} Monate) minus gezahlte Vorauszahlungen` : "Betrag laut Eingabe", betrag: r2(Math.max(0, betrag)) },
+          ...(extra > 0 ? [{ text: `Erhöhung der schon fälligen Vorauszahlungen ${nz.jahr + 1} (rückwirkend mit dem Bescheid)`, betrag: r2(extra) }] : []),
+        ],
+      });
+    }
+  }
+
   // Innerhalb eines Tages: Eingänge vor Ausgängen, sonst stabil
   ereignisse.sort((a, b) => a.datum.localeCompare(b.datum) || Math.sign(b.betrag) - Math.sign(a.betrag));
   return { start, ende, fx, fxQuelle, ereignisse, ustBasis, eustAndereMonat, ustIstSchnitt, bestellInfo, hinweise, nachbestellKgMonat, ebruNachbestellKgMonat, einfuhrAndere, vermutungen, einnahmenKorrektur };
@@ -1323,8 +1422,83 @@ function simuliere(
   return { tage, nachEreignis, tiefpunkt: { datum: tief.datum, saldo: r2(tief.saldo) } };
 }
 
-export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null | undefined): PrognoseErgebnis {
-  const e = mitDefaults(eIn);
+/** Zahlungen, die das Szenario "Lieferanten glätten" verschieben/teilen darf. */
+export const istLieferantenZahlung = (ev: Ereignis) => (ev.art === "lieferant" || ev.art === "manuell" || ev.art === "nachbestellung") && !ev.unterwegs;
+
+/**
+ * Lieferanten so zahlen, dass das Konto über der Reserve bleibt: feste Zahlungen (Steuern, Einfuhr, Einnahmen)
+ * bleiben, Lieferantenzahlungen gehen in ihrer Reihenfolge (älteste zuerst) raus, sobald der Betrag bis zum
+ * Ende der Vorschau nirgends unter die Reserve drückt — nie früher als geplant. Reicht es nur für einen Teil
+ * (≥ minTeil), wird geteilt. Was im Zeitraum nicht mehr passt, fällt hinten raus (offenAmEnde).
+ */
+export function glaetteLieferanten(
+  ereignisse: Ereignis[],
+  startSaldo: number,
+  start: string,
+  ende: string,
+  proTag: number,
+  korrektur: Map<string, number>,
+  puffer: number,
+  minTeil: number,
+): { ereignisse: Ereignis[]; info: Glaettung } {
+  // Termine nach dem Vorschau-Ende (z.B. späte Ebru-Raten) bleiben, wie sie sind — sie sind nicht in der Kurve
+  const verschiebbar = (x: Ereignis) => istLieferantenZahlung(x) && x.datum <= ende;
+  const fest = ereignisse.filter((x) => !verschiebbar(x));
+  const queue = ereignisse.filter(verschiebbar).map((ev) => ({ ev, rest: -ev.betrag }));
+  const { tage } = simuliere(startSaldo, start, ende, proTag, fest, korrektur);
+  // Tiefster Stand ab jedem Tag bis zum Ende (nur feste Zahlungen)
+  const abHier: number[] = new Array(tage.length);
+  for (let i = tage.length - 1, m = Infinity; i >= 0; i--) abHier[i] = m = Math.min(m, tage[i].saldo);
+  const neu: Ereignis[] = [];
+  let bezahlt = 0;
+  let verzugGewicht = 0;
+  let summeBezahlt = 0;
+  let verschoben = 0;
+  let geteilt = 0;
+  let kopf = 0;
+  for (let i = 0; i < tage.length && kopf < queue.length; i++) {
+    const d = tage[i].datum;
+    let frei = abHier[i] - bezahlt - puffer;
+    while (kopf < queue.length && queue[kopf].ev.datum <= d) {
+      const q = queue[kopf];
+      const teil = q.rest <= frei + 0.005 ? q.rest : frei >= minTeil ? Math.floor(frei / 100) * 100 : 0;
+      if (teil <= 0) break;
+      const ganz = teil >= q.rest - 0.005;
+      const erstesStueck = Math.abs(q.rest + q.ev.betrag) < 0.01;
+      if (d !== q.ev.datum || !ganz || !erstesStueck) {
+        neu.push({
+          ...q.ev,
+          datum: d,
+          betrag: -r2(teil),
+          glattVon: q.ev.datum,
+          sofort: false,
+          label: `${q.ev.label}${!ganz || !erstesStueck ? " · Teilzahlung" : ""}${d !== q.ev.datum ? ` (geplant ${deKurz(q.ev.datum)})` : ""}`,
+        });
+        if (d !== q.ev.datum && erstesStueck) verschoben++;
+        if (!ganz && erstesStueck) geteilt++;
+      } else neu.push(q.ev);
+      verzugGewicht += teil * tageZwischen(q.ev.datum, d);
+      summeBezahlt += teil;
+      q.rest = r2(q.rest - teil);
+      bezahlt += teil;
+      frei -= teil;
+      if (q.rest <= 0.005) kopf++;
+    }
+  }
+  const offenAmEnde = r2(queue.reduce((s, q) => s + Math.max(0, q.rest), 0));
+  const alle = [...fest, ...neu].sort((a, b) => a.datum.localeCompare(b.datum) || Math.sign(b.betrag) - Math.sign(a.betrag));
+  return {
+    ereignisse: alle,
+    info: { verschoben, geteilt, verzugTageSchnitt: summeBezahlt > 0 ? Math.round(verzugGewicht / summeBezahlt) : 0, offenAmEnde },
+  };
+}
+
+export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null | undefined, szenario?: LiqSzenario | null): PrognoseErgebnis {
+  const eGespeichert = mitDefaults(eIn);
+  // "Nur das Nötigste": Nachbestellungen im Mindestbedarf statt nach Verbrauch
+  const e = szenario?.nurNoetigstes
+    ? { ...eGespeichert, nachbestellKgMonat: Math.max(0, szenario.amandaKgMonat), ebruNachbestellKgMonat: Math.max(0, szenario.ebruKgMonat) }
+    : eGespeichert;
   const plan = erstellePlan(roh, e);
   const tage = Math.max(1, roh.basis.tage);
   const einnahmenProTag = r2(roh.basis.einnahmen / tage);
@@ -1343,6 +1517,13 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
   if (pp && !ppFrisch) plan.hinweise.push(`PayPal-Stand ist vom ${pp.abgerufenAm.slice(0, 10)} — nicht eingerechnet (Worker/PayPal-API prüfen).`);
   const startSaldo = roh.startSaldo + (ppEin && pp ? pp.saldo : 0);
 
+  let glaettung: Glaettung | null = null;
+  if (szenario?.glaetten) {
+    const g = glaetteLieferanten(plan.ereignisse, startSaldo, plan.start, plan.ende, proTag, plan.einnahmenKorrektur, e.puffer, Math.max(100, szenario.minTeilEur));
+    plan.ereignisse = g.ereignisse;
+    glaettung = g.info;
+    if (g.info.offenAmEnde > 0) plan.hinweise.push(`Szenario „Lieferanten glätten“: ${Math.round(g.info.offenAmEnde).toLocaleString("de-DE")} € Lieferantenzahlungen passen nicht mehr in den Vorschau-Zeitraum, ohne die Reserve zu unterschreiten — sie fehlen in der Kurve und bleiben offen.`);
+  }
   const sim = simuliere(startSaldo, plan.start, plan.ende, proTag, plan.ereignisse, plan.einnahmenKorrektur);
   const simAndere = e.andereLieferantenEinrechnen
     ? sim
@@ -1363,7 +1544,7 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
       label: b.label,
       status: b.status,
       eta: b.eta,
-      zahlDatum: info.zahlDatum,
+      zahlDatum: glaettung && zahlEvs.length ? zahlEvs.map((x) => x.datum).sort()[0] : info.zahlDatum,
       sofort: info.sofort,
       termin: info.termin,
       bezahlt: info.usd <= 0.01,
@@ -1425,5 +1606,6 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
     tiefpunkt: sim.tiefpunkt,
     tiefpunktMitAnderen: simAndere.tiefpunkt,
     hinweise: plan.hinweise,
+    glaettung,
   };
 }

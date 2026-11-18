@@ -6,7 +6,7 @@ import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, X } from "luc
 import { Area, Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import { kontoZweck } from "@/lib/bank/konten";
-import { LIQ_DEFAULTS, VERSAND_FRUEHESTENS_TAGE, bestellTage, ZOLL_NACH_VERSAND_TAGE, prognose, zahlGruppe, zerlegeRateSchluessel, type Ereignis, type LiqEinstellungen, type LiqRohdaten, type VerlaufTag, type ZahlGruppe } from "@/lib/liquiditaet/rechnung";
+import { LIQ_DEFAULTS, VERSAND_FRUEHESTENS_TAGE, bestellTage, ZOLL_NACH_VERSAND_TAGE, prognose, zahlGruppe, zerlegeRateSchluessel, type Ereignis, type LiqAktion, type LiqEinstellungen, type LiqRohdaten, type LiqSzenario, type VerlaufTag, type ZahlGruppe } from "@/lib/liquiditaet/rechnung";
 import { SYMBOLE, TerminSymbol, symbolTyp, type SymbolTyp } from "./termin-symbol";
 import { AMPEL_STIL } from "../../orders/liquiditaet-badge";
 import EinfuhrRechnung from "./einfuhr-rechnung";
@@ -91,7 +91,11 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
     }
     return { ...roh, verschiebungen: v };
   }, [roh, entwuerfe]);
-  const p = useMemo(() => prognose(rohMitEntwurf, e), [rohMitEntwurf, e]);
+  // Was-wäre-wenn: nur Anzeige, nicht gespeichert (die Ampel an den Bestellungen rechnet ohne)
+  const [sz, setSz] = useState<LiqSzenario>(SZENARIO_START);
+  const szAktiv = sz.glaetten || sz.nurNoetigstes;
+  const p = useMemo(() => prognose(rohMitEntwurf, e, szAktiv ? sz : null), [rohMitEntwurf, e, sz, szAktiv]);
+  const pOhne = useMemo(() => (szAktiv ? prognose(rohMitEntwurf, e) : null), [rohMitEntwurf, e, szAktiv]);
   const geaendert = JSON.stringify(e) !== JSON.stringify(gespeichert);
   // Angeklickter Tag im Diagramm + Sprung zum Eintrag darunter
   const [pin, setPin] = useState<{ datum: string; x: number } | null>(null);
@@ -245,9 +249,16 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
     };
   }, [p, roh]);
   const pinSchulden = pin ? schuldenNach(pin.datum) : null;
+  const ohneAm = useMemo(() => new Map((pOhne?.tage ?? []).map((t) => [t.datum, t.saldo])), [pOhne]);
   const chartAnzeige = useMemo(
-    () => (pin && pin.datum >= p.start ? chartData.map((t) => (t.datum >= pin.datum ? { ...t, schuld: schuldenNach(t.datum)?.summe } : t)) : chartData),
-    [chartData, pin, p.start, schuldenNach],
+    () =>
+      chartData.map((t) => {
+        let z: DiagrammTag & { schuld?: number; ohne?: number } = t;
+        if (pin && pin.datum >= p.start && t.datum >= pin.datum) z = { ...z, schuld: schuldenNach(t.datum)?.summe };
+        if (ohneAm.size && t.saldo !== undefined) z = { ...z, ohne: ohneAm.get(t.datum) };
+        return z;
+      }),
+    [chartData, pin, p.start, schuldenNach, ohneAm],
   );
   const fensterVon = chartData[0]?.datum ?? p.start;
   const fensterBis = chartData.at(-1)?.datum ?? p.start;
@@ -266,9 +277,10 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
     ebruRegel && set("ratenLieferanten", [{ ...ebruRegel, ...patch }, ...e.ratenLieferanten.slice(1)]);
   const termine = [
     ...p.ereignisse.filter((x) => x.art !== "lieferant" && x.art !== "aktion"),
-    ...(aktionEv.length
-      ? [{ datum: aktionEv[0].datum, betrag: aktionEv.reduce((s, x) => s + x.betrag, 0), art: "aktion" as const, label: `${e.aktion?.label ?? "Aktion"}: Mehrumsatz-Eingänge bis ${deDate(aktionEv.at(-1)!.datum)}` }]
-      : []),
+    ...[...new Set(aktionEv.map((x) => aktionName(x.label)))].map((name): Ereignis => {
+      const evs = aktionEv.filter((x) => aktionName(x.label) === name);
+      return { datum: evs[0].datum, betrag: evs.reduce((s, x) => s + x.betrag, 0), art: "aktion" as const, label: `${name}: Mehrumsatz-Eingänge bis ${deDate(evs.at(-1)!.datum)}` };
+    }),
   ].sort((a, b) => a.datum.localeCompare(b.datum));
   const setAktion = (patch: Partial<NonNullable<LiqEinstellungen["aktion"]>>) =>
     e.aktion && set("aktion", { ...e.aktion, ...patch });
@@ -398,6 +410,22 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
             {fensterBis >= p.start && <span className="ml-2 inline-flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-blue-600" /> Vorschau</span>}
           </span>
           <span className="flex items-center gap-1">
+            <span className="mr-1 flex items-center rounded-md border border-neutral-200 p-0.5" title="Wie weit die Vorschau in die Zukunft rechnet">
+              {HORIZONTE.map((h) => (
+                <button
+                  key={h.tage}
+                  onClick={() => {
+                    setPin(null);
+                    setZurueck(0);
+                    set("horizontTage", h.tage);
+                  }}
+                  aria-pressed={e.horizontTage === h.tage}
+                  className={`rounded px-1.5 py-0.5 text-xs font-medium ${e.horizontTage === h.tage ? "bg-neutral-900 text-white" : "text-neutral-600 hover:bg-neutral-100"}`}
+                >
+                  {h.name}
+                </button>
+              ))}
+            </span>
             {versatz > 0 && (
               <button onClick={() => verschiebe(-versatz)} className="rounded-md px-2 py-1 text-xs font-medium text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900">
                 Heute
@@ -446,6 +474,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
             </button>
           )}
         </div>
+        <SzenarioLeiste sz={sz} setSz={setSz} p={p} pOhne={pOhne} puffer={e.puffer} roh={roh} e={e} />
         <div className="relative cursor-pointer [&_*:focus]:outline-none" style={{ width: "100%", height: 300 }}>
           <ResponsiveContainer>
             <ComposedChart data={chartAnzeige} margin={{ top: 12, right: 8, left: 8, bottom: 0 }} onClick={diagrammKlick}>
@@ -481,6 +510,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
                   return (
                     <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs shadow-sm max-w-sm space-y-1">
                       <div className="font-semibold">{deDate(d.datum)}: {eur(d.saldo ?? d.ist ?? 0)}</div>
+                      {pOhne && ohneAm.has(d.datum) && <div className="text-neutral-500">ohne Was-wäre-wenn: {eur(ohneAm.get(d.datum) ?? 0)}</div>}
                       <TagesBuchungen tag={d} />
                       {d.ev.map((x, i) => (
                         <div key={i} className="flex items-start gap-1.5 text-neutral-600">
@@ -506,6 +536,8 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
               <ReferenceLine y={e.puffer} stroke="#d97706" strokeDasharray="4 4" label={{ value: "Reserve", position: "insideTopRight", fontSize: 10, fill: "#d97706" }} />
               <Area type="stepAfter" dataKey="ist" stroke="#737373" fill="#f5f5f5" strokeWidth={2} isAnimationActive={false} />
               <Area type="stepAfter" dataKey="saldo" stroke="#2563eb" fill="#dbeafe" strokeWidth={2} isAnimationActive={false} />
+              {/* Szenario aktiv: Kurve ohne Szenario zum Vergleich */}
+              {pOhne && <Line type="stepAfter" dataKey="ohne" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="5 4" dot={false} activeDot={false} isAnimationActive={false} />}
               {/* Ab dem angeklickten Tag: was an Lieferanten danach noch offen ist */}
               {pinSchulden && <Line yAxisId="s" type="stepAfter" dataKey="schuld" stroke="#7c3aed" strokeWidth={2} strokeDasharray="6 4" dot={false} activeDot={false} isAnimationActive={false} />}
               {/* Zahlungen als Balken (rechte Achse): bezahlt blass, geplant kräftig */}
@@ -862,6 +894,9 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
         </Card>
       )}
 
+      <WeitereAktionen liste={e.weitereAktionen ?? []} onChange={(l) => set("weitereAktionen", l)} p={p} />
+      <SteuerNachzahlungKarte nz={e.steuerNachzahlung} sp={roh.steuerPrognose ?? null} onChange={(v) => set("steuerNachzahlung", v)} p={p} />
+
       {manuellRaten.length > 0 && (
         <Card title="Ratenplan offene Rechnungen" accent="border-l-amber-400">
           <div className="text-xs text-neutral-500 mb-3 space-y-1">
@@ -928,7 +963,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           <Feld label="Manuelle Positionen: Rate (USD)" value={e.manuellRateUsd} step={1000} onChange={(v) => set("manuellRateUsd", Math.max(1000, v ?? LIQ_DEFAULTS.manuellRateUsd))} />
           <Feld label="Manuelle Positionen: Zahlungsfrist (Tage)" value={e.manuellFristTage} onChange={(v) => set("manuellFristTage", Math.max(0, v ?? LIQ_DEFAULTS.manuellFristTage))} />
           <Feld label="Manuelle Positionen: Abstand der Raten (Tage)" value={e.manuellAbstandTage} onChange={(v) => set("manuellAbstandTage", Math.max(1, v ?? LIQ_DEFAULTS.manuellAbstandTage))} />
-          <Feld label="Vorschau (Tage)" value={e.horizontTage} onChange={(v) => set("horizontTage", Math.max(14, Math.min(365, v ?? 90)))} />
+          <Feld label="Vorschau (Tage, max. 548)" value={e.horizontTage} onChange={(v) => set("horizontTage", Math.max(14, Math.min(548, v ?? 90)))} />
           <Feld label={`Wechselkurs USD/€ (leer = aus Bank: ${roh.fxAuto?.kurs ?? "—"})`} value={e.fxUsdProEur} step={0.0001} optional onChange={(v) => set("fxUsdProEur", v)} />
           <Feld label="EUSt-Satz (%)" value={e.eustSatz} step={0.1} onChange={(v) => set("eustSatz", v ?? 19)} />
           <Feld label="Zollsatz (%) — Extensions 2,2" value={e.zollSatz} step={0.1} onChange={(v) => set("zollSatz", v ?? 0)} />
@@ -979,7 +1014,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
             {saving ? <Loader2 size={14} className="animate-spin" /> : msg?.ok ? <Check size={14} /> : null}
             Speichern
           </button>
-          <button onClick={() => setE({ ...LIQ_DEFAULTS, aktion: e.aktion })} className="text-sm text-neutral-500 hover:text-neutral-900">Standardwerte</button>
+          <button onClick={() => setE({ ...LIQ_DEFAULTS, aktion: e.aktion, weitereAktionen: e.weitereAktionen, steuerNachzahlung: e.steuerNachzahlung })} className="text-sm text-neutral-500 hover:text-neutral-900">Standardwerte</button>
           {geaendert && !saving && <span className="text-xs text-amber-700">Vorschau zeigt ungespeicherte Annahmen</span>}
           {msg && <span className={`text-xs ${msg.ok ? "text-emerald-700" : "text-red-700"}`}>{msg.text}</span>}
         </div>
@@ -988,6 +1023,261 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
         )}
       </Card>
     </div>
+  );
+}
+
+/** Zeitraum-Knöpfe am Diagramm. */
+const HORIZONTE = [
+  { name: "3 M", tage: 91 },
+  { name: "6 M", tage: 183 },
+  { name: "12 M", tage: 365 },
+  { name: "18 M", tage: 548 },
+];
+
+/** Mindestbedarf aus der Bedarfsanalyse 14.11.2026 (Lager + Unterwegs je Produkt, vorsichtige Variante):
+ *  glatt ~2–6 kg, wellig ~6–17 kg je 14-Tage-Bestellung. */
+const SZENARIO_START: LiqSzenario = { glaetten: false, minTeilEur: 5000, nurNoetigstes: false, amandaKgMonat: 9, ebruKgMonat: 24 };
+
+const kurzDatum = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(2, 4)}`;
+const euro = (n: number) => Math.round(n).toLocaleString("de-DE") + " €";
+
+function SzenarioLeiste({
+  sz, setSz, p, pOhne, puffer, roh, e,
+}: {
+  sz: LiqSzenario;
+  setSz: (f: (prev: LiqSzenario) => LiqSzenario) => void;
+  p: ReturnType<typeof prognose>;
+  pOhne: ReturnType<typeof prognose> | null;
+  puffer: number;
+  roh: LiqRohdaten;
+  e: LiqEinstellungen;
+}) {
+  const chip = (an: boolean) =>
+    `rounded-full border px-2.5 py-0.5 font-medium transition-colors ${an ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50"}`;
+  const zahl = (v: number, f: (n: number) => void, w = "w-20") => (
+    <input
+      type="number"
+      value={v}
+      onChange={(ev) => f(Math.max(0, Number(ev.target.value.replace(",", ".")) || 0))}
+      className={`${w} rounded-md border border-neutral-300 px-1.5 py-0.5 text-xs tabular-nums`}
+    />
+  );
+  const g = p.glaettung;
+  const ende = p.tage.at(-1);
+  const endeOhne = pOhne?.tage.at(-1);
+  const nbAus = !e.nachbestellungenEinrechnen && !e.ebruNachbestellungenEinrechnen;
+  return (
+    <div className="mb-2 rounded-xl border border-dashed border-neutral-300 bg-neutral-50/60 px-3 py-2 text-xs">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-neutral-500">Was wäre wenn:</span>
+        <button onClick={() => setSz((x) => ({ ...x, glaetten: !x.glaetten }))} aria-pressed={sz.glaetten} className={chip(sz.glaetten)}>
+          Lieferanten ohne Engpass zahlen
+        </button>
+        <button onClick={() => setSz((x) => ({ ...x, nurNoetigstes: !x.nurNoetigstes }))} aria-pressed={sz.nurNoetigstes} className={chip(sz.nurNoetigstes)}>
+          Nur das Nötigste nachbestellen
+        </button>
+        {(sz.glaetten || sz.nurNoetigstes) && (
+          <button onClick={() => setSz((x) => ({ ...x, glaetten: false, nurNoetigstes: false }))} className="ml-1 text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-neutral-900">
+            zurücksetzen
+          </button>
+        )}
+      </div>
+      {sz.glaetten && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-neutral-600">
+          <span>
+            Amanda, Ebru-Raten und Nachbestellungen gehen erst raus, wenn das Konto dabei bis zum Ende der Vorschau über der Reserve ({euro(puffer)}) bleibt —
+            nie früher als geplant, älteste zuerst. Teilzahlungen ab
+          </span>
+          {zahl(sz.minTeilEur, (v) => setSz((x) => ({ ...x, minTeilEur: v })))}
+          <span>€.</span>
+          {g && (
+            <span className="font-medium text-neutral-800">
+              {g.verschoben || g.geteilt
+                ? `${g.verschoben} Zahlung${g.verschoben === 1 ? "" : "en"} später (Ø ${g.verzugTageSchnitt} Tage)${g.geteilt ? `, ${g.geteilt} in Teilzahlungen` : ""}`
+                : "Kein Engpass — nichts verschoben"}
+              {g.offenAmEnde > 0 && <span className="text-amber-700"> · {euro(g.offenAmEnde)} passen nicht mehr in den Zeitraum (bleiben offen)</span>}
+            </span>
+          )}
+        </div>
+      )}
+      {sz.nurNoetigstes && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-neutral-600">
+          <span>Nachbestellungen nur im Mindestbedarf: Amanda</span>
+          {zahl(sz.amandaKgMonat, (v) => setSz((x) => ({ ...x, amandaKgMonat: v })), "w-14")}
+          <span>kg/Monat (statt {(e.nachbestellKgMonat ?? roh.nachbestellung.kgVerbrauchMonat ?? roh.nachbestellung.kgProMonatAuto).toLocaleString("de-DE")}), Ebru</span>
+          {zahl(sz.ebruKgMonat, (v) => setSz((x) => ({ ...x, ebruKgMonat: v })), "w-14")}
+          <span>
+            kg/Monat (statt {(e.ebruNachbestellKgMonat ?? roh.ebruNachbestellung?.kgVerbrauchMonat ?? roh.ebruNachbestellung?.kgProMonatAuto ?? 0).toLocaleString("de-DE")}).
+            Vorschlag aus der Bedarfsanalyse vom 14.11. (Lager + Unterwegs je Produkt): glatt reicht ~19 Monate, wellig ~10 Monate. Schon bestellte Ware bleibt.
+          </span>
+          {nbAus && <span className="text-amber-700">Nachbestellungen sind in den Annahmen ausgeschaltet — das Szenario wirkt erst, wenn sie eingerechnet sind.</span>}
+        </div>
+      )}
+      {pOhne && ende && endeOhne && (
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 border-t border-neutral-200 pt-2">
+          <span>
+            Tiefpunkt <b className={p.tiefpunkt.saldo < 0 ? "text-red-700" : p.tiefpunkt.saldo < puffer ? "text-amber-700" : "text-emerald-700"}>{euro(p.tiefpunkt.saldo)}</b> am {kurzDatum(p.tiefpunkt.datum)}
+            <span className="text-neutral-500"> (ohne: {euro(pOhne.tiefpunkt.saldo)} am {kurzDatum(pOhne.tiefpunkt.datum)})</span>
+          </span>
+          <span>
+            Kontostand {kurzDatum(ende.datum)}: <b>{euro(ende.saldo)}</b>
+            <span className="text-neutral-500"> (ohne: {euro(endeOhne.saldo)}, {ende.saldo >= endeOhne.saldo ? "+" : "−"}{euro(Math.abs(ende.saldo - endeOhne.saldo))})</span>
+          </span>
+          <span className="text-neutral-400">Graue gestrichelte Linie = ohne Was-wäre-wenn. Nur Anzeige: wird nicht gespeichert, die Ampel an den Bestellungen rechnet ohne.</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const NEUE_AKTION = (liste: LiqAktion[]): LiqAktion => ({
+  aktiv: true,
+  // User 18.11.2026: am 12.01.2027 Sale 30–40 % auf die Ladenhüter, 4 Tage
+  label: liste.length ? "Aktion" : "Ladenhüter-Sale 30–40 %",
+  von: liste.length ? new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10) : "2027-01-12",
+  bis: liste.length ? new Date(Date.now() + 33 * 86_400_000).toISOString().slice(0, 10) : "2027-01-15",
+  mehrumsatzBrutto: 30_000,
+  profil: [],
+  verzugTage: 3,
+  auszahlungProzent: 97,
+  quelle: "Annahme",
+  nachlauf: null,
+});
+
+function WeitereAktionen({ liste, onChange, p }: { liste: LiqAktion[]; onChange: (l: LiqAktion[]) => void; p: ReturnType<typeof prognose> }) {
+  const setA = (i: number, patch: Partial<LiqAktion>) => onChange(liste.map((a, j) => (j === i ? { ...a, ...patch } : a)));
+  const eingang = (label: string) => p.ereignisse.filter((x) => x.art === "aktion" && aktionName(x.label) === label).reduce((s, x) => s + x.betrag, 0);
+  const inp = "mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 focus:outline-none";
+  return (
+    <Card title="Geplante Aktionen (Sales)" accent="border-l-emerald-500">
+      {liste.length === 0 && <p className="text-sm text-neutral-500">Noch keine weitere Aktion eingeplant.</p>}
+      <div className="space-y-4">
+        {liste.map((a, i) => (
+          <div key={i} className="rounded-xl border border-neutral-200 p-3">
+            <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-6">
+              <label className="block md:col-span-2">
+                <span className="text-xs font-medium text-neutral-600">Name</span>
+                <input value={a.label} onChange={(ev) => setA(i, { label: ev.target.value })} className={inp} />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-neutral-600">von</span>
+                <input type="date" value={a.von} onChange={(ev) => ev.target.value && setA(i, { von: ev.target.value, profil: [] })} className={inp} />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-neutral-600">bis</span>
+                <input type="date" value={a.bis} onChange={(ev) => ev.target.value && setA(i, { bis: ev.target.value, profil: [] })} className={inp} />
+              </label>
+              <Feld label="Mehrumsatz brutto (€)" value={a.mehrumsatzBrutto} step={1000} onChange={(v) => setA(i, { mehrumsatzBrutto: Math.max(0, v ?? 0) })} />
+              <Feld label="Tage bis Geld da" value={a.verzugTage} onChange={(v) => setA(i, { verzugTage: Math.max(0, Math.min(30, v ?? 0)) })} />
+            </div>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-500">
+              <span className="flex flex-wrap items-center gap-3">
+                <Schalter label="einrechnen" checked={a.aktiv} onChange={(v) => setA(i, { aktiv: v })} />
+                <span>
+                  Umsatz zusätzlich zum normalen Tagesumsatz, gleichmäßig auf {Math.max(1, Math.round((Date.parse(a.bis) - Date.parse(a.von)) / 86_400_000) + 1)} Tage verteilt,
+                  {` ${a.auszahlungProzent} % kommen nach Gebühren an.`} Davon gehen {euro((a.mehrumsatzBrutto * 19) / 119)} USt mit der Voranmeldung ans Finanzamt.
+                  {a.aktiv && eingang(a.label) > 0 && <b className="text-emerald-700"> In der Vorschau: +{euro(eingang(a.label))}</b>}
+                  {a.aktiv && a.mehrumsatzBrutto > 0 && eingang(a.label) === 0 && <span className="text-amber-700"> Liegt außerhalb des Vorschau-Zeitraums.</span>}
+                </span>
+              </span>
+              <button onClick={() => onChange(liste.filter((_, j) => j !== i))} className="text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-red-700">
+                entfernen
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <button onClick={() => onChange([...liste, NEUE_AKTION(liste)])} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50">
+          + Aktion hinzufügen
+        </button>
+        <span className="text-xs text-neutral-500">
+          Mehrumsatz = was zusätzlich zum normalen Umsatz reinkommt. Bei einem Ladenhüter-Sale ist die Ware schon bezahlt — das Geld fließt komplett aufs Konto.
+          Mit „Speichern“ unten übernehmen.
+        </span>
+      </div>
+    </Card>
+  );
+}
+
+function SteuerNachzahlungKarte({
+  nz, sp, onChange, p,
+}: {
+  nz: LiqEinstellungen["steuerNachzahlung"];
+  sp: NonNullable<LiqRohdaten["steuerPrognose"]> | null;
+  onChange: (v: LiqEinstellungen["steuerNachzahlung"]) => void;
+  p: ReturnType<typeof prognose>;
+}) {
+  const jahr = nz?.jahr ?? sp?.jahr ?? new Date().getFullYear();
+  if (!nz) {
+    return (
+      <Card title="Erwartete Nachzahlung Einkommen- und Gewerbesteuer" accent="border-l-red-500">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+          <span className="text-neutral-600">
+            {sp
+              ? <>Hochrechnung {sp.jahr}: ESt {euro(sp.nachEst)} + GewSt {euro(sp.nachGewst)} Nachzahlung — noch nicht in der Vorschau.</>
+              : "Noch nicht in der Vorschau."}
+          </span>
+          <button
+            onClick={() => onChange({ aktiv: true, jahr, datum: `${jahr + 1}-06-30`, estEur: null, gewstEur: null, vzAnpassen: true })}
+            className="rounded-lg bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white"
+          >
+            Einplanen
+          </button>
+        </div>
+      </Card>
+    );
+  }
+  const set = (patch: Partial<NonNullable<typeof nz>>) => onChange({ ...nz, ...patch });
+  const evs = p.ereignisse.filter((x) => x.art === "steuer" && (x.label.includes(`Nachzahlung ${nz.jahr}`) || x.label.includes(`nach Bescheid ${nz.jahr}`)));
+  const ende = p.tage.at(-1)?.datum ?? "";
+  const autoEst = sp && sp.jahr === nz.jahr ? sp.nachEst : null;
+  const autoGew = sp && sp.jahr === nz.jahr ? sp.nachGewst : null;
+  const estJahr = sp && sp.jahr === nz.jahr ? (nz.estEur ?? sp.nachEst) + sp.vzEst : null;
+  const gewJahr = sp && sp.jahr === nz.jahr ? (nz.gewstEur ?? sp.nachGewst) + sp.vzGewst : null;
+  return (
+    <Card title={`Erwartete Nachzahlung Einkommen- und Gewerbesteuer ${nz.jahr}`} accent="border-l-red-500">
+      <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+        <div className="space-y-2 pt-5">
+          <Schalter label="einrechnen" checked={nz.aktiv} onChange={(v) => set({ aktiv: v })} />
+          <Schalter label="Vorauszahlungen danach anheben" checked={nz.vzAnpassen} onChange={(v) => set({ vzAnpassen: v })} />
+        </div>
+        <label className="block">
+          <span className="text-xs font-medium text-neutral-600">Erwarteter Zahltag (Bescheid + ~1 Monat)</span>
+          <input type="date" value={nz.datum} onChange={(ev) => ev.target.value && set({ datum: ev.target.value })} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900 focus:outline-none" />
+        </label>
+        <Feld label={`ESt-Nachzahlung (leer = Hochrechnung ${autoEst != null ? euro(autoEst) : "—"})`} value={nz.estEur} optional step={1000} onChange={(v) => set({ estEur: v })} />
+        <Feld label={`GewSt-Nachzahlung (leer = Hochrechnung ${autoGew != null ? euro(autoGew) : "—"})`} value={nz.gewstEur} optional step={1000} onChange={(v) => set({ gewstEur: v })} />
+      </div>
+      {sp && sp.jahr === nz.jahr && (
+        <p className="mt-3 text-xs text-neutral-600">
+          Hochrechnung aus „Einnahmen &amp; Ausgaben“ ({sp.monate} Monate): Gewinn {nz.jahr} ≈ {euro(sp.gewinnJahr)} → ESt inkl. Soli {euro(sp.est)}, GewSt {euro(sp.gewst)};
+          gezahlte/festgesetzte Vorauszahlungen ESt {euro(sp.vzEst)}, GewSt {euro(sp.vzGewst)}.
+          {nz.vzAnpassen && estJahr != null && gewJahr != null && (
+            <> Mit dem Bescheid setzt das Finanzamt die Vorauszahlungen {nz.jahr + 1} meist auf ein Viertel der Jahressteuer: ESt {euro(estJahr / 4)} + GewSt {euro(gewJahr / 4)} pro Quartal.
+            Schon fällige Quartale {nz.jahr + 1} fordert es mit dem Bescheid nach — das ist in der Nachzahlung oben enthalten.</>
+          )}
+        </p>
+      )}
+      {evs.length > 0 ? (
+        <div className="mt-3 divide-y divide-neutral-100 text-sm">
+          {evs.map((x, i) => (
+            <div key={i} className="flex items-center justify-between gap-3 py-1">
+              <span className="tabular-nums text-neutral-500 w-20 shrink-0">{kurzDatum(x.datum)}</span>
+              <span className="flex-1 min-w-0 truncate text-neutral-800">{x.label}</span>
+              <span className="font-medium tabular-nums">{euro(-x.betrag)}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        nz.aktiv && nz.datum > ende && <p className="mt-3 text-xs text-amber-700">Der Zahltag liegt nach dem Vorschau-Zeitraum (bis {kurzDatum(ende)}) — oben am Diagramm „12 M“ oder „18 M“ wählen.</p>
+      )}
+      <p className="mt-3 text-xs text-neutral-500">
+        Wann der Bescheid kommt, hängt an der Abgabe der Erklärung {nz.jahr}: mit Steuerberater spätestens bis Ende Februar {nz.jahr + 2}, oft früher. Gezahlt wird ca. einen Monat
+        nach dem Bescheid. Das Datum ist eine Annahme — trag ein, was der Steuerberater sagt. Steht die Nachzahlung schon bei den Vorauszahlungen (Soll), zählt nur diese.
+        Den Verlustvortrag bzw. die richtige Buchung des Kaufvertrags (Ware statt Firmenwert) kennt die Hochrechnung noch nicht.
+      </p>
+    </Card>
   );
 }
 
@@ -1063,9 +1353,14 @@ function Kachel({ label, value, sub, tone = "neutral" }: { label: string; value:
   );
 }
 
+/** "Ladenhüter-Sale Mehrumsatz 12.01." / "Sale: Mehrumsatz-Eingänge bis …" → "Ladenhüter-Sale". */
+function aktionName(label: string) {
+  return label.replace(/:? Mehrumsatz.*$/, "");
+}
+
 /** Anker einer Zeile in „Weitere Termine“; die Aktion ist dort eine Sammelzeile. */
 function terminId(ev: Pick<Ereignis, "art" | "datum" | "label">) {
-  return ev.art === "aktion" ? "termin-aktion" : `termin-${ev.art}-${ev.datum}-${ev.label}`;
+  return ev.art === "aktion" ? `termin-aktion-${aktionName(ev.label)}` : `termin-${ev.art}-${ev.datum}-${ev.label}`;
 }
 
 const ZIEL_TEXT: Partial<Record<Ereignis["art"], string>> = { lieferant: "Termin ändern", manuell: "Termin ändern" };
