@@ -6,7 +6,7 @@ import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, X } from "luc
 import { Area, Bar, CartesianGrid, ComposedChart, Line, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import { kontoZweck } from "@/lib/bank/konten";
-import { LIQ_DEFAULTS, VERSAND_FRUEHESTENS_TAGE, bestellTage, ZOLL_NACH_VERSAND_TAGE, prognose, zahlGruppe, zerlegeRateSchluessel, type Ereignis, type LiqAktion, type LiqEinstellungen, type LiqRohdaten, type LiqSzenario, type VerlaufTag, type ZahlGruppe } from "@/lib/liquiditaet/rechnung";
+import { LIQ_DEFAULTS, SZENARIO_STANDARD, VERSAND_FRUEHESTENS_TAGE, bestellTage, ZOLL_NACH_VERSAND_TAGE, prognose, zahlGruppe, zerlegeRateSchluessel, type Ereignis, type LiqAktion, type LiqEinstellungen, type LiqRohdaten, type LiqSzenario, type VerlaufTag, type ZahlGruppe } from "@/lib/liquiditaet/rechnung";
 import { SYMBOLE, TerminSymbol, symbolTyp, type SymbolTyp } from "./termin-symbol";
 import { AMPEL_STIL } from "../../orders/liquiditaet-badge";
 import EinfuhrRechnung from "./einfuhr-rechnung";
@@ -1062,10 +1062,7 @@ const HORIZONTE = [
   { name: "18 M", tage: 548 },
 ];
 
-/** Mindestbedarf aus der Bedarfsanalyse 14.11.2026 (Lager + Unterwegs je Produkt, vorsichtige Variante):
- *  glatt ~2–6 kg, wellig ~6–17 kg je 14-Tage-Bestellung. */
-// Ladenhüter = kein Verkauf in 90 Tagen (Analyse 14.11.2026: glatt 65 Produkte/56 kg, wellig 44/52 kg)
-const SZENARIO_START: LiqSzenario = { glaetten: false, minTeilEur: 5000, nurNoetigstes: false, amandaKgMonat: 9, ebruKgMonat: 24, zielMonate: 3, ladenhueterGlattKg: 56, ladenhueterWelligKg: 52 };
+const SZENARIO_START: LiqSzenario = SZENARIO_STANDARD;
 
 const kurzDatum = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(2, 4)}`;
 const euro = (n: number) => Math.round(n).toLocaleString("de-DE") + " €";

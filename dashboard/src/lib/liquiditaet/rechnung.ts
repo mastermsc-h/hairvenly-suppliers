@@ -136,6 +136,13 @@ export interface LiqSzenario {
   ladenhueterWelligKg: number;
 }
 
+/**
+ * Startwerte der Was-wäre-wenn-Optionen (Seite + Hi). Mindestbedarf aus der Bedarfsanalyse 14.11.2026
+ * (Lager + Unterwegs je Produkt, vorsichtig: glatt ~2–6 kg, wellig ~6–17 kg je 14-Tage-Bestellung);
+ * Ladenhüter = kein Verkauf in 90 Tagen (glatt 65 Produkte/56 kg, wellig 44/52 kg).
+ */
+export const SZENARIO_STANDARD: LiqSzenario = { glaetten: false, minTeilEur: 5000, nurNoetigstes: false, amandaKgMonat: 9, ebruKgMonat: 24, zielMonate: 3, ladenhueterGlattKg: 56, ladenhueterWelligKg: 52 };
+
 /** Bestellmengen nach Lagerbestand (Szenario „nur das Nötigste“), je Qualität. */
 export interface BedarfsPlan {
   lagerKg: number;

@@ -1,26 +1,13 @@
 import { redirect } from "next/navigation";
 import { requireFeature } from "@/lib/auth";
 import { ladeEinstellungen, ladeKontoVerlauf, ladeRohdaten } from "@/lib/liquiditaet/daten";
-import { getTotalStockKg, readVerkaufsanalyse } from "@/lib/stock-sheets";
+import { readVerkaufsanalyse } from "@/lib/stock-sheets";
 import { createServiceClient } from "@/lib/supabase/server";
 import Liquiditaet, { type Verbrauch } from "./liquiditaet";
 import UstMonate from "../ust-monate";
 import { ladeUstMonate } from "@/lib/steuer/ust-monate";
-import { ladeSteuerKasse } from "@/lib/cockpit/daten";
+import { ladeRohZusatz } from "@/lib/liquiditaet/erweitert";
 import type { LiqRohdaten } from "@/lib/liquiditaet/rechnung";
-
-/** ESt/GewSt-Hochrechnung des laufenden Jahres (gleiche Rechnung wie Steuerkasse/Finanzübersicht). */
-async function ladeSteuerPrognose(): Promise<LiqRohdaten["steuerPrognose"]> {
-  try {
-    const d = await ladeSteuerKasse();
-    const pr = d.jahr.prognose;
-    if (!pr) return null;
-    return { jahr: d.jahr.jahr, est: pr.est, gewst: pr.gewst, vzEst: pr.vzEst, vzGewst: pr.vzGewst, nachEst: pr.nachEst, nachGewst: pr.nachGewst, gewinnJahr: pr.gewinnJahr, monate: pr.monate };
-  } catch (e) {
-    console.error("[liquiditaet] Steuer-Hochrechnung", e);
-    return null; // Seite funktioniert ohne — Nachzahlung zeigt dann einen Hinweis
-  }
-}
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +32,7 @@ export default async function LiquiditaetPage() {
   if (profile.role === "supplier") redirect("/");
   const sb = createServiceClient();
   const jahr = Number(heuteBerlinDatum().slice(0, 4));
-  const [rohBasis, einstellungen, verbrauch, ustMonate, steuerPrognose, lager] = await Promise.all([
+  const [rohBasis, einstellungen, verbrauch, ustMonate, zusatz] = await Promise.all([
     ladeRohdaten(sb),
     ladeEinstellungen(sb),
     ladeVerbrauch(),
@@ -53,11 +40,9 @@ export default async function LiquiditaetPage() {
       console.error("[liquiditaet] USt je Monat", e);
       return [];
     }),
-    ladeSteuerPrognose(),
-    // Lagerbestand je Qualität für „nur das Nötigste“ — unvollständig gelesen = nicht verwenden
-    getTotalStockKg().then((k) => (k.partial || !k.totalKg ? null : { glatt: k.russianKg, wellig: k.uzbekKg, stand: k.lastUpdated })).catch(() => null),
+    ladeRohZusatz(),
   ]);
-  const roh: LiqRohdaten = { ...rohBasis, steuerPrognose, lagerKg: lager };
+  const roh: LiqRohdaten = { ...rohBasis, ...zusatz };
   const verlauf = await ladeKontoVerlauf(sb, roh, einstellungen);
   return (
     <>
