@@ -10,6 +10,8 @@ import CockpitGrid from "./cockpit-grid";
 import SturmWidget from "./widget-sturm";
 import ZeitungWidget from "./widget-zeitung";
 import SteuerKasseWidget from "./widget-steuerkasse";
+import KanaeleWidget from "./widget-kanaele";
+import { ladeKanalStaende } from "@/lib/marketing-kanaele";
 import RoutinenWidget from "./widget-routinen";
 import { HaileyWidget, PflanzeWidget, PolaroidWidget, WetterWidget } from "./widgets-deko";
 import { ladeHailey, ladePflanze, ladePolaroids, ladeWetter } from "@/lib/cockpit/deko";
@@ -72,6 +74,7 @@ export default async function StartPage() {
   inhalte.polaroid = warte(<Mit lade={() => ladePolaroids(profile.id)}>{(d) => <PolaroidWidget bilder={d} />}</Mit>);
   inhalte.wetter = warte(<Mit lade={ladeWetter}>{(d) => <WetterWidget d={d} />}</Mit>);
   if (finanzen) inhalte.pflanze = warte(<Mit lade={ladePflanze}>{(d) => <PflanzeWidget d={d} />}</Mit>);
+  inhalte.kanaele = warte(<Mit lade={ladeKanalStaende}>{(d) => <KanaeleWidget d={d} />}</Mit>);
   inhalte.routinen = warte(<Mit lade={ladeRoutinen}>{(d) => <RoutinenWidget routinen={d} istAdmin={istAdmin} />}</Mit>);
   if (istAdmin) inhalte.newsletter = warte(<Mit lade={() => ladeNewsletter()}>{(d) => <ZeitungWidget d={d} />}</Mit>);
   if (chatbot) {

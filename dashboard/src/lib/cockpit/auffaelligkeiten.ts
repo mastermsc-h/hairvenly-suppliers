@@ -9,6 +9,7 @@ import { hyBucket } from "@/lib/health";
 import { ladeInstagram, ladeKampagnen, ladeLiquiditaet, ladeUmsatz, ladeWerbung } from "./daten";
 import type { Auffaelligkeit, Bericht } from "./typen";
 import { ladeNewsletter } from "@/lib/newsletter";
+import { ladeKanalStaende } from "@/lib/marketing-kanaele";
 import { ladeGoogleBewertungen, ladeShopBewertungen, ladeTrustpilotBewertungen, type BewertungsQuelle } from "@/lib/bewertungen";
 
 const S = {
@@ -455,8 +456,33 @@ const bewertungen: Pruefung = async () => {
   return out;
 };
 
+// ── Marketing-Kanäle ────────────────────────────────────────────────────────
+// Eingeschlafene Kanäle (nichts im Fenster bzw. länger als der doppelte Rhythmus still) als eine
+// Kachel; Ernst ab 3 schlafenden. Knappe Kanäle als Hinweis.
+const kanaele: Pruefung = async () => {
+  const { kanaele: k } = await ladeKanalStaende();
+  const schlaf = k.filter((x) => x.status === "schlaeft");
+  const knapp = k.filter((x) => x.status === "knapp");
+  const out: Auffaelligkeit[] = [];
+  const seit = (x: (typeof k)[number]) => (x.tageSeit == null ? "noch nie gepostet" : `seit ${x.tageSeit} Tagen still`);
+  if (schlaf.length) out.push({
+    id: "kanaele-schlafen", bereich: "werbung", schwere: schlaf.length >= 3 ? "hoch" : "mittel",
+    titel: `${schlaf.length} Marketing-Kanal${schlaf.length === 1 ? "" : "e"} eingeschlafen`,
+    detail: schlaf.map((x) => x.name).join(", ") + " – hier wurde zuletzt nicht wie geplant gepostet.",
+    href: "/start", liste: schlaf.map((x) => `${x.name} (${x.rhythmus}): ${seit(x)}`),
+  });
+  if (knapp.length) out.push({
+    id: "kanaele-knapp", bereich: "werbung", schwere: "hinweis",
+    titel: `${knapp.length} Kanal${knapp.length === 1 ? "" : "e"} unter Soll`,
+    detail: knapp.map((x) => `${x.name} ${x.ist}/${x.soll}`).join(" · "),
+    href: "/start", liste: knapp.map((x) => `${x.name}: ${x.ist} von ${x.soll} in ${x.fenster} Tagen`),
+  });
+  return out;
+};
+
 const PRUEFUNGEN: Array<[string, Pruefung]> = [
   ["Bewertungen", bewertungen],
+  ["Marketing-Kanäle", kanaele],
   ["Newsletter", newsletter],
   ["Datenquellen", datenquellen],
   ["Lager", lager], ["Chats", chats], ["Werbung", werbung], ["Aktionen", aktionen], ["Vorkasse", vorkasse],

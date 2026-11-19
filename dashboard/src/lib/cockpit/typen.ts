@@ -429,6 +429,7 @@ export const WIDGETS = [
   { id: "aktionen", name: "Aktuelle Aktionen", info: "Laufende und geplante Aktionen", feature: null },
   { id: "philosophie", name: "Firmenphilosophie", info: "Wofür Hairvenly steht", feature: null },
   { id: "liquiditaet", name: "Liquidität", info: "Kontostand der nächsten 90 Tage", feature: "finances" },
+  { id: "kanaele", name: "Marketing-Kanäle", info: "Wo wir posten wie geplant – und wo der Kanal eingeschlafen ist", feature: null },
   { id: "steuerkasse", name: "Steuerkasse", info: "Was ans Finanzamt geht – wann, wie viel, was danach bleibt", feature: "finances" },
   { id: "marketing", name: "Marketing (HALO)", info: "Dringende Aufgaben des Marketing-Teams", feature: "finances" },
 ] as const;
@@ -470,6 +471,7 @@ const STANDARD_LAYOUT_GROB: LayoutItem[] = [
   { i: "polaroid", x: 5, y: 111, w: 4, h: 9 },
   { i: "wetter", x: 9, y: 111, w: 3, h: 9 },
   { i: "steuerkasse", x: 0, y: 120, w: 12, h: 15 },
+  { i: "kanaele", x: 0, y: 135, w: 12, h: 15 },
 ];
 
 /** Standard-Anordnung im feinen Raster (10-px-Zeilen). Überlappt noch – wird beim Aufbau einmal verdichtet. */

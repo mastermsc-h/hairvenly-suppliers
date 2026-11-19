@@ -240,3 +240,33 @@ export async function maskottchenSetzen(id: string): Promise<Ergebnis> {
     : await sb.from("cockpit_layout").insert({ user_id: profile.id, layout: {}, maskottchen: id });
   return error ? { ok: false, error: error.message } : { ok: true };
 }
+
+// ── Marketing-Kanäle: Beitrag von Hand melden (TikTok, Pinterest, Google …) ──
+export async function kanalBeitragMelden(kanal: string): Promise<Ergebnis> {
+  const profile = await team();
+  if (!profile) return { ok: false, error: "Kein Zugriff" };
+  const { KANAELE } = await import("@/lib/marketing-kanaele");
+  if (!KANAELE.some((k) => k.id === kanal)) return { ok: false, error: "Unbekannter Kanal" };
+  const { error } = await createServiceClient().from("marketing_beitraege").insert({
+    kanal, extern_id: `manuell-${crypto.randomUUID()}`, zeitpunkt: new Date().toISOString(), quelle: "manuell", erstellt_von: profile.id,
+  });
+  if (!error) revalidatePath("/start");
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+export async function kanalBeitragZuruecknehmen(id: string): Promise<Ergebnis> {
+  const profile = await team();
+  if (!profile) return { ok: false, error: "Kein Zugriff" };
+  const { error } = await createServiceClient().from("marketing_beitraege").delete().eq("id", id).eq("quelle", "manuell");
+  if (!error) revalidatePath("/start");
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+export async function kanaeleAktualisieren(): Promise<Ergebnis> {
+  const profile = await team();
+  if (!profile) return { ok: false, error: "Kein Zugriff" };
+  const { sammleBeitraege } = await import("@/lib/marketing-kanaele");
+  const r = await sammleBeitraege();
+  revalidatePath("/start");
+  return r.fehler.length && !r.neu ? { ok: false, error: r.fehler.join(" · ") } : { ok: true };
+}
