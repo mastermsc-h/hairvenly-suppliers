@@ -9,6 +9,7 @@ import { hyBucket } from "@/lib/health";
 import { ladeInstagram, ladeKampagnen, ladeLiquiditaet, ladeUmsatz, ladeWerbung } from "./daten";
 import type { Auffaelligkeit, Bericht } from "./typen";
 import { ladeNewsletter } from "@/lib/newsletter";
+import { ladeGoogleBewertungen, ladeShopBewertungen, ladeTrustpilotBewertungen, type BewertungsQuelle } from "@/lib/bewertungen";
 
 const S = {
   chatStunden: 4,             // Kundin wartet länger als so viele Stunden auf eine Antwort
@@ -421,7 +422,41 @@ const newsletter: Pruefung = async () => {
   return out;
 };
 
+// ── Bewertungen ─────────────────────────────────────────────────────────────
+// Je Quelle IMMER eine Kachel (auch ohne neue schlechte), damit die Zahl sichtbar bleibt.
+// Ernst ab 3 neuen schlechten in 30 Tagen, Beachten ab 1, sonst Hinweis.
+function bewertungsKachel(q: BewertungsQuelle, id: string, name: string, href: string): Auffaelligkeit {
+  if (!q.verbunden) return { id, bereich: "bewertungen", schwere: "hinweis", titel: `${name}: noch nicht verbunden`, detail: q.hinweis ?? "Verbindung fehlt.", href };
+  const schwere = q.schlecht30 >= 3 ? "hoch" : q.schlecht30 >= 1 ? "mittel" : "hinweis";
+  const offen = q.liste.filter((b) => b.beantwortet === false).length;
+  const titel = q.schlecht30 > 0
+    ? `${name}: ${q.schlecht30} neue schlechte Bewertung${q.schlecht30 === 1 ? "" : "en"} in 30 Tagen`
+    : `${name}: keine neue schlechte Bewertung in 30 Tagen`;
+  const teile = [
+    q.schlechtGesamt != null ? `${q.schlechtGesamt}${q.gesamt ? ` von ${zahl(q.gesamt)}` : ""} Bewertungen mit 1–2 Sternen` : null,
+    q.schnitt != null ? `Schnitt ${zahl(q.schnitt, 1)} ★` : null,
+    `${q.schlecht90} in 90 Tagen`,
+    offen ? `${offen} unbeantwortet` : null,
+  ].filter(Boolean);
+  return {
+    id, bereich: "bewertungen", schwere, titel,
+    detail: teile.join(" · ") + (q.hinweis ? ` – ${q.hinweis}` : ""),
+    href,
+    liste: q.liste.slice(0, 6).map((b) => `${b.datum ? kurz(b.datum) : "?"} · ${"★".repeat(b.sterne)} · ${b.titel || b.text.slice(0, 70)}${b.produkt ? ` – ${b.produkt}` : ""}${b.beantwortet === false ? " · unbeantwortet" : ""}`),
+  };
+}
+const bewertungen: Pruefung = async () => {
+  const [shop, google, tp] = await Promise.allSettled([ladeShopBewertungen(), ladeGoogleBewertungen(), ladeTrustpilotBewertungen()]);
+  const out: Auffaelligkeit[] = [];
+  const fehlerKachel = (id: string, name: string, e: unknown): Auffaelligkeit => ({ id, bereich: "bewertungen", schwere: "hinweis", titel: `${name}: Bewertungen nicht abrufbar`, detail: e instanceof Error ? e.message.slice(0, 160) : String(e) });
+  out.push(shop.status === "fulfilled" ? bewertungsKachel(shop.value, "bewertungen-shop", "Shop", "https://admin.shopify.com/store/339520-3/apps/judgeme") : fehlerKachel("bewertungen-shop", "Shop", shop.reason));
+  out.push(google.status === "fulfilled" ? bewertungsKachel(google.value, "bewertungen-google", "Google", "https://business.google.com/reviews") : fehlerKachel("bewertungen-google", "Google", google.reason));
+  out.push(tp.status === "fulfilled" ? bewertungsKachel(tp.value, "bewertungen-trustpilot", "Trustpilot", "https://businessapp.b2b.trustpilot.com/reviews") : fehlerKachel("bewertungen-trustpilot", "Trustpilot", tp.reason));
+  return out;
+};
+
 const PRUEFUNGEN: Array<[string, Pruefung]> = [
+  ["Bewertungen", bewertungen],
   ["Newsletter", newsletter],
   ["Datenquellen", datenquellen],
   ["Lager", lager], ["Chats", chats], ["Werbung", werbung], ["Aktionen", aktionen], ["Vorkasse", vorkasse],

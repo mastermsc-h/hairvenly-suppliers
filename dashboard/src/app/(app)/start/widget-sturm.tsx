@@ -8,7 +8,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AlertOctagon, BadgePercent, Banknote, Camera, ChevronDown, CloudLightning, Database, Landmark, Megaphone, MessageSquareWarning,
-  Package, RefreshCw, RotateCcw, Sun, TrendingDown, Truck, Wallet, Zap,
+  Package, RefreshCw, RotateCcw, Star, Sun, TrendingDown, Truck, Wallet, Zap,
 } from "lucide-react";
 import { berichtJetztPruefen } from "@/lib/actions/cockpit";
 import SturmZylinder from "./sturm-zylinder";
@@ -16,11 +16,11 @@ import type { AuffaelligBereich, Bericht } from "@/lib/cockpit/typen";
 
 const ICON: Record<AuffaelligBereich, React.ComponentType<{ size?: number }>> = {
   lager: Package, chats: MessageSquareWarning, werbung: Megaphone, aktionen: BadgePercent, zahlungen: Banknote,
-  finanzen: Wallet, versand: Truck, retouren: RotateCcw, steuern: Landmark, instagram: Camera, umsatz: TrendingDown, daten: Database,
+  finanzen: Wallet, versand: Truck, retouren: RotateCcw, steuern: Landmark, instagram: Camera, umsatz: TrendingDown, daten: Database, bewertungen: Star,
 };
 const BEREICH: Record<AuffaelligBereich, string> = {
   lager: "Lager", chats: "Chats", werbung: "Werbung", aktionen: "Aktionen", zahlungen: "Zahlungen", finanzen: "Finanzen",
-  versand: "Versand", retouren: "Retouren", steuern: "Steuern", instagram: "Instagram", umsatz: "Umsatz", daten: "Datenquellen",
+  versand: "Versand", retouren: "Retouren", steuern: "Steuern", instagram: "Instagram", umsatz: "Umsatz", daten: "Datenquellen", bewertungen: "Bewertungen",
 };
 /** Fällt zurück, wenn der Browser keinen Speicher erlaubt (privates Fenster). */
 const ansichtSpeicher = { wert: "zylinder" as "zylinder" | "liste" };
@@ -174,7 +174,7 @@ export default function SturmWidget({ bericht, vorher, istAdmin }: { bericht: Be
                         <ChevronDown size={14} style={{ transform: auf ? "rotate(180deg)" : undefined, transition: "transform .2s" }} />
                       </button>
                     )}
-                    {p.href && <Link href={p.href} className="st-link">Ansehen</Link>}
+                    {p.href && <Link href={p.href} className="st-link" {...(p.href.startsWith("http") ? { target: "_blank", rel: "noopener noreferrer" } : {})}>Ansehen</Link>}
                   </div>
                 </div>
                 {auf && p.liste && (

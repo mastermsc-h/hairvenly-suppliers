@@ -178,7 +178,7 @@ export default function SturmZylinder({
             </div>
             <div className="st-aktionen">
               <span className="st-marke">{bereiche[p.bereich]} · {schwereText[p.schwere]}</span>
-              {p.href && <Link href={p.href} className="st-link">Ansehen</Link>}
+              {p.href && <Link href={p.href} className="st-link" {...(p.href.startsWith("http") ? { target: "_blank", rel: "noopener noreferrer" } : {})}>Ansehen</Link>}
             </div>
             <button type="button" className="st-mehr" onClick={() => setGewaehlt(null)} aria-label="Schließen"><X size={13} /></button>
           </div>

@@ -203,7 +203,7 @@ export interface WerbungDaten {
   googleKampagnen: Array<{ name: string; kosten: number; klicks: number }>;
 }
 
-export type AuffaelligBereich = "lager" | "chats" | "werbung" | "aktionen" | "zahlungen" | "finanzen" | "versand" | "retouren" | "steuern" | "instagram" | "umsatz" | "daten";
+export type AuffaelligBereich = "lager" | "chats" | "werbung" | "aktionen" | "zahlungen" | "finanzen" | "versand" | "retouren" | "steuern" | "instagram" | "umsatz" | "daten" | "bewertungen";
 
 export interface Auffaelligkeit {
   id: string;
