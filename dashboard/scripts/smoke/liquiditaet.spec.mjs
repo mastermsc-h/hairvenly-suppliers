@@ -471,8 +471,27 @@ const nbRoh = roh({ nachbestellung: { kgProMonatAuto: 40, kgVerbrauchMonat: 30, 
 const nbSum = (pp) => -pp.ereignisse.filter((x) => x.art === "nachbestellung").reduce((s, x) => s + x.betrag, 0);
 const nbVoll = L.prognose(nbRoh, { ...E0, nachbestellungenEinrechnen: true });
 const nbMin = L.prognose(nbRoh, { ...E0, nachbestellungenEinrechnen: true }, { ...SZ, glaetten: false, nurNoetigstes: true, amandaKgMonat: 5, ebruKgMonat: 0 });
-check("Nötigstes: ein Sechstel der Verbrauchs-Bestellungen", Math.round(nbSum(nbMin) * 6), Math.round(nbSum(nbVoll)));
-check("Nötigstes: kg/Monat im Ergebnis", nbMin.nachbestellKgMonat, 5);
+check("Nötigstes: ein Sechstel der Verbrauchs-Bestellungen (±1 %, kg auf 0,1 gerundet)", Math.abs(nbSum(nbMin) * 6 / nbSum(nbVoll) - 1) < 0.01, true);
+check("Nötigstes ohne Lagerbestand: Warnung statt stiller Annahme", nbMin.hinweise.some((h) => h.includes("Lagerbestand nicht verfügbar")), true);
+
+// Bestand gekoppelt (User 19.11.2026: "auf Dauer" — Mindestbedarf nur solange Übervorrat da ist)
+const tage14 = (n) => Array.from({ length: n }, (_, i) => L.plusTage("2026-11-20", 14 * i));
+const bm = (o) => L.bedarfsMengen({ bestellTage: tage14(40), start: "2026-11-19", leadTage: 56, abstandTage: 14, verbrauchKgMonat: 57, mindestKgMonat: 24, zielMonate: 3, verkaufbarKg: 440, ...o });
+const r1 = bm({});
+const vProB = (57 * 12 * 14) / 365, mProB = (24 * 12 * 14) / 365;
+check("Bedarf: erst Mindestbedarf", Math.abs(r1.kg[0] - mProB) < 0.1, true);
+check("Bedarf: Umstieg kommt (Übervorrat ist endlich)", r1.umstieg !== null, true);
+check("Bedarf: Umstieg ungefähr wenn Bestand aufs Ziel sinkt (~6–8 Monate)", r1.umstieg >= "2027-04-01" && r1.umstieg <= "2027-08-01", true);
+check("Bedarf: auf Dauer = Verbrauch (letzte 10 Bestellungen im Schnitt)", Math.abs(r1.kg.slice(-10).reduce((a, b) => a + b, 0) / 10 - vProB) < 0.5, true);
+check("Bedarf: nie mehr als doppelter Verbrauch je Bestellung", r1.kg.every((k) => k <= 2 * vProB + 0.1), true);
+const proj = (r, i) => 440 - (57 * 12 / 365) * L.tageZwischen("2026-11-19", L.plusTage(tage14(40)[i], 56)) + r.kg.slice(0, i + 1).reduce((a, b) => a + b, 0);
+check("Bedarf: Bestand fällt nach dem Umstieg nicht unter 2 Monate Verbrauch", tage14(40).every((d, i) => d < L.plusTage(r1.umstieg, 60) || proj(r1, i) >= 2 * 57), true);
+check("Bedarf: kein Übervorrat → sofort voller Verbrauch", Math.abs(bm({ verkaufbarKg: 171 }).kg[0] - vProB) < 0.6 || bm({ verkaufbarKg: 171 }).kg[0] > vProB, true);
+check("Bedarf: Mindestbedarf nie über Verbrauch", L.bedarfsMengen({ bestellTage: tage14(3), start: "2026-11-19", leadTage: 56, abstandTage: 14, verbrauchKgMonat: 10, mindestKgMonat: 24, zielMonate: 3, verkaufbarKg: 1000 }).kg.every((k) => k <= (10 * 12 * 14) / 365 + 0.1), true);
+const nbLager = L.prognose({ ...nbRoh, lagerKg: { glatt: 400, wellig: 0, stand: null } }, { ...E0, horizontTage: 365, nachbestellungenEinrechnen: true }, { ...SZ, glaetten: false, nurNoetigstes: true, amandaKgMonat: 5, ebruKgMonat: 0, zielMonate: 3, ladenhueterGlattKg: 50, ladenhueterWelligKg: 0 });
+check("Prognose: Bedarfsplan glatt mit verkaufbar = Lager + unterwegs − Ladenhüter", nbLager.bedarf.glatt.verkaufbarKg, 350);
+check("Prognose: Umstieg auf Verbrauch im Zeitraum", nbLager.bedarf.glatt.umstieg !== null, true);
+check("Prognose: nach Umstieg mehr als Mindestbedarf", nbLager.ereignisse.filter((x) => x.art === "nachbestellung").some((x) => -x.betrag > (5 * 12 * 14 / 365) * 1000 / 1.25 + 1), true);
 
 // ── Weitere Aktionen (Ladenhüter-Sale 12.–15.01.2027) ───────────────────────
 const sale = { aktiv: true, label: "Sale", von: "2026-11-01", bis: "2026-11-04", mehrumsatzBrutto: 40000, profil: [], verzugTage: 2, auszahlungProzent: 100, quelle: "" };

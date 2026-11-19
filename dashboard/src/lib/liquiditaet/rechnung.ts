@@ -126,8 +126,62 @@ export interface LiqSzenario {
   minTeilEur: number;
   /** Nachbestellungen nur noch im Mindestbedarf (kg/Monat statt Verbrauch). */
   nurNoetigstes: boolean;
+  /** Mindestbedarf kg/Monat, solange der verkaufbare Bestand über der Ziel-Reichweite liegt. */
   amandaKgMonat: number;
   ebruKgMonat: number;
+  /** Ziel-Reichweite des verkaufbaren Bestands (Monate) — darunter wird wieder nach Verbrauch bestellt. */
+  zielMonate: number;
+  /** Ladenhüter (kein Verkauf in 90 Tagen), kg — zählen nicht als verkaufbarer Bestand. */
+  ladenhueterGlattKg: number;
+  ladenhueterWelligKg: number;
+}
+
+/** Bestellmengen nach Lagerbestand (Szenario „nur das Nötigste“), je Qualität. */
+export interface BedarfsPlan {
+  lagerKg: number;
+  unterwegsKg: number;
+  ladenhueterKg: number;
+  verkaufbarKg: number;
+  verbrauchKgMonat: number;
+  mindestKgMonat: number;
+  zielKg: number;
+  /** Erste Bestellung, die wieder über dem Mindestbedarf liegt (Bestand nähert sich dem Ziel). */
+  umstieg: string | null;
+  /** Bestelltag → kg. */
+  mengen: Array<{ datum: string; kg: number }>;
+}
+
+/**
+ * Bestellmengen „nur das Nötigste“: Solange der verkaufbare Bestand bei Ankunft einer Bestellung über
+ * Ziel-Reichweite + einem Bestellabstand liegt, nur der Mindestbedarf (Topseller, die ausgehen). Danach
+ * Bestell-bis-Logik: Verbrauch im Abstand + Lücke zum Ziel, höchstens doppelter Verbrauch je Bestellung.
+ * Unterwegs-Ware zählt als vorhanden (kommt vor den neuen Bestellungen an).
+ */
+export function bedarfsMengen(p: {
+  bestellTage: string[];
+  start: string;
+  leadTage: number;
+  abstandTage: number;
+  verkaufbarKg: number;
+  verbrauchKgMonat: number;
+  mindestKgMonat: number;
+  zielMonate: number;
+}): { kg: number[]; umstieg: string | null } {
+  const vTag = (Math.max(0, p.verbrauchKgMonat) * 12) / 365;
+  const proBestellung = vTag * p.abstandTage;
+  const mindest = Math.min(proBestellung, (Math.max(0, p.mindestKgMonat) * 12 * p.abstandTage) / 365);
+  const ziel = Math.max(0, p.zielMonate) * Math.max(0, p.verbrauchKgMonat);
+  const kg: number[] = [];
+  let bestellt = 0;
+  let umstieg: string | null = null;
+  for (const d of p.bestellTage) {
+    const bestandBeiAnkunft = p.verkaufbarKg - vTag * tageZwischen(p.start, plusTage(d, p.leadTage)) + bestellt;
+    const menge = Math.round(Math.max(mindest, Math.min(2 * proBestellung, ziel + proBestellung - bestandBeiAnkunft)) * 10) / 10;
+    if (!umstieg && menge > mindest + 0.05) umstieg = d;
+    kg.push(menge);
+    bestellt += menge;
+  }
+  return { kg, umstieg };
 }
 
 export interface LiqRatenRegel {
@@ -557,6 +611,8 @@ export interface LiqRohdaten {
     /** Datum aus dem Steuer-Ledger je offenem Soll, "art|zeitraum" → YYYY-MM-DD. */
     sollFaellig?: Record<string, string>;
   };
+  /** Physischer Lagerbestand je Qualität (Inventar-Tabs) — nur auf der Liquiditätsseite geladen. */
+  lagerKg?: { glatt: number; wellig: number; stand: string | null } | null;
   /** Hochrechnung ESt/GewSt des laufenden Jahres (Finanzübersicht) — nur auf der Liquiditätsseite geladen. */
   steuerPrognose?: { jahr: number; est: number; gewst: number; vzEst: number; vzGewst: number; nachEst: number; nachGewst: number; gewinnJahr: number; monate: number } | null;
   nachbestellung: {
@@ -743,6 +799,8 @@ export interface PrognoseErgebnis {
   hinweise: string[];
   /** Szenario "Lieferanten glätten": was verschoben wurde. */
   glaettung: Glaettung | null;
+  /** Szenario "nur das Nötigste": Bestellmengen nach Lagerbestand. */
+  bedarf: { glatt: BedarfsPlan | null; wellig: BedarfsPlan | null } | null;
 }
 
 export interface Glaettung {
@@ -807,6 +865,7 @@ interface Plan {
   vermutungen: Map<string, EinfuhrVermutung>;
   /** Tag → Abweichung der Einnahmen vom Ø (Flaute nach der Aktion, negativ). */
   einnahmenKorrektur: Map<string, number>;
+  bedarf: { glatt: BedarfsPlan | null; wellig: BedarfsPlan | null } | null;
   eustAndereMonat: number;
   ustIstSchnitt: number | null;
 }
@@ -958,7 +1017,7 @@ export function ratenVerschiebungenJetzt(
   return out;
 }
 
-export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
+export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen, sz: LiqSzenario | null = null): Plan {
   const start = plusTage(roh.saldoStand, 1) > roh.heute ? roh.heute : plusTage(roh.saldoStand, 1);
   const ende = plusTage(start, e.horizontTage);
   const hinweise: string[] = [];
@@ -1106,6 +1165,29 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     }
   }
 
+  // Szenario „nur das Nötigste“: Bestellmengen nach Lagerbestand statt nach Verbrauch
+  const nb = sz?.nurNoetigstes ? sz : null;
+  const bedarf: Plan["bedarf"] = nb ? { glatt: null, wellig: null } : null;
+  const bedarfFuer = (q: "glatt" | "wellig", tage: string[], leadTage: number, verbrauch: number, unterwegsKg: number): number[] | null => {
+    if (!nb) return null;
+    const mindest = q === "glatt" ? nb.amandaKgMonat : nb.ebruKgMonat;
+    const lager = roh.lagerKg?.[q];
+    if (lager === undefined || lager === null || !(lager > 0)) {
+      // Ohne Lagerbestand: Mindestbedarf für den ganzen Zeitraum (alte Rechnung) — mit Warnung
+      hinweise.push(`„Nur das Nötigste“ (${q}): Lagerbestand nicht verfügbar — Mindestbedarf gilt für den ganzen Zeitraum, das unterschätzt spätere Bestellungen.`);
+      return tage.map(() => Math.round(((mindest * 12 * e.nachbestellAbstandTage) / 365) * 10) / 10);
+    }
+    const ladenhueter = q === "glatt" ? nb.ladenhueterGlattKg : nb.ladenhueterWelligKg;
+    const verkaufbar = Math.max(0, lager + unterwegsKg - ladenhueter);
+    const r = bedarfsMengen({ bestellTage: tage, start, leadTage, abstandTage: e.nachbestellAbstandTage, verkaufbarKg: verkaufbar, verbrauchKgMonat: verbrauch, mindestKgMonat: mindest, zielMonate: nb.zielMonate });
+    bedarf![q] = {
+      lagerKg: r2(lager), unterwegsKg: r2(unterwegsKg), ladenhueterKg: ladenhueter, verkaufbarKg: r2(verkaufbar),
+      verbrauchKgMonat: verbrauch, mindestKgMonat: mindest, zielKg: r2(nb.zielMonate * verbrauch), umstieg: r.umstieg,
+      mengen: tage.map((datum, i) => ({ datum, kg: r.kg[i] })),
+    };
+    return r.kg;
+  };
+
   // 1a') Künftige Ebru-Nachbestellungen (Schätzung): im Bestellrhythmus ab der letzten Bestellung, Rechnung bei Versand
   const ebruNb = roh.ebruNachbestellung ?? null;
   // Nachbestellt wird nach Verbrauch (Usbekisch wellig laut Verkaufsanalyse), sonst Ø Bestellungen
@@ -1113,10 +1195,18 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
   const nbPositionen: LiqManuellePosition[] = [];
   if (e.ebruNachbestellungenEinrechnen && ebruNb && ebruEinzeln) {
     const usdKg = e.ebruUsdProKg ?? ebruNb.usdProKgAuto;
-    const kgBestellung = (ebruNachbestellKgMonat * 12 * e.nachbestellAbstandTage) / 365;
-    if (kgBestellung <= 0 || usdKg <= 0) hinweise.push("Ebru-Nachbestellungen: keine kg/Monat oder kein Preis pro kg — nicht eingerechnet.");
+    const kgStandard = (ebruNachbestellKgMonat * 12 * e.nachbestellAbstandTage) / 365;
+    if (kgStandard <= 0 || usdKg <= 0) hinweise.push("Ebru-Nachbestellungen: keine kg/Monat oder kein Preis pro kg — nicht eingerechnet.");
     else {
-      for (const d of bestellTage(ebruNb.letzteBestellung, start, ende, e.nachbestellAbstandTage)) {
+      const tage = bestellTage(ebruNb.letzteBestellung, start, ende, e.nachbestellAbstandTage);
+      // Unterwegs = Ebru-Ware noch nicht angekommen (Warenwert ÷ $/kg) + Ware in Produktion ohne Ankunftsdatum
+      const ebruUnterwegsKg =
+        ((roh.einfuhrAndere ?? []).filter((b) => !WARE_DA.includes(b.status)).reduce((s, b) => s + b.warenUsd, 0) +
+          Object.entries(roh.ratenKommendUsd ?? {}).filter(([l]) => l === ebruNb.lieferant).reduce((s, [, v]) => s + v, 0)) / usdKg;
+      const mengen = bedarfFuer("wellig", tage, ebruNb.leadWochen * 7, ebruNachbestellKgMonat, ebruUnterwegsKg);
+      for (const [i, d] of tage.entries()) {
+        const kgBestellung = mengen ? mengen[i] : kgStandard;
+        if (kgBestellung <= 0.05) continue;
         const usd = r2(kgBestellung * usdKg);
         const ankunft = plusTage(d, ebruNb.leadWochen * 7);
         const rechnung = plusTage(ankunft, -e.zahlungVorAnkunftTage);
@@ -1161,8 +1251,16 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
     const kgMonat = nachbestellKgMonat;
     const usdKg = e.usdProKg ?? roh.nachbestellung.usdProKgAuto;
     const leadTage = roh.nachbestellung.leadWochen * 7;
-    const kgBestellung = (kgMonat * 12 * e.nachbestellAbstandTage) / 365;
-    for (const d of bestellTage(roh.nachbestellung.letzteBestellung, start, ende, e.nachbestellAbstandTage)) {
+    const kgStandard = (kgMonat * 12 * e.nachbestellAbstandTage) / 365;
+    const tage = bestellTage(roh.nachbestellung.letzteBestellung, start, ende, e.nachbestellAbstandTage);
+    // Unterwegs = Amanda-Bestellungen noch nicht angekommen (kg, sonst Rechnung ÷ $/kg)
+    const amandaUnterwegsKg = roh.bestellungen
+      .filter((b) => !WARE_DA.includes(b.status))
+      .reduce((s, b) => s + (b.kg ?? (usdKg > 0 ? (b.invoiceUsd ?? 0) / usdKg : 0)), 0);
+    const mengen = bedarfFuer("glatt", tage, leadTage, kgMonat, amandaUnterwegsKg);
+    for (const [i, d] of tage.entries()) {
+      const kgBestellung = mengen ? mengen[i] : kgStandard;
+      if (kgBestellung <= 0.05) continue;
       const usd = kgBestellung * usdKg;
       const zahl = plusTage(d, leadTage - e.zahlungVorAnkunftTage);
       const ankunft = plusTage(d, leadTage);
@@ -1416,7 +1514,7 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen): Plan {
 
   // Innerhalb eines Tages: Eingänge vor Ausgängen, sonst stabil
   ereignisse.sort((a, b) => a.datum.localeCompare(b.datum) || Math.sign(b.betrag) - Math.sign(a.betrag));
-  return { start, ende, fx, fxQuelle, ereignisse, ustBasis, eustAndereMonat, ustIstSchnitt, bestellInfo, hinweise, nachbestellKgMonat, ebruNachbestellKgMonat, einfuhrAndere, vermutungen, einnahmenKorrektur };
+  return { start, ende, fx, fxQuelle, ereignisse, ustBasis, eustAndereMonat, ustIstSchnitt, bestellInfo, hinweise, nachbestellKgMonat, ebruNachbestellKgMonat, einfuhrAndere, vermutungen, einnahmenKorrektur, bedarf };
 }
 
 function simuliere(
@@ -1518,12 +1616,9 @@ export function glaetteLieferanten(
 }
 
 export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null | undefined, szenario?: LiqSzenario | null): PrognoseErgebnis {
-  const eGespeichert = mitDefaults(eIn);
-  // "Nur das Nötigste": Nachbestellungen im Mindestbedarf statt nach Verbrauch
-  const e = szenario?.nurNoetigstes
-    ? { ...eGespeichert, nachbestellKgMonat: Math.max(0, szenario.amandaKgMonat), ebruNachbestellKgMonat: Math.max(0, szenario.ebruKgMonat) }
-    : eGespeichert;
-  const plan = erstellePlan(roh, e);
+  const e = mitDefaults(eIn);
+  // "Nur das Nötigste": Bestellmengen nach Lagerbestand (Mindestbedarf, bis die Ziel-Reichweite erreicht ist)
+  const plan = erstellePlan(roh, e, szenario?.nurNoetigstes ? szenario : null);
   const tage = Math.max(1, roh.basis.tage);
   const einnahmenProTag = r2(roh.basis.einnahmen / tage);
   const aus = new Set(e.ausgeblendeteKategorien);
@@ -1631,5 +1726,6 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
     tiefpunktMitAnderen: simAndere.tiefpunkt,
     hinweise: plan.hinweise,
     glaettung,
+    bedarf: plan.bedarf,
   };
 }

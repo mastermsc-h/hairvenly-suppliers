@@ -485,7 +485,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           }}
           eingang={(label) => p.ereignisse.filter((x) => x.art === "aktion" && aktionName(x.label) === label).reduce((s, x) => s + x.betrag, 0)}
         />
-        <SzenarioLeiste sz={sz} setSz={setSz} p={p} pOhne={pOhne} puffer={e.puffer} roh={roh} e={e} />
+        <SzenarioLeiste sz={sz} setSz={setSz} p={p} pOhne={pOhne} puffer={e.puffer} e={e} />
         <div className="relative cursor-pointer [&_*:focus]:outline-none" style={{ width: "100%", height: 300 }}>
           <ResponsiveContainer>
             <ComposedChart data={chartAnzeige} margin={{ top: 12, right: 8, left: 8, bottom: 0 }} onClick={diagrammKlick}>
@@ -1064,20 +1064,20 @@ const HORIZONTE = [
 
 /** Mindestbedarf aus der Bedarfsanalyse 14.11.2026 (Lager + Unterwegs je Produkt, vorsichtige Variante):
  *  glatt ~2–6 kg, wellig ~6–17 kg je 14-Tage-Bestellung. */
-const SZENARIO_START: LiqSzenario = { glaetten: false, minTeilEur: 5000, nurNoetigstes: false, amandaKgMonat: 9, ebruKgMonat: 24 };
+// Ladenhüter = kein Verkauf in 90 Tagen (Analyse 14.11.2026: glatt 65 Produkte/56 kg, wellig 44/52 kg)
+const SZENARIO_START: LiqSzenario = { glaetten: false, minTeilEur: 5000, nurNoetigstes: false, amandaKgMonat: 9, ebruKgMonat: 24, zielMonate: 3, ladenhueterGlattKg: 56, ladenhueterWelligKg: 52 };
 
 const kurzDatum = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(2, 4)}`;
 const euro = (n: number) => Math.round(n).toLocaleString("de-DE") + " €";
 
 function SzenarioLeiste({
-  sz, setSz, p, pOhne, puffer, roh, e,
+  sz, setSz, p, pOhne, puffer, e,
 }: {
   sz: LiqSzenario;
   setSz: (f: (prev: LiqSzenario) => LiqSzenario) => void;
   p: ReturnType<typeof prognose>;
   pOhne: ReturnType<typeof prognose> | null;
   puffer: number;
-  roh: LiqRohdaten;
   e: LiqEinstellungen;
 }) {
   const chip = (an: boolean) =>
@@ -1129,15 +1129,38 @@ function SzenarioLeiste({
         </div>
       )}
       {sz.nurNoetigstes && (
-        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-neutral-600">
-          <span>Nachbestellungen nur im Mindestbedarf: Amanda</span>
-          {zahl(sz.amandaKgMonat, (v) => setSz((x) => ({ ...x, amandaKgMonat: v })), "w-14")}
-          <span>kg/Monat (statt {(e.nachbestellKgMonat ?? roh.nachbestellung.kgVerbrauchMonat ?? roh.nachbestellung.kgProMonatAuto).toLocaleString("de-DE")}), Ebru</span>
-          {zahl(sz.ebruKgMonat, (v) => setSz((x) => ({ ...x, ebruKgMonat: v })), "w-14")}
-          <span>
-            kg/Monat (statt {(e.ebruNachbestellKgMonat ?? roh.ebruNachbestellung?.kgVerbrauchMonat ?? roh.ebruNachbestellung?.kgProMonatAuto ?? 0).toLocaleString("de-DE")}).
-            Vorschlag aus der Bedarfsanalyse vom 14.11. (Lager + Unterwegs je Produkt): glatt reicht ~19 Monate, wellig ~10 Monate. Schon bestellte Ware bleibt.
-          </span>
+        <div className="mt-2 space-y-1.5 text-neutral-600">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>Mindestbedarf (Topseller, die ausgehen): Amanda</span>
+            {zahl(sz.amandaKgMonat, (v) => setSz((x) => ({ ...x, amandaKgMonat: v })), "w-14")}
+            <span>kg/Monat, Ebru</span>
+            {zahl(sz.ebruKgMonat, (v) => setSz((x) => ({ ...x, ebruKgMonat: v })), "w-14")}
+            <span>kg/Monat · Ladenhüter (zählen nicht als Bestand): glatt</span>
+            {zahl(sz.ladenhueterGlattKg, (v) => setSz((x) => ({ ...x, ladenhueterGlattKg: v })), "w-14")}
+            <span>kg, wellig</span>
+            {zahl(sz.ladenhueterWelligKg, (v) => setSz((x) => ({ ...x, ladenhueterWelligKg: v })), "w-14")}
+            <span>kg · ab Reichweite unter</span>
+            {zahl(sz.zielMonate, (v) => setSz((x) => ({ ...x, zielMonate: v })), "w-12")}
+            <span>Monaten wieder nach Verbrauch.</span>
+          </div>
+          {(["glatt", "wellig"] as const).map((q) => {
+            const b = p.bedarf?.[q];
+            if (!b) return null;
+            const name = q === "glatt" ? "Glatt (Amanda)" : "Wellig (Ebru)";
+            const reichweite = b.verbrauchKgMonat > 0 ? b.verkaufbarKg / b.verbrauchKgMonat : 0;
+            const kgVorUmstieg = b.mengen.filter((m) => !b.umstieg || m.datum < b.umstieg).reduce((s2, m) => s2 + m.kg, 0);
+            return (
+              <div key={q}>
+                <b className="text-neutral-800">{name}:</b> verkaufbar {Math.round(b.verkaufbarKg)} kg (Lager {Math.round(b.lagerKg)} + unterwegs {Math.round(b.unterwegsKg)} − Ladenhüter {Math.round(b.ladenhueterKg)})
+                {" "}= {reichweite.toLocaleString("de-DE", { maximumFractionDigits: 1 })} Monate bei {b.verbrauchKgMonat.toLocaleString("de-DE", { maximumFractionDigits: 1 })} kg Verbrauch/Monat.{" "}
+                {b.umstieg ? (
+                  <>Bis {kurzDatum(b.umstieg)} nur Mindestbedarf ({Math.round(kgVorUmstieg)} kg), <b className="text-neutral-800">ab Bestellung {kurzDatum(b.umstieg)} wieder voll</b> (Ziel {Math.round(b.zielKg)} kg Bestand).</>
+                ) : (
+                  <>Im ganzen Zeitraum reicht der Mindestbedarf — Bestand bleibt über dem Ziel ({Math.round(b.zielKg)} kg).</>
+                )}
+              </div>
+            );
+          })}
           {nbAus && <span className="text-amber-700">Nachbestellungen sind in den Annahmen ausgeschaltet — das Szenario wirkt erst, wenn sie eingerechnet sind.</span>}
         </div>
       )}

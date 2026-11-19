@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireFeature } from "@/lib/auth";
 import { ladeEinstellungen, ladeKontoVerlauf, ladeRohdaten } from "@/lib/liquiditaet/daten";
-import { readVerkaufsanalyse } from "@/lib/stock-sheets";
+import { getTotalStockKg, readVerkaufsanalyse } from "@/lib/stock-sheets";
 import { createServiceClient } from "@/lib/supabase/server";
 import Liquiditaet, { type Verbrauch } from "./liquiditaet";
 import UstMonate from "../ust-monate";
@@ -45,7 +45,7 @@ export default async function LiquiditaetPage() {
   if (profile.role === "supplier") redirect("/");
   const sb = createServiceClient();
   const jahr = Number(heuteBerlinDatum().slice(0, 4));
-  const [rohBasis, einstellungen, verbrauch, ustMonate, steuerPrognose] = await Promise.all([
+  const [rohBasis, einstellungen, verbrauch, ustMonate, steuerPrognose, lager] = await Promise.all([
     ladeRohdaten(sb),
     ladeEinstellungen(sb),
     ladeVerbrauch(),
@@ -54,8 +54,10 @@ export default async function LiquiditaetPage() {
       return [];
     }),
     ladeSteuerPrognose(),
+    // Lagerbestand je Qualität für „nur das Nötigste“ — unvollständig gelesen = nicht verwenden
+    getTotalStockKg().then((k) => (k.partial || !k.totalKg ? null : { glatt: k.russianKg, wellig: k.uzbekKg, stand: k.lastUpdated })).catch(() => null),
   ]);
-  const roh: LiqRohdaten = { ...rohBasis, steuerPrognose };
+  const roh: LiqRohdaten = { ...rohBasis, steuerPrognose, lagerKg: lager };
   const verlauf = await ladeKontoVerlauf(sb, roh, einstellungen);
   return (
     <>
