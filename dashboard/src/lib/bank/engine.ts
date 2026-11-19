@@ -6,6 +6,7 @@ import { dedupeKeys, type BankRow } from "./rows";
 import { runKategorisierung } from "./kategorien-engine";
 import { effektiveIban } from "./kategorien";
 import {
+  institutionalCredit,
   matchTransaction,
   plausibleClosedNumbers,
   refineAmountOnly,
@@ -524,6 +525,19 @@ async function healResolvedReviews(daysBack = 150): Promise<{ checked: number; r
     if (handledIds.has(r.id)) continue;
     if (r.match_status !== "review") continue;
     if (r.match_reason !== "amount_only" && r.match_reason !== "no_candidate") continue;
+
+    // Behörden-/Kassen-Erstattungen (AAG, Bundesagentur, Finanzamt, AOK/BARMER/…) →
+    // keine Kundenzahlung, raus aus der Prüfliste. Absender oft nur im Zweck.
+    const inst = institutionalCredit({ counterparty_name: r.counterparty_name, purpose: r.purpose });
+    if (inst) {
+      patches.push({ id: r.id, patch: {
+        match_status: "ignored", match_reason: "payout_source",
+        match_detail: `Behörden-/Kassen-Erstattung: ${inst}`, candidates: [], resolved_at: now,
+      } });
+      refined++;
+      continue;
+    }
+
     if (!r.counterparty_name || !r.counterparty_name.trim()) continue;
 
     const mtx: MatchTx = { amount: Number(r.amount), booking_date: r.booking_date, purpose: r.purpose, counterparty_name: r.counterparty_name, end_to_end_ref: r.end_to_end_ref };

@@ -173,6 +173,17 @@ check("Refine: GbR-Konto, fremde Gleichpreis-Bestellung wird ignoriert",
 check("payerMatchesOrder: Name im Zweck zählt", M.payerMatchesOrder(gbrTx, ["Sabina Durakovic"]), true);
 check("payerMatchesOrder: Fremdname zählt nicht", M.payerMatchesOrder(gbrTx, ["Vivien Kretschmer"]), false);
 
+// Behörden-/Kassen-Erstattungen (Absender nur im Verwendungszweck) → ignored
+const credit = (purpose) => ({ amount: 253.5, purpose, counterparty_name: null, booking_date: "2026-10-26", end_to_end_ref: null });
+check("Institutional: Bundesagentur → ignored", kind(M.matchTransaction(credit("GUTSCHRIFT Bundesagentur für Arbeit-Service-Haus 482EGT214D017488"), open)), "ignored");
+check("Institutional: BARMER AAG → ignored", kind(M.matchTransaction(credit("GUTSCHRIFT BARMER Ersatzkasse EUR 253,50- ERSTATTUNG NACH AAG 13. BIS 15. 10.2026"), open)), "ignored");
+check("Institutional: AOK → ignored", kind(M.matchTransaction(credit("GUTSCHRIFT AOK Bremen/Bremerhaven 003000085519 SIEHE BRIEF"), open)), "ignored");
+check("Institutional: BKK Arbeitgeberversicherung → ignored", kind(M.matchTransaction(credit("GUTSCHRIFT BKK LV MITTE ARBEITGEBERVERSICHERUNG Erstattung nach AAG"), open)), "ignored");
+check("Institutional: Reason payout_source", reason(M.matchTransaction(credit("BARMER Ersatzkasse ERSTATTUNG NACH AAG"), open)), "payout_source");
+check("Institutional: Kundenname trotzdem Kundenzahlung (kein Fehlalarm)", M.institutionalCredit({ counterparty_name: "Dakota Barmann", purpose: "Danke" }), null);
+check("Institutional: Finanzamt im Zweck → erkannt", !!M.institutionalCredit({ counterparty_name: null, purpose: "Erstattung Finanzamt Bremen" }), true);
+check("Institutional: normale Kundenzahlung → null", M.institutionalCredit({ counterparty_name: "Anna Müller", purpose: "27405 Danke" }), null);
+
 // stripForeignAmountOnly: amount_only ohne Namenstreffer → no_candidate (kein Ein-Klick)
 const foreign = { kind: "review", reason: "amount_only", detail: "", candidates: [{ gid: "g", name: "#27307", outstanding: 947.88, via: "amount", nameMatch: false, isBankDeposit: false }] };
 check("Strip: Fremd-Kandidat ohne Namenstreffer → no_candidate",

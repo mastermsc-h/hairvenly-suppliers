@@ -160,6 +160,23 @@ export function payoutSource(counterparty: string | null | undefined): string | 
   return PAYOUT_SOURCES.find((k) => c.includes(k)) ?? null;
 }
 
+/**
+ * Erstattungen/Gutschriften von Behörden & Krankenkassen — nie eine Kunden-
+ * zahlung für eine Bestellung: AAG-Arbeitgebererstattung (Entgeltfortzahlung),
+ * Bundesagentur für Arbeit, Finanzamt, Krankenkassen (AOK/BARMER/BKK/DAK/IKK/
+ * TK/Knappschaft/Ersatzkasse). Diese Marker sind eindeutig genug, um AUCH im
+ * Verwendungszweck zu greifen (bei SEPA-Gutschriften steht der Absender dort,
+ * der Kontoinhaber ist leer) — ein Extensions-Kunde schreibt sie nie in seinen
+ * Zahlungszweck.
+ */
+const INSTITUTIONAL =
+  /\b(erstattung\s+nach\s+a\s?ag|nach\s+a\s?ag\b|arbeitgeberversicherung|bundesagentur\s+f(ue|ü)r\s+arbeit|aok|barmer|dak[-\s]?gesundheit|\bdak\b|\bbkk\b|\bikk\b|techniker\s*krankenkasse|ersatzkasse|krankenkasse|knappschaft|finanzamt|bundeskasse|landeshauptkasse)\b/i;
+
+export function institutionalCredit(tx: Pick<MatchTx, "counterparty_name" | "purpose">): string | null {
+  const m = `${tx.counterparty_name ?? ""} ${tx.purpose ?? ""}`.match(INSTITUTIONAL);
+  return m ? m[0].replace(/\s+/g, " ").trim() : null;
+}
+
 /** Bareinzahlung am Automaten/Schalter — Geld aus dem Salon, keine Bestellzahlung. */
 const CASH_DEPOSIT = /\b(SB-?EINZAHLUNG|BAREINZAHLUNG|BARGELDEINZAHLUNG|EINZAHLUNG\s+(AM\s+)?AUTOMAT|CASH\s+DEPOSIT)\b/i;
 
@@ -233,10 +250,17 @@ export function matchTransaction(
   if (own === "own_transfer") return { kind: "ignored", reason: own, detail: "Übertrag zwischen eigenen Konten" };
   if (own === "cash_deposit") return { kind: "ignored", reason: own, detail: "Bareinzahlung" };
 
-  // 3) Auszahlungen von Plattformen/Behörden
+  // 3) Auszahlungen von Plattformen/Behörden (Kontoinhaber)
   const payout = payoutSource(tx.counterparty_name);
   if (payout) {
     return { kind: "ignored", reason: "payout_source", detail: `Auszahlung/Absender: ${payout}` };
+  }
+
+  // 3b) Behörden-/Kassen-Erstattungen (Absender steht bei Gutschriften oft nur
+  //     im Verwendungszweck) — AAG-Erstattung, Bundesagentur, Finanzamt, Kassen.
+  const inst = institutionalCredit(tx);
+  if (inst) {
+    return { kind: "ignored", reason: "payout_source", detail: `Behörden-/Kassen-Erstattung: ${inst}` };
   }
 
   // 4) Nummer passt, Betrag nicht
