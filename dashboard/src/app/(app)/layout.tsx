@@ -163,6 +163,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                   { href: "/pack/stats", label: t(locale, "nav.shipping.stats") },
                   { href: "/pack/display", label: t(locale, "nav.shipping.display") },
                   { href: "/pack/kamera", label: t(locale, "nav.shipping.camera") },
+                  // Zahlungseingänge (Vorkasse-Abgleich) gehört thematisch zu den
+                  // Shopify-Bestellungen; nur für Finanz-berechtigte sichtbar (Seite
+                  // selbst ist weiterhin requireFeature("finances")).
+                  ...(has("finances")
+                    ? [{ href: "/pack/zahlungen", label: t(locale, "nav.finances.payments") }]
+                    : []),
                   // Umsätze + geschätzte Namensherkunft: nur der echte Admin
                   ...(profile.role === "admin"
                     ? [{ href: "/pack/kunden", label: t(locale, "nav.shipping.customers") }]
@@ -281,7 +287,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                     { href: "/finances/overview", label: t(locale, "nav.finances.overview") },
                     { href: "/finances/bwa", label: t(locale, "nav.finances.bwa") },
                     { href: "/finances/prepayments", label: t(locale, "nav.finances.prepayments") },
-                    { href: "/finances/payments", label: t(locale, "nav.finances.payments") },
                     { href: "/finances/bank", label: t(locale, "nav.finances.bank") },
                     { href: "/finances/liquiditaet", label: t(locale, "nav.finances.liquiditaet") },
                     { href: "/finances/z-bons", label: t(locale, "nav.finances.zbons") },

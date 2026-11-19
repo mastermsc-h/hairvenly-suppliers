@@ -15,7 +15,7 @@ import {
   type RunSummary,
 } from "@/lib/bank/engine";
 
-const PATH = "/finances/payments";
+const PATH = "/pack/zahlungen";
 
 export interface BankTransaction {
   id: string;
