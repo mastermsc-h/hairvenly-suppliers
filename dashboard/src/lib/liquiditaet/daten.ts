@@ -17,6 +17,7 @@ import {
   parseKontostand,
   plusTage,
   WARE_DA,
+  AMANDA_ZOLL_NACHLAUF_TAGE,
   prognose,
   tageZwischen,
   type LiqBestellung,
@@ -269,7 +270,9 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     .filter((b) => {
       if (!(WARE_DA.includes(b.status) && b.restUsd <= 0.01)) return true;
       const ez = b.einfuhrZahlung;
-      return !!ez && ez.gefunden.length < ez.rechnungen.length && !!b.eta && b.eta.slice(0, 10) >= plusTage(heute, -60);
+      if (ez) return ez.gefunden.length < ez.rechnungen.length && !!b.eta && b.eta.slice(0, 10) >= plusTage(heute, -60);
+      // Ohne ZIT-Nummer: frisch angekommen → DHL bucht gesammelt später ab, Einfuhr noch offen (Abgleich in der Rechnung)
+      return !!b.eta && b.eta.slice(0, 10) >= plusTage(heute, -AMANDA_ZOLL_NACHLAUF_TAGE);
     })
     .sort((a, b) => (a.eta ?? "").localeCompare(b.eta ?? ""));
 
@@ -289,7 +292,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     .sort((a, b) => (a.eta ?? "").localeCompare(b.eta ?? ""));
 
   // ── Versandtag verschickter Ware (Statusverlauf) + Verzoller-Abbuchungen ohne zugeordnete Bestellung ──
-  const unterwegsIds = [...bestellungen, ...einfuhrAndere].filter((b) => b.status === "shipped" || b.status === "in_customs").map((b) => b.id);
+  const unterwegsIds = [...bestellungen, ...einfuhrAndere].filter((b) => ["shipped", "in_customs", ...WARE_DA].includes(b.status)).map((b) => b.id);
   if (unterwegsIds.length) {
     const { data: ev } = await sb
       .from("order_events")
@@ -297,12 +300,17 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
       .eq("event_type", "status_change")
       .in("order_id", unterwegsIds)
       .order("created_at", { ascending: true });
-    // Erster Wechsel auf "versendet" bzw. "beim Zoll" (deutsche Zeit)
+    // Erster Wechsel auf "versendet" bzw. "beim Zoll" (deutsche Zeit). Wurde der Schritt übersprungen
+    // (direkt auf angekommen/eingelagert), gilt der erste Wechsel dorthin — Abbuchungen danach können dazugehören.
     const versandAm = new Map<string, string>();
+    const ankunftAm = new Map<string, string>();
     for (const x of (ev ?? []) as Array<{ order_id: string; created_at: string; meta: { to?: string } | null }>) {
-      if (versandAm.has(x.order_id) || !["shipped", "in_customs"].includes(x.meta?.to ?? "")) continue;
-      versandAm.set(x.order_id, new Date(x.created_at).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }));
+      const tag = new Date(x.created_at).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
+      const to = x.meta?.to ?? "";
+      if (["shipped", "in_customs"].includes(to) && !versandAm.has(x.order_id)) versandAm.set(x.order_id, tag);
+      if (WARE_DA.includes(to) && !ankunftAm.has(x.order_id)) ankunftAm.set(x.order_id, tag);
     }
+    for (const [id, tag] of ankunftAm) if (!versandAm.has(id)) versandAm.set(id, tag);
     for (const b of [...bestellungen, ...einfuhrAndere]) b.versandAm = versandAm.get(b.id) ?? null;
   }
   const zollBuchungen = offeneZollBuchungen(

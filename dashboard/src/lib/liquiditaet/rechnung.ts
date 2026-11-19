@@ -832,6 +832,12 @@ export const WARE_DA = ["delivered", "stocked"];
 const VERSENDET = ["shipped", "in_customs", ...WARE_DA];
 /** Noch nicht versendete Ware mit überholtem Datum: Versand frühestens in so vielen Tagen. */
 export const VERSAND_FRUEHESTENS_TAGE = 7;
+/**
+ * Amanda (DHL Express): DHL bucht EUSt/Zoll gesammelt, oft Tage bis Wochen nach der Ankunft (13.06.-Sendung:
+ * angekommen 17.09., abgebucht 30.10.). Angekommene Sendungen ohne ZIT-Nummer bleiben so lange offen, bis eine
+ * DHL-Abbuchung nach dem Versand sie deckt — längstens so viele Tage nach der Ankunft, danach gelten sie als bezahlt.
+ */
+export const AMANDA_ZOLL_NACHLAUF_TAGE = 45;
 /** Ebru: Rechnung des Verzollers (Carl Ungewitter) ~2–3 Tage nach Versand. */
 export const ZOLL_NACH_VERSAND_TAGE = 3;
 const SOFORT_STATUS = ["ready_to_ship", "shipped", "in_customs", ...WARE_DA];
@@ -1041,11 +1047,15 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen, sz: LiqSzena
   // Schon abgebuchte, aber nicht zugeordnete Verzoller-Rechnungen: gegen verschickte Ware ohne Nummer
   // verrechnen (sonst steckt der Betrag im Kontostand UND als Zahlung "heute" in der Vorschau).
   const UNTERWEGS = ["shipped", "in_customs"];
+  // Amanda angekommen, aber DHL hat (vermutlich) noch nicht abgebucht
+  const amandaFrischDa = (b: { status: string; eta: string | null }) =>
+    WARE_DA.includes(b.status) && !!b.eta && b.eta.slice(0, 10) >= plusTage(start, -AMANDA_ZOLL_NACHLAUF_TAGE);
   const ebruEinzelnVorab = roh.einfuhrAndere !== undefined && !e.andereLieferantenEinrechnen;
   const vermutungen = new Map<string, EinfuhrVermutung>();
   if (e.zollAbbuchungenVerrechnen && roh.zollBuchungen?.length) {
-    const kand = (b: { id: string; status: string; versandAm?: string | null; einfuhrRechnung?: string | null; importVatEur: number | null }, usd: number, art: ZollBuchung["art"]) => {
-      if (!UNTERWEGS.includes(b.status) || !b.versandAm || rechnungsNummern(b.einfuhrRechnung).length || usd <= 0) return [];
+    const kand = (b: { id: string; status: string; eta: string | null; versandAm?: string | null; einfuhrRechnung?: string | null; importVatEur: number | null }, usd: number, art: ZollBuchung["art"]) => {
+      const frischDa = art === "dhl" && amandaFrischDa(b);
+      if ((!UNTERWEGS.includes(b.status) && !frischDa) || !b.versandAm || rechnungsNummern(b.einfuhrRechnung).length || usd <= 0) return [];
       const ab = einfuhrFuer(usd, b.importVatEur);
       return [{ id: b.id, art, versandAm: b.versandAm, eur: r2(ab.eust + ab.zoll) }];
     };
@@ -1063,14 +1073,17 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen, sz: LiqSzena
     // Schon versendet: echter Versandtag liegt zurück → keine Untergrenze außer heute
     const frueh = VERSENDET.includes(b.status) ? "" : plusTage(start, VERSAND_FRUEHESTENS_TAGE);
     const max = (a: string, c: string) => (a > c ? a : c);
-    if (termin === "ankunft") return amStart(max(b.eta ?? start, frueh));
+    // Schon angekommen: Ankunft liegt hinter uns, egal was im ETA-Feld steht
+    if (termin === "ankunft") return WARE_DA.includes(b.status) ? start : amStart(max(b.eta ?? start, frueh));
     const versand = max(b.eta ? plusTage(b.eta, -e.zahlungVorAnkunftTage) : start, frueh);
     return amStart(plusTage(versand, ZOLL_NACH_VERSAND_TAGE));
   };
   const planeEinfuhr = (b: { id: string; label: string; status: string; eta: string | null; warenUsd: number; importVatEur: number | null; einfuhrZahlung?: EinfuhrZahlung | null }, termin: "ankunft" | "versand") => {
     const ez = b.einfuhrZahlung ?? null;
     const ezErledigt = !!ez && ez.gefunden.length === ez.rechnungen.length;
-    if (ezErledigt || (WARE_DA.includes(b.status) && !ez) || b.warenUsd <= 0) return null;
+    // Angekommen ohne Rechnungsnummer: Ebru (Ungewitter bucht sofort) = erledigt; Amanda (DHL sammelt) bleibt eine Weile offen
+    const amandaOffen = termin === "ankunft" && amandaFrischDa(b);
+    if (ezErledigt || (WARE_DA.includes(b.status) && !ez && !amandaOffen) || b.warenUsd <= 0) return null;
     const ab = einfuhrFuer(b.warenUsd, b.importVatEur);
     // Teil schon abgebucht (mehrere Rechnungen): nur der Rest; bei Sammelzahlungen ist der Anteil unbekannt
     const summe = ab.eust + ab.zoll;
@@ -1080,7 +1093,15 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen, sz: LiqSzena
     const rest = { eust: r2(ab.eust * f), zoll: r2(ab.zoll * f) };
     if (rest.eust + rest.zoll <= 0.005) return null;
     const datum = einfuhrDatum(b, termin);
-    ereignisse.push({ datum, betrag: -r2(rest.eust + rest.zoll), art: "einfuhr", label: `Einfuhrabgaben ${b.label}`, orderId: b.id });
+    const daOhneAbbuchung = amandaOffen && !ez;
+    ereignisse.push({
+      datum,
+      betrag: -r2(rest.eust + rest.zoll),
+      art: "einfuhr",
+      label: `Einfuhrabgaben ${b.label}${daOhneAbbuchung ? " (angekommen, DHL-Abbuchung steht noch aus)" : ""}`,
+      orderId: b.id,
+      ...(daOhneAbbuchung ? { sofort: true, schaetzung: true } : {}),
+    });
     eustProMonat[monatVon(datum)] = (eustProMonat[monatVon(datum)] ?? 0) + rest.eust;
     return { datum, ...rest };
   };

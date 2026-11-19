@@ -271,7 +271,17 @@ check("Einfuhrabgaben bleiben bei Ankunft", pA.bestellungen[0].einfuhr.datum, "2
 const eingelagert = L.prognose(roh({ bestellungen: [{ ...bv, status: "stocked", eta: "2026-12-20" }] }), E0);
 check("Eingelagert unbezahlt ist sofort fällig", eingelagert.bestellungen[0].sofort, true);
 check("Eingelagert: Zahlung am ersten Tag", eingelagert.ereignisse.filter((x) => x.art === "lieferant").map((x) => x.datum), [eingelagert.start]);
-check("Eingelagert: keine Einfuhrabgaben", eingelagert.ereignisse.filter((x) => x.art === "einfuhr").length, 0);
+check("Eingelagert vor > 45 Tagen: keine Einfuhrabgaben mehr", L.prognose(roh({ bestellungen: [{ ...bv, status: "stocked", eta: "2026-08-01" }] }), E0).ereignisse.filter((x) => x.art === "einfuhr").length, 0);
+// User 19.11.2026: DHL bucht für angekommene Amanda-Sendungen gesammelt später ab (19k vorgemerkt) — die fehlten
+check("Frisch angekommen ohne ZIT: Einfuhr noch offen, sofort", eingelagert.ereignisse.filter((x) => x.art === "einfuhr").map((x) => [x.datum, !!x.sofort, x.label.includes("DHL-Abbuchung steht noch aus")]), [[eingelagert.start, true, true]]);
+const daBezahlt = { ...bv, id: "d", status: "delivered", eta: "2026-10-30", restUsd: 0, versandAm: "2026-10-30" };
+const ohneDhl = L.prognose(roh({ bestellungen: [daBezahlt] }), E0);
+check("Angekommen + bezahlt, keine DHL-Abbuchung: Einfuhr offen", ohneDhl.ereignisse.filter((x) => x.art === "einfuhr").length, 1);
+const mitDhl = L.prognose(roh({ bestellungen: [daBezahlt], zollBuchungen: [{ datum: "2026-11-05", betragEur: 50000, nummern: ["ZIT1"], art: "dhl" }] }), E0);
+check("Angekommen + DHL-Abbuchung danach: gedeckt", mitDhl.ereignisse.filter((x) => x.art === "einfuhr").length, 0);
+const dhlVorher = L.prognose(roh({ bestellungen: [daBezahlt], zollBuchungen: [{ datum: "2026-10-20", betragEur: 50000, nummern: ["ZIT1"], art: "dhl" }] }), E0);
+check("DHL-Abbuchung vor der Ankunft deckt nicht", dhlVorher.ereignisse.filter((x) => x.art === "einfuhr").length, 1);
+check("Ebru angekommen ohne Nummer: weiter erledigt (Ungewitter bucht sofort)", L.prognose(roh({ einfuhrAndere: [{ id: "e", label: "China", lieferant: "Ebru", status: "delivered", eta: "2026-11-01", warenUsd: 30000, importVatEur: null, geschaetzt: false }] }), E0).ereignisse.filter((x) => x.art === "einfuhr").length, 0);
 check("Angekommen verhält sich gleich", L.prognose(roh({ bestellungen: [{ ...bv, status: "delivered", eta: "2026-12-20" }] }), E0).bestellungen[0].sofort, true);
 
 // Einfuhrabgaben per DHL-Rechnungsnummer (ZIT) mit dem Konto abgleichen
