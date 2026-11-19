@@ -310,6 +310,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                   items={[
                     { href: "/admin/suppliers", label: t(locale, "nav.suppliers") },
                     { href: "/admin/users", label: t(locale, "nav.users") },
+                    { href: "/admin/passwoerter", label: t(locale, "nav.passwords") },
                   ]}
                 />
               </>
