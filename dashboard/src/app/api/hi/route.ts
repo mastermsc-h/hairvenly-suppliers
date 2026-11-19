@@ -3,6 +3,7 @@
  * POST { verlauf: MessageParam[], frage: string, modus?: "normal" | "gruendlich" } → NDJSON-Stream:
  *   {t:"text", d}           Textstück der Antwort
  *   {t:"werkzeug", label}   Hi schaut gerade irgendwo nach
+ *   {t:"vorschlag", id, titel, zeilen}  Hi möchte etwas eintragen — erst nach Klick auf „Eintragen" (Server-Action)
  *   {t:"kosten", usd, eur}  Kosten dieser Frage
  *   {t:"fertig", verlauf}   Verlauf zum Weiterreden — nur Fragen und Antworttexte
  *   {t:"fehler", text}
@@ -14,6 +15,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { HI_SYSTEM } from "@/lib/hi/system";
 import { WERKZEUGE, fuehreAus, werkzeugLabel } from "@/lib/hi/werkzeuge";
+import { SCHREIB_WERKZEUGE, erstelleVorschlag, istSchreibWerkzeug } from "@/lib/hi/vorschlaege";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,7 +31,7 @@ const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 let fallbackAus = false;
 
 const client = new Anthropic();
-const TOOLS: Anthropic.Tool[] = WERKZEUGE.map((w) => ({ ...w, eager_input_streaming: true }));
+const TOOLS: Anthropic.Tool[] = [...WERKZEUGE, ...SCHREIB_WERKZEUGE].map((w) => ({ ...w, eager_input_streaming: true }));
 
 /**
  * Früherer Verlauf nur als Text: Fragen und Antworten, ohne Werkzeug-Rohdaten und Denkblöcke.
@@ -165,10 +167,23 @@ export async function POST(req: Request) {
 
           for (const t of toolUses) {
             werkzeuge.push(t.name);
-            send({ t: "werkzeug", label: werkzeugLabel(t.name, t.input) });
+            if (!istSchreibWerkzeug(t.name)) send({ t: "werkzeug", label: werkzeugLabel(t.name, t.input) });
           }
           if (antwort && !antwort.endsWith("\n")) antwort += "\n\n";
-          const ergebnisse = await Promise.all(toolUses.map((t) => fuehreAus(t.name, t.input)));
+          // Schreib-Werkzeuge schreiben nie selbst: sie legen einen Vorschlag ab, den der Nutzer per Klick ausführt
+          const ergebnisse = await Promise.all(
+            toolUses.map(async (t) => {
+              if (!istSchreibWerkzeug(t.name)) return fuehreAus(t.name, t.input);
+              try {
+                const karte = await erstelleVorschlag(t.name, t.input, user.id);
+                send({ t: "vorschlag", ...karte });
+                return { inhalt: `Vorschlag angelegt und als Karte mit „Eintragen"/„Abbrechen" angezeigt: ${karte.titel} — ${karte.zeilen.join(" · ")}. Noch NICHT gespeichert; der Nutzer muss klicken.`, fehler: false };
+              } catch (e) {
+                const msg = e instanceof Error ? (e.name === "ZodError" ? `Ungültige Angaben: ${e.message.slice(0, 600)}` : e.message) : String(e);
+                return { inhalt: `Kein Vorschlag möglich: ${msg}`, fehler: true };
+              }
+            }),
+          );
           messages = [
             ...messages,
             {

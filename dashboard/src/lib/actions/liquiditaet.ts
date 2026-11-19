@@ -57,7 +57,7 @@ export async function saveLiquiditaetEinstellungen(input: Partial<LiqEinstellung
           profil: (Array.isArray(a.profil) ? a.profil : []).slice(0, 62).map((x) => Math.max(0, Number(x) || 0)),
           verzugTage: Math.min(30, Math.max(0, Math.round(Number(a.verzugTage) || 0))),
           auszahlungProzent: Math.min(100, Math.max(50, Number(a.auszahlungProzent) || 100)),
-          quelle: String(a.quelle ?? "").slice(0, 120),
+          quelle: String(a.quelle ?? "").slice(0, 600),
           nachlauf:
             a.nachlauf && typeof a.nachlauf === "object"
               ? {
@@ -66,7 +66,7 @@ export async function saveLiquiditaetEinstellungen(input: Partial<LiqEinstellung
                     .slice(0, 6)
                     .filter((x) => datum(x?.von) && datum(x?.bis) && x.von <= x.bis)
                     .map((x) => ({ von: x.von, bis: x.bis, faktor: Math.min(1.5, Math.max(0, Number(x.faktor) || 0)) })),
-                  quelle: String(a.nachlauf.quelle ?? "").slice(0, 200),
+                  quelle: String(a.nachlauf.quelle ?? "").slice(0, 600),
                 }
               : null,
         }

@@ -303,3 +303,19 @@
 
 /* Goldene Strähnen um die Kugel */
 .hi-straehnen { position: absolute; z-index: 4; pointer-events: none; }
+
+/* Vorschlagskarte: Hi möchte etwas eintragen — erst nach Klick */
+.hi-vorschlag { margin-top: 12px; border: 1px solid rgba(255, 205, 110, 0.45); border-radius: 14px; padding: 12px 14px; background: linear-gradient(180deg, rgba(255, 200, 100, 0.08), rgba(255, 200, 100, 0.03)); }
+.hi-vorschlag[data-status="ok"] { border-color: rgba(110, 231, 183, 0.5); background: rgba(110, 231, 183, 0.06); }
+.hi-vorschlag[data-status="fehler"] { border-color: rgba(248, 113, 113, 0.55); background: rgba(248, 113, 113, 0.06); }
+.hi-vorschlag[data-status="verworfen"] { opacity: 0.55; }
+.hi-vorschlag-titel { font-weight: 600; color: var(--hi-gold); font-size: 13.5px; margin-bottom: 6px; }
+.hi-vorschlag ul { margin: 0 0 10px; padding-left: 18px; font-size: 13px; line-height: 1.5; }
+.hi-vorschlag-knoepfe { display: flex; gap: 8px; }
+.hi-vorschlag-knoepfe button { border-radius: 9px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid transparent; }
+.hi-vorschlag-knoepfe button:disabled { opacity: 0.6; cursor: wait; }
+.hi-vorschlag-ja { background: linear-gradient(180deg, #ffd98a, #e0a43a); color: #1b1404; }
+.hi-vorschlag-nein { background: transparent; color: var(--hi-dim); border-color: rgba(255, 255, 255, 0.18) !important; }
+.hi-vorschlag-ergebnis { font-size: 13px; }
+.hi-vorschlag[data-status="ok"] .hi-vorschlag-ergebnis { color: #6ee7b7; }
+.hi-vorschlag[data-status="fehler"] .hi-vorschlag-ergebnis { color: #fca5a5; margin-bottom: 8px; }

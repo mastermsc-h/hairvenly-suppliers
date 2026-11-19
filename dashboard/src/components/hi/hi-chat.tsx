@@ -6,6 +6,16 @@ import Link from "next/link";
 import { ArrowUp, Maximize2, RotateCcw, Square, X } from "lucide-react";
 import HiGehirn, { type HiZustand } from "./hi-gehirn";
 import HiMarkdown from "./hi-markdown";
+import { hiVorschlagAusfuehren, hiVorschlagVerwerfen } from "@/lib/actions/hi";
+
+/** Etwas, das Hi eintragen möchte — gespeichert wird erst nach Klick. */
+interface Vorschlag {
+  id: string;
+  titel: string;
+  zeilen: string[];
+  status?: "offen" | "laeuft" | "ok" | "fehler" | "verworfen";
+  ergebnis?: string;
+}
 
 /** Ein Eintrag der sichtbaren Unterhaltung. */
 interface Anzeige {
@@ -15,6 +25,43 @@ interface Anzeige {
   fehler?: boolean;
   /** Kosten dieser Antwort in Euro. */
   kostenEur?: number;
+  vorschlaege?: Vorschlag[];
+}
+
+function VorschlagKarte({ v, onAendern }: { v: Vorschlag; onAendern: (neu: Partial<Vorschlag>) => void }) {
+  const status = v.status ?? "offen";
+  const klick = async (ausfuehren: boolean) => {
+    onAendern({ status: "laeuft" });
+    try {
+      const r = ausfuehren ? await hiVorschlagAusfuehren(v.id) : await hiVorschlagVerwerfen(v.id);
+      onAendern({ status: !r.ok ? "fehler" : ausfuehren ? "ok" : "verworfen", ergebnis: r.text });
+    } catch (e) {
+      onAendern({ status: "fehler", ergebnis: e instanceof Error ? e.message : "Fehler" });
+    }
+  };
+  return (
+    <div className="hi-vorschlag" data-status={status}>
+      <div className="hi-vorschlag-titel">{v.titel}</div>
+      <ul>
+        {v.zeilen.map((z, j) => (
+          <li key={j}>{z}</li>
+        ))}
+      </ul>
+      {status === "fehler" && <div className="hi-vorschlag-ergebnis">⚠ {v.ergebnis}</div>}
+      {status === "offen" || status === "laeuft" || status === "fehler" ? (
+        <div className="hi-vorschlag-knoepfe">
+          <button type="button" className="hi-vorschlag-ja" disabled={status === "laeuft"} onClick={() => klick(true)}>
+            {status === "laeuft" ? "Trägt ein …" : status === "fehler" ? "Nochmal versuchen" : "Eintragen"}
+          </button>
+          <button type="button" className="hi-vorschlag-nein" disabled={status === "laeuft"} onClick={() => klick(false)}>
+            Abbrechen
+          </button>
+        </div>
+      ) : (
+        <div className="hi-vorschlag-ergebnis">{status === "ok" ? "✓ " : ""}{v.ergebnis}</div>
+      )}
+    </div>
+  );
 }
 
 // Verlauf für die API (inkl. Denk- und Werkzeugblöcke) und Anzeige — geteilt zwischen Seite und Widget
@@ -126,7 +173,7 @@ export default function HiChat({
           puffer = teile.pop() ?? "";
           for (const zeile of teile) {
             if (!zeile.trim()) continue;
-            const ev = JSON.parse(zeile) as { t: string; d?: string; label?: string; verlauf?: ApiMessage[]; text?: string; eur?: number };
+            const ev = JSON.parse(zeile) as { t: string; d?: string; label?: string; verlauf?: ApiMessage[]; text?: string; eur?: number; id?: string; titel?: string; zeilen?: string[] };
             if (ev.t === "text" && ev.d) {
               setZustand("spricht");
               setImpuls((x) => x + 1);
@@ -134,6 +181,9 @@ export default function HiChat({
             } else if (ev.t === "werkzeug" && ev.label) {
               setZustand("denkt");
               aendereLetzte((a) => ({ ...a, schritte: [...(a.schritte ?? []), ev.label as string], text: a.text && !a.text.endsWith("\n") ? a.text + "\n\n" : a.text }));
+            } else if (ev.t === "vorschlag" && ev.id && ev.titel) {
+              const v: Vorschlag = { id: ev.id, titel: ev.titel, zeilen: ev.zeilen ?? [], status: "offen" };
+              aendereLetzte((a) => ({ ...a, vorschlaege: [...(a.vorschlaege ?? []), v] }));
             } else if (ev.t === "denkt") {
               setZustand("denkt");
             } else if (ev.t === "kosten" && typeof ev.eur === "number") {
@@ -183,6 +233,14 @@ export default function HiChat({
     schreib(SPEICHER_ANZEIGE, []);
     schreib(SPEICHER_VERLAUF, []);
   };
+
+  const aendereVorschlag = useCallback((id: string, neu: Partial<Vorschlag>) => {
+    setAnzeige((alt) => {
+      const n = alt.map((a) => (a.vorschlaege?.some((v) => v.id === id) ? { ...a, vorschlaege: a.vorschlaege.map((v) => (v.id === id ? { ...v, ...neu } : v)) } : a));
+      if (neu.status !== "laeuft") schreib(SPEICHER_ANZEIGE, n);
+      return n;
+    });
+  }, []);
 
   const leer = anzeige.length === 0;
   const sichtbar = widget ? anzeige.slice(-2) : anzeige;
@@ -236,6 +294,9 @@ export default function HiChat({
                 </div>
               )}
               {a.text ? <HiMarkdown text={a.text} /> : zustand !== "ruhig" && i === sichtbar.length - 1 ? <div className="hi-tippt"><span /><span /><span /></div> : null}
+              {a.vorschlaege?.map((v) => (
+                <VorschlagKarte key={v.id} v={v} onAendern={(neu) => aendereVorschlag(v.id, neu)} />
+              ))}
               {typeof a.kostenEur === "number" && (
                 <div className="hi-kosten" title="Kosten dieser Antwort (KI-Nutzung)">≈ {a.kostenEur.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
               )}
