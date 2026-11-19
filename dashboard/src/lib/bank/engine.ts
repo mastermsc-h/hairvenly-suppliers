@@ -48,8 +48,18 @@ function eur(n: number): string {
   return n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 }
 function deDate(iso: string): string {
-  const [y, m, d] = iso.split("-");
+  const [y, m, d] = iso.slice(0, 10).split("-");
   return `${d}.${m}.${y}`;
+}
+/** YYYY-MM-DD minus n Tage (UTC, mittag-sicher gegen DST). */
+function minusDaysIso(iso: string, n: number): string {
+  const d = new Date(`${iso.slice(0, 10)}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+/** Bestellnummer aus "#29054" / "29054" normalisieren (wie lookupClosedOrders). */
+function orderNum(name: string): string {
+  return String(name).replace(/^#/, "").replace(/^0+/, "");
 }
 
 function noteFor(tx: TxRow, how: string): string {
@@ -157,6 +167,8 @@ export interface RunSummary {
   errors: string[];
   /** Kategorisierung der Kontoumsätze (nach dem Abgleich). */
   kategorien?: { geprueft: number; geaendert: number; remaining: number };
+  /** Selbstheilung: Prüf-/Shadow-Fälle, deren Bestellung inzwischen bezahlt wurde. */
+  healed?: { checked: number; resolved: number; relabeled: number };
 }
 
 /**
@@ -172,6 +184,15 @@ export interface RunSummary {
  */
 export async function runBankMatching(opts: { budgetMs?: number } = {}): Promise<RunSummary> {
   const summary = await abgleichLauf(opts);
+  // Selbstheilung: Prüf-/Shadow-Fälle, deren vorgeschlagene Bestellung inzwischen
+  // (meist von Hand in Shopify) bezahlt wurde, auflösen — sonst bleiben sie ewig
+  // in "Zu prüfen" stehen, obwohl die Bestellung längst bezahlt ist.
+  // Ein Fehler hier darf den Zahlungsabgleich nie scheitern lassen.
+  try {
+    summary.healed = await healResolvedReviews();
+  } catch (e) {
+    summary.errors.push(`Selbstheilung: ${e instanceof Error ? e.message : String(e)}`);
+  }
   // Kategorien (Reiter Kontoumsätze) + Steuer-Ledger nachziehen — auch im Modus "off".
   // Läuft nach dem Abgleich, weil Kunden-Überweisungen erst dann als Vorkasse erkennbar sind.
   // Ein Fehler hier darf den Zahlungsabgleich nie scheitern lassen.
@@ -359,6 +380,97 @@ async function abgleichLauf(opts: { budgetMs?: number }): Promise<RunSummary> {
 
   summary.remaining = await countRemaining();
   return summary;
+}
+
+// ── Selbstheilung stehengebliebener Prüf-/Shadow-Fälle ──────────────────────
+
+interface HealRow {
+  id: string;
+  booking_date: string;
+  match_status: string;
+  candidates?: { gid: string; name: string; outstanding: number }[] | null;
+  matched_orders?: { gid: string; name: string; outstanding: number }[] | null;
+}
+
+/**
+ * Gleicht offene Prüf-/Shadow-Fälle mit dem LIVE-Status ihrer vorgeschlagenen
+ * Bestellung ab. Hintergrund: Die "Zu prüfen"-Liste ist eine Momentaufnahme vom
+ * letzten Abgleich. Zahlt der User eine Vorkasse-Bestellung von Hand in Shopify
+ * (ohne Bestellnr. im Verwendungszweck findet der Matcher sie nie sicher), bleibt
+ * der Eingang hier ewig als "prüfen" stehen, obwohl die Bestellung längst bezahlt ist.
+ *
+ * WICHTIG: markiert NIE etwas in Shopify als bezahlt — ändert nur die Dashboard-
+ * Einordnung, voll reversibel (Wiederherstellen-Knopf). Nur wenn ALLE
+ * referenzierten Bestellungen geschlossen sind, wird gehandelt:
+ *  - am/nach (Buchung−1 Tag) bezahlt → "von Hand erledigt" → ignored/already_paid
+ *    (verlässt "Zu prüfen"); das Zeitfenster schließt Zufallstreffer praktisch aus.
+ *  - vorher bezahlt / storniert → bleibt zur Prüfung, aber ohne den irreführenden
+ *    Vorschlag auf eine bezahlte Bestellung (order_not_open, mögliche Doppelzahlung).
+ *  - mind. eine Bestellung noch offen → unverändert (echter Kandidat bleibt).
+ */
+async function healResolvedReviews(daysBack = 150): Promise<{ checked: number; resolved: number; relabeled: number }> {
+  const sb = createServiceClient();
+  const since = new Date(Date.now() - daysBack * 86400000).toISOString().slice(0, 10);
+  const { data } = await sb
+    .from("bank_transactions")
+    .select("id, booking_date, match_status, candidates, matched_orders")
+    .in("match_status", ["review", "shadow"])
+    .gt("amount", 0)
+    .gte("booking_date", since)
+    .limit(500);
+  const rows = (data ?? []) as HealRow[];
+
+  // Shadow-Fälle referenzieren matched_orders (sicherer Treffer), Prüf-Fälle candidates.
+  const refsOf = (r: HealRow) => (r.match_status === "shadow" ? r.matched_orders : r.candidates) ?? [];
+
+  const numbers = new Set<string>();
+  for (const r of rows) for (const o of refsOf(r)) { const n = orderNum(o.name); if (n) numbers.add(n); }
+  if (numbers.size === 0) return { checked: rows.length, resolved: 0, relabeled: 0 };
+
+  // Nur GESCHLOSSENE Bestellungen landen in der Map (offene werden übersprungen) → inkl. paidAt.
+  const closed = await lookupClosedOrders([...numbers]);
+
+  let resolved = 0, relabeled = 0;
+  const patches: { id: string; patch: Record<string, unknown> }[] = [];
+  const now = new Date().toISOString();
+  for (const r of rows) {
+    const refs = refsOf(r);
+    if (refs.length === 0) continue;
+    const infos = refs.map((o) => closed[orderNum(o.name)]);
+    if (infos.some((c) => !c)) continue; // mind. eine noch offen → unangetastet lassen
+
+    const handledFrom = minusDaysIso(r.booking_date, 1);
+    const allHandled = infos.every((c) => c!.state === "paid" && c!.paidAt && c!.paidAt.slice(0, 10) >= handledFrom);
+
+    if (allHandled) {
+      const names = infos.map((c) => c!.name).join(", ");
+      const dates = infos.map((c) => deDate(c!.paidAt!)).join(", ");
+      patches.push({ id: r.id, patch: {
+        match_status: "ignored",
+        match_reason: "already_paid",
+        match_detail: `${names} war bereits als bezahlt markiert (${dates}) – vermutlich von Hand erledigt.`,
+        candidates: [],
+        resolved_at: now,
+      } });
+      resolved++;
+    } else {
+      const parts = infos.map((c) =>
+        c!.state === "cancelled" ? `${c!.name} ist storniert – ggf. erstatten`
+        : c!.state === "paid" ? `${c!.name} ist bereits bezahlt${c!.paidAt ? ` am ${deDate(c!.paidAt)}` : ""} – mögliche Doppelzahlung, bitte prüfen`
+        : `${c!.name} ist nicht offen (${c!.detail})`,
+      );
+      patches.push({ id: r.id, patch: {
+        match_status: "review",
+        match_reason: "order_not_open",
+        match_detail: parts.join(". ") + ".",
+        candidates: [],
+        matched_orders: [],
+      } });
+      relabeled++;
+    }
+  }
+  await inBatches(patches, 10, (p) => sb.from("bank_transactions").update(p.patch).eq("id", p.id));
+  return { checked: rows.length, resolved, relabeled };
 }
 
 // ── Manuelle Aktionen ───────────────────────────────────────────────────────
