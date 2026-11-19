@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { Plus, Archive, Weight } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { Plus, Archive, Weight, AlertTriangle } from "lucide-react";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { unklareLieferantenZahlungen } from "@/lib/bank/lieferanten-zahlungen";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { usd, date } from "@/lib/format";
 import { type OrderWithTotals, type OrderDocument, type Supplier } from "@/lib/types";
@@ -30,6 +31,10 @@ export default async function OrdersPage() {
   const showInvoices = hasFeature(profile, "invoices") || isSupplierRole;
   // Geplante Ratentermine (Ebru/manuelle Positionen) — gleicher Plan wie die Liquiditätsvorschau
   const ratenTermine: Record<string, string[]> = !isSupplierRole && hasFeature(profile, "finances") ? await ladeRatenTermine().catch(() => ({})) : {};
+  // Überweisungen an Ebru/Amanda, die keiner Position eindeutig zugeordnet werden konnten
+  const unklareZahlungen = !isSupplierRole && profile.is_admin && hasFeature(profile, "finances")
+    ? await unklareLieferantenZahlungen(createServiceClient()).catch(() => [])
+    : [];
   const canEditOrder = profile.is_admin || isSupplierRole;
 
   // Scope queries to own supplier for supplier role
@@ -133,6 +138,23 @@ export default async function OrdersPage() {
           )}
         </div>
       </header>
+
+      {unklareZahlungen.length > 0 && (
+        <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+          <div>
+            <b>{unklareZahlungen.length} Überweisung{unklareZahlungen.length > 1 ? "en" : ""} an Lieferanten konnte{unklareZahlungen.length > 1 ? "n" : ""} keiner Position zugeordnet werden</b> — bitte von Hand als Zahlung eintragen:
+            <ul className="mt-1 space-y-0.5">
+              {unklareZahlungen.map((z) => (
+                <li key={z.id}>
+                  {date(z.datum)} · {z.lieferant} · {z.usd != null ? usd(z.usd) : "Betrag?"}
+                  {z.rechnung ? ` · Rechnung ${z.rechnung}` : ""} <span className="opacity-75">({z.grund})</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       {list.length === 0 && (
         <div className="bg-white rounded-2xl border border-neutral-200 p-12 text-center text-neutral-500 text-sm">

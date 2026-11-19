@@ -4,6 +4,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { dedupeKeys, type BankRow } from "./rows";
 import { runKategorisierung } from "./kategorien-engine";
+import { lieferantenZahlungenAbgleichen } from "./lieferanten-zahlungen";
 import { effektiveIban } from "./kategorien";
 import {
   institutionalCredit,
@@ -178,6 +179,8 @@ export interface RunSummary {
   /** Selbstheilung: Prüf-/Shadow-Fälle, deren Bestellung inzwischen bezahlt oder
    *  per Betrag+Name als Fremd-/Eigen-Bestellung neu bewertet wurde. */
   healed?: { checked: number; resolved: number; relabeled: number; refined: number };
+  /** Überweisungen an Ebru/Amanda, die automatisch als Zahlung eingetragen wurden. */
+  lieferantenZahlungen?: { geprueft: number; gebucht: number; unklar: number };
 }
 
 /**
@@ -209,6 +212,14 @@ export async function runBankMatching(opts: { budgetMs?: number } = {}): Promise
     summary.kategorien = await runKategorisierung({ scope: "neu", maxRows: 500 });
   } catch (e) {
     summary.errors.push(`Kategorisierung: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  // Vergessene Zahlungen an Auslandslieferanten nachtragen — Fehler hier stoppen nichts.
+  try {
+    const lz = await lieferantenZahlungenAbgleichen(createServiceClient());
+    summary.lieferantenZahlungen = { geprueft: lz.geprueft, gebucht: lz.gebucht.length, unklar: lz.unklar };
+    summary.errors.push(...lz.errors.map((x) => `Lieferanten-Zahlung: ${x}`));
+  } catch (e) {
+    summary.errors.push(`Lieferanten-Zahlungen: ${e instanceof Error ? e.message : String(e)}`);
   }
   return summary;
 }

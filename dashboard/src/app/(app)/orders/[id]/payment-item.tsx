@@ -95,7 +95,17 @@ export default function PaymentItem({
   return (
     <li className="py-3 text-sm group">
       <div className="flex justify-between items-start">
-        <span className="font-medium text-neutral-900">{usd(payment.amount)}</span>
+        <span className="font-medium text-neutral-900">
+          {usd(payment.amount)}
+          {payment.auto_added && (
+            <span
+              title="Wurde nicht von Hand eingetragen, sondern automatisch aus den Kontoumsätzen erkannt"
+              className="ml-2 inline-flex items-center rounded-full bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 ring-1 ring-inset ring-sky-200"
+            >
+              automatisch hinzugefügt
+            </span>
+          )}
+        </span>
         <div className="flex items-center gap-2">
           <span className="text-neutral-500">{date(payment.paid_at)}</span>
           {isAdmin && (

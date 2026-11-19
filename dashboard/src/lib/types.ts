@@ -205,6 +205,8 @@ export interface Payment {
   proof_path: string | null;
   note: string | null;
   created_at: string;
+  /** Automatisch aus den Kontoumsätzen eingetragen (Überweisung an Ebru/Amanda). */
+  auto_added?: boolean;
 }
 
 export interface OrderDocument {
