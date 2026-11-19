@@ -539,19 +539,21 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
                   );
                 }}
               />
-              {/* Aktionszeiträume als grüne Fläche */}
+              {/* Aktionszeiträume als grüne Fläche — nur Tage mit Umsatz laut Tagesprofil (Black Week und BF getrennt) */}
               {alleAktionen
-                .filter((a) => a.aktiv && a.bis >= fensterVon && a.von <= fensterBis)
-                .map((a, i) => (
+                .filter((a) => a.aktiv)
+                .flatMap((a, i) => aktionAbschnitte(a).map(([von, bis], k) => ({ a, i, k, von, bis })))
+                .filter((x) => x.bis >= fensterVon && x.von <= fensterBis)
+                .map(({ a, i, k, von, bis }) => (
                   <ReferenceArea
-                    key={`akt-${i}`}
-                    x1={a.von < fensterVon ? fensterVon : a.von}
-                    x2={a.bis > fensterBis ? fensterBis : a.bis}
+                    key={`akt-${i}-${k}`}
+                    x1={von < fensterVon ? fensterVon : von}
+                    x2={bis > fensterBis ? fensterBis : bis}
                     fill="#10b981"
                     fillOpacity={0.12}
                     stroke="#10b981"
                     strokeOpacity={0.3}
-                    label={{ value: a.label, position: "insideBottom", fontSize: 10, fill: "#047857" }}
+                    label={k === 0 ? { value: a.label, position: "insideBottom", fontSize: 10, fill: "#047857" } : undefined}
                   />
                 ))}
               <ReferenceLine y={0} stroke="#dc2626" strokeWidth={1.5} />
@@ -1169,6 +1171,25 @@ const NEUE_AKTION = (liste: LiqAktion[]): LiqAktion => ({
   quelle: "Annahme",
   nachlauf: null,
 });
+
+/** Zusammenhängende Verkaufstage einer Aktion: Tage mit Anteil 0 im Tagesprofil (Lücke zwischen Black Week und BF) fallen raus. */
+function aktionAbschnitte(a: LiqAktion): Array<[string, string]> {
+  const tage = Math.round((Date.parse(`${a.bis}T12:00:00Z`) - Date.parse(`${a.von}T12:00:00Z`)) / 86_400_000) + 1;
+  if (tage < 1) return [];
+  if (a.profil.length !== tage || !a.profil.some((x) => x > 0)) return [[a.von, a.bis]];
+  const tag = (i: number) => new Date(Date.parse(`${a.von}T12:00:00Z`) + i * 86_400_000).toISOString().slice(0, 10);
+  const out: Array<[string, string]> = [];
+  let anfang = -1;
+  for (let i = 0; i <= tage; i++) {
+    const an = i < tage && a.profil[i] > 0;
+    if (an && anfang < 0) anfang = i;
+    if (!an && anfang >= 0) {
+      out.push([tag(anfang), tag(i - 1)]);
+      anfang = -1;
+    }
+  }
+  return out;
+}
 
 /** Knöpfe am Diagramm: jede Aktion ein-/ausschalten, neue Aktion anlegen. */
 function AktionenLeiste({ aktionen, onUmschalten, onNeu, eingang }: { aktionen: LiqAktion[]; onUmschalten: (i: number) => void; onNeu: () => void; eingang: (label: string) => number }) {
