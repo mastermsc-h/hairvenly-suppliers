@@ -16,7 +16,7 @@ import type { FinanzMonatsdaten } from "@/lib/types";
 import { compute, taxChain } from "@/lib/finanzen/steuerrechnung";
 import type {
   Ampel, AuslandDaten, BesucherDaten, ChatDaten, CockpitLayout, Eintrag, EintragArt, HyDaten, KampagneDaten,
-  LiqGruppe, LiquiditaetDaten, PflichtenDaten, SteuerArt, SteuerKasseDaten, PflichtPosten, ShopifyDaten, Signal, TotesKapitalDaten, InstagramDaten, IgAnfragenDaten, IgAnfragenPeriode, WerbungDaten, UmsatzDaten,
+  GewerbeDaten, LiqGruppe, LiquiditaetDaten, PflichtenDaten, SteuerArt, SteuerKasseDaten, PflichtPosten, ShopifyDaten, Signal, TotesKapitalDaten, InstagramDaten, IgAnfragenDaten, IgAnfragenPeriode, WerbungDaten, UmsatzDaten,
 } from "./typen";
 
 const berlin = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin" });
@@ -1042,3 +1042,54 @@ export async function ladeSignale(opts: { finanzen: boolean; chatbot: boolean })
   const rang: Record<Ampel, number> = { alarm: 0, warn: 1, ok: 2 };
   return out.sort((a, b) => rang[a.ampel] - rang[b.ampel]);
 }
+
+// ── Gewerbekunden ───────────────────────────────────────────────────────────
+
+/** Anzahl der in Shopify mit „B2B“ markierten Kunden (auch ohne Bestellung). */
+async function b2bRegistriert(): Promise<number | null> {
+  try {
+    let after: string | null = null;
+    let n = 0;
+    for (let i = 0; i < 20; i++) {
+      const r: { data?: { customers: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: Array<{ id: string }> } } } =
+        await shopifyGraphQL(`query($a: String) { customers(first: 250, after: $a, query: "tag:B2B") { pageInfo { hasNextPage endCursor } nodes { id } } }`, { a: after });
+      if (!r.data) return null;
+      n += r.data.customers.nodes.length;
+      if (!r.data.customers.pageInfo.hasNextPage) return n;
+      after = r.data.customers.pageInfo.endCursor;
+    }
+    return n;
+  } catch {
+    return null;
+  }
+}
+
+export const ladeGewerbe = cache(async (): Promise<GewerbeDaten> => {
+  const sb = createServiceClient();
+  const [mon, kz, registriert] = await Promise.all([
+    sb.rpc("cockpit_gewerbe_monate", { p_monate: 13 }),
+    sb.rpc("cockpit_gewerbe_kennzahlen"),
+    b2bRegistriert(),
+  ]);
+  if (mon.error) throw new Error(mon.error.message);
+  if (kz.error) throw new Error(kz.error.message);
+  const k = (kz.data as Array<Record<string, number>>)[0] ?? {};
+  const monate = ((mon.data ?? []) as Array<{ monat: string; aktive: number; neue: number; bestellungen: number; umsatz_b2b: number; umsatz_gesamt: number }>).map((m) => ({
+    monat: m.monat, aktive: m.aktive, neue: m.neue, bestellungen: m.bestellungen, umsatz: r0(Number(m.umsatz_b2b)),
+    anteil: Number(m.umsatz_gesamt) > 0 ? Number(m.umsatz_b2b) / Number(m.umsatz_gesamt) : 0,
+  }));
+  const voll = monate.slice(-4, -1);
+  const b2b3 = voll.reduce((s, m) => s + m.umsatz, 0);
+  const ges3 = voll.reduce((s, m) => s + (m.anteil > 0 ? m.umsatz / m.anteil : 0), 0);
+  return {
+    registriert,
+    kaeufer: Number(k.kaeufer ?? 0),
+    aktiv30: Number(k.aktiv30 ?? 0),
+    aktiv90: Number(k.aktiv90 ?? 0),
+    aktiv90Vorjahr: Number(k.aktiv90_vorjahr ?? 0),
+    umsatz90: r0(Number(k.umsatz90 ?? 0)),
+    bestellungen90: Number(k.bestellungen90 ?? 0),
+    anteil: ges3 > 0 ? b2b3 / ges3 : 0,
+    monate,
+  };
+});

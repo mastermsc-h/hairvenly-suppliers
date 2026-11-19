@@ -320,6 +320,21 @@ export interface LiquiditaetDaten {
   marken: Array<{ datum: string; betrag: number; label: string; gruppe: LiqGruppe; geschaetzt: boolean }>;
 }
 
+/** Gewerbekunden (Tag „B2B“ in Shopify): Bestand, Aktivität und Monatsverlauf. */
+export interface GewerbeDaten {
+  /** In Shopify als B2B markierte Kunden (null = Shopify nicht erreichbar). */
+  registriert: number | null;
+  kaeufer: number;
+  aktiv30: number;
+  aktiv90: number;
+  aktiv90Vorjahr: number;
+  umsatz90: number;
+  bestellungen90: number;
+  /** Anteil Gewerbe am Umsatz der letzten 3 vollen Monate (0–1). */
+  anteil: number;
+  monate: Array<{ monat: string; aktive: number; neue: number; bestellungen: number; umsatz: number; anteil: number }>;
+}
+
 export type SteuerArt = "ust" | "lst" | "est" | "gewst";
 
 /** Steuerkasse: kommende Zahlungen ans Finanzamt und was danach auf dem Konto bleibt. */
@@ -429,6 +444,7 @@ export const WIDGETS = [
   { id: "aktionen", name: "Aktuelle Aktionen", info: "Laufende und geplante Aktionen", feature: null },
   { id: "philosophie", name: "Firmenphilosophie", info: "Wofür Hairvenly steht", feature: null },
   { id: "liquiditaet", name: "Liquidität", info: "Kontostand der nächsten 90 Tage", feature: "finances" },
+  { id: "gewerbe", name: "Gewerbekunden", info: "Wie viele Salons & Profis bei uns kaufen – und wie viele gerade aktiv sind", feature: "finances" },
   { id: "kanaele", name: "Marketing-Kanäle", info: "Wo wir posten wie geplant – und wo der Kanal eingeschlafen ist", feature: null },
   { id: "steuerkasse", name: "Steuerkasse", info: "Was ans Finanzamt geht – wann, wie viel, was danach bleibt", feature: "finances" },
   { id: "marketing", name: "Marketing (HALO)", info: "Dringende Aufgaben des Marketing-Teams", feature: "finances" },
@@ -472,6 +488,7 @@ const STANDARD_LAYOUT_GROB: LayoutItem[] = [
   { i: "wetter", x: 9, y: 111, w: 3, h: 9 },
   { i: "steuerkasse", x: 0, y: 120, w: 12, h: 15 },
   { i: "kanaele", x: 0, y: 135, w: 12, h: 15 },
+  { i: "gewerbe", x: 0, y: 150, w: 8, h: 12 },
 ];
 
 /** Standard-Anordnung im feinen Raster (10-px-Zeilen). Überlappt noch – wird beim Aufbau einmal verdichtet. */
@@ -483,4 +500,5 @@ export const MIN_GROESSE: Record<string, { w: number; h: number }> = {
   lage: { w: 3, h: 8 },
   liquiditaet: { w: 4, h: 20 },
   steuerkasse: { w: 5, h: 30 },
+  gewerbe: { w: 5, h: 28 },
 };

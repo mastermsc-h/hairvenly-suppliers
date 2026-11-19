@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import {
   ladeAusland, ladeInstagram, ladeIgAnfragen, ladeWerbung, ladeBesucher, ladeTotesKapital, ladeChats, ladeEintraege, ladeHy, ladeKampagnen, ladeLayout, ladeLiquiditaet, ladePflichten,
-  ladeShopify, ladeSignale, ladeSteuerKasse, ladeTeam, ladeUmsatz,
+  ladeGewerbe, ladeShopify, ladeSignale, ladeSteuerKasse, ladeTeam, ladeUmsatz,
 } from "@/lib/cockpit/daten";
 import { WIDGETS } from "@/lib/cockpit/typen";
 import CockpitGrid from "./cockpit-grid";
@@ -11,6 +11,7 @@ import SturmWidget from "./widget-sturm";
 import ZeitungWidget from "./widget-zeitung";
 import SteuerKasseWidget from "./widget-steuerkasse";
 import KanaeleWidget from "./widget-kanaele";
+import GewerbeWidget from "./widget-gewerbe";
 import { ladeKanalStaende } from "@/lib/marketing-kanaele";
 import RoutinenWidget from "./widget-routinen";
 import { HaileyWidget, PflanzeWidget, PolaroidWidget, WetterWidget } from "./widgets-deko";
@@ -93,6 +94,7 @@ export default async function StartPage() {
     inhalte.besucher = warte(<Mit lade={ladeBesucher}>{(d) => <BesucherWidget d={d} />}</Mit>);
     inhalte.pflichten = warte(<Mit lade={() => ladePflichten(30)}>{(d) => <PflichtenWidget d={d} />}</Mit>);
     inhalte.liquiditaet = warte(<Mit lade={ladeLiquiditaet}>{(d) => <LiquiditaetWidget d={d} />}</Mit>);
+    inhalte.gewerbe = warte(<Mit lade={ladeGewerbe}>{(d) => <GewerbeWidget d={d} />}</Mit>);
     inhalte.steuerkasse = warte(<Mit lade={() => ladeSteuerKasse()}>{(d) => <SteuerKasseWidget d={d} />}</Mit>);
     inhalte.marketing = warte(<Mit lade={ladeHalo}>{(d) => <MarketingWidget d={d} />}</Mit>);
   }
