@@ -3,7 +3,7 @@
 import { kontoZweck } from "@/lib/bank/konten";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { AlertTriangle, ChevronLeft, ChevronRight, Loader2, RefreshCw, RotateCcw, Search, Trash2, Wand2 } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Filter, Loader2, RefreshCw, RotateCcw, Search, Trash2, Wand2 } from "lucide-react";
 import { KATEGORIEN, KATEGORIE_BY_KEY, type KategorieGruppe, type SteuerSplit } from "@/lib/bank/kategorien";
 import { monatGrenzen, monatName, suchMonate } from "@/lib/bank/such-zeitraum";
 import {
@@ -39,6 +39,22 @@ const GRUPPE_LABEL: Record<KategorieGruppe, string> = {
   steuern: "Steuern",
   ausgaben: "Ausgaben",
   neutral: "Neutral",
+};
+
+/** Farben je Gruppe: Überschrift, Zeilen-Hover, aktive Zeile. */
+const GRUPPE_FARBE: Record<KategorieGruppe, { kopf: string; hover: string; aktiv: string }> = {
+  einnahmen: { kopf: "bg-emerald-100 text-emerald-800", hover: "hover:bg-emerald-50 hover:border-emerald-200", aktiv: "bg-emerald-100 border-emerald-400" },
+  ausgaben: { kopf: "bg-orange-100 text-orange-800", hover: "hover:bg-orange-50 hover:border-orange-200", aktiv: "bg-orange-100 border-orange-400" },
+  steuern: { kopf: "bg-red-100 text-red-800", hover: "hover:bg-red-50 hover:border-red-200", aktiv: "bg-red-100 border-red-400" },
+  neutral: { kopf: "bg-slate-200 text-slate-700", hover: "hover:bg-slate-50 hover:border-slate-300", aktiv: "bg-slate-200 border-slate-400" },
+};
+
+type Ton = "red" | "blue" | "violet" | "slate";
+const TON: Record<Ton, { rand: string; kopf: string; text: string }> = {
+  red: { rand: "border-l-red-500", kopf: "bg-red-50 border-red-100", text: "text-red-800" },
+  blue: { rand: "border-l-blue-500", kopf: "bg-blue-50 border-blue-100", text: "text-blue-800" },
+  violet: { rand: "border-l-violet-500", kopf: "bg-violet-50 border-violet-100", text: "text-violet-800" },
+  slate: { rand: "border-l-slate-500", kopf: "bg-slate-100 border-slate-200", text: "text-slate-800" },
 };
 
 function fmt(n: number) {
@@ -87,6 +103,14 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
   suchZeitRef.current = suchZeit;
   const monatRef = useRef(monat);
   monatRef.current = monat;
+  const listeRef = useRef<HTMLDivElement>(null);
+
+  /** Kategorie anklicken = Liste filtern und zur Liste springen; nochmal = Filter aus. */
+  function waehleKategorie(key: string) {
+    const aus = katFilter === key;
+    setKatFilter(aus ? null : key);
+    if (!aus) setTimeout(() => listeRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }
 
   async function suchen(q: string) {
     if (q.trim().length < 2) {
@@ -305,8 +329,9 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
         <Kachel label="Steuern (netto ans FA/Zoll)" value={fmt(steuerNetto)} tone="red" />
         <Kachel label="Saldo inkl. Umbuchungen" value={fmt(summen.saldo)} tone={summen.saldo >= 0 ? "green" : "red"} />
         <button
-          onClick={() => setKatFilter(katFilter === "unklar" ? null : "unklar")}
-          className={`rounded-xl p-3 text-center border-2 ${summen.unklar.n > 0 ? "border-amber-300 bg-amber-50" : "border-transparent bg-neutral-50"}`}
+          onClick={() => waehleKategorie("unklar")}
+          className={`rounded-xl p-3 text-center border-2 cursor-pointer hover:shadow-md transition-shadow ${summen.unklar.n > 0 ? "border-amber-300 bg-amber-50" : "border-transparent bg-neutral-50"}`}
+          title="Anklicken: nur die nicht zugeordneten Umsätze zeigen"
         >
           <div className="text-xs font-medium uppercase tracking-wide text-amber-700">Nicht zugeordnet</div>
           <div className="text-lg font-bold tabular-nums text-amber-800 mt-1">{summen.unklar.n}</div>
@@ -315,7 +340,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
       </div>
 
       {/* Steuern */}
-      <Card title={`Steuern laut Konto — ${zeitraumText}`} accent="border-l-red-500">
+      <Card title={`Steuern laut Konto — ${zeitraumText}`} ton="red">
         {steuerZeilen.length === 0 ? (
           <p className="text-sm text-neutral-400">Keine Steuerbuchungen in diesem Zeitraum.</p>
         ) : (
@@ -354,25 +379,35 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
       </Card>
 
       {/* Kategorien */}
-      <Card title={`Nach Kategorie — ${zeitraumText}`} accent="border-l-blue-500">
-        <div className="grid md:grid-cols-2 gap-x-8 gap-y-4">
+      <Card title={`Nach Kategorie — ${zeitraumText}`} ton="blue">
+        <p className="flex items-center gap-1.5 text-xs text-blue-700 bg-blue-50 rounded-lg px-3 py-2 mb-4">
+          <Filter size={13} className="shrink-0" />
+          Auf eine Kategorie klicken, um unten nur ihre Umsätze zu sehen. Nochmal klicken hebt den Filter auf.
+        </p>
+        <div className="grid md:grid-cols-2 gap-x-8 gap-y-5">
           {(["einnahmen", "ausgaben", "steuern", "neutral"] as KategorieGruppe[]).map((gruppe) => {
             const rows = KATEGORIEN.filter((k) => k.gruppe === gruppe && summen.byKat.has(k.key));
             if (rows.length === 0) return null;
             return (
               <div key={gruppe}>
-                <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-1">{GRUPPE_LABEL[gruppe]}</div>
+                <div className={`flex items-baseline justify-between rounded-md px-2 py-1 mb-1.5 text-xs font-bold uppercase tracking-wide ${GRUPPE_FARBE[gruppe].kopf}`}>
+                  <span>{GRUPPE_LABEL[gruppe]}</span>
+                  <span className="tabular-nums normal-case font-semibold">{fmt(summen.g[gruppe])}</span>
+                </div>
                 {rows.map((k) => {
                   const s = summen.byKat.get(k.key)!;
                   const active = katFilter === k.key;
                   return (
                     <button
                       key={k.key}
-                      onClick={() => setKatFilter(active ? null : k.key)}
-                      className={`w-full flex items-baseline justify-between gap-2 rounded-md px-2 py-1 text-sm text-left hover:bg-neutral-50 ${active ? "bg-neutral-100 font-semibold" : ""} ${k.key === "unklar" ? "text-amber-700" : ""}`}
+                      onClick={() => waehleKategorie(k.key)}
+                      title={active ? "Filter aufheben" : `Nur „${k.label}“ in der Liste zeigen`}
+                      className={`group w-full flex items-baseline justify-between gap-2 rounded-md border px-2 py-1 text-sm text-left cursor-pointer transition-colors ${active ? `${GRUPPE_FARBE[gruppe].aktiv} font-semibold` : `border-transparent ${GRUPPE_FARBE[gruppe].hover}`} ${k.key === "unklar" ? "text-amber-700" : ""}`}
                     >
-                      <span>
-                        {k.label} <span className="text-xs text-neutral-400">({s.n})</span>
+                      <span className="flex items-baseline gap-1.5">
+                        <ChevronRight size={12} className={`self-center shrink-0 transition-transform ${active ? "rotate-90 text-neutral-700" : "text-neutral-300 group-hover:text-neutral-600"}`} />
+                        <span className="underline decoration-dotted decoration-neutral-300 underline-offset-2 group-hover:decoration-neutral-500">{k.label}</span>
+                        <span className="text-xs text-neutral-400">({s.n})</span>
                       </span>
                       <span className={`tabular-nums ${s.sum >= 0 ? "text-emerald-700" : "text-neutral-800"}`}>{fmt(s.sum)}</span>
                     </button>
@@ -387,7 +422,8 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
       {/* Umsätze */}
       <Card
         title={`${treffer ? `Suchergebnisse — ${suchZeitText} (${liste.length}${treffer.length >= 300 ? "+" : ""})` : `Umsätze (${liste.length})`}${katFilter ? ` — ${KATEGORIE_BY_KEY[katFilter]?.label}` : ""}`}
-        accent="border-l-neutral-400"
+        ton="violet"
+        innerRef={listeRef}
       >
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <select
@@ -426,7 +462,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
             </span>
           )}
           {katFilter && (
-            <button onClick={() => setKatFilter(null)} className="text-xs rounded-lg border border-neutral-300 px-2 py-1 text-neutral-600 hover:bg-neutral-50">
+            <button onClick={() => setKatFilter(null)} className="text-xs font-medium rounded-lg border border-violet-300 bg-violet-50 px-2 py-1 text-violet-800 hover:bg-violet-100">
               Filter „{KATEGORIE_BY_KEY[katFilter]?.label}“ entfernen ✕
             </button>
           )}
@@ -521,9 +557,9 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
       </Card>
 
       {/* Regeln */}
-      <details className="bg-white rounded-2xl border border-neutral-200 shadow-sm">
-        <summary className="cursor-pointer px-4 md:px-6 py-3 text-sm font-semibold text-neutral-900 uppercase tracking-wide">
-          Regeln ({data.regeln.length})
+      <details className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden border-l-4 border-l-slate-500">
+        <summary className="cursor-pointer px-4 md:px-6 py-3 text-sm font-semibold text-slate-800 uppercase tracking-wide bg-slate-100 hover:bg-slate-200">
+          Regeln ({data.regeln.length}) <span className="normal-case font-normal text-xs text-slate-500">· zum Aufklappen klicken</span>
         </summary>
         <div className="px-4 md:px-6 pb-4 overflow-x-auto">
           <table className="w-full text-sm">
@@ -624,19 +660,22 @@ function QuelleBadge({ quelle }: { quelle: KontoUmsatz["kategorie_quelle"] }) {
 
 function Kachel({ label, value, tone }: { label: string; value: string; tone: "green" | "red" | "neutral" }) {
   const color = tone === "green" ? "text-emerald-700" : tone === "red" ? "text-red-700" : "text-neutral-900";
+  const bg = tone === "green" ? "bg-emerald-50 border-emerald-200" : tone === "red" ? "bg-red-50 border-red-200" : "bg-orange-50 border-orange-200";
+  const lbl = tone === "green" ? "text-emerald-800" : tone === "red" ? "text-red-800" : "text-orange-800";
   return (
-    <div className="bg-neutral-50 rounded-xl p-3 text-center">
-      <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">{label}</div>
+    <div className={`rounded-xl border p-3 text-center ${bg}`}>
+      <div className={`text-xs font-semibold uppercase tracking-wide ${lbl}`}>{label}</div>
       <div className={`text-lg font-bold mt-1 tabular-nums ${color}`}>{value}</div>
     </div>
   );
 }
 
-function Card({ title, accent, children }: { title: string; accent: string; children: React.ReactNode }) {
+function Card({ title, ton, innerRef, children }: { title: string; ton: Ton; innerRef?: React.Ref<HTMLDivElement>; children: React.ReactNode }) {
+  const t = TON[ton];
   return (
-    <div className={`bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden border-l-4 ${accent}`}>
-      <div className="px-4 md:px-6 py-3 bg-neutral-50 border-b border-neutral-200">
-        <h2 className="text-sm font-semibold text-neutral-900 uppercase tracking-wide">{title}</h2>
+    <div ref={innerRef} className={`scroll-mt-4 bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden border-l-4 ${t.rand}`}>
+      <div className={`px-4 md:px-6 py-3 border-b ${t.kopf}`}>
+        <h2 className={`text-sm font-bold uppercase tracking-wide ${t.text}`}>{title}</h2>
       </div>
       <div className="px-4 md:px-6 py-4">{children}</div>
     </div>
