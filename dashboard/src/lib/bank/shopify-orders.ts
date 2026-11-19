@@ -1,6 +1,6 @@
 // Shopify-Zugriffe für den Zahlungsabgleich — server-only.
 import { shopifyGraphQL, addOrderTags } from "@/lib/shopify";
-import type { ClosedOrderInfo, OpenOrder } from "./matcher";
+import type { AmountOrder, ClosedOrderInfo, OpenOrder } from "./matcher";
 
 export const BANK_MATCH_TAG = "Bank-Abgleich";
 
@@ -117,6 +117,62 @@ export async function lookupClosedOrders(numbers: string[]): Promise<Record<stri
     }
   }
   return map;
+}
+
+/**
+ * Alle Bestellungen (EUR, inkl. bezahlter/stornierter) mit genau diesem Gesamt-
+ * betrag — Shopify-Volltextsuche nach dem Betrag. Für den Namensabgleich bei
+ * Überweisungen OHNE Bestellnummer: Standardpreise führen sonst dazu, dass die
+ * Gleichpreis-Bestellung eines FREMDEN Kunden vorgeschlagen wird, obwohl der
+ * Zahler seine eigene (oft schon bezahlte) Bestellung begleicht.
+ *
+ * Achtung: Die Volltextsuche liefert auch Fast-Treffer — der Aufrufer
+ * (refineAmountOnly) filtert exakt auf `total === Betrag`.
+ */
+export async function fetchOrdersByAmount(amount: number, limit = 50): Promise<AmountOrder[]> {
+  if (!(amount > 0)) return [];
+  const term = amount.toFixed(2); // "947.88" — Shopify-Volltext matcht den Gesamtbetrag
+  const query = `query bankByAmount($q: String!, $n: Int!) {
+    orders(first: $n, query: $q, sortKey: CREATED_AT, reverse: true) {
+      edges { node {
+        id name createdAt cancelledAt displayFinancialStatus
+        totalPriceSet { shopMoney { amount currencyCode } }
+        totalOutstandingSet { shopMoney { amount } }
+        billingAddress { name } shippingAddress { name }
+        customer { displayName }
+        transactions(first: 20) { kind status processedAt }
+      } }
+    }
+  }`;
+  const res = await shopifyGraphQL<{
+    orders: { edges: { node: OrderNode & {
+      totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
+      customer: { displayName: string | null } | null;
+      transactions: { kind: string; status: string; processedAt: string | null }[];
+    } }[] };
+  }>(query, { q: term, n: Math.min(Math.max(limit, 1), 100) });
+  const out: AmountOrder[] = [];
+  for (const e of res.data?.orders.edges ?? []) {
+    const n = e.node;
+    if (n.totalPriceSet.shopMoney.currencyCode !== "EUR") continue;
+    const paidAt = (n.transactions ?? [])
+      .filter((tx) => tx.status === "SUCCESS" && (tx.kind === "SALE" || tx.kind === "CAPTURE") && tx.processedAt)
+      .map((tx) => tx.processedAt as string)
+      .sort()
+      .pop() ?? null;
+    out.push({
+      gid: n.id,
+      name: n.name,
+      total: Number(n.totalPriceSet.shopMoney.amount) || 0,
+      outstanding: Number(n.totalOutstandingSet.shopMoney.amount) || 0,
+      financialStatus: n.displayFinancialStatus ?? "",
+      cancelled: !!n.cancelledAt,
+      createdAt: n.createdAt,
+      paidAt,
+      customerNames: [n.customer?.displayName, n.billingAddress?.name, n.shippingAddress?.name].filter((x): x is string => !!x),
+    });
+  }
+  return out;
 }
 
 /** Eine Bestellung per Nummer — für manuelle Zuordnung. */

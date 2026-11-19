@@ -138,6 +138,42 @@ check("PLZ außerhalb Bereich → kein Lookup", M.plausibleClosedNumbers(tx(1, "
 check("Alte Nr im Bereich → Lookup", M.plausibleClosedNumbers(tx(1, "27390"), open), ["27390"]);
 check("Offene Nr → kein Lookup", M.plausibleClosedNumbers(tx(1, "27405"), open), []);
 
+// ── Betrags-/Namens-Verfeinerung (Zahlung ohne Bestellnummer) ──────────────
+// Standardpreise: ohne Bestellnr. darf NIE die Gleichpreis-Bestellung eines
+// fremden Kunden vorgeschlagen werden; die eigene (oft bezahlte) zählt.
+const amtOrder = (number, { total = 947.88, outstanding = 0, fin = "PAID", created = "2026-10-12T10:00:00Z", paidAt = "2026-10-12T11:00:00Z", names = ["Luana Heil"], cancelled = false } = {}) => ({
+  gid: `gid://shopify/Order/${number}00`, name: `#${number}`, total, outstanding,
+  financialStatus: fin, cancelled, createdAt: created, paidAt, customerNames: names,
+});
+// Fall "Luana Heil" (echt): Zahler-Bestellung bezahlt rund um die Buchung → von Hand erledigt
+const luanaTx = tx(947.88, "Z0367DJ87", "Luana Heil", "2026-10-13");
+check("Refine: eigene bezahlte Bestellung → ignored/already_paid",
+  M.refineAmountOnly(luanaTx, [amtOrder(27739)])?.reason, "already_paid");
+check("Refine: eigene bezahlte → kind ignored",
+  M.refineAmountOnly(luanaTx, [amtOrder(27739)])?.kind, "ignored");
+check("Refine: fremde Gleichpreis-Bestellung (anderer Name) → null",
+  M.refineAmountOnly(luanaTx, [amtOrder(27307, { fin: "PENDING", outstanding: 947.88, paidAt: null, names: ["Yasir Damar"] })]), null);
+check("Refine: eigene OFFENE Bestellung → amount_only mit Namenstreffer",
+  M.refineAmountOnly(luanaTx, [amtOrder(27800, { fin: "PENDING", outstanding: 947.88, paidAt: null })])?.candidates?.[0]?.nameMatch, true);
+check("Refine: falscher Betrag wird gefiltert → null",
+  M.refineAmountOnly(luanaTx, [amtOrder(27739, { total: 248.75 })]), null);
+check("Refine: uralte Gleichnamen-Bestellung außer Fenster → null",
+  M.refineAmountOnly(luanaTx, [amtOrder(20000, { created: "2026-05-01T10:00:00Z", paidAt: "2026-05-01T10:00:00Z" })]), null);
+check("Refine: eigene VORHER bezahlt → order_not_open (Doppelzahlung)",
+  M.refineAmountOnly(luanaTx, [amtOrder(27739, { paidAt: "2026-09-01T10:00:00Z", created: "2026-09-01T09:00:00Z" })])?.reason, "order_not_open");
+check("Refine: ohne Zahlername → null",
+  M.refineAmountOnly(tx(947.88, "x", "", "2026-10-13"), [amtOrder(27739)]), null);
+
+// stripForeignAmountOnly: amount_only ohne Namenstreffer → no_candidate (kein Ein-Klick)
+const foreign = { kind: "review", reason: "amount_only", detail: "", candidates: [{ gid: "g", name: "#27307", outstanding: 947.88, via: "amount", nameMatch: false, isBankDeposit: false }] };
+check("Strip: Fremd-Kandidat ohne Namenstreffer → no_candidate",
+  M.stripForeignAmountOnly(luanaTx, foreign).reason, "no_candidate");
+check("Strip: no_candidate hat keine Kandidaten mehr",
+  M.stripForeignAmountOnly(luanaTx, foreign).candidates.length, 0);
+const withName = { ...foreign, candidates: [{ ...foreign.candidates[0], nameMatch: true }] };
+check("Strip: Namenstreffer bleibt amount_only",
+  M.stripForeignAmountOnly(luanaTx, withName).reason, "amount_only");
+
 // ── Dedupe ─────────────────────────────────────────────────────────────────
 const row = (amount, purpose, date = "2026-10-12") => ({
   booking_date: date, value_date: null, amount, currency: "EUR", counterparty_name: "A", counterparty_iban: null,

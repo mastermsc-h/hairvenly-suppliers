@@ -160,7 +160,10 @@ export default function PaymentsBoard({
             onClick={() => run(async () => {
               const r = await runBankMatchingAction();
               const s = r.summary;
-              const heal = s?.healed && s.healed.resolved > 0 ? ` · ${s.healed.resolved} inzwischen bezahlt` : "";
+              const h = s?.healed;
+              const heal = h && (h.resolved > 0 || h.refined > 0)
+                ? ` · ${h.resolved + h.refined} nachträglich korrigiert`
+                : "";
               return { ...r, info: s ? `${s.processed} geprüft · ${s.autoPaid} automatisch · ${s.shadow} Shadow · ${s.review} zu prüfen${heal}` : undefined };
             })}
             className="inline-flex items-center gap-2 bg-neutral-900 text-white font-medium rounded-lg px-4 py-2 text-sm disabled:opacity-50"

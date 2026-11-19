@@ -52,6 +52,20 @@ export interface Candidate {
   isBankDeposit: boolean;
 }
 
+/** Bestellung mit genau dem Überweisungsbetrag (inkl. bezahlter) — für den
+ *  Namensabgleich bei Zahlungen ohne Bestellnummer (siehe refineAmountOnly). */
+export interface AmountOrder {
+  gid: string;
+  name: string;
+  total: number;                  // Gesamtbetrag (EUR)
+  outstanding: number;            // offener Betrag (EUR)
+  financialStatus: string;        // PAID / PENDING / PARTIALLY_PAID / ...
+  cancelled: boolean;
+  createdAt: string;              // ISO
+  paidAt: string | null;          // letzte erfolgreiche Zahlung, ISO
+  customerNames: string[];        // Kunde / Rechnungs- / Liefername
+}
+
 export type IgnoreReason =
   | "payout_source"       // Auszahlung eines Zahlungsdienstleisters / Behörde
   | "own_transfer"        // Übertrag zwischen eigenen Konten
@@ -294,6 +308,96 @@ export function matchTransaction(
     kind: "review",
     reason: "no_candidate",
     detail: `${numberNote}, keine offene Bestellung mit diesem Betrag.`,
+    candidates: [],
+  };
+}
+
+const OPEN_FIN = new Set(["PENDING", "PARTIALLY_PAID", "AUTHORIZED"]);
+
+/**
+ * Verfeinert einen amount_only/no_candidate-Fall mit ALLEN Shopify-Bestellungen,
+ * die exakt diesen Betrag haben (inkl. bezahlter). Hintergrund: Bei Standard-
+ * preisen (947,88 €, 63,98 € …) schlägt der reine Betrags-Abgleich sonst die
+ * Bestellung eines FREMDEN Kunden vor, obwohl der Zahler seine eigene — oft schon
+ * bezahlte — Bestellung begleicht.
+ *
+ * Nur NAMENSTREFFER zählen (eigene Normalisierung: ß→ss, Umlaute, Teiltoken):
+ *  - eigene OFFENE Bestellung mit genau diesem offenen Betrag → korrekter Kandidat.
+ *  - eigene am/nach (Buchung−1 Tag) bezahlte Bestellung → "von Hand erledigt" → ignored.
+ *  - eigene vorher bezahlte Bestellung → review/order_not_open (mögliche Doppelzahlung).
+ * Kein Namenstreffer → null (Aufrufer entschärft dann den Fremd-Vorschlag selbst).
+ */
+export function refineAmountOnly(tx: MatchTx, sameAmount: AmountOrder[]): MatchResult | null {
+  const cents = toCents(tx.amount);
+  if (cents <= 0) return null;
+  if (!tx.counterparty_name || !tx.counterparty_name.trim()) return null;
+
+  const from = minusDays(tx.booking_date, 120);
+  const to = minusDays(tx.booking_date, -3);   // bis Buchung + 3 Tage
+  const inWindow = sameAmount.filter(
+    (o) => !o.cancelled && toCents(o.total) === cents
+      && o.createdAt.slice(0, 10) >= from && o.createdAt.slice(0, 10) <= to,
+  );
+  const named = inWindow.filter((o) => namesMatch(tx.counterparty_name, o.customerNames));
+  if (named.length === 0) return null;
+
+  const handledFrom = minusDays(tx.booking_date, 1);
+  const open = named.filter((o) => OPEN_FIN.has(o.financialStatus) && toCents(o.outstanding) === cents);
+  const paidHandled = named.filter((o) => !OPEN_FIN.has(o.financialStatus) && o.paidAt && o.paidAt.slice(0, 10) >= handledFrom);
+  const paidBefore = named.filter((o) => !OPEN_FIN.has(o.financialStatus) && (!o.paidAt || o.paidAt.slice(0, 10) < handledFrom));
+
+  // Eigene offene Bestellung des Zahlers → das ist der richtige Kandidat.
+  if (open.length > 0) {
+    return {
+      kind: "review",
+      reason: "amount_only",
+      detail: `Keine Bestellnummer im Verwendungszweck, Betrag passt zu ${open.map((o) => o.name).join(", ")} (Name passt auch).`,
+      candidates: open.map((o) => ({ gid: o.gid, name: o.name, outstanding: o.outstanding, via: "amount" as const, nameMatch: true, isBankDeposit: false })),
+    };
+  }
+  // Eigene, rund um die Buchung bezahlte Bestellung → von Hand erledigt.
+  if (paidHandled.length > 0) {
+    return {
+      kind: "ignored",
+      reason: "already_paid",
+      detail:
+        `${paidHandled.map((o) => o.name).join(", ")} (${tx.counterparty_name}) war bereits als bezahlt markiert ` +
+        `(${paidHandled.map((o) => deDate(o.paidAt!)).join(", ")}) – vermutlich von Hand erledigt.`,
+    };
+  }
+  // Eigene, schon vorher bezahlte Bestellung → mögliche Doppelzahlung, prüfen.
+  if (paidBefore.length > 0) {
+    return {
+      kind: "review",
+      reason: "order_not_open",
+      detail:
+        `${paidBefore.map((o) => o.name).join(", ")} ist bereits bezahlt` +
+        `${paidBefore[0].paidAt ? ` (${deDate(paidBefore[0].paidAt)})` : ""} – mögliche Doppelzahlung, bitte prüfen.`,
+      candidates: [],
+    };
+  }
+  return null;
+}
+
+/**
+ * Letzte Absicherung, wenn refineAmountOnly nichts fand: einen amount_only-
+ * Vorschlag NICHT als Ein-Klick-Treffer stehen lassen, wenn der Zahler einen
+ * Namen hat und KEIN Kandidat namentlich passt (= fremde Gleichpreis-Bestellung).
+ * Wird zu no_candidate herabgestuft (kein gefährlicher "Als bezahlt"-Knopf),
+ * der Betrags-Hinweis bleibt im Text für die manuelle Zuordnung erhalten.
+ */
+export function stripForeignAmountOnly(tx: MatchTx, r: MatchResult): MatchResult {
+  if (r.kind !== "review" || r.reason !== "amount_only") return r;
+  if (!tx.counterparty_name || !tx.counterparty_name.trim()) return r;
+  if (r.candidates.some((c) => c.nameMatch)) return r;
+  const list = r.candidates.slice(0, 3).map((c) => c.name).join(", ");
+  return {
+    kind: "review",
+    reason: "no_candidate",
+    detail:
+      `Keine Bestellnummer im Verwendungszweck. Betrag passt zwar zu offener Bestellung anderer Kundschaft ` +
+      `(${list}) – aber der Name weicht ab; vermutlich zahlt ${tx.counterparty_name} die eigene ` +
+      `(ggf. schon bezahlte) Bestellung. Bitte per Bestellnummer zuordnen.`,
     candidates: [],
   };
 }

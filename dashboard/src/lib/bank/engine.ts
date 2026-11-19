@@ -8,12 +8,19 @@ import { effektiveIban } from "./kategorien";
 import {
   matchTransaction,
   plausibleClosedNumbers,
+  refineAmountOnly,
+  stripForeignAmountOnly,
+  toCents,
+  type AmountOrder,
   type ClosedOrderInfo,
+  type MatchResult,
+  type MatchTx,
   type OpenOrder,
 } from "./matcher";
 import {
   fetchOpenOrdersForMatching,
   fetchOrderByNumber,
+  fetchOrdersByAmount,
   lookupClosedOrders,
   markOrderPaidVerified,
 } from "./shopify-orders";
@@ -167,8 +174,9 @@ export interface RunSummary {
   errors: string[];
   /** Kategorisierung der Kontoumsätze (nach dem Abgleich). */
   kategorien?: { geprueft: number; geaendert: number; remaining: number };
-  /** Selbstheilung: Prüf-/Shadow-Fälle, deren Bestellung inzwischen bezahlt wurde. */
-  healed?: { checked: number; resolved: number; relabeled: number };
+  /** Selbstheilung: Prüf-/Shadow-Fälle, deren Bestellung inzwischen bezahlt oder
+   *  per Betrag+Name als Fremd-/Eigen-Bestellung neu bewertet wurde. */
+  healed?: { checked: number; resolved: number; relabeled: number; refined: number };
 }
 
 /**
@@ -268,6 +276,7 @@ async function abgleichLauf(opts: { budgetMs?: number }): Promise<RunSummary> {
 
   const patches: { id: string; patch: Record<string, unknown> }[] = [];
   const release: string[] = [];
+  const amountCache = new Map<number, Promise<AmountOrder[]>>();
 
   for (const tx of txs) {
     if (Date.now() - started > budget) {
@@ -279,7 +288,11 @@ async function abgleichLauf(opts: { budgetMs?: number }): Promise<RunSummary> {
     try {
       // Targobank: IBAN steht nur im Verwendungszweck → sonst würden Überträge zwischen
       // eigenen Konten als Kundenzahlung geprüft
-      const r = matchTransaction({ ...tx, amount: Number(tx.amount), counterparty_iban: effektiveIban(tx) }, openOrders, closed, ownIbans);
+      const mtx = { ...tx, amount: Number(tx.amount), counterparty_iban: effektiveIban(tx) };
+      let r = matchTransaction(mtx, openOrders, closed, ownIbans);
+      // Ohne Bestellnr. im Zweck: Betrag + Name gegen ALLE Bestellungen (inkl. bezahlter)
+      // prüfen — sonst wird bei Standardpreisen die Bestellung eines fremden Kunden vorgeschlagen.
+      r = await refineByPayerAmount(mtx, r, amountCache);
       if (r.kind === "debit") {
         patch = { match_status: "debit" };
       } else if (r.kind === "ignored") {
@@ -382,12 +395,40 @@ async function abgleichLauf(opts: { budgetMs?: number }): Promise<RunSummary> {
   return summary;
 }
 
+// ── Betrags-/Namens-Verfeinerung (Zahlungen ohne Bestellnummer) ─────────────
+
+/**
+ * Verfeinert amount_only/no_candidate-Ergebnisse mit einer Shopify-Betragssuche
+ * (inkl. bezahlter Bestellungen) + Namensabgleich. Verhindert, dass bei
+ * Standardpreisen die Gleichpreis-Bestellung eines FREMDEN Kunden vorgeschlagen
+ * wird. Pro Betrag und Lauf nur eine Suche (Cache).
+ */
+async function refineByPayerAmount(
+  tx: MatchTx,
+  result: MatchResult,
+  cache: Map<number, Promise<AmountOrder[]>>,
+): Promise<MatchResult> {
+  if (result.kind !== "review") return result;
+  if (result.reason !== "amount_only" && result.reason !== "no_candidate") return result;
+  if (!tx.counterparty_name || !tx.counterparty_name.trim()) return result;
+  const cents = toCents(tx.amount);
+  if (cents <= 0) return result;
+  let p = cache.get(cents);
+  if (!p) { p = fetchOrdersByAmount(tx.amount); cache.set(cents, p); }
+  const same = await p.catch(() => [] as AmountOrder[]);
+  const refined = refineAmountOnly(tx, same);
+  return refined ?? stripForeignAmountOnly(tx, result);
+}
+
 // ── Selbstheilung stehengebliebener Prüf-/Shadow-Fälle ──────────────────────
 
 interface HealRow {
   id: string;
   booking_date: string;
+  amount: number;
+  counterparty_name: string | null;
   match_status: string;
+  match_reason: string | null;
   candidates?: { gid: string; name: string; outstanding: number }[] | null;
   matched_orders?: { gid: string; name: string; outstanding: number }[] | null;
 }
@@ -408,12 +449,12 @@ interface HealRow {
  *    Vorschlag auf eine bezahlte Bestellung (order_not_open, mögliche Doppelzahlung).
  *  - mind. eine Bestellung noch offen → unverändert (echter Kandidat bleibt).
  */
-async function healResolvedReviews(daysBack = 150): Promise<{ checked: number; resolved: number; relabeled: number }> {
+async function healResolvedReviews(daysBack = 150): Promise<{ checked: number; resolved: number; relabeled: number; refined: number }> {
   const sb = createServiceClient();
   const since = new Date(Date.now() - daysBack * 86400000).toISOString().slice(0, 10);
   const { data } = await sb
     .from("bank_transactions")
-    .select("id, booking_date, match_status, candidates, matched_orders")
+    .select("id, booking_date, amount, counterparty_name, match_status, match_reason, candidates, matched_orders")
     .in("match_status", ["review", "shadow"])
     .gt("amount", 0)
     .gte("booking_date", since)
@@ -425,22 +466,24 @@ async function healResolvedReviews(daysBack = 150): Promise<{ checked: number; r
 
   const numbers = new Set<string>();
   for (const r of rows) for (const o of refsOf(r)) { const n = orderNum(o.name); if (n) numbers.add(n); }
-  if (numbers.size === 0) return { checked: rows.length, resolved: 0, relabeled: 0 };
-
   // Nur GESCHLOSSENE Bestellungen landen in der Map (offene werden übersprungen) → inkl. paidAt.
-  const closed = await lookupClosedOrders([...numbers]);
+  const closed = numbers.size ? await lookupClosedOrders([...numbers]) : {};
 
-  let resolved = 0, relabeled = 0;
+  let resolved = 0, relabeled = 0, refined = 0;
   const patches: { id: string; patch: Record<string, unknown> }[] = [];
+  const handledIds = new Set<string>();
   const now = new Date().toISOString();
+
+  // Teil A: referenzierte Bestellung inzwischen bezahlt/geschlossen.
   for (const r of rows) {
     const refs = refsOf(r);
     if (refs.length === 0) continue;
     const infos = refs.map((o) => closed[orderNum(o.name)]);
-    if (infos.some((c) => !c)) continue; // mind. eine noch offen → unangetastet lassen
+    if (infos.some((c) => !c)) continue; // mind. eine noch offen → hier nichts tun
 
     const handledFrom = minusDaysIso(r.booking_date, 1);
     const allHandled = infos.every((c) => c!.state === "paid" && c!.paidAt && c!.paidAt.slice(0, 10) >= handledFrom);
+    handledIds.add(r.id);
 
     if (allHandled) {
       const names = infos.map((c) => c!.name).join(", ");
@@ -469,8 +512,45 @@ async function healResolvedReviews(daysBack = 150): Promise<{ checked: number; r
       relabeled++;
     }
   }
+
+  // Teil B: bestehende amount_only/no_candidate-Prüffälle mit Betrag+Name gegen
+  // ALLE Bestellungen (inkl. bezahlter) neu bewerten — fängt Fremd-Kunden-
+  // Vorschläge bei Standardpreisen rückwirkend ab (z.B. "Luana zahlt, aber
+  // Yasirs Gleichpreis-Bestellung wird vorgeschlagen").
+  const amountCache = new Map<number, Promise<AmountOrder[]>>();
+  for (const r of rows) {
+    if (handledIds.has(r.id)) continue;
+    if (r.match_status !== "review") continue;
+    if (r.match_reason !== "amount_only" && r.match_reason !== "no_candidate") continue;
+    if (!r.counterparty_name || !r.counterparty_name.trim()) continue;
+
+    const mtx: MatchTx = { amount: Number(r.amount), booking_date: r.booking_date, purpose: null, counterparty_name: r.counterparty_name };
+    const stored: MatchResult = {
+      kind: "review",
+      reason: r.match_reason as "amount_only" | "no_candidate",
+      detail: "",
+      candidates: (r.candidates ?? []).map((c) => ({ gid: c.gid, name: c.name, outstanding: c.outstanding, via: "amount" as const, nameMatch: false, isBankDeposit: false })),
+    };
+    const res = await refineByPayerAmount(mtx, stored, amountCache);
+    const storedGids = (r.candidates ?? []).map((c) => c.gid).sort().join(",");
+
+    if (res.kind === "ignored") {
+      patches.push({ id: r.id, patch: {
+        match_status: "ignored", match_reason: res.reason, match_detail: res.detail, candidates: [], resolved_at: now,
+      } });
+      refined++;
+    } else if (res.kind === "review") {
+      const newGids = res.candidates.map((c) => c.gid).sort().join(",");
+      if (res.reason === r.match_reason && newGids === storedGids) continue; // nichts geändert
+      patches.push({ id: r.id, patch: {
+        match_status: "review", match_reason: res.reason, match_detail: res.detail, candidates: res.candidates, matched_orders: [],
+      } });
+      refined++;
+    }
+  }
+
   await inBatches(patches, 10, (p) => sb.from("bank_transactions").update(p.patch).eq("id", p.id));
-  return { checked: rows.length, resolved, relabeled };
+  return { checked: rows.length, resolved, relabeled, refined };
 }
 
 // ── Manuelle Aktionen ───────────────────────────────────────────────────────
