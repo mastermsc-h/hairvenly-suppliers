@@ -427,6 +427,8 @@ interface HealRow {
   booking_date: string;
   amount: number;
   counterparty_name: string | null;
+  purpose: string | null;
+  end_to_end_ref: string | null;
   match_status: string;
   match_reason: string | null;
   candidates?: { gid: string; name: string; outstanding: number }[] | null;
@@ -454,7 +456,7 @@ async function healResolvedReviews(daysBack = 150): Promise<{ checked: number; r
   const since = new Date(Date.now() - daysBack * 86400000).toISOString().slice(0, 10);
   const { data } = await sb
     .from("bank_transactions")
-    .select("id, booking_date, amount, counterparty_name, match_status, match_reason, candidates, matched_orders")
+    .select("id, booking_date, amount, counterparty_name, purpose, end_to_end_ref, match_status, match_reason, candidates, matched_orders")
     .in("match_status", ["review", "shadow"])
     .gt("amount", 0)
     .gte("booking_date", since)
@@ -524,7 +526,7 @@ async function healResolvedReviews(daysBack = 150): Promise<{ checked: number; r
     if (r.match_reason !== "amount_only" && r.match_reason !== "no_candidate") continue;
     if (!r.counterparty_name || !r.counterparty_name.trim()) continue;
 
-    const mtx: MatchTx = { amount: Number(r.amount), booking_date: r.booking_date, purpose: null, counterparty_name: r.counterparty_name };
+    const mtx: MatchTx = { amount: Number(r.amount), booking_date: r.booking_date, purpose: r.purpose, counterparty_name: r.counterparty_name, end_to_end_ref: r.end_to_end_ref };
     const stored: MatchResult = {
       kind: "review",
       reason: r.match_reason as "amount_only" | "no_candidate",

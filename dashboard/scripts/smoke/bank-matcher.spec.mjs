@@ -163,6 +163,15 @@ check("Refine: eigene VORHER bezahlt → order_not_open (Doppelzahlung)",
   M.refineAmountOnly(luanaTx, [amtOrder(27739, { paidAt: "2026-09-01T10:00:00Z", created: "2026-09-01T09:00:00Z" })])?.reason, "order_not_open");
 check("Refine: ohne Zahlername → null",
   M.refineAmountOnly(tx(947.88, "x", "", "2026-10-13"), [amtOrder(27739)]), null);
+// Salon-/GbR-Konto: Kundenname steht im Verwendungszweck, nicht im Kontoinhaber
+const gbrTx = { amount: 225.25, purpose: "Sabina Durakovic", counterparty_name: "HAARLEM GBR", booking_date: "2026-11-19", end_to_end_ref: null };
+const dura = (number, extra = {}) => amtOrder(number, { total: 225.25, names: ["Sabina Durakovic"], created: "2026-11-19T09:00:00Z", paidAt: "2026-11-19T09:47:00Z", ...extra });
+check("Refine: Name im Verwendungszweck (GbR-Konto) → already_paid",
+  M.refineAmountOnly(gbrTx, [dura(29222)])?.reason, "already_paid");
+check("Refine: GbR-Konto, fremde Gleichpreis-Bestellung wird ignoriert",
+  M.refineAmountOnly(gbrTx, [amtOrder(29999, { total: 225.25, fin: "PENDING", outstanding: 225.25, paidAt: null, names: ["Vivien Kretschmer"], created: "2026-11-19T09:00:00Z" })]), null);
+check("payerMatchesOrder: Name im Zweck zählt", M.payerMatchesOrder(gbrTx, ["Sabina Durakovic"]), true);
+check("payerMatchesOrder: Fremdname zählt nicht", M.payerMatchesOrder(gbrTx, ["Vivien Kretschmer"]), false);
 
 // stripForeignAmountOnly: amount_only ohne Namenstreffer → no_candidate (kein Ein-Klick)
 const foreign = { kind: "review", reason: "amount_only", detail: "", candidates: [{ gid: "g", name: "#27307", outstanding: 947.88, via: "amount", nameMatch: false, isBankDeposit: false }] };

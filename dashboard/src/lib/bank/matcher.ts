@@ -131,6 +131,17 @@ export function namesMatch(counterparty: string | null | undefined, customerName
 }
 
 /**
+ * Passt der Zahler zum Bestell-Kunden? Prüft Kontoinhaber UND Verwendungszweck/
+ * E2E — weil bei Salon-/GbR-/Firmenkonten (z.B. "HAARLEM GBR") der Kundenname oft
+ * nur im Verwendungszweck steht ("Sabina Durakovic"), nicht im Kontoinhaber.
+ */
+export function payerMatchesOrder(tx: MatchTx, customerNames: string[]): boolean {
+  return namesMatch(tx.counterparty_name, customerNames)
+    || namesMatch(tx.purpose, customerNames)
+    || namesMatch(tx.end_to_end_ref, customerNames);
+}
+
+/**
  * Eingänge, die sicher KEINE Vorkasse-Kundenzahlung sind: Auszahlungen von
  * Zahlungsdienstleistern/Plattformen, Behörden, Bank selbst. Geprüft wird nur
  * der Kontoinhaber (nicht der Verwendungszweck — ein Kunde darf "paypal"
@@ -338,7 +349,7 @@ export function refineAmountOnly(tx: MatchTx, sameAmount: AmountOrder[]): MatchR
     (o) => !o.cancelled && toCents(o.total) === cents
       && o.createdAt.slice(0, 10) >= from && o.createdAt.slice(0, 10) <= to,
   );
-  const named = inWindow.filter((o) => namesMatch(tx.counterparty_name, o.customerNames));
+  const named = inWindow.filter((o) => payerMatchesOrder(tx, o.customerNames));
   if (named.length === 0) return null;
 
   const handledFrom = minusDays(tx.booking_date, 1);
@@ -361,8 +372,8 @@ export function refineAmountOnly(tx: MatchTx, sameAmount: AmountOrder[]): MatchR
       kind: "ignored",
       reason: "already_paid",
       detail:
-        `${paidHandled.map((o) => o.name).join(", ")} (${tx.counterparty_name}) war bereits als bezahlt markiert ` +
-        `(${paidHandled.map((o) => deDate(o.paidAt!)).join(", ")}) – vermutlich von Hand erledigt.`,
+        `${paidHandled.map((o) => `${o.name}${o.customerNames[0] ? ` (${o.customerNames[0]})` : ""}`).join(", ")} ` +
+        `war bereits als bezahlt markiert (${paidHandled.map((o) => deDate(o.paidAt!)).join(", ")}) – vermutlich von Hand erledigt.`,
     };
   }
   // Eigene, schon vorher bezahlte Bestellung → mögliche Doppelzahlung, prüfen.
