@@ -4,6 +4,7 @@
 // Links ein Ring (Bestand: aktiv 30 T · aktiv 31–90 T · eingeschlafen · nie bestellt),
 // rechts Kennzahlen und der Monatsverlauf (Balken = aktive Gewerbekunden, Linie = Anteil am Umsatz).
 import { Bar, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell } from "recharts";
+import Link from "next/link";
 import type { GewerbeDaten } from "@/lib/cockpit/typen";
 import { eur, kurzEur, zahl } from "./bausteine";
 
@@ -139,7 +140,7 @@ export default function GewerbeWidget({ d }: { d: GewerbeDaten }) {
               </ComposedChart>
             </ResponsiveContainer>
           </div>
-          <div className="gw-fuss">Gewerbekunde = Kunde mit Tag „B2B“ in Shopify · laufender Monat blasser</div>
+          <div className="gw-fuss">Gewerbekunde = Tag „B2B“ oder „B“ in Shopify · laufender Monat blasser · <Link href="/pack/gewerbe" className="gw-link ck-kein-zug">Alle Gewerbekunden →</Link></div>
         </div>
       </div>
     </div>

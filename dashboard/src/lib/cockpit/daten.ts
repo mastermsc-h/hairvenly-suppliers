@@ -12,6 +12,7 @@ import { FAST_TOT_STANDARD_MONATE } from "@/lib/deadstock-grenze";
 import { holeFollowerLive, type InstagramTag } from "@/lib/instagram-statistik";
 import { ladeWerbeteil } from "@/lib/marketing-extern";
 import { salonUmsatzJahr } from "@/lib/finanzen/salon-umsatz";
+import { ladeGewerbeMarkiert } from "@/lib/gewerbe";
 import type { FinanzMonatsdaten } from "@/lib/types";
 import { compute, taxChain } from "@/lib/finanzen/steuerrechnung";
 import type {
@@ -1045,31 +1046,14 @@ export async function ladeSignale(opts: { finanzen: boolean; chatbot: boolean })
 
 // ── Gewerbekunden ───────────────────────────────────────────────────────────
 
-/** Anzahl der in Shopify mit „B2B“ markierten Kunden (auch ohne Bestellung). */
-async function b2bRegistriert(): Promise<number | null> {
-  try {
-    let after: string | null = null;
-    let n = 0;
-    for (let i = 0; i < 20; i++) {
-      const r: { data?: { customers: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: Array<{ id: string }> } } } =
-        await shopifyGraphQL(`query($a: String) { customers(first: 250, after: $a, query: "tag:B2B") { pageInfo { hasNextPage endCursor } nodes { id } } }`, { a: after });
-      if (!r.data) return null;
-      n += r.data.customers.nodes.length;
-      if (!r.data.customers.pageInfo.hasNextPage) return n;
-      after = r.data.customers.pageInfo.endCursor;
-    }
-    return n;
-  } catch {
-    return null;
-  }
-}
-
 export const ladeGewerbe = cache(async (): Promise<GewerbeDaten> => {
   const sb = createServiceClient();
-  const [mon, kz, registriert] = await Promise.all([
-    sb.rpc("cockpit_gewerbe_monate", { p_monate: 13 }),
-    sb.rpc("cockpit_gewerbe_kennzahlen"),
-    b2bRegistriert(),
+  const markiert = await ladeGewerbeMarkiert();
+  const ids = markiert.map((k) => k.id);
+  const registriert = markiert.length;
+  const [mon, kz] = await Promise.all([
+    sb.rpc("cockpit_gewerbe_monate", { p_ids: ids, p_monate: 13 }),
+    sb.rpc("cockpit_gewerbe_kennzahlen", { p_ids: ids }),
   ]);
   if (mon.error) throw new Error(mon.error.message);
   if (kz.error) throw new Error(kz.error.message);

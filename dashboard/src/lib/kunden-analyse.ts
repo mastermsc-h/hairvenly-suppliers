@@ -216,7 +216,8 @@ async function shopify<T>(query: string, variables: Record<string, unknown>): Pr
   throw new Error("Shopify GraphQL: zu viele Fehlversuche");
 }
 
-const istB2B = (tags: string[] | undefined) => (tags ?? []).some((t) => t.trim().toLowerCase() === "b2b");
+// Gewerbe-Tags in Shopify: „B2B“ oder kurz „B“ (User 20.11.2026)
+const istB2B = (tags: string[] | undefined) => (tags ?? []).some((t) => ["b2b", "b"].includes(t.trim().toLowerCase()));
 
 function nameVon(o: OrderNode): { v: string; n: string } {
   for (const q of [o.customer, o.billingAddress, o.shippingAddress]) {

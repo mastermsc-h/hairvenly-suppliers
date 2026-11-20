@@ -320,9 +320,9 @@ export interface LiquiditaetDaten {
   marken: Array<{ datum: string; betrag: number; label: string; gruppe: LiqGruppe; geschaetzt: boolean }>;
 }
 
-/** Gewerbekunden (Tag „B2B“ in Shopify): Bestand, Aktivität und Monatsverlauf. */
+/** Gewerbekunden (Tag „B2B“ oder „B“ in Shopify): Bestand, Aktivität und Monatsverlauf. */
 export interface GewerbeDaten {
-  /** In Shopify als B2B markierte Kunden (null = Shopify nicht erreichbar). */
+  /** In Shopify als Gewerbe markierte Kunden. */
   registriert: number | null;
   kaeufer: number;
   aktiv30: number;

@@ -1435,3 +1435,4 @@ details.sk-jahr[open] > summary { padding-bottom: 6px; border-bottom: 1px dashed
   .gw-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) { .gw-bogen { animation: none; } }
+.gw-link { color: #f3cf85; font-weight: 650; text-decoration: none; } .gw-link:hover { text-decoration: underline; }

@@ -169,6 +169,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                   ...(has("finances")
                     ? [{ href: "/pack/zahlungen", label: t(locale, "nav.finances.payments") }]
                     : []),
+                  ...(has("finances")
+                    ? [{ href: "/pack/gewerbe", label: t(locale, "nav.shipping.gewerbe") }]
+                    : []),
                   // Umsätze + geschätzte Namensherkunft: nur der echte Admin
                   ...(profile.role === "admin"
                     ? [{ href: "/pack/kunden", label: t(locale, "nav.shipping.customers") }]
