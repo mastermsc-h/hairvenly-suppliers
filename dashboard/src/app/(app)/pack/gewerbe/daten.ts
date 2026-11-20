@@ -17,7 +17,12 @@ export async function ladeGewerbeZeilen(): Promise<GewerbeZeile[]> {
   const roh = (data ?? []) as Roh[];
   const proId = new Map(roh.map((r) => [Number(r.customer_id), r]));
   const verdacht = roh.filter((r) => !r.markiert);
-  const shop = await ladeShopifyKunden(verdacht.map((r) => Number(r.customer_id)));
+  const [shop, notizRes] = await Promise.all([
+    ladeShopifyKunden(verdacht.map((r) => Number(r.customer_id))),
+    createServiceClient().from("gewerbe_notizen").select("customer_id, notiz, geaendert_am, profiles(display_name, username)"),
+  ]);
+  type NotizRoh = { customer_id: number; notiz: string; geaendert_am: string; profiles: { display_name: string | null; username: string | null } | null };
+  const notizen = new Map(((notizRes.data ?? []) as unknown as NotizRoh[]).map((n) => [Number(n.customer_id), n]));
   const heute = Date.parse(`${berlin.format(new Date())}T12:00:00Z`);
   const tage = (iso: string | null) => (iso ? Math.round((heute - Date.parse(`${berlin.format(new Date(iso))}T12:00:00Z`)) / 86_400_000) : null);
 
@@ -43,6 +48,9 @@ export async function ladeGewerbeZeilen(): Promise<GewerbeZeile[]> {
       status: t == null ? "nie" : t <= 90 ? "aktiv" : t <= 365 ? "inaktiv" : "tot",
       punkte: r?.punkte ?? 0,
       gruende: r?.gruende ?? [],
+      notiz: notizen.get(id)?.notiz ?? "",
+      notizAm: notizen.get(id)?.geaendert_am ?? null,
+      notizVon: notizen.get(id)?.profiles?.display_name ?? notizen.get(id)?.profiles?.username ?? null,
     };
   };
 
