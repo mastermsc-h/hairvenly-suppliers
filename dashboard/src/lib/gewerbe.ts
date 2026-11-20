@@ -20,14 +20,16 @@ export interface ShopifyKunde {
 type Knoten = {
   id: string; displayName: string; email: string | null; tags: string[]; createdAt: string;
   defaultAddress: { company: string | null; city: string | null; zip: string | null } | null;
+  lastOrder?: { billingAddress: { company: string | null } | null; shippingAddress: { company: string | null } | null } | null;
 };
-const FELDER = "id displayName email tags createdAt defaultAddress { company city zip }";
+// Firma: Standardadresse, sonst Rechnungs-/Lieferadresse der letzten Bestellung
+const FELDER = "id displayName email tags createdAt defaultAddress { company city zip } lastOrder { billingAddress { company } shippingAddress { company } }";
 
 const zuKunde = (n: Knoten): ShopifyKunde => ({
   id: Number(n.id.split("/").pop()),
   name: n.displayName?.trim() || "Ohne Namen",
   email: n.email,
-  firma: n.defaultAddress?.company?.trim() || null,
+  firma: n.defaultAddress?.company?.trim() || n.lastOrder?.billingAddress?.company?.trim() || n.lastOrder?.shippingAddress?.company?.trim() || null,
   ort: [n.defaultAddress?.zip, n.defaultAddress?.city].filter(Boolean).join(" ") || null,
   tags: n.tags,
   seit: n.createdAt,
@@ -56,6 +58,23 @@ export async function ladeShopifyKunden(ids: number[]): Promise<Map<number, Shop
     const teil = ids.slice(i, i + 100).map((id) => `gid://shopify/Customer/${id}`);
     const r: { data?: { nodes: Array<Knoten | null> } } = await shopifyGraphQL(`query($ids: [ID!]!) { nodes(ids: $ids) { ... on Customer { ${FELDER} } } }`, { ids: teil });
     for (const n of r.data?.nodes ?? []) if (n?.id) map.set(Number(n.id.split("/").pop()), zuKunde(n));
+  }
+  return map;
+}
+
+/** Firmenname aus bestimmten Bestellungen (die laut kunden_bestellungen eine Firmenadresse haben). */
+export async function firmenAusBestellungen(bestellungen: Array<{ kunde: number; bestellung: number }>): Promise<Map<number, string>> {
+  const map = new Map<number, string>();
+  const kundeVon = new Map(bestellungen.map((b) => [`gid://shopify/Order/${b.bestellung}`, b.kunde]));
+  const gids = [...kundeVon.keys()];
+  for (let i = 0; i < gids.length; i += 50) {
+    const r: { data?: { nodes: Array<{ id?: string; billingAddress?: { company: string | null } | null; shippingAddress?: { company: string | null } | null } | null> } } =
+      await shopifyGraphQL(`query($ids: [ID!]!) { nodes(ids: $ids) { ... on Order { id billingAddress { company } shippingAddress { company } } } }`, { ids: gids.slice(i, i + 50) }, { allowPartialErrors: true });
+    for (const n of r.data?.nodes ?? []) {
+      const firma = n?.billingAddress?.company?.trim() || n?.shippingAddress?.company?.trim();
+      const kunde = n?.id ? kundeVon.get(n.id) : undefined;
+      if (firma && kunde && !map.has(kunde)) map.set(kunde, firma);
+    }
   }
   return map;
 }
