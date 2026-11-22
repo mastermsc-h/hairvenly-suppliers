@@ -816,6 +816,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "nav.finances.payments": "Zahlungseingänge",
     "nav.finances.bank": "Kontoumsätze",
     "nav.finances.liquiditaet": "Liquidität",
+    "nav.finances.steuertipps": "Steuertipps",
     "bank.title": "Zahlungseingänge",
     "bank.search.placeholder": "Alle Zahlungseingänge durchsuchen: Name, Zweck, Bestellnr., 449,90, 19.10. …",
     "bank.search.title": "Suchergebnisse",
@@ -1152,6 +1153,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "nav.finances.prepayments": "Tax Prepayments",
     "nav.finances.transfers": "Transfer Logs",
     "nav.finances.zbons": "Z reports (daily closings)",
+    "nav.finances.steuertipps": "Tax tips",
 
     // Finance
     "finance.title": "Income & Expenses",
@@ -2021,6 +2023,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "nav.finances.prepayments": "Vergi Ön Ödemeleri",
     "nav.finances.transfers": "Transfer Protokolleri",
     "nav.finances.zbons": "Z raporları (gün sonu)",
+    "nav.finances.steuertipps": "Vergi ipuçları",
 
     // Finance
     "finance.title": "Gelir ve Giderler",

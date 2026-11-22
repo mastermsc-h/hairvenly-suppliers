@@ -292,6 +292,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                     { href: "/finances/prepayments", label: t(locale, "nav.finances.prepayments") },
                     { href: "/finances/bank", label: t(locale, "nav.finances.bank") },
                     { href: "/finances/liquiditaet", label: t(locale, "nav.finances.liquiditaet") },
+                    { href: "/finances/steuertipps", label: t(locale, "nav.finances.steuertipps") },
                     { href: "/finances/z-bons", label: t(locale, "nav.finances.zbons") },
                     { href: "/finances/transfers", label: t(locale, "nav.finances.transfers") },
                   ]}
