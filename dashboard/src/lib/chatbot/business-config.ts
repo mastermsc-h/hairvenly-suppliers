@@ -36,8 +36,9 @@ export const BUSINESS_CONFIG = {
   whatsapp_number: "0173 8000865",
   whatsapp_url: "https://wa.me/491738000865",
   email: "kontakt@hairvenly.de",
-  instagram_handle: "@hairvenly",
-  instagram_url: "https://instagram.com/hairvenly",
+  // Bug 24.11.2026: stand hier als "@hairvenly" → Bot verwies auf falsches Profil.
+  instagram_handle: "@hairvenly.de",
+  instagram_url: "https://www.instagram.com/hairvenly.de/",
 
   // Versand
   shipping_carrier: "DHL",

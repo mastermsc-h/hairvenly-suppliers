@@ -68,9 +68,9 @@ export default async function ChatbotStatsPage({ searchParams }: PageProps) {
   // Kampagnen laden (für Uplift-Fenster ggf. weiter zurück nötig)
   const { data: campRows } = await svc
     .from("chatbot_campaigns")
-    .select("id, name, starts_on, ends_on, color, note")
+    .select("id, name, starts_on, ends_on, color, note, public_info")
     .order("starts_on", { ascending: true });
-  const campaigns = (campRows ?? []) as { id: string; name: string; starts_on: string; ends_on: string | null; color: string; note: string | null }[];
+  const campaigns = (campRows ?? []) as { id: string; name: string; starts_on: string; ends_on: string | null; color: string; note: string | null; public_info: string | null }[];
 
   // Haupt-Serie (gewählte Granularität) + Tages-Serie (für KPIs & Uplift)
   const earliestCampStart = campaigns.length ? campaigns[0].starts_on : sinceStr;
@@ -181,7 +181,7 @@ export default async function ChatbotStatsPage({ searchParams }: PageProps) {
     const avgDuring = totalDuring / days;
     const avgBefore = sumDays(addDays(start, -14), addDays(start, -1)) / 14;
     return {
-      id: c.id, name: c.name, starts_on: c.starts_on, ends_on: c.ends_on, color: c.color, note: c.note,
+      id: c.id, name: c.name, starts_on: c.starts_on, ends_on: c.ends_on, color: c.color, note: c.note, public_info: c.public_info,
       totalDuring, upliftPct: pct(avgDuring, avgBefore),
     };
   }).sort((a, b) => (a.starts_on < b.starts_on ? 1 : -1));

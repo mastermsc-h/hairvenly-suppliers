@@ -485,5 +485,25 @@ export function enforceBusinessFacts(text: string): { text: string; changed: boo
     return c.email;
   });
 
+  // INSTAGRAM-HANDLE — Bug 24.11.2026: Bot schrieb "@hairvenly" statt "@hairvenly.de".
+  // Strukturell: jedes "@hairvenly…" (nicht Teil einer E-Mail) → echter Handle.
+  // Satzende-Punkt bleibt erhalten ("folg uns auf @hairvenly." → "@hairvenly.de.").
+  const realHandle = c.instagram_handle.replace(/^@/, "").toLowerCase();
+  out = out.replace(/(^|[\s(„"'“:])@(hairvenly[\w.]*)/gi, (match, pre: string, h: string) => {
+    const trailing = h.match(/\.+$/)?.[0] ?? "";
+    const core = h.slice(0, h.length - trailing.length);
+    if (core.toLowerCase() === realHandle) return match;
+    changed = true;
+    console.warn(`[enforceBusinessFacts] IG-Handle korrigiert (@${h}) → ${c.instagram_handle}`);
+    return `${pre}${c.instagram_handle}${trailing}`;
+  });
+  // Sibling: Instagram-Profil-URL
+  out = out.replace(/(?:https?:\/\/)?(?:www\.)?instagram\.com\/(hairvenly[\w.]*?)(\/)?(?=[\s)"'”,!?]|\.(?:\s|$)|$)/gi, (match, h: string) => {
+    if (h.toLowerCase() === realHandle) return match;
+    changed = true;
+    console.warn(`[enforceBusinessFacts] IG-URL korrigiert (${match}) → ${c.instagram_url}`);
+    return c.instagram_url;
+  });
+
   return { text: out, changed };
 }

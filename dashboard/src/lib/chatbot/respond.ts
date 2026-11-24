@@ -442,7 +442,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-10-17.eta-future-only-date-guard.v1";
+const RESPOND_CODE_VERSION = "2026-11-24.campaigns-inject-promo-guard.v1";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
@@ -688,6 +688,22 @@ export async function respondAsBot(sessionId: string, opts: RespondOptions = {})
   // ⚠️ MUSS in den dynamic-Block (siehe Architektur-Memo §1.2 Cache-Stabilität),
   // nicht in systemPrompt (= stable cached Block) — sonst zerschießt es bei jedem
   // Call den Cache-Hash des Persona/Catalog/Trainings-Vorbereichs.
+  // AKTIONEN/RABATTE — DYNAMISCH (datumsabhängig) → variabler Block. Bug 24.11.2026:
+  // Bot erfand „Black Week bereits auf Instagram angekündigt". Quelle:
+  // chatbot_campaigns.public_info (Statistik-Seite). Siehe campaign-context.ts.
+  let campaignBlock = "";
+  try {
+    const { buildCampaignBlock } = await import("./campaign-context");
+    const { berlinTodayIso } = await import("./eta-pick");
+    const { data: camps } = await svc
+      .from("chatbot_campaigns")
+      .select("name, starts_on, ends_on, public_info")
+      .not("public_info", "is", null);
+    campaignBlock = buildCampaignBlock(camps ?? [], berlinTodayIso(), BUSINESS_CONFIG.instagram_handle);
+  } catch (e) {
+    console.warn("[respond] campaign block failed:", (e as Error).message);
+  }
+
   const biz = getBusinessHoursContext();
   let businessHoursBlock = "\n## 🕒 AKTUELLE GESCHÄFTSZEIT\n";
   businessHoursBlock += `- Jetzt ist: **${biz.nowLabel} (Europe/Berlin)**\n`;
@@ -1491,6 +1507,7 @@ KEINE Farbnamen nennen — die MA macht das.`;
     dynamicExtras +
     colorCodeDynamicHint +
     businessHoursBlock +
+    campaignBlock +
     openTurnsHint + greetingHint + categoryHardRule;
 
   // Set aller external_ids in dieser Session — für Reply-Lookup. Wenn eine
@@ -2571,6 +2588,20 @@ KEINE Farbnamen nennen — die MA macht das.`;
       console.warn(`[respond] ETA-DATE-HALLUCINATION session=${sessionId.slice(0,8)} — ${etaCheck.reason} — Snippet: "${etaCheck.matchedSnippet ?? ""}"`);
       needsManualReview = true;
       manualReviewReason = `Bot nennt einen Liefertermin, der nicht belegt ist oder in der Vergangenheit liegt (${etaCheck.reason}). Antwort als Draft gespeichert — MA bitte echten Termin in der Bestellung prüfen.`;
+    }
+  }
+
+  // ── PROMO-HALLUZINATIONS-GUARD (Bug 24.11.2026) ──────────────────────
+  // Prozente/Rabattcodes im Aktions-Kontext müssen im Prompt (Aktions-Block,
+  // FAQ) oder in Tool-Ergebnissen stehen; „bereits angekündigt" ist nie belegt.
+  // Getestet: scripts/smoke/campaign-context.spec.mjs.
+  if (!needsManualReview) {
+    const { detectPromoHallucination } = await import("./campaign-context");
+    const promo = detectPromoHallucination(finalText, [systemPromptStable, systemPromptVariable, ...allToolResults.map(r => r.content)]);
+    if (promo.suspicious) {
+      console.warn(`[respond] PROMO-HALLUCINATION session=${sessionId.slice(0,8)} — ${promo.reason} — Snippet: "${promo.snippet ?? ""}"`);
+      needsManualReview = true;
+      manualReviewReason = `Bot macht eine Aktions-/Rabatt-Aussage, die nirgends hinterlegt ist (${promo.reason}). Antwort als Draft gespeichert — Aktionen pflegt ihr unter Chatbot → Statistik („Info für Kundinnen").`;
     }
   }
 

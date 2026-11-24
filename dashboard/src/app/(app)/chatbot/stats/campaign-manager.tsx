@@ -11,6 +11,7 @@ export interface CampaignRow {
   ends_on: string | null;
   color: string;
   note: string | null;
+  public_info: string | null; // was der Bot Kundinnen sagen darf (leer = Bot kennt die Aktion nicht)
   upliftPct: number | null; // +% vs. 14 Tage davor (null = nicht berechenbar)
   totalDuring: number;       // Nachrichten im Zeitraum
 }
@@ -63,6 +64,9 @@ export default function CampaignManager({ campaigns }: { campaigns: CampaignRow[
                 <div className="text-xs text-neutral-500">
                   {fmtDe(c.starts_on)}{c.ends_on ? ` – ${fmtDe(c.ends_on)}` : " – (laufend)"}
                   {c.note ? ` · ${c.note}` : ""}
+                </div>
+                <div className="text-xs text-neutral-500 truncate">
+                  {c.public_info ? <>🤖 Bot sagt: {c.public_info}</> : <span className="text-neutral-400">🤖 Bot kennt diese Aktion nicht</span>}
                 </div>
               </div>
               <div className="text-right shrink-0">
@@ -124,6 +128,13 @@ function CampaignForm({ row, onDone }: { row?: CampaignRow; onDone: () => void }
             className="rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900" />
         </label>
       </div>
+      <label className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-neutral-600 uppercase tracking-wide">Info für Kundinnen (der Bot darf genau das sagen)</span>
+        <textarea name="public_info" defaultValue={row?.public_info ?? ""} rows={2}
+          placeholder="z.B. Bis zu 30 % Rabatt auf Extensions und Tools. — leer lassen, wenn der Bot die Aktion nicht nennen soll"
+          className="rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-900" />
+        <span className="text-xs text-neutral-500">Der Bot nennt die Aktion ab 30 Tage vorher mit Zeitraum und diesem Text — keine anderen Prozente oder Codes.</span>
+      </label>
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-neutral-600 uppercase tracking-wide">Farbe</span>
         {COLORS.map((c) => (

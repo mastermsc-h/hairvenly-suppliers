@@ -17,10 +17,11 @@ export async function createCampaign(fd: FormData) {
   const ends_on = str(fd, "ends_on") || null;
   const color = str(fd, "color") || "#ec4899";
   const note = str(fd, "note") || null;
+  const public_info = str(fd, "public_info") || null;
 
   const svc = createServiceClient();
   const { error } = await svc.from("chatbot_campaigns").insert({
-    name, starts_on, ends_on, color, note, created_by: profile.id,
+    name, starts_on, ends_on, color, note, public_info, created_by: profile.id,
   });
   if (error) throw new Error(error.message);
   revalidatePath("/chatbot/stats");
@@ -44,6 +45,7 @@ export async function updateCampaign(fd: FormData) {
       ends_on: str(fd, "ends_on") || null,
       color: str(fd, "color") || "#ec4899",
       note: str(fd, "note") || null,
+      public_info: str(fd, "public_info") || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id);
