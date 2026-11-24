@@ -442,7 +442,7 @@ interface RespondOptions {
  */
 // CODE_VERSION-Marker — bei jeder bot-Generierung geloggt. So lässt sich in
 // Vercel-Logs prüfen welcher Code aktuell live ist (nach Deploy verifizieren).
-const RESPOND_CODE_VERSION = "2026-11-24.campaigns-inject-promo-guard.v1";
+const RESPOND_CODE_VERSION = "2026-11-24.campaigns-promo-weekday-guard.v2";
 
 export async function respondAsBot(sessionId: string, opts: RespondOptions = {}): Promise<RespondResult> {
   const svc = createServiceClient();
@@ -2602,6 +2602,19 @@ KEINE Farbnamen nennen — die MA macht das.`;
       console.warn(`[respond] PROMO-HALLUCINATION session=${sessionId.slice(0,8)} — ${promo.reason} — Snippet: "${promo.snippet ?? ""}"`);
       needsManualReview = true;
       manualReviewReason = `Bot macht eine Aktions-/Rabatt-Aussage, die nirgends hinterlegt ist (${promo.reason}). Antwort als Draft gespeichert — Aktionen pflegt ihr unter Chatbot → Statistik („Info für Kundinnen").`;
+    }
+  }
+
+  // ── WOCHENTAG-GUARD (Bug 24.11.2026: „ab Mittwoch" für Freitag, 27.11.) ──
+  // Getestet: scripts/smoke/weekday-mismatch.spec.mjs.
+  if (!needsManualReview) {
+    const { detectWeekdayMismatch } = await import("./detect-weekday-mismatch");
+    const { berlinTodayIso } = await import("./eta-pick");
+    const wd = detectWeekdayMismatch(finalText, berlinTodayIso());
+    if (wd.suspicious) {
+      console.warn(`[respond] WEEKDAY-MISMATCH session=${sessionId.slice(0,8)} — ${wd.reason} — Snippet: "${wd.snippet ?? ""}"`);
+      needsManualReview = true;
+      manualReviewReason = `Bot nennt einen Wochentag, der nicht zum Datum passt (${wd.reason}). Antwort als Draft gespeichert — bitte Wochentag prüfen.`;
     }
   }
 

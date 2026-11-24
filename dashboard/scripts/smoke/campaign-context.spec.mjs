@@ -43,7 +43,8 @@ check("ohne public_info nie sichtbar", C.campaignState({ ...BF, public_info: nul
 check("mehr als 30 Tage vorher: noch nicht", C.campaignState(BF, "2026-10-20"), "hidden");
 
 const blockBefore = C.buildCampaignBlock([BF], "2026-11-24", "@hairvenly.de");
-check("Block vorher: Startdatum + Zeitraum", /startet am 27\.11\.2026 \(27\.11\.2026 bis 30\.11\.2026\)/.test(blockBefore), true);
+check("Block vorher: Startdatum + Zeitraum mit Wochentag", /startet am Freitag, 27\.11\.2026 \(Freitag, 27\.11\.2026 bis Montag, 30\.11\.2026\)/.test(blockBefore), true);
+check("Block: heute mit Wochentag (24.11.2026 = Dienstag)", blockBefore.includes("heute Dienstag, 24.11.2026"), true);
 check("Block vorher: noch nicht gültig", /vorher gilt der Rabatt noch NICHT/.test(blockBefore), true);
 check("Block nennt richtigen Handle", blockBefore.includes("@hairvenly.de"), true);
 check("leerer Block: keine Aktion eingetragen", /KEINE zeitlich begrenzte Aktion/.test(C.buildCampaignBlock([], "2026-11-24", "@hairvenly.de")), true);

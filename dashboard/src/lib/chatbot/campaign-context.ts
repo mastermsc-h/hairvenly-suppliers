@@ -25,7 +25,10 @@ export const ENDED_DAYS = 14;
 
 const dayMs = 86_400_000;
 const toDay = (iso: string) => Date.parse(iso.slice(0, 10) + "T00:00:00Z");
-const de = (iso: string) => { const [y, m, d] = iso.slice(0, 10).split("-"); return `${d}.${m}.${y}`; };
+const WEEKDAYS = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
+const deDate = (iso: string) => { const [y, m, d] = iso.slice(0, 10).split("-"); return `${d}.${m}.${y}`; };
+/** Mit Wochentag — Bug 24.11.: Bot schrieb „ab Mittwoch" für Freitag, 27.11. (Wochentag selbst errechnet). */
+const de = (iso: string) => `${WEEKDAYS[new Date(toDay(iso)).getUTCDay()]}, ${deDate(iso)}`;
 
 export type CampaignState = "running" | "upcoming" | "ended" | "hidden";
 
@@ -53,10 +56,11 @@ export function buildCampaignBlock(campaigns: CampaignLite[], todayIso: string, 
     else lines.push(`- **${c.name}** — BEENDET am ${de(c.ends_on ?? c.starts_on)}, gilt nicht mehr.`);
   }
   let block = `\n## 🏷 AKTIONEN & RABATTE (heute ${de(todayIso)})\n`;
+  // Wochentage stehen dabei — nie selbst ausrechnen.
   block += lines.length
     ? lines.join("\n") + "\n"
     : "- Aktuell ist KEINE zeitlich begrenzte Aktion eingetragen.\n";
-  block += `- Zu Aktionen NUR diese Angaben nennen (Zeitraum, Prozente, Produkte genau so). NIE Rabatthöhen, Codes, Zeiträume oder „wurde bereits angekündigt/gepostet" erfinden.\n`;
+  block += `- Zu Aktionen NUR diese Angaben nennen (Zeitraum mit genau diesen Wochentagen, Prozente, Produkte genau so). NIE Rabatthöhen, Codes, Zeiträume oder „wurde bereits angekündigt/gepostet" erfinden.\n`;
   block += `- Details, die hier nicht stehen (welche Farben, Rabattcode, genaue Prozente je Produkt) → ehrlich sagen, dass alle Infos auf Instagram ${instagramHandle} geteilt werden.\n`;
   return block;
 }
