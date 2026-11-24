@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import {
   ladeAusland, ladeInstagram, ladeIgAnfragen, ladeWerbung, ladeBesucher, ladeTotesKapital, ladeChats, ladeEintraege, ladeHy, ladeKampagnen, ladeLayout, ladeLiquiditaet, ladePflichten,
-  ladeGewerbe, ladeShopify, ladeSignale, ladeSteuerKasse, ladeTeam, ladeUmsatz,
+  ladeGewerbe, ladeTeam12, ladeShopify, ladeSignale, ladeSteuerKasse, ladeTeam, ladeUmsatz,
 } from "@/lib/cockpit/daten";
 import { WIDGETS } from "@/lib/cockpit/typen";
 import CockpitGrid from "./cockpit-grid";
@@ -12,6 +12,7 @@ import ZeitungWidget from "./widget-zeitung";
 import SteuerKasseWidget from "./widget-steuerkasse";
 import KanaeleWidget from "./widget-kanaele";
 import GewerbeWidget from "./widget-gewerbe";
+import TeamWidget from "./widget-team";
 import { ladeKanalStaende } from "@/lib/marketing-kanaele";
 import RoutinenWidget from "./widget-routinen";
 import { HaileyWidget, PflanzeWidget, PolaroidWidget, WetterWidget } from "./widgets-deko";
@@ -70,6 +71,7 @@ export default async function StartPage() {
     philosophie: <PhilosophieWidget eintraege={eintraege} istAdmin={istAdmin} />,
   };
   if (istAdmin) inhalte.hi = <HiKugel />;
+  if (istAdmin) inhalte.team = warte(<Mit lade={ladeTeam12}>{(d) => <TeamWidget d={d} />}</Mit>);
   const anzeigeName = profile.display_name ?? profile.username ?? "du";
   inhalte.hailey = warte(<Mit lade={() => ladeHailey({ finanzen, chatbot, name: anzeigeName, userId: profile.id })}>{(d) => <HaileyWidget d={d} />}</Mit>);
   inhalte.polaroid = warte(<Mit lade={() => ladePolaroids(profile.id)}>{(d) => <PolaroidWidget bilder={d} />}</Mit>);

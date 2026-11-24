@@ -270,3 +270,27 @@ export async function kanaeleAktualisieren(): Promise<Ergebnis> {
   revalidatePath("/start");
   return r.fehler.length && !r.neu ? { ok: false, error: r.fehler.join(" · ") } : { ok: true };
 }
+
+// ── Team-Stempelkarte: Verspätung erfassen (nur Admin) ──────────────────────
+export async function verspaetungErfassen(staffId: string, minuten: number, datum?: string): Promise<Ergebnis> {
+  const profile = await requireProfile();
+  if (profile.role !== "admin") return { ok: false, error: "Nur für Admin" };
+  const min = Math.round(Number(minuten));
+  if (!(min > 0 && min <= 600)) return { ok: false, error: "Minuten zwischen 1 und 600" };
+  if (datum && !/^\d{4}-\d{2}-\d{2}$/.test(datum)) return { ok: false, error: "Ungültiges Datum" };
+  const { error } = await createServiceClient().from("staff_verspaetungen").insert({ staff_id: staffId, minuten: min, ...(datum ? { datum } : {}), erstellt_von: profile.id });
+  if (!error) revalidatePath("/start");
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+export async function verspaetungZuruecknehmen(): Promise<Ergebnis> {
+  const profile = await requireProfile();
+  if (profile.role !== "admin") return { ok: false, error: "Nur für Admin" };
+  const sb = createServiceClient();
+  const { data } = await sb.from("staff_verspaetungen").select("id").eq("erstellt_von", profile.id).order("erstellt_am", { ascending: false }).limit(1);
+  const id = (data as Array<{ id: string }> | null)?.[0]?.id;
+  if (!id) return { ok: false, error: "Nichts zum Zurücknehmen" };
+  const { error } = await sb.from("staff_verspaetungen").delete().eq("id", id);
+  if (!error) revalidatePath("/start");
+  return error ? { ok: false, error: error.message } : { ok: true };
+}

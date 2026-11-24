@@ -624,7 +624,7 @@ a.ck-signal:hover { border-color: var(--s); }
     #f5f2fc;
   background-attachment: fixed;
 }
-.ck[data-stil="glas"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]):not([data-w="newsletter"]):not([data-w="gewerbe"]):not([data-frei="true"]) {
+.ck[data-stil="glas"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]):not([data-w="newsletter"]):not([data-w="gewerbe"]):not([data-w="team"]):not([data-frei="true"]) {
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.6));
   border: 1px solid rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(16px) saturate(1.15);
@@ -634,13 +634,13 @@ a.ck-signal:hover { border-color: var(--s); }
     inset 0 1px 0 #fff,
     0 18px 38px -26px rgba(60, 40, 120, 0.45);
 }
-.ck[data-stil="glas"] .ck-panel:not([data-w="hi"]):not([data-w="sturm"]):not([data-w="newsletter"]):not([data-w="gewerbe"]):not([data-frei="true"])::before {
+.ck[data-stil="glas"] .ck-panel:not([data-w="hi"]):not([data-w="sturm"]):not([data-w="newsletter"]):not([data-w="gewerbe"]):not([data-w="team"]):not([data-frei="true"])::before {
   content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
   background: linear-gradient(115deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0) 28%);
 }
 
 /* Aurora: jedes Fenster leicht in seiner Farbe getönt, mit farbiger Lichtkante */
-.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]):not([data-w="newsletter"]):not([data-w="gewerbe"]):not([data-frei="true"]) {
+.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]):not([data-w="newsletter"]):not([data-w="gewerbe"]):not([data-w="team"]):not([data-frei="true"]) {
   background:
     radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--w) 17%, transparent), transparent 60%),
     radial-gradient(100% 70% at 100% 100%, color-mix(in srgb, var(--w) 9%, transparent), transparent 60%),
@@ -648,7 +648,7 @@ a.ck-signal:hover { border-color: var(--s); }
   border: 1px solid color-mix(in srgb, var(--w) 26%, white);
   box-shadow: 0 1px 2px rgba(60, 40, 120, 0.05), 0 18px 40px -24px color-mix(in srgb, var(--w) 65%, transparent);
 }
-.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]):not([data-w="newsletter"]):not([data-w="gewerbe"]):not([data-frei="true"])::before {
+.ck[data-stil="aurora"] .ck-panel:not([data-w="hi"]):not([data-w="umsatz"]):not([data-w="sturm"]):not([data-w="newsletter"]):not([data-w="gewerbe"]):not([data-w="team"]):not([data-frei="true"])::before {
   content: ""; position: absolute; left: 18px; right: 18px; top: 0; height: 2px; border-radius: 2px; pointer-events: none;
   background: linear-gradient(90deg, transparent, var(--w), transparent);
   opacity: 0.85;
@@ -1436,3 +1436,83 @@ details.sk-jahr[open] > summary { padding-bottom: 6px; border-bottom: 1px dashed
 }
 @media (prefers-reduced-motion: reduce) { .gw-bogen { animation: none; } }
 .gw-link { color: #f3cf85; font-weight: 650; text-decoration: none; } .gw-link:hover { text-decoration: underline; }
+
+/* ── Team-Stempelkarte: Karton, seitliche Lochung, Perforation, Gummistempel ─ */
+.ck-panel[data-w="team"] {
+  --w: #b8322b;
+  --ck-text: #3b2f1e;
+  --ck-dim: #6b5a3e;
+  --ck-matt: #9a8763;
+  --ck-linie: #e2d5b8;
+  color: var(--ck-text);
+  border: 0;
+  border-radius: 10px;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 27px, rgba(160, 130, 80, 0.10) 27px 28px),
+    radial-gradient(120% 80% at 10% 0%, #fffaf0, transparent 60%),
+    linear-gradient(170deg, #fbf4e3 0%, #f4e9cf 100%);
+  /* halbrunde Lochung links und rechts in der Mitte + kleine Ecken-Kerben */
+  -webkit-mask:
+    radial-gradient(circle 16px at 0 50%, #0000 97%, #000) left / 51% 100% no-repeat,
+    radial-gradient(circle 16px at 100% 50%, #0000 97%, #000) right / 51% 100% no-repeat;
+          mask:
+    radial-gradient(circle 16px at 0 50%, #0000 97%, #000) left / 51% 100% no-repeat,
+    radial-gradient(circle 16px at 100% 50%, #0000 97%, #000) right / 51% 100% no-repeat;
+  box-shadow: none;
+}
+.react-grid-item:has(> .ck-panel[data-w="team"]) { filter: drop-shadow(0 14px 22px rgba(90, 60, 20, 0.22)) drop-shadow(0 1px 1px rgba(90, 60, 20, 0.2)); }
+.ck-panel[data-w="team"] .ck-abzeichen { background: #b8322b; color: #fff6e6; box-shadow: none; }
+.ck-panel[data-w="team"] .ck-titel { font-family: ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.04em; }
+
+.tk { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.tk-kopfzeile { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 10.5px; letter-spacing: 0.16em; color: var(--ck-matt); border-bottom: 2px solid #3b2f1e; padding: 0 6px 5px; }
+.tk-felder { display: grid; grid-template-columns: 1fr 14px 1.15fr 14px 1fr; flex: 1; min-height: 0; padding: 0 6px; }
+.tk-feld { position: relative; display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; padding: 4px 6px 8px; overflow: hidden auto; }
+.tk-feld-kopf { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ck-dim); }
+.tk-feld-kopf b { color: #b8322b; margin-right: 4px; }
+.tk-perforation { background: radial-gradient(circle 2.4px, rgba(90, 60, 20, 0.35) 95%, transparent) center / 6px 11px repeat-y; }
+.tk-liste { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.tk-zeile { display: grid; grid-template-columns: minmax(58px, 0.8fr) 1fr auto; gap: 8px; align-items: center; font-size: 12.5px; }
+.tk-zeile[data-erst="true"] .tk-name { font-weight: 800; color: #3b2f1e; }
+.tk-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ck-dim); }
+.tk-wert { text-align: right; white-space: nowrap; font-size: 11.5px; color: var(--ck-dim); }
+.tk-wert b { font-size: 15px; color: #3b2f1e; }
+.tk-wert small { display: block; font-size: 10px; color: var(--ck-matt); }
+.tk-thermo { width: 100%; height: 20px; }
+.tk-quecksilber { transform-origin: 16px 50%; animation: tk-steigen 1.1s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes tk-steigen { from { transform: scaleX(0); } }
+.tk-loecher { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.tk-loecher i { width: 9px; height: 9px; border-radius: 50%; background: #2b2215; box-shadow: inset 0 1px 1px rgba(255,255,255,0.25), 0 0 0 1.5px #e8dcc0; }
+.tk-loecher em { font-style: normal; font-size: 10.5px; color: var(--ck-matt); }
+.tk-treue { grid-template-columns: 26px 1fr auto; }
+.tk-medaille { filter: drop-shadow(0 1px 1px rgba(0,0,0,0.2)); }
+.tk-leer { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; font-size: 12px; color: var(--ck-dim); padding: 6px 0; }
+.tk-leer-icon { font-size: 22px; }
+.tk-link { color: #b8322b; font-weight: 700; text-decoration: none; font-size: 11.5px; }
+.tk-link:hover { text-decoration: underline; }
+.tk-hinweis { font-size: 10.5px; color: #8a5a1c; background: rgba(227, 179, 65, 0.18); border-left: 3px solid #e3b341; padding: 4px 7px; }
+.tk-stempel {
+  position: absolute; right: 8px; bottom: 6px; padding: 2px 8px; font-size: 11px; font-weight: 800; letter-spacing: 0.18em;
+  border: 2.5px solid currentColor; border-radius: 4px; transform: rotate(-9deg); opacity: 0.55; pointer-events: none;
+  mix-blend-mode: multiply;
+}
+.tk-stempel-rot { color: #c0392b; }
+.tk-stempel-blau { color: #2b5bb8; transform: rotate(7deg); }
+.tk-uhr { margin-top: auto; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-top: 6px; border-top: 1px dashed #d8c9a8; }
+.tk-uhr select { flex: 1 1 130px; min-width: 0; font: inherit; font-size: 12px; background: #fffaf0; border: 1px solid #d8c9a8; border-radius: 6px; padding: 5px 6px; color: #3b2f1e; }
+.tk-minuten { display: inline-flex; border: 1px solid #d8c9a8; border-radius: 6px; overflow: hidden; }
+.tk-minuten button { font: inherit; font-size: 11.5px; padding: 4px 7px; background: #fffaf0; border: 0; border-right: 1px solid #e8dcc0; cursor: pointer; color: var(--ck-dim); }
+.tk-minuten button:last-child { border-right: 0; }
+.tk-minuten button[aria-checked="true"] { background: #3b2f1e; color: #fff6e6; }
+.tk-stempel-knopf { font: inherit; font-size: 11.5px; font-weight: 800; letter-spacing: 0.14em; color: #fff6e6; background: #b8322b; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; box-shadow: 0 3px 0 #7d1f19; transition: transform 0.08s, box-shadow 0.08s; }
+.tk-stempel-knopf:active { transform: translateY(3px); box-shadow: 0 0 0 #7d1f19; }
+.tk-stempel-knopf:disabled, .tk-zurueck:disabled { opacity: 0.6; cursor: progress; }
+.tk-zurueck { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; border: 1px solid #d8c9a8; background: #fffaf0; color: var(--ck-dim); cursor: pointer; }
+.tk-meldung { font-size: 11px; color: #2f7a3e; }
+.tk-meldung[data-ok="false"] { color: #b8322b; }
+@container (max-width: 760px) {
+  .tk-felder { grid-template-columns: 1fr; gap: 10px; overflow-y: auto; }
+  .tk-perforation { height: 8px; background: radial-gradient(circle 2.4px, rgba(90, 60, 20, 0.35) 95%, transparent) center / 11px 6px repeat-x; }
+}
+.ck-panel[data-w="team"] .ck-inhalt { container-type: inline-size; }
+@media (prefers-reduced-motion: reduce) { .tk-quecksilber { animation: none; } }

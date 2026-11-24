@@ -17,7 +17,7 @@ import type { FinanzMonatsdaten } from "@/lib/types";
 import { compute, taxChain } from "@/lib/finanzen/steuerrechnung";
 import type {
   Ampel, AuslandDaten, BesucherDaten, ChatDaten, CockpitLayout, Eintrag, EintragArt, HyDaten, KampagneDaten,
-  GewerbeDaten, LiqGruppe, LiquiditaetDaten, PflichtenDaten, SteuerArt, SteuerKasseDaten, PflichtPosten, ShopifyDaten, Signal, TotesKapitalDaten, InstagramDaten, IgAnfragenDaten, IgAnfragenPeriode, WerbungDaten, UmsatzDaten,
+  GewerbeDaten, TeamDaten, LiqGruppe, LiquiditaetDaten, PflichtenDaten, SteuerArt, SteuerKasseDaten, PflichtPosten, ShopifyDaten, Signal, TotesKapitalDaten, InstagramDaten, IgAnfragenDaten, IgAnfragenPeriode, WerbungDaten, UmsatzDaten,
 } from "./typen";
 
 const berlin = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin" });
@@ -1075,5 +1075,54 @@ export const ladeGewerbe = cache(async (): Promise<GewerbeDaten> => {
     bestellungen90: Number(k.bestellungen90 ?? 0),
     anteil: ges3 > 0 ? b2b3 / ges3 : 0,
     monate,
+  };
+});
+
+// ── Team-Stempelkarte (nur Admin) ───────────────────────────────────────────
+export const ladeTeam12 = cache(async (): Promise<TeamDaten> => {
+  const sb = createServiceClient();
+  const seit = plusTage(heuteBerlin(), -365);
+  const [mRes, kRes, vRes] = await Promise.all([
+    sb.from("staff_members").select("id, name, team, employment_start").eq("active", true),
+    sb.from("sick_days").select("staff_id, start_date, end_date, days").gte("end_date", seit),
+    sb.from("staff_verspaetungen").select("staff_id, datum, minuten").gte("datum", seit).order("datum", { ascending: false }),
+  ]);
+  if (mRes.error) throw new Error(mRes.error.message);
+  const mit = (mRes.data ?? []) as Array<{ id: string; name: string; team: string | null; employment_start: string | null }>;
+  const name = new Map(mit.map((m) => [m.id, m.name]));
+  const heute = heuteBerlin();
+  const tageZw = (a: string, b: string) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a.slice(0, 10)}T12:00:00Z`)) / 86_400_000);
+
+  const kMap = new Map<string, { tage: number; faelle: number; letzte: string | null }>();
+  for (const k of (kRes.data ?? []) as Array<{ staff_id: string; start_date: string; end_date: string; days: number | null }>) {
+    if (!name.has(k.staff_id)) continue;
+    const e = kMap.get(k.staff_id) ?? { tage: 0, faelle: 0, letzte: null };
+    e.tage += Number(k.days ?? 0) || tageZw(k.start_date, k.end_date) + 1;
+    e.faelle += 1;
+    if (!e.letzte || k.start_date > e.letzte) e.letzte = k.start_date;
+    kMap.set(k.staff_id, e);
+  }
+  const vListe = (vRes.data ?? []) as Array<{ staff_id: string; datum: string; minuten: number }>;
+  const vMap = new Map<string, { anzahl: number; minuten: number; letzte: string | null }>();
+  for (const v of vListe) {
+    if (!name.has(v.staff_id)) continue;
+    const e = vMap.get(v.staff_id) ?? { anzahl: 0, minuten: 0, letzte: null };
+    e.anzahl += 1;
+    e.minuten += v.minuten;
+    if (!e.letzte || v.datum > e.letzte) e.letzte = v.datum;
+    vMap.set(v.staff_id, e);
+  }
+  const mitStart = mit.filter((m) => m.employment_start);
+  const zaehl = new Map<string, number>();
+  for (const m of mitStart) zaehl.set(m.employment_start!.slice(0, 10), (zaehl.get(m.employment_start!.slice(0, 10)) ?? 0) + 1);
+  const haeufig = [...zaehl.entries()].sort((a, b) => b[1] - a[1])[0];
+  const lv = vListe.find((v) => name.has(v.staff_id));
+  return {
+    mitarbeiter: mit.map((m) => ({ id: m.id, name: m.name, team: m.team })).sort((a, b) => a.name.localeCompare(b.name, "de")),
+    krank: [...kMap].map(([id, e]) => ({ id, name: name.get(id)!, ...e })).sort((a, b) => b.tage - a.tage || b.faelle - a.faelle),
+    spaet: [...vMap].map(([id, e]) => ({ id, name: name.get(id)!, ...e })).sort((a, b) => b.anzahl - a.anzahl || b.minuten - a.minuten),
+    treue: mitStart.map((m) => ({ id: m.id, name: m.name, seit: m.employment_start!.slice(0, 10), tage: tageZw(m.employment_start!, heute) })).sort((a, b) => b.tage - a.tage || a.name.localeCompare(b.name, "de")),
+    letzteSpaet: lv ? { id: lv.staff_id, name: name.get(lv.staff_id)!, datum: lv.datum, minuten: lv.minuten } : null,
+    gleicherStart: haeufig && haeufig[1] >= 3 ? { datum: haeufig[0], anzahl: haeufig[1] } : null,
   };
 });

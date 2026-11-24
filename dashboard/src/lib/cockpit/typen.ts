@@ -320,6 +320,17 @@ export interface LiquiditaetDaten {
   marken: Array<{ datum: string; betrag: number; label: string; gruppe: LiqGruppe; geschaetzt: boolean }>;
 }
 
+/** Team-Stempelkarte: Krankheit, Verspätungen (12 Monate) und Betriebszugehörigkeit. Nur Admin. */
+export interface TeamDaten {
+  mitarbeiter: Array<{ id: string; name: string; team: string | null }>;
+  krank: Array<{ id: string; name: string; tage: number; faelle: number; letzte: string | null }>;
+  spaet: Array<{ id: string; name: string; anzahl: number; minuten: number; letzte: string | null }>;
+  treue: Array<{ id: string; name: string; seit: string; tage: number }>;
+  letzteSpaet: { id: string; name: string; datum: string; minuten: number } | null;
+  /** Mehrere mit identischem Eintrittsdatum (vermutlich Platzhalter). */
+  gleicherStart: { datum: string; anzahl: number } | null;
+}
+
 /** Gewerbekunden (Tag „B2B“ oder „B“ in Shopify): Bestand, Aktivität und Monatsverlauf. */
 export interface GewerbeDaten {
   /** In Shopify als Gewerbe markierte Kunden. */
@@ -445,6 +456,7 @@ export const WIDGETS = [
   { id: "philosophie", name: "Firmenphilosophie", info: "Wofür Hairvenly steht", feature: null },
   { id: "liquiditaet", name: "Liquidität", info: "Kontostand der nächsten 90 Tage", feature: "finances" },
   { id: "gewerbe", name: "Gewerbekunden", info: "Wie viele Salons & Profis bei uns kaufen – und wie viele gerade aktiv sind", feature: "finances" },
+  { id: "team", name: "Team-Stempelkarte", info: "Wer am häufigsten krank und zu spät war – und wer am längsten dabei ist", feature: "admin" },
   { id: "kanaele", name: "Marketing-Kanäle", info: "Wo wir posten wie geplant – und wo der Kanal eingeschlafen ist", feature: null },
   { id: "steuerkasse", name: "Steuerkasse", info: "Was ans Finanzamt geht – wann, wie viel, was danach bleibt", feature: "finances" },
   { id: "marketing", name: "Marketing (HALO)", info: "Dringende Aufgaben des Marketing-Teams", feature: "finances" },
@@ -489,6 +501,7 @@ const STANDARD_LAYOUT_GROB: LayoutItem[] = [
   { i: "steuerkasse", x: 0, y: 120, w: 12, h: 15 },
   { i: "kanaele", x: 0, y: 135, w: 12, h: 15 },
   { i: "gewerbe", x: 0, y: 150, w: 8, h: 12 },
+  { i: "team", x: 0, y: 162, w: 12, h: 11 },
 ];
 
 /** Standard-Anordnung im feinen Raster (10-px-Zeilen). Überlappt noch – wird beim Aufbau einmal verdichtet. */
@@ -501,4 +514,5 @@ export const MIN_GROESSE: Record<string, { w: number; h: number }> = {
   liquiditaet: { w: 4, h: 20 },
   steuerkasse: { w: 5, h: 30 },
   gewerbe: { w: 5, h: 28 },
+  team: { w: 6, h: 30 },
 };
