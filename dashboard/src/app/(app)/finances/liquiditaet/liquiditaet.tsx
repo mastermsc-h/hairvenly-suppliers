@@ -166,8 +166,13 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
     for (const ev of p.ereignisse) byDay.set(ev.datum, [...(byDay.get(ev.datum) ?? []), ev]);
     const vergangen = verlauf.filter((t) => t.datum < p.start);
     // Heutige Buchungen stecken schon im Startstand, gehören aber als "bezahlt" zum ersten Vorschau-Tag
-    const heuteGebucht = verlauf.find((t) => t.datum === p.start)?.zahlungen;
-    const vorschau: DiagrammTag[] = p.tage.map((t, i) => ({ ...t, ev: byDay.get(t.datum) ?? [], ...(i === 0 && heuteGebucht ? { zahlungen: heuteGebucht } : {}) }));
+    const heute = verlauf.find((t) => t.datum === p.start);
+    const vorschau: DiagrammTag[] = p.tage.map((t, i) => ({
+      ...t,
+      ev: byDay.get(t.datum) ?? [],
+      ...(i === 0 && heute?.zahlungen ? { zahlungen: heute.zahlungen } : {}),
+      ...(i === 0 && heute?.buchungen.length ? { buchungen: heute.buchungen, weitere: heute.weitere } : {}),
+    }));
     // Echte Linie läuft bis an den Start der Vorschau heran
     if (vorschau[0] && vergangen.length) vorschau[0] = { ...vorschau[0], ist: vergangen.at(-1)?.saldo };
     const zeilen: DiagrammTag[] = [
@@ -193,6 +198,14 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
     setZurueck(Math.max(0, Math.min(maxZurueck, versatz + tage)));
   };
   // Steuertermine als Marken im Diagramm (gleicher Tag → übereinander)
+  // Tatsächlich abgebuchte Einfuhrabgaben (EUSt + Zoll) als Marke unten im Diagramm — mit „wofür“ im Hover
+  const einfuhrIstMarken = useMemo(
+    () =>
+      alleTage
+        .map((t) => ({ datum: t.datum, posten: (t.zahlungen ?? []).filter((z) => z.gruppe === "einfuhr" && z.betrag < 0) }))
+        .filter((x) => x.posten.reduce((s2, z) => s2 - z.betrag, 0) >= 1000),
+    [alleTage],
+  );
   const steuerMarken = useMemo(() => {
     const m = new Map<string, Ereignis[]>();
     for (const ev of p.ereignisse) if (ev.art === "steuer") m.set(ev.datum, [...(m.get(ev.datum) ?? []), ev]);
@@ -737,6 +750,17 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
                     : {})}
                 />,
               ])}
+              {einfuhrIstMarken.filter((m) => m.datum >= fensterVon && m.datum <= fensterBis).map((m) => (
+                <ReferenceLine
+                  key={`ist-${m.datum}`}
+                  x={m.datum}
+                  stroke={SYMBOLE.einfuhr.farbe}
+                  strokeOpacity={0.5}
+                  label={(props: { viewBox?: { x?: number; y?: number; height?: number } }) => (
+                    <IstMarke x={props.viewBox?.x ?? 0} y={(props.viewBox?.y ?? 0) + (props.viewBox?.height ?? 0)} posten={m.posten} />
+                  )}
+                />
+              ))}
               {steuerMarken.filter(([datum]) => datum >= fensterVon && datum <= fensterBis).map(([datum, evs]) => (
                 <ReferenceLine
                   key={datum}
@@ -1544,6 +1568,27 @@ function SteuerNachzahlungKarte({
         </span>
       </div>
     </Card>
+  );
+}
+
+/** Tatsächlich abgebuchte Einfuhrabgaben eines Tages: Marke unten im Diagramm mit Betrag, Hover = wofür. */
+function IstMarke({ x, y, posten }: { x: number; y: number; posten: Array<{ name: string; betrag: number }> }) {
+  const s = SYMBOLE.einfuhr;
+  const summe = posten.reduce((a, z) => a - z.betrag, 0);
+  const text = `✓ EUSt ${(summe / 1000).toLocaleString("de-DE", { maximumFractionDigits: 1 })}k`;
+  const w = 18 + text.length * 5.6;
+  const top = y - 20;
+  // Am ersten Tag (heute) läge die halbe Marke links außerhalb der Fläche → nicht über die Achse hinaus
+  const links = Math.max(x - w / 2, 54);
+  return (
+    <g>
+      <title>{posten.map((z) => `−${eur(-z.betrag)} ${z.name}`).join("\n") + "\n(bezahlt laut Konto)"}</title>
+      <rect x={links} y={top} width={w} height={16} rx={8} fill={s.farbe} />
+      <s.Icon x={links + 4} y={top + 3} width={10} height={10} color="#fff" strokeWidth={2.5} />
+      <text x={links + 16} y={top + 11.5} fontSize={9.5} fontWeight={600} fill="#fff">
+        {text}
+      </text>
+    </g>
   );
 }
 

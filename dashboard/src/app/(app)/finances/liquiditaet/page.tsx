@@ -1,13 +1,13 @@
 import { redirect } from "next/navigation";
 import { requireFeature } from "@/lib/auth";
-import { ladeEinstellungen, ladeKontoVerlauf, ladeRohdaten } from "@/lib/liquiditaet/daten";
+import { einfuhrBuchungsSchluessel, ladeEinstellungen, ladeKontoVerlauf, ladeRohdaten } from "@/lib/liquiditaet/daten";
 import { readVerkaufsanalyse } from "@/lib/stock-sheets";
 import { createServiceClient } from "@/lib/supabase/server";
 import Liquiditaet, { type Verbrauch } from "./liquiditaet";
 import UstMonate from "../ust-monate";
 import { ladeUstMonate } from "@/lib/steuer/ust-monate";
 import { ladeRohZusatz } from "@/lib/liquiditaet/erweitert";
-import type { LiqRohdaten } from "@/lib/liquiditaet/rechnung";
+import { prognose, type LiqRohdaten } from "@/lib/liquiditaet/rechnung";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +43,16 @@ export default async function LiquiditaetPage() {
     ladeRohZusatz(),
   ]);
   const roh: LiqRohdaten = { ...rohBasis, ...zusatz };
-  const verlauf = await ladeKontoVerlauf(sb, roh, einstellungen);
+  // Vermutete Zuordnung der Verzoller-Abbuchungen (DHL/Ungewitter) zu Lieferungen → Text im Diagramm „EUSt + Zoll für …“
+  const vorab = prognose(roh, einstellungen);
+  const einfuhrVermutet = new Map<string, string[]>();
+  for (const b of [...vorab.bestellungen, ...vorab.einfuhrAndere]) {
+    const v = b.einfuhrVermutung;
+    if (!v) continue;
+    const k = einfuhrBuchungsSchluessel(v.datum, v.betragEur);
+    einfuhrVermutet.set(k, [...(einfuhrVermutet.get(k) ?? []), b.label]);
+  }
+  const verlauf = await ladeKontoVerlauf(sb, roh, einstellungen, einfuhrVermutet);
   return (
     <>
       <Liquiditaet roh={roh} gespeichert={einstellungen} verbrauch={verbrauch} verlauf={verlauf} />

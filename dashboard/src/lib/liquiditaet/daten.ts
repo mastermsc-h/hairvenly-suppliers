@@ -562,9 +562,47 @@ export const ladeRatenTermine = cache(async (): Promise<Record<string, string[]>
  * Echter Kontostand je Tag für das Diagramm — nur die Liquiditätsseite braucht ihn,
  * deshalb nicht in ladeRohdaten (das läuft auch bei jeder Bestellliste).
  */
-export async function ladeKontoVerlauf(sb: Sb, roh: Pick<LiqRohdaten, "konten" | "heute">, e: LiqEinstellungen): Promise<VerlaufTag[]> {
+/** Schlüssel einer Verzoller-Abbuchung für die Zuordnung zu Lieferungen: Buchungstag + Betrag in Cent. */
+export const einfuhrBuchungsSchluessel = (datum: string, betragEur: number) => `${datum}|${Math.round(Math.abs(betragEur) * 100)}`;
+
+/**
+ * Text einer EUSt-/Zoll-Abbuchung: wofür (Lieferungen) und von wem (Verzoller + Rechnungsnummer).
+ * `fuer` = Lieferungen mit eingetragener Nummer (sicher) bzw. vermutet zugeordnet (≈).
+ */
+export function einfuhrBuchungsText(t: { counterparty_name: string | null; purpose: string | null }, fuer: { labels: string[]; vermutet: boolean } | null): string {
+  const zweck = t.purpose ?? "";
+  const zits = [...new Set(zweck.match(/ZIT\d{5,}/gi) ?? [])].map((z) => z.toUpperCase());
+  const rg = zweck.match(/RG\.?-?\s*NR\.*\s*([\d][\d ]{3,}\d)/i)?.[1]?.trim();
+  const verzoller = /ungewitter/i.test(t.counterparty_name ?? "")
+    ? `Carl Ungewitter${rg ? ` RG ${rg}` : ""}`
+    : zits.length
+      ? `DHL ${zits.slice(0, 2).join(", ")}${zits.length > 2 ? ` +${zits.length - 2}` : ""}`
+      : t.counterparty_name?.trim() || "Verzoller";
+  if (!fuer?.labels.length) return `EUSt + Zoll · ${verzoller}`;
+  return `EUSt + Zoll für ${fuer.labels.join(", ")}${fuer.vermutet ? " (≈ zugeordnet)" : ""} · ${verzoller}`;
+}
+
+export async function ladeKontoVerlauf(
+  sb: Sb,
+  roh: Pick<LiqRohdaten, "konten" | "heute">,
+  e: LiqEinstellungen,
+  /** Vermutete Zuordnung Verzoller-Abbuchung → Lieferungen (aus der Prognose), Schlüssel einfuhrBuchungsSchluessel. */
+  einfuhrVermutet: Map<string, string[]> = new Map(),
+): Promise<VerlaufTag[]> {
   const ibans = roh.konten.map((k) => k.iban);
   if (!ibans.length) return [];
+  // Eingetragene DHL-/Zoll-Rechnungsnummern aller Bestellungen (sichere Zuordnung, auch für längst eingelagerte Ware)
+  const { data: nrRows } = await sb.from("orders").select("label, einfuhr_rechnung").not("einfuhr_rechnung", "is", null);
+  const mitNummer = ((nrRows ?? []) as Array<{ label: string | null; einfuhr_rechnung: string | null }>)
+    .map((o) => ({ label: String(o.label ?? ""), nr: rechnungsNummern(o.einfuhr_rechnung) }))
+    .filter((o) => o.nr.length);
+  const einfuhrFuer = (t: Pick<Tx, "booking_date" | "amount" | "purpose">): { labels: string[]; vermutet: boolean } | null => {
+    const z = (t.purpose ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const sicher = mitNummer.filter((o) => o.nr.some((n) => z.includes(n))).map((o) => o.label);
+    if (sicher.length) return { labels: [...new Set(sicher)], vermutet: false };
+    const v = einfuhrVermutet.get(einfuhrBuchungsSchluessel(t.booking_date, Number(t.amount)));
+    return v?.length ? { labels: v, vermutet: true } : null;
+  };
   const ratenMuster = e.ratenLieferanten.map((r) => r.bankMuster.trim().toLowerCase()).filter(Boolean);
   // Gleiche Gruppen wie die Termine der Vorschau, damit Vergangenheit und Plan zusammenpassen
   const gruppeVon = (t: Pick<Tx, "amount" | "kategorie" | "counterparty_name" | "purpose">): ZahlGruppe | null => {
@@ -600,7 +638,12 @@ export async function ladeKontoVerlauf(sb: Sb, roh: Pick<LiqRohdaten, "konten" |
         iban: t.account_iban as string,
         datum: t.booking_date,
         betrag,
-        name: gruppe ? nameVon(t, gruppe) : t.counterparty_name?.trim() || KATEGORIE_BY_KEY[t.kategorie ?? "unklar"]?.label || "Buchung",
+        name:
+          gruppe === "einfuhr" && betrag < 0
+            ? einfuhrBuchungsText(t, einfuhrFuer(t))
+            : gruppe
+              ? nameVon(t, gruppe)
+              : t.counterparty_name?.trim() || KATEGORIE_BY_KEY[t.kategorie ?? "unklar"]?.label || "Buchung",
         intern: t.kategorie === "umbuchung",
         gruppe,
       };
