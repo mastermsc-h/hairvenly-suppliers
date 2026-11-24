@@ -59,6 +59,20 @@ const GRUPPEN: Array<{ key: ZahlGruppe; name: string; typ: SymbolTyp }> = [
 /** Offene Lieferantenschulden nach einem Tag (EUR); Einfuhrabgaben nur zur Info, nicht in der Summe. */
 type Schulden = { amanda: number; raten: number; ratenGeschaetzt: number; einfuhr: number; summe: number };
 
+/** Zahlung, die gerade im Diagramm verschoben wird. Phase: ziehen (Maus gedrückt), waehlen (Zieltag anklicken), fertig (Vorschau, speichern). */
+type Zug = {
+  key: string;
+  art: "bestellung" | "rate";
+  schluessel: string;
+  label: string;
+  betrag: number;
+  von: string;
+  ziel: string;
+  phase: "ziehen" | "waehlen" | "fertig";
+  gruppe: ZahlGruppe;
+  alle?: Zug[];
+};
+
 /** Eine Zeile der Zahlungsliste unter dem Diagramm. */
 type ZahlZeile = { datum: string; gruppe: ZahlGruppe; label: string; betrag: number; bezahlt: boolean; ev?: Ereignis };
 
@@ -99,6 +113,11 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
   const geaendert = JSON.stringify(e) !== JSON.stringify(gespeichert);
   // Angeklickter Tag im Diagramm + Sprung zum Eintrag darunter
   const [pin, setPin] = useState<{ datum: string; x: number } | null>(null);
+  // Zahlung im Diagramm verschieben: Balken ziehen (oder anklicken, dann Zieltag anklicken)
+  const [zug, setZug] = useState<Zug | null>(null);
+  const [zugBusy, setZugBusy] = useState(false);
+  const [zugFehler, setZugFehler] = useState<string | null>(null);
+  const zugKlickSperre = useRef(false);
   const [markiert, setMarkiert] = useState<string | null>(null);
   const [fokus, setFokus] = useState<{ key: string; n: number } | null>(null);
   const markierTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -195,6 +214,12 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
 
   // Ein Klick trifft selten genau den Tag mit der Stufe → nächsten Tag mit Terminen in der Nähe nehmen
   function diagrammKlick(state: { activeTooltipIndex?: unknown; activeCoordinate?: { x: number } }) {
+    // Klick, der ein Verschieben begonnen/beendet hat, öffnet keine Tagesliste
+    if (zugKlickSperre.current) {
+      zugKlickSperre.current = false;
+      return;
+    }
+    if (zug?.phase === "waehlen" || zug?.phase === "ziehen") return zugAblegen(tagAus(state));
     const idx = Number(state.activeTooltipIndex);
     if (!Number.isInteger(idx) || !chartData[idx]) return setPin(null);
     const toleranz = Math.max(2, Math.round(chartData.length / 40));
@@ -205,6 +230,62 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
     }
     if (!hatInhalt(tag) || pin?.datum === tag.datum) return setPin(null);
     setPin({ datum: tag.datum, x: state.activeCoordinate?.x ?? 0 });
+  }
+
+  // ── Verschieben im Diagramm ──
+  const vorschauEnde = p.tage.at(-1)?.datum ?? p.start;
+  const tagAus = (state: { activeTooltipIndex?: unknown }): string | null => {
+    const t = chartData[Number(state.activeTooltipIndex)];
+    if (!t) return null;
+    return t.datum < p.start ? p.start : t.datum > vorschauEnde ? vorschauEnde : t.datum;
+  };
+  /** Verschiebbare Zahlungen eines Tages in einer Gruppe: Amanda-Bestellung (ohne Anzahlung/Rest) oder Lieferanten-Rate. */
+  const verschiebbar = (tag: DiagrammTag, gruppe: ZahlGruppe): Zug[] =>
+    tag.ev
+      .filter((ev) => !ev.unterwegs && zahlGruppe(ev) === gruppe)
+      .flatMap((ev): Zug[] => {
+        if (ev.art === "lieferant" && ev.orderId && !ev.teil) return [{ key: `bestellung:${ev.orderId}`, art: "bestellung", schluessel: ev.orderId, label: ev.label, betrag: -ev.betrag, von: tag.datum, ziel: tag.datum, phase: "ziehen", gruppe }];
+        if (ev.art === "manuell" && ev.rateTermin) return [{ key: `rate:${ev.rateTermin.schluessel}`, art: "rate", schluessel: ev.rateTermin.schluessel, label: ev.label.split(" · ")[0], betrag: -ev.betrag, von: tag.datum, ziel: tag.datum, phase: "ziehen", gruppe }];
+        return [];
+      })
+      .sort((a, b) => b.betrag - a.betrag);
+  function zugStarten(tag: DiagrammTag | undefined, gruppe: ZahlGruppe) {
+    if (!tag) return;
+    const kandidaten = verschiebbar(tag, gruppe);
+    if (!kandidaten.length) {
+      setZugFehler(gruppe === "amanda" ? "Dieser Balken ist eine geschätzte Nachbestellung oder Anzahlung/Rest — bitte in der Tabelle verschieben." : "Diese Zahlung lässt sich hier nicht verschieben.");
+      return;
+    }
+    setPin(null);
+    setZugFehler(null);
+    // Vorschau einer vorher verschobenen, noch nicht gespeicherten Zahlung zurücknehmen
+    if (zug && zug.key !== kandidaten[0].key) setEntwuerfe((prev) => { const n = { ...prev }; delete n[zug.key]; return n; });
+    setZug({ ...kandidaten[0], alle: kandidaten.length > 1 ? kandidaten : undefined });
+  }
+  /** Der Klick direkt nach dem Loslassen gehört zum Ziehen — nicht als Tagesauswahl werten (kurz gesperrt). */
+  function klickSperren() {
+    zugKlickSperre.current = true;
+    setTimeout(() => (zugKlickSperre.current = false), 60);
+  }
+  function zugAblegen(ziel: string | null) {
+    if (!zug || !ziel) return;
+    if (ziel === zug.von) return setZug({ ...zug, ziel, phase: "waehlen" });
+    setZug({ ...zug, ziel, phase: "fertig" });
+    setEntwuerfe((prev) => ({ ...prev, [zug.key]: { datum: ziel } }));
+  }
+  function zugAbbrechen() {
+    if (zug) setEntwuerfe((prev) => { const n = { ...prev }; delete n[zug.key]; return n; });
+    setZug(null);
+    setZugFehler(null);
+  }
+  async function zugSpeichern() {
+    if (!zug || zug.phase !== "fertig") return;
+    setZugBusy(true);
+    const res = await setZahlTermin({ art: zug.art, schluessel: zug.schluessel, datum: zug.ziel, notiz: `im Diagramm verschoben (vorher ${deDate(zug.von)})` });
+    setZugBusy(false);
+    if (!res.ok) return setZugFehler(res.error ?? "Fehler beim Speichern");
+    setEntwuerfe((prev) => { const n = { ...prev }; delete n[zug.key]; return n; });
+    setZug(null);
   }
 
   /** Wo ein Termin auf der Seite steht und welches Terminfeld sich dabei öffnet. */
@@ -486,9 +567,70 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           eingang={(label) => p.ereignisse.filter((x) => x.art === "aktion" && aktionName(x.label) === label).reduce((s, x) => s + x.betrag, 0)}
         />
         <SzenarioLeiste sz={sz} setSz={setSz} p={p} pOhne={pOhne} puffer={e.puffer} e={e} />
+        {(zeigen.includes("amanda") || zeigen.includes("ebru")) && !zug && !zugFehler && (
+          <p className="mb-1 text-[11px] text-neutral-400">Tipp: Kräftige Amanda- oder Ebru-Balken lassen sich auf einen anderen Tag ziehen — oder anklicken und dann den neuen Tag anklicken.</p>
+        )}
+        {zugFehler && !zug && (
+          <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+            <span>{zugFehler}</span>
+            <button onClick={() => setZugFehler(null)} aria-label="Schließen"><X size={14} /></button>
+          </div>
+        )}
+        {zug && (
+          <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-xs shadow-sm">
+            <span className="font-medium text-neutral-900">
+              {zug.label} · {eur(zug.betrag)}
+            </span>
+            {zug.alle && (
+              <select
+                value={zug.key}
+                onChange={(ev) => {
+                  const neu = zug.alle?.find((k) => k.key === ev.target.value);
+                  if (!neu) return;
+                  setEntwuerfe((prev) => { const n = { ...prev }; delete n[zug.key]; return n; });
+                  setZug({ ...neu, alle: zug.alle, phase: "waehlen" });
+                }}
+                className="rounded-md border border-neutral-300 px-1.5 py-0.5"
+              >
+                {zug.alle.map((k) => <option key={k.key} value={k.key}>{k.label} · {eur(k.betrag)}</option>)}
+              </select>
+            )}
+            {zug.phase === "fertig" ? (
+              <>
+                <span className="text-neutral-600">
+                  {deDate(zug.von)} → <b className="text-neutral-900">{deDate(zug.ziel)}</b> · Tiefpunkt jetzt <b className={p.tiefpunkt.saldo < 0 ? "text-red-700" : p.tiefpunkt.saldo < e.puffer ? "text-amber-700" : "text-emerald-700"}>{eur(p.tiefpunkt.saldo)}</b> am {deDate(p.tiefpunkt.datum)}
+                </span>
+                <button onClick={zugSpeichern} disabled={zugBusy} className="inline-flex items-center gap-1 rounded-md bg-neutral-900 px-2.5 py-1 font-medium text-white disabled:opacity-50">
+                  {zugBusy && <Loader2 size={12} className="animate-spin" />} Speichern
+                </button>
+                <button onClick={() => setZug({ ...zug, phase: "waehlen" })} className="text-neutral-600 hover:underline">anderer Tag</button>
+              </>
+            ) : (
+              <span className="text-neutral-600">{zug.phase === "ziehen" ? "Auf den neuen Tag ziehen — oder dort im Diagramm klicken." : "Jetzt im Diagramm auf den neuen Tag klicken."}</span>
+            )}
+            <button onClick={zugAbbrechen} className="text-neutral-500 hover:underline">Abbrechen</button>
+            {zugFehler && <span className="text-red-700">{zugFehler}</span>}
+          </div>
+        )}
         <div className="relative cursor-pointer [&_*:focus]:outline-none" style={{ width: "100%", height: 300 }}>
           <ResponsiveContainer>
-            <ComposedChart data={chartAnzeige} margin={{ top: 12, right: 8, left: 8, bottom: 0 }} onClick={diagrammKlick}>
+            <ComposedChart
+              data={chartAnzeige}
+              margin={{ top: 12, right: 8, left: 8, bottom: 0 }}
+              onClick={diagrammKlick}
+              onMouseMove={(state) => {
+                if (zug && (zug.phase === "ziehen" || zug.phase === "waehlen")) {
+                  const t = tagAus(state);
+                  if (t && t !== zug.ziel) setZug({ ...zug, ziel: t });
+                }
+              }}
+              onMouseUp={(state) => {
+                if (zug?.phase === "ziehen") {
+                  klickSperren();
+                  zugAblegen(tagAus(state));
+                }
+              }}
+            >
               <CartesianGrid stroke="#f3f4f6" />
               <XAxis dataKey="datum" tick={{ fontSize: 11, fill: "#737373" }} tickFormatter={(d) => `${String(d).slice(8, 10)}.${String(d).slice(5, 7)}.`} minTickGap={24} />
               <YAxis tick={{ fontSize: 11, fill: "#737373" }} tickFormatter={(v) => `${Math.round(v / 1000)}k`} width={44} />
@@ -558,6 +700,16 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
                 ))}
               <ReferenceLine y={0} stroke="#dc2626" strokeWidth={1.5} />
               {pin && <ReferenceLine x={pin.datum} stroke="#171717" strokeWidth={1.5} />}
+              {/* Verschieben: alter Tag blass, Zieltag kräftig */}
+              {zug && zug.ziel !== zug.von && zug.von >= fensterVon && zug.von <= fensterBis && <ReferenceLine x={zug.von} stroke={SYMBOLE[GRUPPEN.find((g) => g.key === zug.gruppe)?.typ ?? "manuell"].farbe} strokeOpacity={0.35} strokeDasharray="3 3" />}
+              {zug && zug.ziel >= fensterVon && zug.ziel <= fensterBis && (
+                <ReferenceLine
+                  x={zug.ziel}
+                  stroke={SYMBOLE[GRUPPEN.find((g) => g.key === zug.gruppe)?.typ ?? "manuell"].farbe}
+                  strokeWidth={2}
+                  label={{ value: `→ ${deDate(zug.ziel).slice(0, 6)}`, position: "insideTopLeft", fontSize: 11, fill: "#171717" }}
+                />
+              )}
               {versatz > 0 && fensterBis >= p.start && (
                 <ReferenceLine x={p.start} stroke="#737373" strokeDasharray="4 3" label={{ value: "Heute", position: "insideBottomLeft", fontSize: 10, fill: "#737373" }} />
               )}
@@ -571,7 +723,19 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
               {/* Zahlungen als Balken (rechte Achse): bezahlt blass, geplant kräftig */}
               {GRUPPEN.filter((g) => zeigen.includes(g.key)).flatMap((g) => [
                 <Bar key={`b_${g.key}`} yAxisId="z" dataKey={`b_${g.key}`} stackId="z" fill={SYMBOLE[g.typ].farbe} fillOpacity={0.4} maxBarSize={10} isAnimationActive={false} />,
-                <Bar key={`g_${g.key}`} yAxisId="z" dataKey={`g_${g.key}`} stackId="z" fill={SYMBOLE[g.typ].farbe} maxBarSize={10} isAnimationActive={false} />,
+                <Bar
+                  key={`g_${g.key}`}
+                  yAxisId="z"
+                  dataKey={`g_${g.key}`}
+                  stackId="z"
+                  fill={SYMBOLE[g.typ].farbe}
+                  maxBarSize={10}
+                  isAnimationActive={false}
+                  // Geplante Amanda-/Ebru-Zahlungen lassen sich auf einen anderen Tag ziehen
+                  {...(g.key === "amanda" || g.key === "ebru"
+                    ? { style: { cursor: zug ? "grabbing" : "grab" }, onMouseDown: (d: { payload?: DiagrammTag }) => zugStarten(d?.payload, g.key) }
+                    : {})}
+                />,
               ])}
               {steuerMarken.filter(([datum]) => datum >= fensterVon && datum <= fensterBis).map(([datum, evs]) => (
                 <ReferenceLine

@@ -453,8 +453,10 @@ export function zollVermutungen(
     let anteil = 0;
     buchungen.forEach((b, i) => {
       if (offen <= 0.005 || rest[i] <= 0.005 || b.art !== k.art) return;
-      // Erst nach dem Versandtag — am selben Tag kann noch keine Zoll-Rechnung abgebucht sein
-      if (b.datum <= k.versandAm || b.datum > plusTage(k.versandAm, fensterTage)) return;
+      // versandAm = Tag, an dem der Status gesetzt wurde — oft erst, wenn die Zoll-Rechnung schon da ist
+      // (User 24.11.2026: drei Ebru-Sendungen auf „Verzollung“ gesetzt, Ungewitter am selben Tag abgebucht).
+      // Deshalb zählt auch der Markier-Tag und STATUS_NACHTRAG_TAGE davor; ältere Abbuchungen nicht.
+      if (b.datum < plusTage(k.versandAm, -STATUS_NACHTRAG_TAGE) || b.datum > plusTage(k.versandAm, fensterTage)) return;
       const nimm = Math.min(rest[i], offen);
       rest[i] = r2(rest[i] - nimm);
       offen = r2(offen - nimm);
@@ -845,6 +847,8 @@ export const VERSAND_FRUEHESTENS_TAGE = 7;
  * DHL-Abbuchung nach dem Versand sie deckt — längstens so viele Tage nach der Ankunft, danach gelten sie als bezahlt.
  */
 export const AMANDA_ZOLL_NACHLAUF_TAGE = 45;
+/** Status „versendet/Verzollung“ wird oft nachgetragen: Verzoller-Abbuchungen bis so viele Tage davor gehören noch dazu. */
+export const STATUS_NACHTRAG_TAGE = 2;
 /** Ebru: Rechnung des Verzollers (Carl Ungewitter) ~2–3 Tage nach Versand. */
 export const ZOLL_NACH_VERSAND_TAGE = 3;
 const SOFORT_STATUS = ["ready_to_ship", "shipped", "in_customs", ...WARE_DA];

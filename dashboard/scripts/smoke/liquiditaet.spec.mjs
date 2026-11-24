@@ -411,7 +411,12 @@ const zv = L.zollVermutungen(
 );
 check("Vermutung: älteste Sendung zuerst, Abbuchung deckt mehrere", [zv.get("a"), zv.get("b")].map((v) => [v.anteilEur, v.vollstaendig, v.betragEur]), [[5000, true, 8000], [3000, false, 8000]]);
 check("Vermutung: Abbuchung vor dem Versand / anderer Verzoller zählt nicht", [zv.has("c"), zv.has("d")], [false, false]);
-check("Vermutung: Abbuchung am Versandtag zählt nicht", L.zollVermutungen([{ id: "a", art: "dhl", versandAm: "2026-10-16", eur: 5000 }], [{ datum: "2026-10-16", betragEur: 8000, nummern: ["ZIT1"], art: "dhl" }]).size, 0);
+// User 24.11.2026: Status „Verzollung“ am selben Tag gesetzt, an dem Ungewitter abgebucht hat → muss zählen
+check("Vermutung: Abbuchung am Markier-Tag zählt", L.zollVermutungen([{ id: "a", art: "dhl", versandAm: "2026-10-16", eur: 5000 }], [{ datum: "2026-10-16", betragEur: 8000, nummern: ["ZIT1"], art: "dhl" }]).get("a")?.vollstaendig, true);
+check("Vermutung: Abbuchung 2 Tage vor dem Markieren zählt (Status nachgetragen)", L.zollVermutungen([{ id: "a", art: "ungewitter", versandAm: "2026-10-16", eur: 5000 }], [{ datum: "2026-10-14", betragEur: 8000, nummern: ["26 1"], art: "ungewitter" }]).size, 1);
+check("Vermutung: Abbuchung 3 Tage vorher zählt nicht", L.zollVermutungen([{ id: "a", art: "ungewitter", versandAm: "2026-10-16", eur: 5000 }], [{ datum: "2026-10-13", betragEur: 8000, nummern: ["26 1"], art: "ungewitter" }]).size, 0);
+const drei = L.zollVermutungen(["x", "y", "z"].map((id, i) => ({ id, art: "ungewitter", versandAm: "2026-11-24", eur: [22600, 3230, 2700][i] })), [{ datum: "2026-11-24", betragEur: 26676.11, nummern: ["26 33620"], art: "ungewitter" }]);
+check("Drei Ebru-Sendungen, eine Ungewitter-Rechnung: verteilt, Rest offen", ["x", "y", "z"].map((id) => [drei.get(id)?.vollstaendig ?? false, Math.round(drei.get(id)?.anteilEur ?? 0)]), [[true, 22600], [true, 3230], [false, 846]]);
 const zbRoh = (o, b = {}) => roh({ bestellungen: [best({ restUsd: 0, status: "shipped", versandAm: "2026-10-15", ...b })], zollBuchungen: [{ datum: "2026-10-16", betragEur: 8000, nummern: ["ZIT8150777"], art: "dhl" }], ...o });
 const pzv = L.prognose(zbRoh({}), E0);
 check("Abgebucht nach Versand, nicht zugeordnet: keine Einfuhr mehr in der Vorschau", [pzv.ereignisse.filter((x) => x.art === "einfuhr").length, pzv.bestellungen[0].einfuhr, pzv.bestellungen[0].einfuhrVermutung.nummern], [0, null, ["ZIT8150777"]]);
