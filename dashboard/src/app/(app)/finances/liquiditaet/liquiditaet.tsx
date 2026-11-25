@@ -678,6 +678,9 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
                       <div className="font-semibold">{deDate(d.datum)}: {eur(d.saldo ?? d.ist ?? 0)}</div>
                       {pOhne && ohneAm.has(d.datum) && <div className="text-neutral-500">ohne Was-wäre-wenn: {eur(ohneAm.get(d.datum) ?? 0)}</div>}
                       <TagesBuchungen tag={d} />
+                      {!!d.buchungen?.length && d.saldo !== undefined && d.ev.length > 0 && (
+                        <div className="pt-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">Noch geplant · bis Tagesende abgezogen</div>
+                      )}
                       {d.ev.map((x, i) => (
                         <div key={i} className="flex items-start gap-1.5 text-neutral-600">
                           <TerminSymbol typ={symbolTyp(x)} schaetzung={x.schaetzung} />
@@ -1752,8 +1755,11 @@ function ZahlungsListe({ zeilen, zeigen, von, bis, onWaehlen }: { zeilen: ZahlZe
 /** Größte Buchungen eines vergangenen Tages. */
 function TagesBuchungen({ tag }: { tag: DiagrammTag }) {
   if (!tag.buchungen?.length) return null;
+  // Erster Vorschau-Tag (heute): diese Buchungen sind schon passiert und stecken im Startstand — nicht nochmal abgezogen
+  const heute = tag.saldo !== undefined;
   return (
     <div className="space-y-0.5">
+      {heute && <div className="pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">Heute schon gebucht · im Kontostand enthalten</div>}
       {tag.buchungen.map((b, i) => (
         <div key={i} className="flex items-baseline justify-between gap-3 text-neutral-600">
           <span className="min-w-0 truncate">{b.name}</span>
@@ -1812,6 +1818,9 @@ function TagPopup({
         )}
       </div>
       <div className="space-y-0.5">
+        {!!tag.buchungen?.length && tag.saldo !== undefined && ereignisse.length > 0 && (
+          <div className="px-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">Noch geplant · bis Tagesende abgezogen</div>
+        )}
         {ereignisse.map((x2, i) => (
           <button
             key={i}
