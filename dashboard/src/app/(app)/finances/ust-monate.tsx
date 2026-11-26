@@ -14,6 +14,21 @@ const QUELLE: Record<NonNullable<UstMonat["quelle"]>, string> = {
   schaetzung: "Schätzung",
 };
 
+/**
+ * Abweichung in Worten: was das Finanzamt im Vergleich zu unserer Rechnung festgesetzt hat.
+ * Werte: > 0 = Zahlung ans Finanzamt, < 0 = Erstattung.
+ */
+function abweichungText(finanzamt: number, berechnet: number): string {
+  if (finanzamt > berechnet) {
+    if (berechnet < 0 && finanzamt <= 0) return "weniger Erstattung als berechnet";
+    if (berechnet >= 0) return "mehr zu zahlen als berechnet";
+    return "Zahlung statt berechneter Erstattung";
+  }
+  if (berechnet > 0 && finanzamt >= 0) return "weniger zu zahlen als berechnet";
+  if (berechnet <= 0) return "mehr Erstattung als berechnet";
+  return "Erstattung statt berechneter Zahlung";
+}
+
 function Ergebnis({ wert, klein = false }: { wert: number; klein?: boolean }) {
   const zahlung = wert >= 0;
   return (
@@ -208,7 +223,7 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
               <th className="py-2 pr-3 text-right font-medium">− EUSt</th>
               <th className="py-2 pr-3 text-right font-medium">= berechnet</th>
               <th className="py-2 pr-3 text-right font-medium">Finanzamt</th>
-              <th className="py-2 text-right font-medium" title="Finanzamt minus unsere Rechnung: + = Finanzamt wollte mehr (bzw. gab weniger zurück), − = Finanzamt wollte weniger (bzw. gab mehr zurück)">Abweichung</th>
+              <th className="py-2 text-right font-medium" title="Unterschied zwischen dem Betrag des Finanzamts und unserer Rechnung, darunter in Worten">Abweichung</th>
             </tr>
           </thead>
           <tbody>
@@ -250,9 +265,9 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
                     )}
                   </td>
                   <td className={`py-2 text-right tabular-nums text-xs ${diff === null ? "text-neutral-300" : Math.abs(diff) > 5000 ? "font-medium text-amber-700" : "text-neutral-500"}`}>
-                    {diff === null ? "—" : `${diff > 0 ? "+" : diff < 0 ? "−" : ""}${eur(Math.abs(diff))}`}
-                    {diff !== null && Math.abs(diff) >= 1 && (
-                      <div className="text-[10.5px] font-normal text-neutral-400">{diff > 0 ? "Finanzamt höher" : "Finanzamt niedriger"}</div>
+                    {diff === null ? "—" : eur(Math.abs(diff))}
+                    {diff !== null && Math.abs(diff) >= 1 && m.finanzamt !== null && (
+                      <div className="text-[10.5px] font-normal text-neutral-500 leading-tight">{abweichungText(m.finanzamt, m.berechnet)}</div>
                     )}
                   </td>
                 </tr>
@@ -274,7 +289,7 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
           das aus. Maßgeblich ist immer die Spalte „Finanzamt“.
         </p>
         <p>
-          <b>Abweichung:</b> Finanzamt minus unsere Rechnung. Sie zeigt, wie weit die Schätzung daneben lag — nicht, dass zu viel oder zu wenig gezahlt
+          <b>Abweichung:</b> Unterschied zwischen Finanzamt und unserer Rechnung, darunter in Worten (z.B. „weniger Erstattung als berechnet“). Sie zeigt, wie weit die Schätzung daneben lag — nicht, dass zu viel oder zu wenig gezahlt
           wurde. Gezahlt wurde immer der Betrag aus der Voranmeldung des Steuerberaters. Große Ausschläge in Nachbarmonaten mit umgekehrtem Vorzeichen
           (z.B. April −17k, Mai +29k) sind meist Einfuhrumsatzsteuer, die in einem anderen Monat abgebucht als angerechnet wurde. In Monaten, die ohne
           Salon gemeldet wurden, steckt die fehlende Salon-USt in der Abweichung.
