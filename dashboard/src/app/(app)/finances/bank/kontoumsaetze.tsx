@@ -74,6 +74,26 @@ function konto(iban: string | null) {
   const bank = iban.startsWith("DE") ? BANKEN[iban.slice(4, 12)] : undefined;
   return `${bank ? bank + " " : ""}…${iban.slice(-4)}`;
 }
+/** Bank-Kennung (BLZ) eines Kontos; Filterwert "bank:<BLZ>" = alle Konten dieser Bank. */
+const blzOf = (iban: string | null) => (iban && iban.startsWith("DE") ? iban.slice(4, 12) : "sonstige");
+const bankName = (blz: string) => BANKEN[blz] ?? "Sonstige";
+function kontoPasst(iban: string | null, filter: string) {
+  if (filter === "alle") return true;
+  if (filter.startsWith("bank:")) return blzOf(iban) === filter.slice(5);
+  return iban === filter;
+}
+function filterLabel(filter: string) {
+  if (filter === "alle") return "alle Konten";
+  if (filter.startsWith("bank:")) return `${bankName(filter.slice(5))} (alle Konten)`;
+  return konto(filter);
+}
+/** Farbe je Bank (Überschrift, Hover, aktiv). */
+const BANK_FARBE: Record<string, { kopf: string; hover: string; aktiv: string }> = {
+  "29050101": { kopf: "bg-red-100 text-red-800", hover: "hover:bg-red-50 hover:border-red-200", aktiv: "bg-red-100 border-red-400" },
+  "30020900": { kopf: "bg-sky-100 text-sky-800", hover: "hover:bg-sky-50 hover:border-sky-200", aktiv: "bg-sky-100 border-sky-400" },
+};
+const BANK_FARBE_STD = { kopf: "bg-slate-200 text-slate-700", hover: "hover:bg-slate-50 hover:border-slate-300", aktiv: "bg-slate-200 border-slate-400" };
+
 const gruppeOf = (k: string | null) => KATEGORIE_BY_KEY[k ?? "unklar"]?.gruppe ?? "neutral";
 
 /** Suchzeitraum: -1 = alle (null), 0 = ganzes Jahr, 1–12 = Monat. */
@@ -167,7 +187,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
       data.umsaetze.filter(
         (u) =>
           (monat <= 0 || Number(u.booking_date.slice(5, 7)) === monat) &&
-          (kontoFilter === "alle" || u.account_iban === kontoFilter)
+          kontoPasst(u.account_iban, kontoFilter)
       ),
     [data, monat, kontoFilter]
   );
@@ -187,6 +207,31 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
     const saldo = imZeitraum.reduce((s, u) => s + u.amount, 0);
     return { byKat, g, unklar, saldo };
   }, [imZeitraum]);
+
+  // Nach Bank & Konto: Zeitraum, aber ohne Kontofilter (sonst sähe man nur das gewählte Konto)
+  const nachBank = useMemo(() => {
+    type Zeile = { n: number; g: Record<KategorieGruppe, number>; saldo: number };
+    const leer = (): Zeile => ({ n: 0, g: { einnahmen: 0, steuern: 0, ausgaben: 0, neutral: 0 }, saldo: 0 });
+    const banken = new Map<string, { summe: Zeile; konten: Map<string, Zeile> }>();
+    for (const u of data.umsaetze) {
+      if (monat > 0 && Number(u.booking_date.slice(5, 7)) !== monat) continue;
+      const iban = u.account_iban ?? "—";
+      const blz = blzOf(u.account_iban);
+      if (!banken.has(blz)) banken.set(blz, { summe: leer(), konten: new Map() });
+      const b = banken.get(blz)!;
+      if (!b.konten.has(iban)) b.konten.set(iban, leer());
+      for (const z of [b.summe, b.konten.get(iban)!]) {
+        z.n++;
+        z.g[gruppeOf(u.kategorie)] += u.amount;
+        z.saldo += u.amount;
+      }
+    }
+    return [...banken.entries()].sort((a, b) => bankName(a[0]).localeCompare(bankName(b[0])));
+  }, [data, monat]);
+
+  function waehleKonto(filter: string) {
+    setKontoFilter(kontoFilter === filter ? "alle" : filter);
+  }
 
   // Steuerbuchungen im Zeitraum (jeder Anteil einzeln)
   const steuerZeilen = useMemo(
@@ -208,7 +253,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
     return basis.filter(
       (u) =>
         (!katFilter || (u.kategorie ?? "unklar") === katFilter) &&
-        (!treffer || kontoFilter === "alle" || u.account_iban === kontoFilter)
+        (!treffer || kontoPasst(u.account_iban, kontoFilter))
     );
   }, [imZeitraum, treffer, katFilter, kontoFilter]);
 
@@ -266,7 +311,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
 
   const zeitraumText = monat === -1 ? "Alle Zeiträume" : monat === 0 ? `Jahr ${jahr}` : `${MONATE[monat - 1]} ${jahr}`;
   const suchZeitText = !suchZeit ? "Alle Zeiträume" : suchZeit.length === 4 ? `Jahr ${suchZeit}` : monatName(suchZeit);
-  const steuerNetto = -summen.g.steuern;
+  const steuerNetto = -summen.g.steuern + 0;
 
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6">
@@ -298,8 +343,13 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
           </select>
           <select value={kontoFilter} onChange={(e) => setKontoFilter(e.target.value)} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm bg-white">
             <option value="alle">Alle Konten</option>
-            {konten.map((k) => (
-              <option key={k} value={k}>{konto(k)}{kontoZweck(k) ? ` · ${kontoZweck(k)}` : ""}</option>
+            {[...new Set(konten.map(blzOf))].sort((a, b) => bankName(a).localeCompare(bankName(b))).map((blz) => (
+              <optgroup key={blz} label={bankName(blz)}>
+                <option value={`bank:${blz}`}>{bankName(blz)} – alle Konten</option>
+                {konten.filter((k) => blzOf(k) === blz).map((k) => (
+                  <option key={k} value={k}>{konto(k)}{kontoZweck(k) ? ` · ${kontoZweck(k)}` : ""}</option>
+                ))}
+              </optgroup>
             ))}
           </select>
           <button
@@ -320,7 +370,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
       )}
 
       {/* Aktuelle Kontostände (Bank per FinTS, PayPal per API — stündlich) */}
-      <KontostandLeiste salden={data.salden} />
+      <KontostandLeiste salden={data.salden} aktiv={kontoFilter} onWaehle={waehleKonto} />
 
       {/* Kennzahlen */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -339,8 +389,64 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
         </button>
       </div>
 
+      {/* Nach Bank & Konto */}
+      <Card title={`Nach Bank & Konto — ${zeitraumText}`} ton="slate">
+        <p className="flex items-center gap-1.5 text-xs text-slate-700 bg-slate-50 rounded-lg px-3 py-2 mb-4">
+          <Filter size={13} className="shrink-0" />
+          Auf eine Bank oder ein Konto klicken: Kacheln, Kategorien und Umsätze zeigen dann nur dieses. Nochmal klicken zeigt wieder alle Konten.
+        </p>
+        <div className="grid md:grid-cols-2 gap-x-8 gap-y-5">
+          {nachBank.map(([blz, b]) => {
+            const f = BANK_FARBE[blz] ?? BANK_FARBE_STD;
+            const bankAktiv = kontoFilter === `bank:${blz}`;
+            return (
+              <div key={blz}>
+                <button
+                  onClick={() => waehleKonto(`bank:${blz}`)}
+                  title={bankAktiv ? "Filter aufheben" : `Nur ${bankName(blz)} zeigen`}
+                  className={`w-full flex items-baseline justify-between rounded-md border px-2 py-1 mb-1.5 text-xs font-bold uppercase tracking-wide cursor-pointer ${f.kopf} ${bankAktiv ? "border-neutral-700 ring-1 ring-neutral-700" : "border-transparent hover:border-neutral-400"}`}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <ChevronRight size={12} className={bankAktiv ? "rotate-90" : ""} />
+                    {bankName(blz)} <span className="normal-case font-normal">({b.summe.n})</span>
+                  </span>
+                  <span className="tabular-nums normal-case font-semibold">Saldo {fmt(b.summe.saldo)}</span>
+                </button>
+                {[...b.konten.entries()].map(([iban, z]) => {
+                  const aktiv = kontoFilter === iban;
+                  return (
+                    <button
+                      key={iban}
+                      onClick={() => waehleKonto(iban)}
+                      title={aktiv ? "Filter aufheben" : `Nur ${konto(iban)} zeigen`}
+                      className={`group w-full rounded-md border px-2 py-1.5 text-sm text-left cursor-pointer transition-colors ${aktiv ? `${f.aktiv} font-semibold` : `border-transparent ${f.hover}`}`}
+                    >
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="flex items-baseline gap-1.5">
+                          <ChevronRight size={12} className={`self-center shrink-0 transition-transform ${aktiv ? "rotate-90 text-neutral-700" : "text-neutral-300 group-hover:text-neutral-600"}`} />
+                          <span className="underline decoration-dotted decoration-neutral-300 underline-offset-2 group-hover:decoration-neutral-500">{konto(iban)}</span>
+                          {kontoZweck(iban) && <span className="text-xs text-neutral-500">{kontoZweck(iban)}</span>}
+                          <span className="text-xs text-neutral-400">({z.n})</span>
+                        </span>
+                        <span className={`tabular-nums ${z.saldo >= 0 ? "text-emerald-700" : "text-neutral-800"}`}>{fmt(z.saldo)}</span>
+                      </div>
+                      <div className="pl-5 mt-0.5 flex flex-wrap gap-x-3 text-[11px] tabular-nums font-normal">
+                        <span className="text-emerald-700">Einnahmen {fmt(z.g.einnahmen)}</span>
+                        <span className="text-orange-700">Ausgaben {fmt(-z.g.ausgaben + 0)}</span>
+                        <span className="text-red-700">Steuern {fmt(-z.g.steuern + 0)}</span>
+                        {z.g.neutral !== 0 && <span className="text-slate-500">Umbuchungen u. a. {fmt(z.g.neutral)}</span>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
       {/* Steuern */}
-      <Card title={`Steuern laut Konto — ${zeitraumText}`} ton="red">
+      <Card title={`Steuern laut Konto — ${zeitraumText}${kontoFilter !== "alle" ? ` · ${filterLabel(kontoFilter)}` : ""}`} ton="red">
         {steuerZeilen.length === 0 ? (
           <p className="text-sm text-neutral-400">Keine Steuerbuchungen in diesem Zeitraum.</p>
         ) : (
@@ -379,7 +485,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
       </Card>
 
       {/* Kategorien */}
-      <Card title={`Nach Kategorie — ${zeitraumText}`} ton="blue">
+      <Card title={`Nach Kategorie — ${zeitraumText}${kontoFilter !== "alle" ? ` · ${filterLabel(kontoFilter)}` : ""}`} ton="blue">
         <p className="flex items-center gap-1.5 text-xs text-blue-700 bg-blue-50 rounded-lg px-3 py-2 mb-4">
           <Filter size={13} className="shrink-0" />
           Auf eine Kategorie klicken, um unten nur ihre Umsätze zu sehen. Nochmal klicken hebt den Filter auf.
@@ -421,7 +527,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
 
       {/* Umsätze */}
       <Card
-        title={`${treffer ? `Suchergebnisse — ${suchZeitText} (${liste.length}${treffer.length >= 300 ? "+" : ""})` : `Umsätze (${liste.length})`}${katFilter ? ` — ${KATEGORIE_BY_KEY[katFilter]?.label}` : ""}`}
+        title={`${treffer ? `Suchergebnisse — ${suchZeitText} (${liste.length}${treffer.length >= 300 ? "+" : ""})` : `Umsätze (${liste.length})`}${katFilter ? ` — ${KATEGORIE_BY_KEY[katFilter]?.label}` : ""}${kontoFilter !== "alle" ? ` · ${filterLabel(kontoFilter)}` : ""}`}
         ton="violet"
         innerRef={listeRef}
       >
@@ -457,7 +563,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
           </div>
           {treffer && (
             <span className="text-xs text-neutral-500">
-              {suchZeitText} · {kontoFilter === "alle" ? "alle Konten" : konto(kontoFilter)} · mehrere Begriffe = alle müssen vorkommen · Betrag „449,90“, Datum „19.10.“
+              {suchZeitText} · {filterLabel(kontoFilter)} · mehrere Begriffe = alle müssen vorkommen · Betrag „449,90“, Datum „19.10.“
               {treffer.length >= 300 && " · nur die neuesten 300 — Suche genauer eingrenzen"}
             </span>
           )}
@@ -614,7 +720,7 @@ function saldoRang(iban: string): number {
   return iban.slice(4, 12) === "30020900" ? 2 : 1;
 }
 
-function KontostandLeiste({ salden }: { salden: KontoSaldo[] }) {
+function KontostandLeiste({ salden, aktiv, onWaehle }: { salden: KontoSaldo[]; aktiv: string; onWaehle: (filter: string) => void }) {
   if (!salden.length) return null;
   const liste = [...salden].sort((a, b) => saldoRang(a.iban) - saldoRang(b.iban) || a.iban.localeCompare(b.iban));
   const gesamt = liste.reduce((s, b) => s + b.saldo, 0);
@@ -625,7 +731,12 @@ function KontostandLeiste({ salden }: { salden: KontoSaldo[] }) {
         const alt = jetzt - new Date(b.abgerufenAm).getTime() > 26 * 3600_000;
         const abgerufen = new Date(b.abgerufenAm).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
         return (
-          <div key={b.iban} className={`rounded-xl border p-3 ${alt ? "border-amber-300 bg-amber-50" : "border-neutral-200 bg-white"}`}>
+          <div
+            key={b.iban}
+            onClick={b.iban === "PAYPAL" ? undefined : () => onWaehle(b.iban)}
+            title={b.iban === "PAYPAL" ? undefined : aktiv === b.iban ? "Filter aufheben" : "Nur dieses Konto zeigen"}
+            className={`rounded-xl border p-3 ${b.iban !== "PAYPAL" ? "cursor-pointer hover:shadow-md transition-shadow" : ""} ${aktiv === b.iban ? "ring-2 ring-neutral-900" : ""} ${alt ? "border-amber-300 bg-amber-50" : "border-neutral-200 bg-white"}`}
+          >
             <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">
               {b.iban === "PAYPAL" ? "PayPal-Guthaben" : konto(b.iban)}
             </div>
