@@ -68,7 +68,7 @@ export async function POST(req: Request) {
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
   if (profile?.role !== "admin") return new Response("Nur für Admins", { status: 403 });
 
-  let body: { verlauf?: unknown; frage?: unknown; modus?: unknown };
+  let body: { verlauf?: unknown; frage?: unknown; modus?: unknown; seite?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -82,7 +82,12 @@ export async function POST(req: Request) {
   const effort = modus === "gruendlich" ? ("high" as const) : ("medium" as const);
 
   const heute = new Date().toLocaleDateString("de-DE", { timeZone: "Europe/Berlin", weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" });
-  const frageText = `${frage}\n\n(Heute ist ${heute}.)`;
+  // Schwebendes Hi: die Seite, auf der gefragt wird (Pfad, Titel, sichtbarer Text, gekürzt)
+  const s = body.seite && typeof body.seite === "object" ? (body.seite as Record<string, unknown>) : null;
+  const seitenText = s && typeof s.pfad === "string"
+    ? `\n\n<aktuelle_seite pfad="${String(s.pfad).slice(0, 200)}" titel="${String(s.titel ?? "").slice(0, 200).replace(/"/g, "'")}">\n${String(s.text ?? "").slice(0, 6000)}\n</aktuelle_seite>\n(Die Frage bezieht sich auf diese Dashboard-Seite, die gerade offen ist. Der Text oben ist der sichtbare Inhalt – nutze ihn als Ausgangspunkt und prüfe Zahlen bei Bedarf mit den Werkzeugen.)`
+    : "";
+  const frageText = `${frage}${seitenText}\n\n(Heute ist ${heute}.)`;
   let messages: Anthropic.MessageParam[] = [...vorher, { role: "user", content: frageText }];
   const beginn = Date.now();
   const nutzung = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0, runden: 0 };

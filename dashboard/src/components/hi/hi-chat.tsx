@@ -108,12 +108,20 @@ function kuerzen(verlauf: ApiMessage[]): ApiMessage[] {
   return verlauf.slice(ab).map((m) => (typeof m.content === "string" ? m : { ...m, content: m.content.filter((b) => b.type !== "thinking" && b.type !== "redacted_thinking") }));
 }
 
+/** Kontext der Seite, auf der Hi gerade gefragt wird (schwebendes Hi). */
+export interface SeitenKontext { pfad: string; titel: string; text: string }
+
+const SEITEN_VORSCHLAEGE = ["Was fällt dir auf dieser Seite auf?", "Erklär mir kurz, was ich hier sehe.", "Was sollte ich hier als Nächstes tun?"];
+
 export default function HiChat({
   variante = "seite",
   startFrage,
   onSchliessen,
+  seitenKontext,
 }: {
-  variante?: "seite" | "widget";
+  variante?: "seite" | "widget" | "schwebe";
+  /** Liefert beim Fragen die aktuelle Seite (Pfad, Titel, sichtbarer Text) mit. */
+  seitenKontext?: () => SeitenKontext | null;
   /** Wird nach dem Laden des Verlaufs sofort gefragt (aus der Kugel im Startbildschirm). */
   startFrage?: string;
   /** Vollbild über dem Startbildschirm: Knopf zum Schließen. */
@@ -128,7 +136,8 @@ export default function HiChat({
   const abbruch = useRef<AbortController | null>(null);
   const listeRef = useRef<HTMLDivElement>(null);
   const feldRef = useRef<HTMLTextAreaElement>(null);
-  const widget = variante === "widget";
+  const widget = variante !== "seite";
+  const schwebe = variante === "schwebe";
   const [geladen, setGeladen] = useState(false);
   const startGefragt = useRef(false);
 
@@ -158,7 +167,7 @@ export default function HiChat({
       const aendereLetzte = (f: (a: Anzeige) => Anzeige) => setAnzeige((alt) => [...alt.slice(0, -1), f(alt[alt.length - 1])]);
 
       try {
-        const res = await fetch("/api/hi", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ verlauf: basis, frage, modus: gruendlich ? "gruendlich" : "normal" }), signal: ctrl.signal });
+        const res = await fetch("/api/hi", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ verlauf: basis, frage, modus: gruendlich ? "gruendlich" : "normal", seite: seitenKontext?.() ?? undefined }), signal: ctrl.signal });
         if (!res.ok || !res.body) throw new Error(res.status === 403 ? "Hi ist nur für Admins freigeschaltet." : `Hi ist gerade nicht erreichbar (${res.status}).`);
         // Abgelaufene Anmeldung: die Middleware leitet auf die Login-Seite um (HTML statt Antwort-Stream)
         if (!(res.headers.get("content-type") ?? "").includes("ndjson")) throw new Error("Bitte neu anmelden — die Sitzung ist abgelaufen.");
@@ -210,7 +219,7 @@ export default function HiChat({
         feldRef.current?.focus();
       }
     },
-    [anzeige, verlauf, zustand, gruendlich],
+    [anzeige, verlauf, zustand, gruendlich, seitenKontext],
   );
 
   useEffect(() => {
@@ -243,15 +252,15 @@ export default function HiChat({
   }, []);
 
   const leer = anzeige.length === 0;
-  const sichtbar = widget ? anzeige.slice(-2) : anzeige;
+  const sichtbar = variante === "widget" ? anzeige.slice(-2) : anzeige;
   const statusText = zustand === "denkt" ? "denkt nach" : zustand === "spricht" ? "antwortet" : "bereit";
 
   return (
-    <div className={`hi ${widget ? "hi-widget" : "hi-seite"} ${leer ? "hi-leer" : ""}`} data-zustand={zustand}>
+    <div className={`hi ${widget ? "hi-widget" : "hi-seite"} ${schwebe ? "hi-schwebe" : ""} ${leer ? "hi-leer" : ""}`} data-zustand={zustand}>
       {!widget && <div className="hi-hintergrund" aria-hidden />}
       <div className="hi-kopf">
         <div className="hi-gehirn-rahmen">
-          <HiGehirn zustand={zustand} impuls={impuls} groesse={widget ? 84 : leer ? 300 : 120} />
+          <HiGehirn zustand={zustand} impuls={impuls} groesse={schwebe ? 52 : widget ? 84 : leer ? 300 : 120} />
         </div>
         <div className="hi-marke">
           <div className="hi-name">Hi<span className="hi-punkt">.</span></div>
@@ -307,7 +316,7 @@ export default function HiChat({
 
       {leer && (
         <div className="hi-vorschlaege">
-          {(widget ? VORSCHLAEGE.slice(0, 2) : VORSCHLAEGE).map((v) => (
+          {(schwebe ? SEITEN_VORSCHLAEGE : widget ? VORSCHLAEGE.slice(0, 2) : VORSCHLAEGE).map((v) => (
             <button key={v} type="button" className="hi-vorschlag" onClick={() => fragen(v)}>{v}</button>
           ))}
         </div>

@@ -1,3 +1,4 @@
+import HiSchweber from "@/components/hi/hi-schweber";
 import Link from "next/link";
 import { requireProfile, hasFeature } from "@/lib/auth";
 import { signOut } from "@/lib/actions/auth";
@@ -373,6 +374,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
       {/* Main content — add top padding on mobile for hamburger button */}
       <main className="flex-1 overflow-auto pt-14 md:pt-0">{children}</main>
+      {profile.role === "admin" && <HiSchweber />}
     </div>
   );
 }
