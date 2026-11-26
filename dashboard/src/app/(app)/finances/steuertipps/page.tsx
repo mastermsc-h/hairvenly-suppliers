@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { requireFeature } from "@/lib/auth";
 import { ladeSteuerKasse } from "@/lib/cockpit/daten";
 import { createServiceClient } from "@/lib/supabase/server";
+import { fetchSteuertippsUmgesetzt } from "@/lib/actions/steuertipps";
 import Steuertipps from "./steuertipps";
 
 export const dynamic = "force-dynamic";
@@ -25,11 +26,12 @@ export default async function SteuertippsPage() {
   const sb = createServiceClient();
   const jahr = Number(new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }).slice(0, 4));
 
-  const [kasse, monat, staff, shop] = await Promise.all([
+  const [kasse, monat, staff, shop, umgesetzt] = await Promise.all([
     ladeSteuerKasse().catch(() => null),
     sb.from("finanz_monatsdaten").select("daten").eq("jahr", jahr).order("monat", { ascending: false }).limit(1).maybeSingle(),
     sb.from("staff_members").select("id", { count: "exact", head: true }).eq("active", true),
     sb.from("shopify_umsatz_monat").select("monat, netto").in("monat", [`${jahr - 1}-11`, `${jahr - 1}-12`]),
+    fetchSteuertippsUmgesetzt().catch(() => ({}) as Record<string, string>),
   ]);
 
   const p = kasse?.jahr.prognose ?? null;
@@ -51,5 +53,5 @@ export default async function SteuertippsPage() {
     shopDezVorjahr: shopVon(`${jahr - 1}-12`),
   };
 
-  return <Steuertipps basis={basis} />;
+  return <Steuertipps basis={basis} umgesetzt={umgesetzt} />;
 }

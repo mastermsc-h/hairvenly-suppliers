@@ -41,7 +41,7 @@ const MASSNAHMEN: Massnahme[] = [
   { key: "wareneinkauf", titel: "Lieferanten vor dem 31.12. bezahlen", fuer: "Firma", farbe: "#475569", geldfluss: true, nur: "euer", verschiebung: true, hinweis: "Nur bei EÜR: Wareneinkauf zählt, wenn er bezahlt wird. Zahlungen an Amanda/Ebru bis 31.12. mindern den Gewinn 2026 — dafür ist 2027 entsprechend höher." },
 ];
 
-export default function Steuertipps({ basis }: { basis: SteuertippsBasis }) {
+export default function Steuertipps({ basis, umgesetzt }: { basis: SteuertippsBasis; umgesetzt: Record<string, string> }) {
   const [gewinn, setGewinn] = useState<number>(basis.gewinnJahr ?? 400_000);
   const [ermittlung, setErmittlung] = useState<Ermittlung>("unklar");
   const [aktiv, setAktiv] = useState<Set<MassnahmeKey>>(new Set(["bonus", "it", "sachbezug", "haare"]));
@@ -291,7 +291,7 @@ export default function Steuertipps({ basis }: { basis: SteuertippsBasis }) {
         </details>
       </Karte>
 
-      <TippsKatalog ermittlung={ermittlung} />
+      <TippsKatalog ermittlung={ermittlung} umgesetzt={umgesetzt} />
 
       {/* Rücklagen & Rückstellungen */}
       <Karte titel="Rücklagen und Rückstellungen — was der Steuerberater meint" ton="amber" icon={<Scale size={16} />}>
@@ -310,7 +310,6 @@ export default function Steuertipps({ basis }: { basis: SteuertippsBasis }) {
         <ol className="text-sm text-neutral-800 space-y-1.5 list-decimal pl-5">
           <li>Ermitteln wir den Gewinn per <b>EÜR oder Bilanz</b>? Bei über 800.000 € Umsatz besteht Buchführungspflicht (HGB bzw. § 141 AO).</li>
           <li>Kommt der <b>höhere Spitzensteuersatz 2027</b> (45 % ab 250.000 €, 47 % ab 280.000 €)? Falls ja: Ausgaben eher ins Jahr 2027 legen, § 34a-Thesaurierung prüfen.</li>
-          <li>Sind <b>Salon und Shop zwei Betriebe</b>? (Investitionsabzugsbetrag für den Salon, falls dessen Gewinn unter 200.000 € liegt.)</li>
           <li>Welche <b>Rückstellungen</b> bilden wir zum 31.12.2026 (Retouren, Aufbewahrung, Jahresabschluss, Urlaub, Boni)?</li>
           <li>Wie dokumentieren wir <b>verdorbene/beschädigte Haare</b> und Ladenhüter, damit die Inventur-Abwertung anerkannt wird?</li>
           <li>Lohnen sich <b>Manager-Boni</b> noch 2026 — Auszahlung im Dezember oder Zusage mit Auszahlung im Januar?</li>

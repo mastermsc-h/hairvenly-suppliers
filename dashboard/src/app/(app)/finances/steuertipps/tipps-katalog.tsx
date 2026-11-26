@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { BookOpen, ExternalLink } from "lucide-react";
+import { useState, useTransition } from "react";
+import { BookOpen, CheckCircle2, Circle, ExternalLink, Loader2 } from "lucide-react";
+import { setSteuertippUmgesetzt } from "@/lib/actions/steuertipps";
 import { Karte } from "./ui";
 
 type Gruppe = "inhaber" | "mitarbeiter" | "manager";
@@ -314,7 +315,6 @@ export const TIPPS: Tipp[] = [
     betrag: "bis 50 % einer geplanten Anschaffung vorab absetzen",
     firma: "Geht für Hairvenly nicht: nur bis 200.000 € Gewinn (laut BFH 2026 sogar inkl. Gewerbesteuer). Gilt auch für die 20 %-Sonderabschreibung.",
     wie: "—",
-    achtung: "Offene Frage an den Steuerberater: Sind Salon und Shop zwei getrennte Betriebe? Dann könnte der Salon allein unter der Grenze liegen.",
     quelle: "https://www.grantthornton.de/themen/2026/bfh-urteil-investitionsabzugsbetrag-gewinngrenze-und-gewerbesteuer/",
     status: "geht-nicht",
   },
@@ -426,13 +426,60 @@ const GRUPPE_STIL: Record<Gruppe, { rand: string; badge: string; label: string }
   mitarbeiter: { rand: "border-t-emerald-500", badge: "bg-emerald-100 text-emerald-800", label: "Mitarbeiter" },
 };
 
-export default function TippsKatalog({ ermittlung }: { ermittlung: "unklar" | "bilanz" | "euer" }) {
+type Stand = "alle" | "offen" | "umgesetzt";
+
+export default function TippsKatalog({ ermittlung, umgesetzt: start }: { ermittlung: "unklar" | "bilanz" | "euer"; umgesetzt: Record<string, string> }) {
   const [gruppe, setGruppe] = useState<Gruppe | "alle">("alle");
   const [wann, setWann] = useState<Wann | "alle">("alle");
-  const liste = TIPPS.filter((t) => (gruppe === "alle" || t.gruppe === gruppe) && (wann === "alle" || t.wann === wann));
+  const [stand, setStand] = useState<Stand>("alle");
+  const [umgesetzt, setUmgesetzt] = useState<Record<string, string>>(start);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [fehler, setFehler] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
+
+  const liste = TIPPS.filter(
+    (t) =>
+      (gruppe === "alle" || t.gruppe === gruppe) &&
+      (wann === "alle" || t.wann === wann) &&
+      (stand === "alle" || (stand === "umgesetzt") === !!umgesetzt[t.titel])
+  );
+  const anzahlUmgesetzt = TIPPS.filter((t) => umgesetzt[t.titel]).length;
+
+  function abhaken(titel: string) {
+    const an = !umgesetzt[titel];
+    const vorher = umgesetzt;
+    // sofort anzeigen, bei Fehler zurück
+    setUmgesetzt((u) => {
+      const n = { ...u };
+      if (an) n[titel] = new Date().toISOString();
+      else delete n[titel];
+      return n;
+    });
+    setBusy(titel);
+    setFehler(null);
+    startTransition(async () => {
+      const res = await setSteuertippUmgesetzt(titel, an);
+      if (!res.ok) {
+        setUmgesetzt(vorher);
+        setFehler(res.error ?? "Speichern fehlgeschlagen");
+      } else if (an && res.am) {
+        setUmgesetzt((u) => ({ ...u, [titel]: res.am! }));
+      }
+      setBusy(null);
+    });
+  }
 
   return (
-    <Karte titel={`Tipps-Katalog (${liste.length})`} ton="blue" icon={<BookOpen size={16} />}>
+    <Karte
+      titel={`Tipps-Katalog (${liste.length})`}
+      ton="blue"
+      icon={<BookOpen size={16} />}
+      rechts={
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-100 rounded-full px-2.5 py-1">
+          <CheckCircle2 size={13} /> {anzahlUmgesetzt} von {TIPPS.length} umgesetzt
+        </span>
+      }
+    >
       <div className="flex flex-wrap gap-2 mb-2">
         {GRUPPEN.map((g) => (
           <button key={g.key} onClick={() => setGruppe(g.key)} className={`rounded-full border px-3 py-1 text-xs font-semibold ${gruppe === g.key ? g.aktiv : "bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-50"}`}>
@@ -441,6 +488,12 @@ export default function TippsKatalog({ ermittlung }: { ermittlung: "unklar" | "b
         ))}
       </div>
       <div className="flex flex-wrap gap-2 mb-4">
+        {(["alle", "offen", "umgesetzt"] as Stand[]).map((s) => (
+          <button key={s} onClick={() => setStand(s)} className={`rounded-full border px-3 py-1 text-xs ${stand === s ? "bg-emerald-100 text-emerald-900 border-emerald-300 font-semibold" : "bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-50"}`}>
+            {{ alle: "Offen + umgesetzt", offen: "Nur offene", umgesetzt: "Nur umgesetzte" }[s]}
+          </button>
+        ))}
+        <span className="w-px bg-neutral-200 mx-1" />
         {WANN.map((w) => (
           <button key={w.key} onClick={() => setWann(w.key)} className={`rounded-full border px-3 py-1 text-xs ${wann === w.key ? "bg-amber-100 text-amber-900 border-amber-300 font-semibold" : "bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-50"}`}>
             {w.label}
@@ -448,13 +501,31 @@ export default function TippsKatalog({ ermittlung }: { ermittlung: "unklar" | "b
         ))}
       </div>
 
+      {fehler && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{fehler}</div>}
       <div className="grid md:grid-cols-2 gap-3">
         {liste.map((t) => {
           const s = GRUPPE_STIL[t.gruppe];
           const passtNicht = t.gilt && ermittlung !== "unklar" && t.gilt !== ermittlung;
+          const erledigt = umgesetzt[t.titel];
+          const kannAbhaken = t.status !== "geht-nicht";
           return (
-            <article key={t.titel} className={`rounded-xl border border-neutral-200 border-t-4 ${s.rand} p-4 ${t.status === "geht-nicht" || passtNicht ? "opacity-60" : ""}`}>
+            <article
+              key={t.titel}
+              className={`relative rounded-xl border border-t-4 ${s.rand} p-4 pr-12 transition-colors ${erledigt ? "border-emerald-300 bg-emerald-50/50" : "border-neutral-200"} ${!erledigt && (t.status === "geht-nicht" || passtNicht) ? "opacity-60" : ""}`}
+            >
+              {kannAbhaken && (
+                <button
+                  onClick={() => abhaken(t.titel)}
+                  disabled={busy === t.titel}
+                  title={erledigt ? `Umgesetzt am ${new Date(erledigt).toLocaleDateString("de-DE")} — klicken, um wieder zu öffnen` : "Als umgesetzt abhaken"}
+                  aria-label={erledigt ? "Wieder als offen markieren" : "Als umgesetzt abhaken"}
+                  className={`absolute top-2.5 right-2.5 rounded-full transition-transform hover:scale-110 ${erledigt ? "text-emerald-600" : "text-neutral-300 hover:text-emerald-500"}`}
+                >
+                  {busy === t.titel ? <Loader2 size={26} className="animate-spin text-neutral-400" /> : erledigt ? <CheckCircle2 size={30} fill="#059669" className="text-white drop-shadow-sm" /> : <Circle size={26} />}
+                </button>
+              )}
               <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                {erledigt && <span className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-emerald-600 text-white">umgesetzt {new Date(erledigt).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" })}</span>}
                 <span className={`text-[10px] font-bold uppercase tracking-wide rounded px-1.5 py-0.5 ${s.badge}`}>{s.label}</span>
                 {t.gilt && <span className="text-[10px] font-semibold rounded px-1.5 py-0.5 bg-violet-100 text-violet-800">nur {t.gilt === "bilanz" ? "Bilanz" : "EÜR"}</span>}
                 {t.status === "neu" && <span className="text-[10px] font-semibold rounded px-1.5 py-0.5 bg-sky-100 text-sky-800">neu</span>}
