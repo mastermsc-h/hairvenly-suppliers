@@ -210,11 +210,14 @@ export default function ArchiveList({
                         <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-emerald-700">
                           <Printer size={11} />
                           <span>
-                            {new Date(s.slipPrintedAt).toLocaleDateString(localeStr, {
+                            {new Date(s.slipPrintedAt).toLocaleString(localeStr, {
                               day: "2-digit",
                               month: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
                               timeZone: "Europe/Berlin",
-                            })}
+                            })}{" "}
+                            Uhr
                             {s.slipPrintedBy ? ` · ${s.slipPrintedBy}` : ""}
                           </span>
                         </div>

@@ -332,7 +332,15 @@ export default function PackList({
                     {o.packedBy && <span>{o.packedBy}</span>}
                     {o.slipPrintedAt && (
                       <span className="inline-flex items-center gap-1 text-emerald-700">
-                        <Printer size={11} /> gedruckt
+                        <Printer size={11} /> gedruckt{" "}
+                        {new Date(o.slipPrintedAt).toLocaleString(localeStr, {
+                          day: "2-digit",
+                          month: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          timeZone: "Europe/Berlin",
+                        })}{" "}
+                        Uhr
                         {o.slipPrintedBy ? ` · ${o.slipPrintedBy}` : ""}
                       </span>
                     )}
@@ -492,11 +500,14 @@ export default function PackList({
                         <div className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-emerald-700">
                           <Printer size={11} />
                           <span>
-                            {new Date(o.slipPrintedAt).toLocaleDateString(localeStr, {
+                            {new Date(o.slipPrintedAt).toLocaleString(localeStr, {
                               day: "2-digit",
                               month: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
                               timeZone: "Europe/Berlin",
-                            })}
+                            })}{" "}
+                            Uhr
                             {o.slipPrintedBy ? ` · ${o.slipPrintedBy}` : ""}
                           </span>
                           <button
