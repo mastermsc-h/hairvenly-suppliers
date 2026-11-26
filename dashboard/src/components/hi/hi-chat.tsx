@@ -118,7 +118,13 @@ export default function HiChat({
   startFrage,
   onSchliessen,
   seitenKontext,
+  sitzung,
+  sitzungName,
 }: {
+  /** Eigene Sitzung (eigener Verlauf), z. B. je Dashboard-Seite beim schwebenden Hi. Ohne = gemeinsamer Verlauf von /hi. */
+  sitzung?: string;
+  /** Anzeigename der Sitzung im Kopf (z. B. „Liquidität“). */
+  sitzungName?: string;
   variante?: "seite" | "widget" | "schwebe";
   /** Liefert beim Fragen die aktuelle Seite (Pfad, Titel, sichtbarer Text) mit. */
   seitenKontext?: () => SeitenKontext | null;
@@ -138,15 +144,17 @@ export default function HiChat({
   const feldRef = useRef<HTMLTextAreaElement>(null);
   const widget = variante !== "seite";
   const schwebe = variante === "schwebe";
+  const kVerlauf = sitzung ? `${SPEICHER_VERLAUF}:${sitzung}` : SPEICHER_VERLAUF;
+  const kAnzeige = sitzung ? `${SPEICHER_ANZEIGE}:${sitzung}` : SPEICHER_ANZEIGE;
   const [geladen, setGeladen] = useState(false);
   const startGefragt = useRef(false);
 
   useEffect(() => {
-    setAnzeige(lies<Anzeige[]>(SPEICHER_ANZEIGE, []));
-    setVerlauf(lies<ApiMessage[]>(SPEICHER_VERLAUF, []));
+    setAnzeige(lies<Anzeige[]>(kAnzeige, []));
+    setVerlauf(lies<ApiMessage[]>(kVerlauf, []));
     setGruendlich(lies<boolean>(SPEICHER_MODUS, false));
     setGeladen(true);
-  }, []);
+  }, [kAnzeige, kVerlauf]);
 
   useEffect(() => {
     const el = listeRef.current;
@@ -200,7 +208,7 @@ export default function HiChat({
               aendereLetzte((a) => ({ ...a, kostenEur: eur }));
             } else if (ev.t === "fertig" && ev.verlauf) {
               setVerlauf(ev.verlauf);
-              schreib(SPEICHER_VERLAUF, ev.verlauf);
+              schreib(kVerlauf, ev.verlauf);
             } else if (ev.t === "fehler") {
               aendereLetzte((a) => ({ ...a, text: a.text || (ev.text ?? "Fehler"), fehler: true }));
             }
@@ -213,13 +221,13 @@ export default function HiChat({
         abbruch.current = null;
         setZustand("ruhig");
         setAnzeige((a) => {
-          schreib(SPEICHER_ANZEIGE, a);
+          schreib(kAnzeige, a);
           return a;
         });
         feldRef.current?.focus();
       }
     },
-    [anzeige, verlauf, zustand, gruendlich, seitenKontext],
+    [anzeige, verlauf, zustand, gruendlich, seitenKontext, kAnzeige, kVerlauf],
   );
 
   useEffect(() => {
@@ -239,17 +247,17 @@ export default function HiChat({
     if (zustand !== "ruhig") abbruch.current?.abort();
     setAnzeige([]);
     setVerlauf([]);
-    schreib(SPEICHER_ANZEIGE, []);
-    schreib(SPEICHER_VERLAUF, []);
+    schreib(kAnzeige, []);
+    schreib(kVerlauf, []);
   };
 
   const aendereVorschlag = useCallback((id: string, neu: Partial<Vorschlag>) => {
     setAnzeige((alt) => {
       const n = alt.map((a) => (a.vorschlaege?.some((v) => v.id === id) ? { ...a, vorschlaege: a.vorschlaege.map((v) => (v.id === id ? { ...v, ...neu } : v)) } : a));
-      if (neu.status !== "laeuft") schreib(SPEICHER_ANZEIGE, n);
+      if (neu.status !== "laeuft") schreib(kAnzeige, n);
       return n;
     });
-  }, []);
+  }, [kAnzeige]);
 
   const leer = anzeige.length === 0;
   const sichtbar = variante === "widget" ? anzeige.slice(-2) : anzeige;
@@ -264,7 +272,7 @@ export default function HiChat({
         </div>
         <div className="hi-marke">
           <div className="hi-name">Hi<span className="hi-punkt">.</span></div>
-          <div className="hi-unter">Hairvenly Intelligence · <span className="hi-status">{statusText}</span></div>
+          <div className="hi-unter">{sitzungName ? <span className="hi-sitzung" title="Eigenes Gespräch für diese Seite">{sitzungName}</span> : "Hairvenly Intelligence"} · <span className="hi-status">{statusText}</span></div>
         </div>
         <div className="hi-kopf-aktionen">
           {!leer && (

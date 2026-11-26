@@ -350,3 +350,4 @@
   .hi-schwebe-fenster { width: calc(100vw - 24px); height: calc(100dvh - 100px); }
 }
 @media (prefers-reduced-motion: reduce) { .hi-schwebe-knopf, .hi-schwebe-ring, .hi-schwebe-fenster { animation: none; } }
+.hi-sitzung { color: var(--hi-gold, #e8be6e); font-weight: 700; letter-spacing: 0.06em; }
