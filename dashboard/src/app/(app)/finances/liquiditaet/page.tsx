@@ -48,9 +48,12 @@ export default async function LiquiditaetPage() {
   const einfuhrVermutet = new Map<string, string[]>();
   for (const b of [...vorab.bestellungen, ...vorab.einfuhrAndere]) {
     const v = b.einfuhrVermutung;
-    if (!v) continue;
-    const k = einfuhrBuchungsSchluessel(v.datum, v.betragEur);
-    einfuhrVermutet.set(k, [...(einfuhrVermutet.get(k) ?? []), b.label]);
+    // Je Abbuchung alle Lieferungen, die einen Teil davon bekommen — mit Anteil, wenn es nicht die ganze ist
+    for (const t of v?.teile ?? []) {
+      const k = einfuhrBuchungsSchluessel(t.datum, t.betragEur);
+      const text = t.anteilEur < t.betragEur - 1 ? `${b.label} (${Math.round(t.anteilEur).toLocaleString("de-DE")} €)` : b.label;
+      einfuhrVermutet.set(k, [...(einfuhrVermutet.get(k) ?? []), text]);
+    }
   }
   const verlauf = await ladeKontoVerlauf(sb, roh, einstellungen, einfuhrVermutet);
   return (

@@ -409,6 +409,8 @@ export interface EinfuhrVermutung {
   anteilEur: number;
   /** Deckt die ganze Schätzung. */
   vollstaendig: boolean;
+  /** Je verrechneter Abbuchung: Tag, Betrag der ganzen Abbuchung, davon für diese Bestellung. */
+  teile?: Array<{ datum: string; betragEur: number; anteilEur: number }>;
 }
 
 /**
@@ -455,6 +457,7 @@ export function zollVermutungen(
     let offen = k.eur;
     const genutzt: number[] = [];
     let anteil = 0;
+    const teile: NonNullable<EinfuhrVermutung["teile"]> = [];
     buchungen.forEach((b, i) => {
       if (offen <= 0.005 || rest[i] <= 0.005 || b.art !== k.art) return;
       // versandAm = Tag, an dem der Status gesetzt wurde — oft erst, wenn die Zoll-Rechnung schon da ist
@@ -466,6 +469,7 @@ export function zollVermutungen(
       offen = r2(offen - nimm);
       anteil = r2(anteil + nimm);
       genutzt.push(i);
+      teile.push({ datum: b.datum, betragEur: b.betragEur, anteilEur: r2(nimm) });
     });
     if (!genutzt.length) continue;
     out.set(k.id, {
@@ -474,6 +478,7 @@ export function zollVermutungen(
       betragEur: r2(genutzt.reduce((s, i) => s + buchungen[i].betragEur, 0)),
       anteilEur: anteil,
       vollstaendig: offen <= 0.005,
+      teile,
     });
   }
   return out;
