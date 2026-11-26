@@ -51,6 +51,9 @@ export async function updateSession(request: NextRequest) {
     // Lokaler FinTS-Worker (Mac) liefert Kontoumsätze — kein Login-Cookie,
     // schützt sich per Bearer-Secret (fail-closed) in der Route selbst.
     path === "/api/bank/ingest" ||
+    // Cloud-Bank-Abruf (Python-Funktion api/fints.py, Vercel-Cron + Dashboard-Knopf über
+    // /api/bank/fints-cloud) — kein Login-Cookie, prüft Bearer CRON_SECRET selbst.
+    path === "/api/fints" ||
     // Foto-Handoff iMac → iPhone: /pack-foto/<token> ist öffentlich, der Zugriff
     // wird durch den signierten, 2h gültigen Session-Token geschützt (kein
     // Login am Handy nötig). Nur Foto-Upload möglich, keine Bestelldaten.
