@@ -293,6 +293,18 @@ export function MeilensteineWidget({ eintraege, istAdmin }: { eintraege: Eintrag
   const { liste, fehler, neu, aendern, loeschen } = useEintraege(eintraege, "meilenstein");
   const [titel, setTitel] = useState("");
   const [datum, setDatum] = useState("");
+  // Bearbeiten: ein Meilenstein zur Zeit (Titel + Zieldatum)
+  const [bearbeite, setBearbeite] = useState<{ id: string; titel: string; datum: string } | null>(null);
+  const speichern = async () => {
+    if (!bearbeite) return;
+    const m = liste.find((x) => x.id === bearbeite.id);
+    const t = bearbeite.titel.trim();
+    if (!m || !t) return;
+    const daten = { ...m.daten };
+    if (bearbeite.datum) daten.faellig = bearbeite.datum; else delete daten.faellig;
+    setBearbeite(null);
+    await aendern(m.id, { titel: t, daten });
+  };
   const sortiert = [...liste].sort((a, b) => (a.daten.faellig ?? "9999").localeCompare(b.daten.faellig ?? "9999") || a.sort - b.sort);
   const anlegen = async () => {
     const t = titel.trim();
@@ -308,6 +320,19 @@ export function MeilensteineWidget({ eintraege, istAdmin }: { eintraege: Eintrag
       <div className="ck-zeitleiste">
         {sortiert.map((m) => (
           <div key={m.id} className="ck-meilenstein" data-erledigt={!!m.erledigt_am}>
+            {bearbeite?.id === m.id ? (
+              <form
+                className="ck-kein-zug"
+                onSubmit={(e) => { e.preventDefault(); speichern(); }}
+                onKeyDown={(e) => { if (e.key === "Escape") setBearbeite(null); }}
+                style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}
+              >
+                <input autoFocus value={bearbeite.titel} onChange={(e) => setBearbeite({ ...bearbeite, titel: e.target.value })} aria-label="Meilenstein" style={{ flex: "2 1 140px", minWidth: 0 }} />
+                <input type="date" value={bearbeite.datum} onChange={(e) => setBearbeite({ ...bearbeite, datum: e.target.value })} aria-label="Zieldatum" style={{ flex: "1 1 120px", minWidth: 0 }} />
+                <button type="submit" className="ck-icon-knopf" aria-label="Speichern" title="Speichern (Enter)" disabled={!bearbeite.titel.trim()}><Check size={13} /></button>
+                <button type="button" className="ck-icon-knopf" aria-label="Abbrechen" title="Abbrechen (Esc)" onClick={() => setBearbeite(null)}><X size={13} /></button>
+              </form>
+            ) : (
             <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.35, overflowWrap: "anywhere", color: m.erledigt_am ? "var(--ck-dim)" : undefined }}>{m.titel}</div>
@@ -318,11 +343,13 @@ export function MeilensteineWidget({ eintraege, istAdmin }: { eintraege: Eintrag
               </div>
               {istAdmin && (
                 <>
-                  <button type="button" className="ck-icon-knopf" aria-label={m.erledigt_am ? "Als offen markieren" : "Als erreicht markieren"} onClick={() => aendern(m.id, { erledigt: !m.erledigt_am })}><Check size={13} /></button>
-                  <button type="button" className="ck-icon-knopf ck-rot" aria-label="Meilenstein löschen" onClick={() => loeschen(m.id)}><Trash2 size={12} /></button>
+                  <button type="button" className="ck-icon-knopf" aria-label="Meilenstein bearbeiten" title="Bearbeiten" onClick={() => setBearbeite({ id: m.id, titel: m.titel, datum: m.daten.faellig ?? "" })}><Pencil size={12} /></button>
+                  <button type="button" className="ck-icon-knopf" aria-label={m.erledigt_am ? "Als offen markieren" : "Als erreicht markieren"} title={m.erledigt_am ? "Wieder offen" : "Erreicht"} onClick={() => aendern(m.id, { erledigt: !m.erledigt_am })}><Check size={13} /></button>
+                  <button type="button" className="ck-icon-knopf ck-rot" aria-label="Meilenstein löschen" title="Löschen" onClick={() => loeschen(m.id)}><Trash2 size={12} /></button>
                 </>
               )}
             </div>
+            )}
           </div>
         ))}
       </div>
