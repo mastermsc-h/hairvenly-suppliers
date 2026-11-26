@@ -18,6 +18,8 @@ export interface KontoUmsatz {
   kategorie: string | null;
   kategorie_quelle: "auto" | "regel" | "manuell" | null;
   kategorie_regel_id: string | null;
+  /** Wann der Umsatz erstmals abgerufen wurde (Bank liefert keine Uhrzeit). */
+  created_at?: string | null;
   steuer_split: SteuerSplit[];
 }
 
@@ -52,7 +54,7 @@ export async function fetchKontoumsaetze(
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("bank_transactions")
-      .select("id, account_iban, booking_date, amount, counterparty_name, counterparty_iban, purpose, posting_text, kategorie, kategorie_quelle, kategorie_regel_id, steuer_split")
+      .select("id, account_iban, booking_date, amount, counterparty_name, counterparty_iban, purpose, posting_text, kategorie, kategorie_quelle, kategorie_regel_id, steuer_split, created_at")
       .gte("booking_date", alleZeitraeume ? "1900-01-01" : `${jahr}-01-01`)
       .lte("booking_date", alleZeitraeume ? "2999-12-31" : `${jahr}-12-31`)
       .order("booking_date", { ascending: false })

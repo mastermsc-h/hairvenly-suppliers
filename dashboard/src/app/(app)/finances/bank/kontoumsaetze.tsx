@@ -95,6 +95,34 @@ const BANK_FARBE: Record<string, { kopf: string; hover: string; aktiv: string }>
 };
 const BANK_FARBE_STD = { kopf: "bg-slate-200 text-slate-700", hover: "hover:bg-slate-50 hover:border-slate-300", aktiv: "bg-slate-200 border-slate-400" };
 
+/**
+ * Uhrzeit eines Umsatzes. Die Bank (FinTS/MT940) liefert nur das Datum. Genau ist sie nur,
+ * wenn sie im Verwendungszweck steht (Kartenzahlung „2026-11-24T11.44Debitk…“, eigene
+ * Überweisung „DATUM 05.09.2025, 15.47 UHR“). Sonst: Uhrzeit des Abrufs, bei dem der Umsatz
+ * erstmals auf dem Konto war — nur wenn das am Buchungstag selbst war.
+ */
+function uhrzeit(u: KontoUmsatz): { text: string; title: string; exakt: boolean } | null {
+  const p = u.purpose ?? "";
+  const iso = p.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2})[.:](\d{2})/);
+  const datum = p.match(/DATUM\s*(\d{2})\.(\d{2})\.(\d{4}),?\s*(\d{1,2})[.:](\d{2})\s*UHR/i);
+  const m = iso ? { d: `${iso[3]}.${iso[2]}.`, ymd: `${iso[1]}-${iso[2]}-${iso[3]}`, t: `${iso[4]}:${iso[5]}` }
+    : datum ? { d: `${datum[1]}.${datum[2]}.`, ymd: `${datum[3]}-${datum[2]}-${datum[1]}`, t: `${datum[4].padStart(2, "0")}:${datum[5]}` }
+    : null;
+  if (m) {
+    const andererTag = m.ymd !== u.booking_date.slice(0, 10);
+    return { text: `${andererTag ? m.d + " " : ""}${m.t} Uhr`, title: "Uhrzeit laut Verwendungszweck (Zahlung/Überweisung ausgelöst)", exakt: true };
+  }
+  if (u.created_at) {
+    const c = new Date(u.created_at);
+    const tag = c.toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
+    if (tag === u.booking_date.slice(0, 10)) {
+      const t = c.toLocaleTimeString("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" });
+      return { text: `ab ${t}`, title: "Die Bank liefert keine Uhrzeit. Um diese Zeit war der Umsatz erstmals beim stündlichen Abruf auf dem Konto zu sehen.", exakt: false };
+    }
+  }
+  return null;
+}
+
 /** Kategorien, die nur Geld zwischen eigenen Konten verschieben. */
 const UEBERTRAG = new Set(["umbuchung", "umbuchung_gehalt"]);
 /** Betrag mit Vorzeichen (+ rein / − raus), 0 als Strich. */
@@ -594,6 +622,24 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
         ton="violet"
         innerRef={listeRef}
       >
+        {(() => {
+          const bank = data.salden.filter((b) => b.iban !== "PAYPAL" && kontoPasst(b.iban, kontoFilter));
+          if (!bank.length) return null;
+          const summe = bank.reduce((s, b) => s + b.saldo, 0);
+          const abgerufen = bank.map((b) => b.abgerufenAm).sort().at(0)!;
+          return (
+            <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg bg-neutral-900 text-white px-4 py-2.5">
+              <span className="text-xs uppercase tracking-wide text-neutral-300">
+                Aktueller Kontostand · {kontoFilter === "alle" ? "alle Bankkonten" : filterLabel(kontoFilter)}
+              </span>
+              <span className={`text-lg font-bold tabular-nums ${summe < 0 ? "text-red-300" : ""}`}>{fmt(summe)}</span>
+              <span className="text-[11px] text-neutral-400">
+                laut Bank, abgerufen {new Date(abgerufen).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                {kontoFilter === "alle" ? " · ohne PayPal" : ""}
+              </span>
+            </div>
+          );
+        })()}
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <select
             value={suchZeit}
@@ -653,7 +699,15 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
                 const busy = busyId === u.id;
                 return (
                   <tr key={u.id} className={`border-b border-neutral-100 align-top ${kat === "unklar" ? "bg-amber-50/40" : ""}`}>
-                    <td className="py-2 pr-2 tabular-nums text-neutral-600 whitespace-nowrap">{deDate(u.booking_date)}</td>
+                    <td className="py-2 pr-2 tabular-nums text-neutral-600 whitespace-nowrap">
+                      {deDate(u.booking_date)}
+                      {(() => {
+                        const z = uhrzeit(u);
+                        return z ? (
+                          <div className={`text-[11px] ${z.exakt ? "text-neutral-700" : "text-neutral-400"}`} title={z.title}>{z.text}</div>
+                        ) : null;
+                      })()}
+                    </td>
                     <td className="py-2 pr-2 text-xs text-neutral-400 whitespace-nowrap" title={kontoZweck(u.account_iban) ?? undefined}>{konto(u.account_iban)}</td>
                     <td className="py-2 pr-2 max-w-[420px]">
                       <div className="text-neutral-800 truncate" title={u.counterparty_name ?? ""}>
