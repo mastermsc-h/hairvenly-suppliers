@@ -304,14 +304,20 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
     // (direkt auf angekommen/eingelagert), gilt der erste Wechsel dorthin — Abbuchungen danach können dazugehören.
     const versandAm = new Map<string, string>();
     const ankunftAm = new Map<string, string>();
+    const zollAm = new Map<string, string>();
     for (const x of (ev ?? []) as Array<{ order_id: string; created_at: string; meta: { to?: string } | null }>) {
       const tag = new Date(x.created_at).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
       const to = x.meta?.to ?? "";
       if (["shipped", "in_customs"].includes(to) && !versandAm.has(x.order_id)) versandAm.set(x.order_id, tag);
+      // "Auf Verzollung" gedrückt → EUSt + Zoll erscheinen ab diesem Tag im Diagramm (einfuhrDatum)
+      if (to === "in_customs" && !zollAm.has(x.order_id)) zollAm.set(x.order_id, tag);
       if (WARE_DA.includes(to) && !ankunftAm.has(x.order_id)) ankunftAm.set(x.order_id, tag);
     }
     for (const [id, tag] of ankunftAm) if (!versandAm.has(id)) versandAm.set(id, tag);
-    for (const b of [...bestellungen, ...einfuhrAndere]) b.versandAm = versandAm.get(b.id) ?? null;
+    for (const b of [...bestellungen, ...einfuhrAndere]) {
+      b.versandAm = versandAm.get(b.id) ?? null;
+      b.zollAm = zollAm.get(b.id) ?? null;
+    }
   }
   const zollBuchungen = offeneZollBuchungen(
     alleTx

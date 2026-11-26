@@ -96,6 +96,16 @@ check("Knapp + Fehlbetrag bis Puffer", [p.bestellungen[0].ampel, p.bestellungen[
 // Bereits bezahlt (Rest 0): keine Zahlung, aber Einfuhrabgaben
 p = L.prognose(roh({ bestellungen: [best({ restUsd: 0, status: "shipped" })] }), E0);
 check("Bezahlt: nur Einfuhr", p.ereignisse.map((x) => x.art), ["einfuhr"]);
+
+// "Auf Verzollung" markiert: Einfuhrabgaben am Markier-Tag, nicht an ETA/Versand
+p = L.prognose(roh({ bestellungen: [best({ restUsd: 0, status: "in_customs", eta: "2026-12-01", zollAm: "2026-10-20" })] }), E0);
+check("Verzollung markiert: Einfuhr am Markier-Tag", p.bestellungen[0].einfuhr.datum, "2026-10-20");
+// Markier-Tag in der Vergangenheit → auf heute (Start) geklemmt
+p = L.prognose(roh({ bestellungen: [best({ restUsd: 0, status: "in_customs", eta: "2026-12-01", zollAm: "2026-10-01" })] }), E0);
+check("Markier-Tag in Vergangenheit → heute", p.bestellungen[0].einfuhr.datum, p.start);
+// Ohne zollAm bleibt alles wie vorher (Regression)
+p = L.prognose(roh({ bestellungen: [best({ restUsd: 0, status: "in_customs", eta: "2026-12-01" })] }), E0);
+check("Ohne Markier-Tag: Einfuhr an ETA wie bisher", p.bestellungen[0].einfuhr.datum, "2026-12-01");
 check("Bezahlt: nicht \"sofort\", sondern bezahlt", [p.bestellungen[0].bezahlt, p.bestellungen[0].sofort], [true, false]);
 
 // USt: Basis − EUSt des Monats, fällig 10. übernächster Monat; Erstattung +21 Tage

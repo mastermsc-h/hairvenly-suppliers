@@ -304,6 +304,9 @@ export interface LiqBestellung {
   einfuhrZahlung?: EinfuhrZahlung | null;
   /** Tag, an dem der Status auf "versendet"/"beim Zoll" gesetzt wurde (Statusverlauf). */
   versandAm?: string | null;
+  /** Tag, an dem der Status auf "In Verzollung" (in_customs) gesetzt wurde — dann sind die
+   *  Einfuhrabgaben real fällig und erscheinen ab diesem Tag im Diagramm (statt ETA-Schätzung). */
+  zollAm?: string | null;
 }
 
 /** Lieferung eines Ratenlieferanten (Ebru): Einfuhrabgaben bei Ankunft, bezahlt wird über die Raten. */
@@ -321,6 +324,7 @@ export interface LiqEinfuhrPosten {
   einfuhrRechnung?: string | null;
   einfuhrZahlung?: EinfuhrZahlung | null;
   versandAm?: string | null;
+  zollAm?: string | null;
 }
 
 // ── Einfuhrabgaben ↔ Kontoumsatz ────────────────────────────────────────────
@@ -1080,7 +1084,10 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen, sz: LiqSzena
   // Termin: Amanda (DHL-ZIT) bei Ankunft; Ebru (Ungewitter) wenige Tage nach Versand, Versand = Ankunft − Vorlauf
   // wie bei der Ebru-Rechnung. Noch nicht versendete Ware mit überholtem Datum kann nicht heute ankommen →
   // Versand/Ankunft frühestens in VERSAND_FRUEHESTENS_TAGE.
-  const einfuhrDatum = (b: { status: string; eta: string | null }, termin: "ankunft" | "versand") => {
+  const einfuhrDatum = (b: { status: string; eta: string | null; zollAm?: string | null }, termin: "ankunft" | "versand") => {
+    // "Auf Verzollung" markiert → Abgaben sind real fällig: ab dem Markier-Tag im Diagramm
+    // (amStart klemmt Vergangenheit auf heute — offenes Geld kann nicht gestern abfließen).
+    if (b.zollAm) return amStart(b.zollAm);
     // Schon versendet: echter Versandtag liegt zurück → keine Untergrenze außer heute
     const frueh = VERSENDET.includes(b.status) ? "" : plusTage(start, VERSAND_FRUEHESTENS_TAGE);
     const max = (a: string, c: string) => (a > c ? a : c);
