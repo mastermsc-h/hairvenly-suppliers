@@ -83,6 +83,15 @@
     {
       "path": "/api/cron/chatbot-lernen",
       "schedule": "30 1 * * *"
+    },
+    {
+      "path": "/api/fints",
+      "schedule": "37 5-22 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "api/fints.py": {
+      "maxDuration": 300
+    }
+  }
 }

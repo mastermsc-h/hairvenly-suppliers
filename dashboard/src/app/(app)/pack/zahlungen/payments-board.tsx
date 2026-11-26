@@ -7,6 +7,7 @@ import {
   Eye, Landmark, Loader2, RefreshCw, RotateCcw, Search, Upload, X, Zap,
 } from "lucide-react";
 import { t, type Locale } from "@/lib/i18n";
+import BankAbrufCloud from "@/app/(app)/finances/bank/bank-abruf-cloud";
 import { monatGrenzen, monatName, suchMonate } from "@/lib/bank/such-zeitraum";
 import {
   assignBankByNumberAction, confirmBankMatchAction, ignoreBankTxAction, importBankCsvAction,
@@ -129,6 +130,9 @@ export default function PaymentsBoard({
         <h1 className="text-xl font-semibold text-neutral-900">{tr("bank.title")}</h1>
         <p className="text-sm text-neutral-500 mt-1">{tr("bank.subtitle")}</p>
       </div>
+
+      {/* Cloud-Bank-Abruf: nur sichtbar, wenn eine Bank eine Freigabe braucht */}
+      <BankAbrufCloud kompakt />
 
       {/* Status + Modus */}
       <div className="grid gap-4 md:grid-cols-2">

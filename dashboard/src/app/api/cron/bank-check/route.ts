@@ -65,9 +65,8 @@ export async function GET(request: Request) {
   const html = `
     <p>${reason}</p>
     <p>Solange das so ist, werden Vorkasse-Zahlungen nicht automatisch erkannt.</p>
-    <p><b>Lösung:</b> Am Mac im Terminal ausführen und die Freigabe in der Banking-App bestätigen:</p>
-    <pre>~/hairvenly-inventory/dashboard/scripts/fints-worker/fints renew</pre>
-    <p><a href="https://suppliers.hairvenly.de/pack/zahlungen">Zahlungseingänge im Dashboard</a></p>`;
+    <p><b>Lösung:</b> Im Dashboard unter <a href="https://suppliers.hairvenly.de/finances/bank">Finanzen → Kontoumsätze</a> im Kasten „Bank-Abruf“ auf <b>„Freigabe erneuern“</b> klicken und die Anfrage in der Banking-App bestätigen.</p>
+    <p>Alternativ am Mac im Terminal: <code>~/hairvenly-inventory/dashboard/scripts/fints-worker/fints renew</code></p>`;
 
   let mail: { ok: boolean; error?: string } = { ok: false, error: "keine Empfänger" };
   if (emails.length) mail = await sendMail({ to: emails, subject: "Bank-Abgleich: Aktion nötig", html });

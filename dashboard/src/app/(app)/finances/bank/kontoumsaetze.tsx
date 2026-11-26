@@ -1,6 +1,7 @@
 "use client";
 
 import { kontoZweck } from "@/lib/bank/konten";
+import BankAbrufCloud from "./bank-abruf-cloud";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { AlertTriangle, ChevronLeft, ChevronRight, Filter, Loader2, RefreshCw, RotateCcw, Search, Trash2, Wand2 } from "lucide-react";
@@ -396,6 +397,8 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
       )}
 
       {/* Aktuelle Kontostände (Bank per FinTS, PayPal per API — stündlich) */}
+      <BankAbrufCloud kompakt />
+
       {data.salden.length > 0 && (
         <div>
           <h2 className="text-sm font-bold uppercase tracking-wide text-neutral-800 mb-2">
@@ -763,6 +766,8 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
           </p>
         </div>
       </details>
+
+      <BankAbrufCloud />
 
       {summen.unklar.n > 0 && (
         <div className="flex items-start gap-2 bg-amber-50 text-amber-800 text-xs rounded-lg px-3 py-2 border border-amber-200">
