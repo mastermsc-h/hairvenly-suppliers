@@ -94,6 +94,17 @@ const BANK_FARBE: Record<string, { kopf: string; hover: string; aktiv: string }>
 };
 const BANK_FARBE_STD = { kopf: "bg-slate-200 text-slate-700", hover: "hover:bg-slate-50 hover:border-slate-300", aktiv: "bg-slate-200 border-slate-400" };
 
+/** Kategorien, die nur Geld zwischen eigenen Konten verschieben. */
+const UEBERTRAG = new Set(["umbuchung", "umbuchung_gehalt"]);
+/** Betrag mit Vorzeichen (+ rein / − raus), 0 als Strich. */
+function vorzeichen(n: number) {
+  if (Math.abs(n) < 0.005) return "—";
+  return (n > 0 ? "+" : "−") + fmt(Math.abs(n));
+}
+function BetragTd({ v, cls }: { v: number; cls: string }) {
+  return <td className={`py-2 pr-2 text-right tabular-nums whitespace-nowrap ${Math.abs(v) < 0.005 ? "text-neutral-300" : cls}`}>{vorzeichen(v)}</td>;
+}
+
 const gruppeOf = (k: string | null) => KATEGORIE_BY_KEY[k ?? "unklar"]?.gruppe ?? "neutral";
 
 /** Suchzeitraum: -1 = alle (null), 0 = ganzes Jahr, 1–12 = Monat. */
@@ -208,11 +219,13 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
     return { byKat, g, unklar, saldo };
   }, [imZeitraum]);
 
-  // Nach Bank & Konto: Zeitraum, aber ohne Kontofilter (sonst sähe man nur das gewählte Konto)
+  // Geldfluss je Bank & Konto im Zeitraum (ohne Kontofilter, sonst sähe man nur das gewählte Konto).
+  // Neutral wird aufgeteilt: Überträge zwischen eigenen Konten vs. Rest (privat, Kredit, nicht zugeordnet).
   const nachBank = useMemo(() => {
-    type Zeile = { n: number; g: Record<KategorieGruppe, number>; saldo: number };
-    const leer = (): Zeile => ({ n: 0, g: { einnahmen: 0, steuern: 0, ausgaben: 0, neutral: 0 }, saldo: 0 });
+    type Zeile = { n: number; rein: number; ausgaben: number; steuern: number; uebertrag: number; sonstiges: number; veraenderung: number };
+    const leer = (): Zeile => ({ n: 0, rein: 0, ausgaben: 0, steuern: 0, uebertrag: 0, sonstiges: 0, veraenderung: 0 });
     const banken = new Map<string, { summe: Zeile; konten: Map<string, Zeile> }>();
+    const gesamt = leer();
     for (const u of data.umsaetze) {
       if (monat > 0 && Number(u.booking_date.slice(5, 7)) !== monat) continue;
       const iban = u.account_iban ?? "—";
@@ -220,17 +233,30 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
       if (!banken.has(blz)) banken.set(blz, { summe: leer(), konten: new Map() });
       const b = banken.get(blz)!;
       if (!b.konten.has(iban)) b.konten.set(iban, leer());
-      for (const z of [b.summe, b.konten.get(iban)!]) {
+      const g = gruppeOf(u.kategorie);
+      for (const z of [gesamt, b.summe, b.konten.get(iban)!]) {
         z.n++;
-        z.g[gruppeOf(u.kategorie)] += u.amount;
-        z.saldo += u.amount;
+        z.veraenderung += u.amount;
+        if (g === "einnahmen") z.rein += u.amount;
+        else if (g === "ausgaben") z.ausgaben += u.amount;
+        else if (g === "steuern") z.steuern += u.amount;
+        else if (UEBERTRAG.has(u.kategorie ?? "")) z.uebertrag += u.amount;
+        else z.sonstiges += u.amount;
       }
     }
-    return [...banken.entries()].sort((a, b) => bankName(a[0]).localeCompare(bankName(b[0])));
+    return { banken: [...banken.entries()].sort((a, b) => bankName(a[0]).localeCompare(bankName(b[0]))), gesamt };
   }, [data, monat]);
 
   function waehleKonto(filter: string) {
     setKontoFilter(kontoFilter === filter ? "alle" : filter);
+  }
+
+  /** Kontostand-Kachel: Konto wählen und direkt zu seinen Umsätzen springen. */
+  function zeigeKontoUmsaetze(filter: string) {
+    const aus = kontoFilter === filter;
+    setKontoFilter(aus ? "alle" : filter);
+    setKatFilter(null);
+    if (!aus) setTimeout(() => listeRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }
 
   // Steuerbuchungen im Zeitraum (jeder Anteil einzeln)
@@ -370,7 +396,14 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
       )}
 
       {/* Aktuelle Kontostände (Bank per FinTS, PayPal per API — stündlich) */}
-      <KontostandLeiste salden={data.salden} aktiv={kontoFilter} onWaehle={waehleKonto} />
+      {data.salden.length > 0 && (
+        <div>
+          <h2 className="text-sm font-bold uppercase tracking-wide text-neutral-800 mb-2">
+            Aktuelle Kontostände <span className="normal-case font-normal text-xs text-neutral-500">· laut Bank, Konto anklicken = seine Umsätze</span>
+          </h2>
+          <KontostandLeiste salden={data.salden} aktiv={kontoFilter} onWaehle={zeigeKontoUmsaetze} />
+        </div>
+      )}
 
       {/* Kennzahlen */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -389,60 +422,87 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
         </button>
       </div>
 
-      {/* Nach Bank & Konto */}
-      <Card title={`Nach Bank & Konto — ${zeitraumText}`} ton="slate">
-        <p className="flex items-center gap-1.5 text-xs text-slate-700 bg-slate-50 rounded-lg px-3 py-2 mb-4">
-          <Filter size={13} className="shrink-0" />
-          Auf eine Bank oder ein Konto klicken: Kacheln, Kategorien und Umsätze zeigen dann nur dieses. Nochmal klicken zeigt wieder alle Konten.
+      {/* Geldfluss je Bank & Konto */}
+      <Card title={`Geldfluss je Konto — ${zeitraumText}`} ton="slate">
+        <p className="text-sm text-slate-700 mb-1">
+          Was ist {monat === -1 ? "insgesamt" : monat === 0 ? `im Jahr ${jahr}` : `im ${MONATE[monat - 1]}`} auf jedem Konto rein- und rausgegangen?
+          Die letzte Spalte zeigt, um wie viel der Kontostand dadurch gestiegen oder gesunken ist.
         </p>
-        <div className="grid md:grid-cols-2 gap-x-8 gap-y-5">
-          {nachBank.map(([blz, b]) => {
-            const f = BANK_FARBE[blz] ?? BANK_FARBE_STD;
-            const bankAktiv = kontoFilter === `bank:${blz}`;
-            return (
-              <div key={blz}>
-                <button
-                  onClick={() => waehleKonto(`bank:${blz}`)}
-                  title={bankAktiv ? "Filter aufheben" : `Nur ${bankName(blz)} zeigen`}
-                  className={`w-full flex items-baseline justify-between rounded-md border px-2 py-1 mb-1.5 text-xs font-bold uppercase tracking-wide cursor-pointer ${f.kopf} ${bankAktiv ? "border-neutral-700 ring-1 ring-neutral-700" : "border-transparent hover:border-neutral-400"}`}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <ChevronRight size={12} className={bankAktiv ? "rotate-90" : ""} />
-                    {bankName(blz)} <span className="normal-case font-normal">({b.summe.n})</span>
-                  </span>
-                  <span className="tabular-nums normal-case font-semibold">Saldo {fmt(b.summe.saldo)}</span>
-                </button>
-                {[...b.konten.entries()].map(([iban, z]) => {
-                  const aktiv = kontoFilter === iban;
+        <p className="text-xs text-slate-500 mb-4">
+          Den aktuellen Kontostand siehst du oben in den Kacheln. Eine Zeile anklicken = die ganze Seite zeigt nur dieses Konto bzw. diese Bank.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-neutral-200">
+                <Th>Konto</Th>
+                <Th right><span className="text-emerald-700">Einnahmen</span></Th>
+                <Th right><span className="text-orange-700">Ausgaben</span></Th>
+                <Th right><span className="text-red-700">Steuern</span></Th>
+                <Th right><span title="Geld zwischen euren eigenen Konten verschoben, z. B. Shopify-Konto → Gehaltskonto">Übertrag eigene Konten</span></Th>
+                <Th right><span title="Privat, Kredit, Unternehmenskauf, noch nicht zugeordnet">Sonstiges</span></Th>
+                <Th right>= Veränderung</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {nachBank.banken.flatMap(([blz, b]) => {
+                const f = BANK_FARBE[blz] ?? BANK_FARBE_STD;
+                const zeilen = [{ filter: `bank:${blz}`, z: b.summe, bank: true, iban: "" }, ...[...b.konten.entries()].map(([iban, z]) => ({ filter: iban, z, bank: false, iban }))];
+                // Bank mit nur einem Konto: keine extra Summenzeile
+                const sichtbar = b.konten.size === 1 ? zeilen.slice(1) : zeilen;
+                return sichtbar.map(({ filter, z, bank, iban }) => {
+                  const aktiv = kontoFilter === filter;
                   return (
-                    <button
-                      key={iban}
-                      onClick={() => waehleKonto(iban)}
-                      title={aktiv ? "Filter aufheben" : `Nur ${konto(iban)} zeigen`}
-                      className={`group w-full rounded-md border px-2 py-1.5 text-sm text-left cursor-pointer transition-colors ${aktiv ? `${f.aktiv} font-semibold` : `border-transparent ${f.hover}`}`}
+                    <tr
+                      key={filter}
+                      onClick={() => waehleKonto(filter)}
+                      title={aktiv ? "Filter aufheben" : "Nur dieses zeigen"}
+                      className={`border-b border-neutral-100 cursor-pointer transition-colors ${bank ? `${f.kopf} font-semibold` : f.hover.split(" ")[0]} ${aktiv ? "outline outline-2 outline-neutral-800 -outline-offset-2" : ""}`}
                     >
-                      <div className="flex items-baseline justify-between gap-2">
+                      <td className={`py-2 pr-2 ${bank ? "" : "pl-0"}`}>
                         <span className="flex items-baseline gap-1.5">
-                          <ChevronRight size={12} className={`self-center shrink-0 transition-transform ${aktiv ? "rotate-90 text-neutral-700" : "text-neutral-300 group-hover:text-neutral-600"}`} />
-                          <span className="underline decoration-dotted decoration-neutral-300 underline-offset-2 group-hover:decoration-neutral-500">{konto(iban)}</span>
-                          {kontoZweck(iban) && <span className="text-xs text-neutral-500">{kontoZweck(iban)}</span>}
-                          <span className="text-xs text-neutral-400">({z.n})</span>
+                          <ChevronRight size={12} className={`self-center shrink-0 ${aktiv ? "rotate-90" : "text-neutral-400"}`} />
+                          {bank ? (
+                            <span>{bankName(blz)} gesamt</span>
+                          ) : (
+                            <span>
+                              <span className="underline decoration-dotted decoration-neutral-300 underline-offset-2">{konto(iban)}</span>
+                              {kontoZweck(iban) && <span className="ml-1.5 text-xs text-neutral-500">{kontoZweck(iban)}</span>}
+                            </span>
+                          )}
+                          <span className="text-xs font-normal text-neutral-400">({z.n})</span>
                         </span>
-                        <span className={`tabular-nums ${z.saldo >= 0 ? "text-emerald-700" : "text-neutral-800"}`}>{fmt(z.saldo)}</span>
-                      </div>
-                      <div className="pl-5 mt-0.5 flex flex-wrap gap-x-3 text-[11px] tabular-nums font-normal">
-                        <span className="text-emerald-700">Einnahmen {fmt(z.g.einnahmen)}</span>
-                        <span className="text-orange-700">Ausgaben {fmt(-z.g.ausgaben + 0)}</span>
-                        <span className="text-red-700">Steuern {fmt(-z.g.steuern + 0)}</span>
-                        {z.g.neutral !== 0 && <span className="text-slate-500">Umbuchungen u. a. {fmt(z.g.neutral)}</span>}
-                      </div>
-                    </button>
+                      </td>
+                      <BetragTd v={z.rein} cls="text-emerald-700" />
+                      <BetragTd v={z.ausgaben} cls="text-orange-700" />
+                      <BetragTd v={z.steuern} cls="text-red-700" />
+                      <BetragTd v={z.uebertrag} cls="text-slate-600" />
+                      <BetragTd v={z.sonstiges} cls="text-slate-600" />
+                      <td className={`py-2 text-right tabular-nums font-bold whitespace-nowrap ${z.veraenderung >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                        {vorzeichen(z.veraenderung)}
+                      </td>
+                    </tr>
                   );
-                })}
-              </div>
-            );
-          })}
+                });
+              })}
+              <tr className="border-t-2 border-neutral-300 font-bold">
+                <td className="py-2 pr-2">Alle Konten</td>
+                <BetragTd v={nachBank.gesamt.rein} cls="text-emerald-700" />
+                <BetragTd v={nachBank.gesamt.ausgaben} cls="text-orange-700" />
+                <BetragTd v={nachBank.gesamt.steuern} cls="text-red-700" />
+                <BetragTd v={nachBank.gesamt.uebertrag} cls="text-slate-600" />
+                <BetragTd v={nachBank.gesamt.sonstiges} cls="text-slate-600" />
+                <td className={`py-2 text-right tabular-nums whitespace-nowrap ${nachBank.gesamt.veraenderung >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                  {vorzeichen(nachBank.gesamt.veraenderung)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
+        <p className="mt-3 text-xs text-slate-500">
+          „Übertrag eigene Konten“ ist kein Gewinn und kein Verlust: Das Geld wandert nur von einem eurer Konten aufs andere (z. B. für Gehälter aufs Gehaltskonto).
+          Über alle Konten zusammen hebt sich das fast auf.
+        </p>
       </Card>
 
       {/* Steuern */}
@@ -734,7 +794,7 @@ function KontostandLeiste({ salden, aktiv, onWaehle }: { salden: KontoSaldo[]; a
           <div
             key={b.iban}
             onClick={b.iban === "PAYPAL" ? undefined : () => onWaehle(b.iban)}
-            title={b.iban === "PAYPAL" ? undefined : aktiv === b.iban ? "Filter aufheben" : "Nur dieses Konto zeigen"}
+            title={b.iban === "PAYPAL" ? undefined : aktiv === b.iban ? "Wieder alle Konten zeigen" : "Umsätze dieses Kontos anzeigen"}
             className={`rounded-xl border p-3 ${b.iban !== "PAYPAL" ? "cursor-pointer hover:shadow-md transition-shadow" : ""} ${aktiv === b.iban ? "ring-2 ring-neutral-900" : ""} ${alt ? "border-amber-300 bg-amber-50" : "border-neutral-200 bg-white"}`}
           >
             <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide">
@@ -744,7 +804,11 @@ function KontostandLeiste({ salden, aktiv, onWaehle }: { salden: KontoSaldo[]; a
             <div className={`text-lg font-bold mt-1 tabular-nums ${b.saldo < 0 ? "text-red-700" : "text-neutral-900"}`}>{fmt(b.saldo)}</div>
             <div className={`text-[11px] mt-0.5 ${alt ? "text-amber-700 font-medium" : "text-neutral-400"}`}>
               {alt ? "veraltet · " : ""}abgerufen {abgerufen}
-
+              {b.iban !== "PAYPAL" && (
+                <div className={`mt-1 font-medium ${aktiv === b.iban ? "text-neutral-900" : "text-blue-700"}`}>
+                  {aktiv === b.iban ? "✕ wieder alle Konten" : "Umsätze ansehen →"}
+                </div>
+              )}
             </div>
           </div>
         );
