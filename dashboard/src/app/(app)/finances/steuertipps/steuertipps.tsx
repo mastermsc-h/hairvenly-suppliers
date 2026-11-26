@@ -12,7 +12,7 @@ import { eur, eurK, Feld, Karte, Zahl } from "./ui";
 type Ermittlung = "unklar" | "bilanz" | "euer";
 
 type MassnahmeKey =
-  | "bonus" | "it" | "website" | "gwg" | "sachbezug" | "feier" | "haare" | "retouren" | "rueckstellungen" | "ladenhueter" | "wareneinkauf";
+  | "bonus" | "it" | "website" | "gwg" | "sachbezug" | "feier" | "haare" | "retouren" | "rueckstellungen" | "ladenhueter";
 
 type Massnahme = {
   key: MassnahmeKey;
@@ -38,12 +38,12 @@ const MASSNAHMEN: Massnahme[] = [
   { key: "retouren", titel: "Rückstellung für Retouren nach Silvester", fuer: "Firma", farbe: "#ea580c", geldfluss: false, nur: "bilanz", verschiebung: true, hinweis: "Dezember-Bestellungen, die erst im Januar zurückkommen: Der darin steckende Gewinn darf schon 2026 herausgerechnet werden." },
   { key: "rueckstellungen", titel: "Weitere Rückstellungen (Aufbewahrung, Abschluss, Urlaub)", fuer: "Firma", farbe: "#d97706", geldfluss: false, nur: "bilanz", verschiebung: true, hinweis: "Kosten, die 2026 verursacht, aber erst später bezahlt werden. Mindert den Gewinn 2026 ohne Geldabfluss." },
   { key: "ladenhueter", titel: "Ladenhüter abwerten (Inventur)", fuer: "Firma", farbe: "#b45309", geldfluss: false, nur: "bilanz", verschiebung: true, hinweis: "Ware, die nur noch mit Rabatt verkauft werden kann, darf in der Inventur niedriger bewertet werden (Teilwert). Beleg: Sale-Preise, Verkaufszahlen." },
-  { key: "wareneinkauf", titel: "Lieferanten vor dem 31.12. bezahlen", fuer: "Firma", farbe: "#475569", geldfluss: true, nur: "euer", verschiebung: true, hinweis: "Nur bei EÜR: Wareneinkauf zählt, wenn er bezahlt wird. Zahlungen an Amanda/Ebru bis 31.12. mindern den Gewinn 2026 — dafür ist 2027 entsprechend höher." },
 ];
 
 export default function Steuertipps({ basis, umgesetzt }: { basis: SteuertippsBasis; umgesetzt: Record<string, string> }) {
   const [gewinn, setGewinn] = useState<number>(basis.gewinnJahr ?? 400_000);
-  const [ermittlung, setErmittlung] = useState<Ermittlung>("unklar");
+  // Vom Steuerberater bestätigt (26.11.2026): Hairvenly ist bilanzierungspflichtig.
+  const ermittlung: Ermittlung = "bilanz";
   const [aktiv, setAktiv] = useState<Set<MassnahmeKey>>(new Set(["bonus", "it", "sachbezug", "haare"]));
 
   // Eingaben je Maßnahme
@@ -58,7 +58,6 @@ export default function Steuertipps({ basis, umgesetzt }: { basis: SteuertippsBa
   const [retouren, setRetouren] = useState({ umsatz: dezNetto, quote: 12, nachStichtag: 50, rohgewinn: 47 });
   const [rst, setRst] = useState({ aufbewahrung: 5_000, abschluss: 8_000, urlaub: 4_000 });
   const [ladenhueter, setLadenhueter] = useState({ bestand: 40_000, abschlag: 30 });
-  const [wareneinkauf, setWareneinkauf] = useState(50_000);
 
   const { hebesatz, freibetrag, jahr } = basis;
   const bonusErg = useMemo(
@@ -77,10 +76,9 @@ export default function Steuertipps({ basis, umgesetzt }: { basis: SteuertippsBa
     retouren: retouren.umsatz * (retouren.quote / 100) * (retouren.nachStichtag / 100) * (retouren.rohgewinn / 100),
     rueckstellungen: rst.aufbewahrung + rst.abschluss + rst.urlaub,
     ladenhueter: ladenhueter.bestand * (ladenhueter.abschlag / 100),
-    wareneinkauf,
   };
 
-  const erlaubt = (m: Massnahme) => !m.nur || ermittlung === "unklar" || m.nur === ermittlung;
+  const erlaubt = (m: Massnahme) => !m.nur || m.nur === ermittlung;
   const gewaehlt = MASSNAHMEN.filter((m) => aktiv.has(m.key) && erlaubt(m));
   const summeAufwand = gewaehlt.reduce((s, m) => s + aufwand[m.key], 0);
   const gesamt = ersparnis(gewinn, summeAufwand, hebesatz, freibetrag, jahr);
@@ -123,7 +121,7 @@ export default function Steuertipps({ basis, umgesetzt }: { basis: SteuertippsBa
       <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
         <AlertTriangle size={16} className="shrink-0 mt-0.5" />
         <div>
-          <b>Keine Steuerberatung.</b> Bei über 2 Mio. € Umsatz seid ihr sehr wahrscheinlich ohnehin <b>bilanzierungspflichtig</b> (Kaufmann nach HGB) — dann gelten die „nur Bilanz“-Tipps. Alle Werte sind Schätzungen nach Stand der Recherche (Nov. 2026) — vor der Umsetzung mit dem Steuerberater
+          <b>Keine Steuerberatung.</b> Hairvenly ist <b>bilanzierungspflichtig</b> (vom Steuerberater bestätigt) — die Tipps sind darauf abgestimmt. Alle Werte sind Schätzungen nach Stand der Recherche (Nov. 2026) — vor der Umsetzung mit dem Steuerberater
           abstimmen. Und: <b>Steuern sparen ist nicht Geld sparen.</b> Wer 10.000 € ausgibt, um ~{Math.round(satz * 100)} % Steuern zu sparen, hat
           trotzdem ~{eur(10_000 * (1 - satz))} weniger. Es lohnt sich nur für Ausgaben, die ihr ohnehin braucht — oder für Buchungen ohne Geldabfluss.
         </div>
@@ -145,18 +143,8 @@ export default function Steuertipps({ basis, umgesetzt }: { basis: SteuertippsBa
         <Zahl label="Jeder abgesetzte Euro spart" wert={`${Math.round(satz * 100)} Cent`} ton="emerald" unter="Grenzsteuersatz (ESt 45 % + Soli + GewSt − Anrechnung)" />
         <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
           <div className="text-xs font-semibold uppercase tracking-wide text-violet-800">Gewinnermittlung</div>
-          <div className="mt-1.5 flex gap-1">
-            {(["unklar", "bilanz", "euer"] as Ermittlung[]).map((e) => (
-              <button
-                key={e}
-                onClick={() => setErmittlung(e)}
-                className={`flex-1 rounded-lg px-2 py-1 text-xs font-medium border ${ermittlung === e ? "bg-violet-700 text-white border-violet-700" : "bg-white text-violet-800 border-violet-300 hover:bg-violet-100"}`}
-              >
-                {{ unklar: "Unklar", bilanz: "Bilanz", euer: "EÜR" }[e]}
-              </button>
-            ))}
-          </div>
-          <div className="text-[11px] text-violet-700 mt-1">Manche Tipps gehen nur mit Bilanz bzw. nur mit EÜR — beim Steuerberater erfragen.</div>
+          <div className="text-lg font-bold text-violet-900 mt-1">Bilanz</div>
+          <div className="text-[11px] text-violet-700 mt-0.5">vom Steuerberater bestätigt · Rückstellungen, Inventur-Abwertung und § 34a sind möglich; EÜR-Tricks gelten nicht.</div>
         </div>
       </div>
 
@@ -176,7 +164,6 @@ export default function Steuertipps({ basis, umgesetzt }: { basis: SteuertippsBa
                     <span className="flex-1 min-w-0">
                       <span className="text-sm font-medium text-neutral-900">{m.titel}</span>
                       <span className="ml-2 text-[11px] text-neutral-500">{m.fuer}</span>
-                      {m.nur && <span className="ml-2 text-[10px] font-semibold rounded px-1.5 py-0.5 bg-violet-100 text-violet-800">nur {m.nur === "bilanz" ? "Bilanz" : "EÜR"}</span>}
                       {!m.geldfluss && <span className="ml-1 text-[10px] font-semibold rounded px-1.5 py-0.5 bg-emerald-100 text-emerald-800">kein Geldabfluss</span>}
                       {m.verschiebung && <span className="ml-1 text-[10px] font-semibold rounded px-1.5 py-0.5 bg-amber-100 text-amber-800">verschiebt Steuer</span>}
                     </span>
@@ -184,7 +171,7 @@ export default function Steuertipps({ basis, umgesetzt }: { basis: SteuertippsBa
                   </button>
                   {an && ok && (
                     <div className="px-3 pb-3 pl-10 space-y-2">
-                      <Eingaben k={m.key} {...{ bonus, setBonus, it, setIt, website, setWebsite, gwg, setGwg, sachbezug, setSachbezug, feier, setFeier, haare, setHaare, retouren, setRetouren, rst, setRst, ladenhueter, setLadenhueter, wareneinkauf, setWareneinkauf }} />
+                      <Eingaben k={m.key} {...{ bonus, setBonus, it, setIt, website, setWebsite, gwg, setGwg, sachbezug, setSachbezug, feier, setFeier, haare, setHaare, retouren, setRetouren, rst, setRst, ladenhueter, setLadenhueter }} />
                       <p className="text-xs text-neutral-500">{m.hinweis}</p>
                     </div>
                   )}
@@ -283,8 +270,7 @@ export default function Steuertipps({ basis, umgesetzt }: { basis: SteuertippsBa
           </summary>
           <ul className="mt-2 text-sm text-neutral-700 space-y-1.5 list-disc pl-5">
             <li><b>Absetzbar:</b> der volle Bonus (brutto) + der Arbeitgeber-Anteil zur Sozialversicherung + Umlagen. Lohnsteuer und Arbeitnehmer-SV stecken im Brutto — das zahlt der Manager.</li>
-            <li><b>Zeitpunkt EÜR:</b> zählt im Jahr der Auszahlung. Bonus im Dezember 2026 ausgezahlt → Gewinn 2026 sinkt.</li>
-            <li><b>Zeitpunkt Bilanz:</b> zählt im Jahr, für das er geschuldet ist. Schriftliche Zusage bis 31.12.2026 (z. B. „Bonus für 2026, zahlbar im Januar“) → Rückstellung, Gewinn 2026 sinkt, Geld fließt erst 2027.</li>
+            <li><b>Zeitpunkt (Bilanz):</b> zählt im Jahr, für das er geschuldet ist — nicht wann das Geld fließt. Schriftliche Zusage bis 31.12.2026 (z. B. „Bonus für 2026, zahlbar im Januar“) → Rückstellung, Gewinn 2026 sinkt, Geld fließt erst 2027.</li>
             <li><b>Angemessen sein:</b> Boni an fremde Angestellte sind unproblematisch. Bei Angehörigen (Ehepartner, Kinder) prüft das Finanzamt, ob Fremde dasselbe bekämen.</li>
             <li><b>Für den Manager:</b> „sonstiger Bezug“ → Lohnsteuer nach der Jahrestabelle, Sozialversicherung nur bis zur anteiligen Jahres-Beitragsbemessungsgrenze.</li>
           </ul>
@@ -308,7 +294,6 @@ export default function Steuertipps({ basis, umgesetzt }: { basis: SteuertippsBa
       {/* Fragen an den Steuerberater */}
       <Karte titel="Fragen für den nächsten Termin beim Steuerberater" ton="slate" icon={<Info size={16} />}>
         <ol className="text-sm text-neutral-800 space-y-1.5 list-decimal pl-5">
-          <li>Ermitteln wir den Gewinn per <b>EÜR oder Bilanz</b>? Bei über 800.000 € Umsatz besteht Buchführungspflicht (HGB bzw. § 141 AO).</li>
           <li>Kommt der <b>höhere Spitzensteuersatz 2027</b> (45 % ab 250.000 €, 47 % ab 280.000 €)? Falls ja: Ausgaben eher ins Jahr 2027 legen, § 34a-Thesaurierung prüfen.</li>
           <li>Welche <b>Rückstellungen</b> bilden wir zum 31.12.2026 (Retouren, Aufbewahrung, Jahresabschluss, Urlaub, Boni)?</li>
           <li>Wie dokumentieren wir <b>verdorbene/beschädigte Haare</b> und Ladenhüter, damit die Inventur-Abwertung anerkannt wird?</li>
@@ -338,7 +323,6 @@ type EingabenProps = {
   retouren: { umsatz: number; quote: number; nachStichtag: number; rohgewinn: number }; setRetouren: (v: EingabenProps["retouren"]) => void;
   rst: { aufbewahrung: number; abschluss: number; urlaub: number }; setRst: (v: EingabenProps["rst"]) => void;
   ladenhueter: { bestand: number; abschlag: number }; setLadenhueter: (v: EingabenProps["ladenhueter"]) => void;
-  wareneinkauf: number; setWareneinkauf: (v: number) => void;
 };
 
 function Eingaben(p: EingabenProps) {
@@ -409,8 +393,6 @@ function Eingaben(p: EingabenProps) {
           <Feld label="Abschlag %" wert={p.ladenhueter.abschlag} set={(v) => p.setLadenhueter({ ...p.ladenhueter, abschlag: v })} breite="w-16" />
         </>
       );
-    case "wareneinkauf":
-      return wrap(<Feld label="Zahlung bis 31.12. (€)" wert={p.wareneinkauf} set={p.setWareneinkauf} schritt={5000} />);
   }
 }
 
@@ -434,7 +416,7 @@ function RueckstellungenErklaert({ gewinn, hebesatz, freibetrag, jahr }: { gewin
         <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
           <div className="font-bold text-amber-900 mb-1">Rückstellung = Schuld, die schon feststeht, aber noch nicht bezahlt ist</div>
           <p>Kosten, die <b>2026 verursacht</b> sind, aber erst 2027 oder später Geld kosten, dürfen schon in die Bilanz 2026. Der Gewinn 2026 sinkt, obwohl noch nichts abgeflossen ist.</p>
-          <p className="mt-2 text-xs text-amber-800">Nur bei Bilanz. Bei EÜR gibt es keine Rückstellungen — dort zählt nur, was bezahlt ist.</p>
+          <p className="mt-2 text-xs text-amber-800">Geht nur mit Bilanz — und die habt ihr. Das ist euer größter Hebel zum Jahresende.</p>
         </div>
         <div className="rounded-xl border border-neutral-200 p-4">
           <div className="font-bold text-neutral-900 mb-1">Rücklage = Gewinn bewusst „parken“</div>
@@ -487,7 +469,6 @@ function HaareEntsorgen({ kg, eurKg, gewinn, hebesatz, freibetrag, jahr }: { kg:
           <div className="font-bold mb-1">Wie es steuerlich wirkt</div>
           <ul className="list-disc pl-5 space-y-1">
             <li><b>Bilanz:</b> Was nicht mehr im Lager ist (Inventur 31.12.), ist automatisch Wareneinsatz. Kaputte Ware wird aus dem Bestand ausgebucht — dafür braucht es den Nachweis, sonst rechnet das Finanzamt mit normaler Marge nach.</li>
-            <li><b>EÜR:</b> Die Haare wurden schon beim Bezahlen abgesetzt. Kein zusätzlicher Abzug — der Nachweis ist trotzdem wichtig, damit die niedrigere Marge bei einer Prüfung erklärbar ist.</li>
             <li><b>Umsatzsteuer:</b> Bei Vernichtung bleibt die Vorsteuer/EUSt erhalten (keine Korrektur, keine Entnahme).</li>
             <li><b>Alternative Haarspende</b> (z. B. an einen gemeinnützigen Perücken-Verein): steuerlich etwa gleich wie Vernichten — umsatzsteuerlich zählt der heutige Wert, bei unverkäuflicher Ware nahe 0 €. Plus fürs Image; Spendenbescheinigung nicht zu hoch ansetzen lassen.</li>
             <li><b>Für die Hochrechnung hier:</b> Die Finanzübersicht zählt nur verkaufte kg als Wareneinsatz. Verluste von ~{kg} kg im Jahr fehlen dort — der echte Gewinn ist um ~{eurK(wert)} niedriger.</li>

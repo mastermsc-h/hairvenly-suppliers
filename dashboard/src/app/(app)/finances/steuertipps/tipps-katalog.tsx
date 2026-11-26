@@ -199,7 +199,7 @@ export const TIPPS: Tipp[] = [
     betrag: "Bonus + ~21 % Arbeitgeber-SV voll absetzbar",
     firma: "Senkt ESt und GewSt in dem Jahr, in dem er zählt — bei ~445k Gewinn etwa 49 Cent je Euro.",
     ma: "Normaler Lohn: Lohnsteuer + SV (nur bis zur anteiligen Beitragsgrenze).",
-    wie: "EÜR: bis 31.12. überweisen. Bilanz: bis 31.12. schriftlich zusagen („Bonus für 2026, zahlbar Januar 2027“) → Rückstellung 2026.",
+    wie: "Bis 31.12. schriftlich zusagen („Bonus für 2026, zahlbar Januar 2027“) → Rückstellung, zählt schon 2026, Geld fließt erst 2027.",
     achtung: "Immer überweisen: Barzahlungen über 10.000 € sollen ab 2027 nicht mehr absetzbar sein (Jahressteuergesetz 2026, Bundesrat 18.12.).",
   },
   {
@@ -507,7 +507,7 @@ export default function TippsKatalog({ ermittlung, umgesetzt: start }: { ermittl
           const s = GRUPPE_STIL[t.gruppe];
           const passtNicht = t.gilt && ermittlung !== "unklar" && t.gilt !== ermittlung;
           const erledigt = umgesetzt[t.titel];
-          const kannAbhaken = t.status !== "geht-nicht";
+          const kannAbhaken = t.status !== "geht-nicht" && !passtNicht;
           return (
             <article
               key={t.titel}
@@ -527,7 +527,7 @@ export default function TippsKatalog({ ermittlung, umgesetzt: start }: { ermittl
               <div className="flex flex-wrap items-center gap-1.5 mb-1">
                 {erledigt && <span className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-emerald-600 text-white">umgesetzt {new Date(erledigt).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" })}</span>}
                 <span className={`text-[10px] font-bold uppercase tracking-wide rounded px-1.5 py-0.5 ${s.badge}`}>{s.label}</span>
-                {t.gilt && <span className="text-[10px] font-semibold rounded px-1.5 py-0.5 bg-violet-100 text-violet-800">nur {t.gilt === "bilanz" ? "Bilanz" : "EÜR"}</span>}
+                {passtNicht && <span className="text-[10px] font-semibold rounded px-1.5 py-0.5 bg-red-100 text-red-800">nur bei EÜR — gilt nicht für uns</span>}
                 {t.status === "neu" && <span className="text-[10px] font-semibold rounded px-1.5 py-0.5 bg-sky-100 text-sky-800">neu</span>}
                 {t.status === "unsicher" && <span className="text-[10px] font-semibold rounded px-1.5 py-0.5 bg-amber-100 text-amber-800">Änderung möglich</span>}
                 {t.status === "geht-nicht" && <span className="text-[10px] font-semibold rounded px-1.5 py-0.5 bg-red-100 text-red-800">geht für uns nicht</span>}
