@@ -264,7 +264,7 @@ export default function UstMonate({ jahr, monate }: { jahr: number; monate: UstM
                       <span className="text-xs text-neutral-400">noch offen</span>
                     )}
                   </td>
-                  <td className={`py-2 text-right tabular-nums text-xs ${diff === null ? "text-neutral-300" : Math.abs(diff) > 5000 ? "font-medium text-amber-700" : "text-neutral-500"}`}>
+                  <td className={`py-2 text-right tabular-nums text-xs ${diff === null || Math.abs(diff) < 1 ? "text-neutral-300" : `${diff < 0 ? "text-emerald-700" : "text-rose-700"} ${Math.abs(diff) > 5000 ? "font-semibold" : ""}`}`}>
                     {diff === null ? "—" : eur(Math.abs(diff))}
                     {diff !== null && Math.abs(diff) >= 1 && m.finanzamt !== null && (
                       <div className="text-[10.5px] font-normal text-neutral-500 leading-tight">{abweichungText(m.finanzamt, m.berechnet)}</div>
