@@ -351,3 +351,8 @@
 }
 @media (prefers-reduced-motion: reduce) { .hi-schwebe-knopf, .hi-schwebe-ring, .hi-schwebe-fenster { animation: none; } }
 .hi-sitzung { color: var(--hi-gold, #e8be6e); font-weight: 700; letter-spacing: 0.06em; }
+.hi-seiten-info { animation: hi-seiten-info 0.45s ease-out both; }
+.hi-seiten-info p { margin: 0; font-size: 13px; line-height: 1.5; }
+.hi-seiten-info-kopf { font-size: 10px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--hi-gold, #e8be6e); margin-bottom: 4px; }
+.hi-seiten-info .hi-seiten-info-frag { margin-top: 6px; opacity: 0.65; font-size: 12px; }
+@keyframes hi-seiten-info { from { opacity: 0; transform: translateY(6px); } }

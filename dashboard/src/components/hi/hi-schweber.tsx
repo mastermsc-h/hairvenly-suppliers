@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import HiGehirn from "./hi-gehirn";
 import HiChat, { type SeitenKontext } from "./hi-chat";
+import { seitenInfo } from "./seiten-info";
 
 /**
  * Hi schwebt als kleine leuchtende Kugel unten rechts auf jeder Seite. Klick klappt ein Chatfenster
@@ -45,7 +46,7 @@ export default function HiSchweber() {
     <div className="hi hi-schweber" data-offen={offen}>
       {offen && (
         <div className="hi-schwebe-fenster" role="dialog" aria-label="Hi zur aktuellen Seite fragen">
-          <HiChat key={pfad} variante="schwebe" sitzung={`seite:${pfad}`} sitzungName={seitenName} seitenKontext={kontext} onSchliessen={() => setOffen(false)} />
+          <HiChat key={pfad} variante="schwebe" sitzung={`seite:${pfad}`} sitzungName={seitenName} begruessung={seitenInfo(pfad) ?? `Du bist auf der Seite „${seitenName}“.`} seitenKontext={kontext} onSchliessen={() => setOffen(false)} />
         </div>
       )}
       <button type="button" className="hi-schwebe-knopf" onClick={umschalten} aria-expanded={offen} aria-label={offen ? "Hi schließen" : "Hi zu dieser Seite fragen"} title={offen ? "Hi schließen (Esc)" : "Hi zu dieser Seite fragen"}>

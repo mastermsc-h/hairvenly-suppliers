@@ -120,7 +120,10 @@ export default function HiChat({
   seitenKontext,
   sitzung,
   sitzungName,
+  begruessung,
 }: {
+  /** Kurzer Text, den Hi bei leerem Gespräch zeigt (z. B. was die aktuelle Seite darstellt). Wird nicht gespeichert. */
+  begruessung?: string;
   /** Eigene Sitzung (eigener Verlauf), z. B. je Dashboard-Seite beim schwebenden Hi. Ohne = gemeinsamer Verlauf von /hi. */
   sitzung?: string;
   /** Anzeigename der Sitzung im Kopf (z. B. „Liquidität“). */
@@ -296,6 +299,13 @@ export default function HiChat({
       {leer && !widget && <p className="hi-begruessung">Frag mich alles über Hairvenly — Finanzen, Lager, Bestellungen, Team, Kunden, Retouren. Ich schaue in den echten Daten nach.</p>}
 
       <div className="hi-liste" ref={listeRef}>
+        {leer && begruessung && (
+          <div className="hi-antwort hi-seiten-info">
+            <div className="hi-seiten-info-kopf">Diese Seite</div>
+            <p>{begruessung}</p>
+            <p className="hi-seiten-info-frag">Frag mich alles dazu – ich sehe, was hier gerade angezeigt wird.</p>
+          </div>
+        )}
         {sichtbar.map((a, i) =>
           a.rolle === "du" ? (
             <div key={i} className="hi-du">{a.text}</div>
