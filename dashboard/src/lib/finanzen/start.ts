@@ -1,12 +1,21 @@
 import { createServiceClient } from "@/lib/supabase/server";
-import { ladePrognose } from "@/lib/liquiditaet/daten";
+import { ladeKontoVerlauf, ladePrognose } from "@/lib/liquiditaet/daten";
 import { ladeHy, ladeSteuerKasse } from "@/lib/cockpit/daten";
 import type { SteuerKasseDaten } from "@/lib/cockpit/typen";
-import { ladeUstMonate, type UstMonat } from "@/lib/steuer/ust-monate";
+import { ladeUstMonate, SALON_NACHMELDUNG_ZEITRAUM, type UstMonat } from "@/lib/steuer/ust-monate";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import { kontoZweck } from "@/lib/bank/konten";
 
 export type Ampel = "gruen" | "gelb" | "rot" | "info";
+
+/**
+ * Stand einer USt-Voranmeldung:
+ * bezahlt/erstattet = Geld ist geflossen (Ist im Ledger) · gemeldet = Voranmeldung abgegeben, Geld noch nicht da ·
+ * geschaetzt = noch keine Voranmeldung, aus den Umsätzen gerechnet · laufend = aktueller Monat, hochgerechnet.
+ */
+export type UstStatus = "bezahlt" | "erstattet" | "gemeldet" | "geschaetzt" | "laufend";
+/** Woraus eine geschätzte Zahllast besteht: USt auf Umsätze − Vorsteuer − Einfuhrumsatzsteuer. */
+export interface UstDetail { ust: number; vorsteuer: number; eust: number }
 
 export interface FinanzStart {
   stand: string;
@@ -21,6 +30,19 @@ export interface FinanzStart {
     /** USt auf Salon-Umsätze, die in abgegebenen Voranmeldungen fehlen (offene Nachzahlung). */
     salonNachmeldung: { von: string; bis: string; betrag: number } | null;
   };
+  /** USt je Monat mit Zahlungsstand + was noch kommt (+ = ans Finanzamt, − = Erstattung). */
+  ustPlan: {
+    jahr: number;
+    monate: Array<{ monat: string; betrag: number; status: UstStatus; faellig: string; datum: string | null; bisher: number | null; detail: UstDetail | null }>;
+    bezahlt: number;
+    erstattet: number;
+    offen: Array<{ label: string; betrag: number; faellig: string; status: UstStatus; detail: UstDetail | null }>;
+    offenSumme: number;
+  };
+  /** Kontostand (Sparkasse) der letzten 60 Tage + Vorschau. */
+  kontoKurve: Array<{ datum: string; ist: number | null; prognose: number | null }>;
+  /** Umsatz je Monat (Shop + Salon, inkl. USt nach Erstattungen) mit Shop-Vorjahr. */
+  umsatzMonate: Array<{ monat: string; shop: number; salon: number; vorjahr: number | null }>;
   steuerTermine: Array<{ datum: string; label: string; betrag: number; geschaetzt: boolean }>;
   fixkosten: { summe: number; posten: Array<{ label: string; monat: number; gruppe: "gehalt" | "betrieb" }> };
   cashflow: Array<{ monat: string; einnahmen: number; ware: number; steuern: number; kosten: number; kredit: number; ueberschuss: number }>;
@@ -37,6 +59,8 @@ const plusMonate = (ym: string, n: number) => {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 };
 const eurKurz = (n: number) => `${Math.round(n).toLocaleString("de-DE")} €`;
+const MONATE_LANG = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
+const mNameLang = (ym: string) => MONATE_LANG[Number(ym.slice(5, 7)) - 1] ?? ym;
 
 async function alle<T>(q: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
   const out: T[] = [];
@@ -57,7 +81,7 @@ export async function ladeFinanzStart(): Promise<FinanzStart> {
   const aktMonat = heute.slice(0, 7);
   const cfVon = `${plusMonate(aktMonat, -6)}-01`;
 
-  const [{ roh, einstellungen: e, ergebnis: p }, hy, ustMonate, tx, shop, kasse] = await Promise.all([
+  const [{ roh, einstellungen: e, ergebnis: p }, hy, ustMonate, tx, shop, kasse, ustPosten] = await Promise.all([
     ladePrognose(),
     ladeHy(),
     ladeUstMonate(jahr, sb),
@@ -70,7 +94,14 @@ export async function ladeFinanzStart(): Promise<FinanzStart> {
       console.error("[finanzen/start] Steuerkasse", err);
       return null;
     }),
+    sb.from("steuer_posten").select("art, zeitraum, richtung, soll_betrag, soll_schaetzung, faellig_am, ist_betrag, bezahlt_am")
+      .eq("jahr", jahr).in("art", ["ust_va", "ust_nachzahlung"])
+      .then((r) => (r.data ?? []) as Array<{ art: string; zeitraum: string; richtung: string; soll_betrag: number; soll_schaetzung: boolean | null; faellig_am: string | null; ist_betrag: number; bezahlt_am: string | null }>),
   ]);
+  const verlauf = await ladeKontoVerlauf(sb, roh, e).catch((err) => {
+    console.error("[finanzen/start] Kontoverlauf", err);
+    return [];
+  });
 
   // ── Konten ──
   const liste = roh.bankSalden.map((b) => ({
@@ -115,6 +146,62 @@ export async function ladeFinanzStart(): Promise<FinanzStart> {
     offeneMonate,
     salonNachmeldung,
   };
+
+  // ── USt-Plan: je Monat bezahlt / gemeldet / geschätzt, dazu was noch offen ist ──
+  const vaBy = new Map(ustPosten.filter((x) => x.art === "ust_va").map((x) => [x.zeitraum, x]));
+  const tagHeute = Number(heute.slice(8, 10));
+  const tageImMonat = new Date(Date.UTC(jahr, Number(aktMonat.slice(5)), 0)).getUTCDate();
+  const planMonate: FinanzStart["ustPlan"]["monate"] = ustMonate.map((m) => {
+    const x = vaBy.get(m.monat);
+    const vz = x?.richtung === "erstattung" ? -1 : 1;
+    const fae = x?.faellig_am?.slice(0, 10) ?? faellig(m.monat);
+    if (x && Number(x.ist_betrag) !== 0)
+      return { monat: m.monat, betrag: r0(vz * Number(x.ist_betrag)), status: vz < 0 ? "erstattet" : "bezahlt", faellig: fae, datum: x.bezahlt_am?.slice(0, 10) ?? null, bisher: null, detail: null };
+    if (x && Number(x.soll_betrag) !== 0 && !x.soll_schaetzung)
+      return { monat: m.monat, betrag: r0(vz * Number(x.soll_betrag)), status: "gemeldet", faellig: fae, datum: null, bisher: null, detail: null };
+    if (m.laufend) {
+      // Umsatz-USt auf den ganzen Monat hochrechnen; Vorsteuer/EUSt wie bisher gebucht (vorsichtig = eher zu hoch)
+      const ustHoch = r0((m.ust * tageImMonat) / Math.max(1, tagHeute));
+      return { monat: m.monat, betrag: ustHoch - m.vorsteuer - m.eust, status: "laufend", faellig: fae, datum: null, bisher: m.berechnet, detail: { ust: ustHoch, vorsteuer: m.vorsteuer, eust: m.eust } };
+    }
+    return { monat: m.monat, betrag: m.berechnet, status: "geschaetzt", faellig: fae, datum: null, bisher: null, detail: { ust: m.ust, vorsteuer: m.vorsteuer, eust: m.eust } };
+  });
+  const salonPosten = ustPosten.find((x) => x.art === "ust_nachzahlung" && x.zeitraum === SALON_NACHMELDUNG_ZEITRAUM);
+  const offenPlan: FinanzStart["ustPlan"]["offen"] = planMonate
+    .filter((m) => m.status !== "bezahlt" && m.status !== "erstattet")
+    .map((m) => ({ label: `USt ${mNameLang(m.monat)}`, betrag: m.betrag, faellig: m.faellig, status: m.status, detail: m.detail }));
+  if (salonPosten ? Number(salonPosten.ist_betrag) === 0 : !!salonNachmeldung) {
+    offenPlan.push({
+      label: `Nachmeldung Salon ${salonNachmeldung ? `${mNameLang(salonNachmeldung.von)}–${mNameLang(salonNachmeldung.bis)}` : "Jul–Okt"}`,
+      betrag: r0(salonPosten && Number(salonPosten.soll_betrag) ? Number(salonPosten.soll_betrag) : salonNachmeldung?.betrag ?? 0),
+      faellig: salonPosten?.faellig_am?.slice(0, 10) ?? faellig(aktMonat),
+      status: salonPosten && !salonPosten.soll_schaetzung ? "gemeldet" : "geschaetzt",
+      detail: null,
+    });
+  }
+  offenPlan.sort((a, b) => a.faellig.localeCompare(b.faellig));
+  const ustPlan: FinanzStart["ustPlan"] = {
+    jahr,
+    monate: planMonate,
+    bezahlt: r0(planMonate.filter((m) => m.status === "bezahlt").reduce((s, m) => s + m.betrag, 0)),
+    erstattet: r0(-planMonate.filter((m) => m.status === "erstattet").reduce((s, m) => s + m.betrag, 0)),
+    offen: offenPlan,
+    offenSumme: r0(offenPlan.reduce((s, x) => s + x.betrag, 0)),
+  };
+
+  // ── Kontostand: letzte 60 Tage (Buchungen) + Vorschau ──
+  const kurveVon = new Date(Date.parse(`${heute}T12:00:00Z`) - 60 * 864e5).toISOString().slice(0, 10);
+  const kontoKurve: FinanzStart["kontoKurve"] = [
+    ...verlauf.filter((v) => v.datum >= kurveVon && v.datum < p.start).map((v) => ({ datum: v.datum, ist: r0(v.saldo), prognose: null })),
+    ...p.tage.map((t, i) => ({ datum: t.datum, ist: i === 0 ? r0(t.saldo) : null, prognose: r0(t.saldo) })),
+  ];
+
+  // ── Umsatz je Monat (dieses Jahr) mit Vorjahr ──
+  const salonBy = new Map(ustMonate.map((m) => [m.monat, m.salon]));
+  const umsatzMonate = Array.from({ length: Number(aktMonat.slice(5)) }, (_, i) => `${jahr}-${String(i + 1).padStart(2, "0")}`).map((m) => {
+    const vj = `${jahr - 1}-${m.slice(5)}`;
+    return { monat: m, shop: r0(shopBy.get(m) ?? 0), salon: r0(m === aktMonat ? salonMonat : salonBy.get(m) ?? 0), vorjahr: shopBy.has(vj) ? r0(shopBy.get(vj)!) : null };
+  });
 
   // ── Steuertermine (aus der Liquiditätsvorschau, nächste 60 Tage) ──
   const bis60 = new Date(Date.parse(`${p.start}T12:00:00Z`) + 60 * 864e5).toISOString().slice(0, 10);
@@ -220,8 +307,8 @@ export async function ladeFinanzStart(): Promise<FinanzStart> {
   }
   checks.push({
     titel: "Umsatzsteuer offen",
-    wert: `${ust.offen >= 0 ? "" : "−"}${eurKurz(Math.abs(ust.offen))}`,
-    text: ust.offen >= 0 ? "grob aus den Umsätzen: noch zu zahlen" : "grob aus den Umsätzen: kommt noch zurück",
+    wert: `${ustPlan.offenSumme >= 0 ? "" : "−"}${eurKurz(Math.abs(ustPlan.offenSumme))}`,
+    text: `${ustPlan.offen.length} offene Posten (gemeldet, nachzumelden oder hochgerechnet) — ${ustPlan.offenSumme >= 0 ? "unterm Strich noch zu zahlen" : "unterm Strich kommt noch zurück"}`,
     ampel: "info",
     href: "/finances/prepayments",
   });
@@ -232,6 +319,9 @@ export async function ladeFinanzStart(): Promise<FinanzStart> {
     liquiditaet: { tiefpunkt: tief, puffer: e.puffer, ende: p.tage.at(-1) ?? null },
     umsatz,
     ust,
+    ustPlan,
+    kontoKurve,
+    umsatzMonate,
     steuerTermine,
     fixkosten,
     cashflow,
