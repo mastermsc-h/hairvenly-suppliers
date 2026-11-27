@@ -469,6 +469,29 @@ def lock(p: dict) -> None:
 
 # ── Abläufe ──────────────────────────────────────────────────────────────────
 
+def berlin_jetzt(now_utc: dt.datetime | None = None) -> dt.datetime:
+    """Berliner Ortszeit ohne tz-Datenbank (EU-Regel: Sommerzeit vom letzten
+    März-Sonntag 01:00 UTC bis letzten Oktober-Sonntag 01:00 UTC)."""
+    n = now_utc or dt.datetime.now(dt.timezone.utc)
+    def letzter_sonntag(jahr: int, monat: int) -> dt.datetime:
+        d = dt.datetime(jahr, monat, 31, 1, 0, tzinfo=dt.timezone.utc)
+        return d - dt.timedelta(days=(d.weekday() + 1) % 7)
+    sommer = letzter_sonntag(n.year, 3) <= n < letzter_sonntag(n.year, 10)
+    return (n + dt.timedelta(hours=2 if sommer else 1)).replace(tzinfo=None)
+
+
+def faellig(now_utc: dt.datetime | None = None) -> bool:
+    """Takt (User 27.11.2026): 09:00–21:00 Berliner Zeit alle 15 Min.; sonst
+    stündlich (erster Viertelstunden-Slot) von 6 bis 23 Uhr; nachts nichts.
+    Der Cron läuft alle 15 Min. in UTC — die Uhrzeit-Entscheidung fällt hier,
+    damit Sommer-/Winterzeit automatisch stimmt."""
+    b = berlin_jetzt(now_utc)
+    minuten = b.hour * 60 + b.minute
+    if 9 * 60 <= minuten < 21 * 60 + 15:
+        return True
+    return 6 <= b.hour <= 23 and b.minute < 15
+
+
 def run_all() -> dict:
     """Stündlicher Lauf: alle eingerichteten Banken ohne TAN, ein gemeinsamer Bericht."""
     if os.environ.get("FINTS_CLOUD", "on").lower() == "off":
@@ -586,6 +609,9 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._authorized():
             return self._json(401, {"error": "Unauthorized"})
+        # ?force=1 (manueller Test) umgeht den Takt
+        if "force=1" not in (urllib.parse.urlparse(self.path).query or "") and not faellig():
+            return self._json(200, {"ok": True, "skipped": "außerhalb des Takts", "berlin": berlin_jetzt().isoformat(timespec="minutes")})
         try:
             self._json(200, run_all())
         except Exception as e:  # nie den Fehlertext der Bank-Bibliothek ungeprüft durchreichen

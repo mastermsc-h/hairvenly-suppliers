@@ -86,7 +86,7 @@
     },
     {
       "path": "/api/fints",
-      "schedule": "37 5-22 * * *"
+      "schedule": "*/15 * * * *"
     }
   ],
   "functions": {
