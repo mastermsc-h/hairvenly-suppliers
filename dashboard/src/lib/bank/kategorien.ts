@@ -236,6 +236,8 @@ export interface KategorieTx {
   purpose: string | null;
   posting_text: string | null;
   match_status: string;
+  /** Von Hand gesetzter USt-Monat einer EUSt-Abbuchung (YYYY-MM), sonst automatisch. */
+  eust_monat?: string | null;
 }
 
 export interface KategorieErgebnis {
@@ -301,14 +303,35 @@ export function kategorisiere(tx: KategorieTx, regelnSortiert: KategorieRegel[])
   return { kategorie: "unklar", quelle: "auto", regel_id: null, steuer_split: [] };
 }
 
+/** DHL Express (ZIT-Zollrechnungen) — bucht die EUSt erst Tage bis Wochen nach dem Rechnungsdatum ab. */
+const DHL_EXPRESS = /DHL\s*EXPRESS|\bZIT\d{5,}/i;
+export function istDhlExpress(tx: Pick<KategorieTx, "purpose" | "counterparty_name">): boolean {
+  return DHL_EXPRESS.test(`${tx.counterparty_name ?? ""} ${tx.purpose ?? ""}`);
+}
+/** Abstand Rechnung → Abbuchung bei DHL Express (gemessen 27.11.2026: 6–7 Tage nach Ankunft). */
+export const DHL_EUST_NACHLAUF_TAGE = 7;
+
+/**
+ * USt-Monat einer EUSt-Abbuchung. Der Steuerberater bucht die EUSt mit dem RECHNUNGSDATUM
+ * (Mail 27.11.2026). Carl Ungewitter bucht am Rechnungstag ab → Buchungsmonat. DHL Express
+ * bucht ca. eine Woche später ab → Monat von (Abbuchung − 7 Tage). Ausreißer (Sammelabbuchung
+ * Wochen später) per Hand: tx.eust_monat hat immer Vorrang.
+ */
+export function eustMonat(tx: Pick<KategorieTx, "booking_date" | "purpose" | "counterparty_name" | "eust_monat">): string {
+  if (tx.eust_monat && /^\d{4}-\d{2}$/.test(tx.eust_monat)) return tx.eust_monat;
+  if (!istDhlExpress(tx)) return tx.booking_date.slice(0, 7);
+  const d = new Date(`${tx.booking_date.slice(0, 10)}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - DHL_EUST_NACHLAUF_TAGE);
+  return d.toISOString().slice(0, 7);
+}
+
 /**
  * Steuer-Zuordnung für Kategorien ohne Finanzamt-Zweck. Nur EUSt/Zoll bekommt
- * einen Zeitraum (Buchungsmonat) — EUSt ist eine Monatssteuer und wird dem
- * Monat zugeordnet, in dem sie bezahlt wurde.
+ * einen Zeitraum: den Monat der Zollrechnung (siehe eustMonat).
  */
-export function steuerSplitFuer(kategorie: string, tx: Pick<KategorieTx, "amount" | "booking_date" | "purpose" | "counterparty_name" | "counterparty_iban">): SteuerSplit[] {
+export function steuerSplitFuer(kategorie: string, tx: Pick<KategorieTx, "amount" | "booking_date" | "purpose" | "counterparty_name" | "counterparty_iban" | "eust_monat">): SteuerSplit[] {
   if (kategorie === "st_eust") {
-    const zeitraum = tx.booking_date.slice(0, 7);
+    const zeitraum = eustMonat(tx);
     return [{ art: "eust", zeitraum, jahr: Number(zeitraum.slice(0, 4)), betrag: round2(-tx.amount) }];
   }
   if (kategorie.startsWith("st_") && istFinanzamt(tx)) return parseSteuerZweck(tx.purpose, tx.amount);

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireFeature } from "@/lib/auth";
 import { KATEGORIE_BY_KEY, type KategorieRegel, type SteuerSplit } from "@/lib/bank/kategorien";
-import { resetKategorie, runKategorisierung, setKategorieManuell } from "@/lib/bank/kategorien-engine";
+import { resetKategorie, runKategorisierung, setEustMonat, setKategorieManuell } from "@/lib/bank/kategorien-engine";
 
 export interface KontoUmsatz {
   id: string;
@@ -21,6 +21,8 @@ export interface KontoUmsatz {
   /** Wann der Umsatz erstmals abgerufen wurde (Bank liefert keine Uhrzeit). */
   created_at?: string | null;
   steuer_split: SteuerSplit[];
+  /** Von Hand gesetzter USt-Monat einer EUSt-Abbuchung (sonst automatisch). */
+  eust_monat?: string | null;
 }
 
 /** Aktueller Kontostand laut Bank (FinTS) bzw. PayPal-API — stündlich vom Worker. */
@@ -54,7 +56,7 @@ export async function fetchKontoumsaetze(
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("bank_transactions")
-      .select("id, account_iban, booking_date, amount, counterparty_name, counterparty_iban, purpose, posting_text, kategorie, kategorie_quelle, kategorie_regel_id, steuer_split, created_at")
+      .select("id, account_iban, booking_date, amount, counterparty_name, counterparty_iban, purpose, posting_text, kategorie, kategorie_quelle, kategorie_regel_id, steuer_split, eust_monat, created_at")
       .gte("booking_date", alleZeitraeume ? "1900-01-01" : `${jahr}-01-01`)
       .lte("booking_date", alleZeitraeume ? "2999-12-31" : `${jahr}-12-31`)
       .order("booking_date", { ascending: false })
@@ -116,6 +118,18 @@ export async function setKategorieAction(ids: string[], kategorie: string): Prom
   if (!ids.length || ids.length > 500) return { ok: false, error: "Ungültige Auswahl" };
   try {
     await setKategorieManuell(ids, kategorie);
+    revalidateFinanzen();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** USt-Monat einer EUSt-/Zoll-Abbuchung von Hand setzen (null = automatisch). */
+export async function setEustMonatAction(id: string, monat: string | null): Promise<Result> {
+  await requireFeature("finances");
+  try {
+    await setEustMonat(id, monat);
     revalidateFinanzen();
     return { ok: true };
   } catch (e) {

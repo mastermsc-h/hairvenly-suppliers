@@ -95,6 +95,20 @@ check("Sammelabbuchung → Kategorie des größten Anteils",
 check("Finanzamt unlesbar → sonstige Steuern", faUnlesbar.kategorie, "st_sonstige");
 const express = K.kategorisiere(tx({ amount: -1015.05, counterparty_name: "DHL GROUP - DEUTSCHE POST AG", purpose: "/OBO/DHL EXPRESS GERMANY GMBH/INV/ZIT7817554" }), regeln);
 check("DHL Express → EUSt (vor DHL-Versand-Regel)", [express.kategorie, express.steuer_split], ["st_eust", [{ art: "eust", zeitraum: "2026-09", jahr: 2026, betrag: 1015.05 }]]);
+// ── EUSt im Monat der Zollrechnung (Steuerberater 27.11.2026) ──
+const ung = { booking_date: "2026-11-03", counterparty_name: "Carl Ungewitter Trinidad", purpose: "RG.-Nr.. 26 33620" };
+check("EUSt Ungewitter = Abbuchungsmonat", K.eustMonat(ung), "2026-11");
+check("EUSt DHL Anfang Monat → Vormonat", K.eustMonat({ booking_date: "2026-11-05", counterparty_name: "DHL AG", purpose: "/OBO/DHL EXPRESS GERMANY GMBH/INV/ZIT8150777" }), "2026-10");
+check("EUSt DHL Monatsmitte bleibt", K.eustMonat({ booking_date: "2026-11-20", counterparty_name: "DHL AG", purpose: "/OBO/DHL EXPRESS GERMANY GMBH/INV/ZIT8193186" }), "2026-11");
+check("EUSt DHL Januar → Dezember Vorjahr", K.eustMonat({ booking_date: "2027-01-04", counterparty_name: "Deutsche Post AG", purpose: "INV/ZIT9000001" }), "2026-12");
+check("EUSt nur ZIT im Zweck = DHL", K.istDhlExpress({ counterparty_name: null, purpose: "INV/ZIT7611945" }), true);
+check("EUSt von Hand hat Vorrang", K.eustMonat({ booking_date: "2026-10-30", counterparty_name: "DHL AG", purpose: "INV/ZIT8044246", eust_monat: "2026-09" }), "2026-09");
+check("EUSt ungültiger Hand-Wert → Regel", K.eustMonat({ booking_date: "2026-10-30", counterparty_name: "DHL AG", purpose: "INV/ZIT8044246", eust_monat: "Sept" }), "2026-10");
+check("steuerSplitFuer nutzt Rechnungsmonat",
+  K.steuerSplitFuer("st_eust", { amount: -7790.76, booking_date: "2026-11-05", counterparty_name: "DHL AG", counterparty_iban: null, purpose: "INV/ZIT8150777" }),
+  [{ art: "eust", zeitraum: "2026-10", jahr: 2026, betrag: 7790.76 }]);
+check("DHL Paket ist kein DHL Express", K.istDhlExpress({ counterparty_name: "DHL GROUP - DHL AG", purpose: "/OBO/DHL PAKET GMBH/KD 6386863875" }), false);
+
 check("DHL Paket → Versand", K.kategorisiere(tx({ amount: -1239.29, counterparty_name: "DHL GROUP - DHL AG", purpose: "/OBO/DHL PAKET GMBH/KD 6386863875" }), regeln).kategorie, "aus_versand");
 check("Nexi Eingang → Kartenzahlungen", K.kategorisiere(tx({ amount: 3000, counterparty_name: "NEXI GERMANY GMBH" }), regeln).kategorie, "ein_karte");
 check("Nexi Ausgang → Gebühren", K.kategorisiere(tx({ amount: -30, counterparty_name: "Nexi Germany GmbH" }), regeln).kategorie, "aus_bank");

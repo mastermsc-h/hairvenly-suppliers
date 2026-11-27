@@ -4,7 +4,7 @@ import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import { readVerkaufsanalyse } from "@/lib/stock-sheets";
 import { createServiceClient } from "@/lib/supabase/server";
-import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
+import { KATEGORIE_BY_KEY, type SteuerSplit } from "@/lib/bank/kategorien";
 import {
   einfuhrZahlungen,
   offeneZollBuchungen,
@@ -34,7 +34,7 @@ import {
 } from "./rechnung";
 import { debtBucket } from "@/lib/order-debt";
 import type { OrderStatus } from "@/lib/types";
-import { SALON_KONTO, SALON_NICHT_GEMELDET } from "@/lib/steuer/ust-monate";
+import { SALON_KONTO, SALON_NICHT_GEMELDET, eustZeitraum } from "@/lib/steuer/ust-monate";
 
 type Sb = ReturnType<typeof createServiceClient>;
 
@@ -75,6 +75,7 @@ interface Tx {
   kategorie: string | null;
   counterparty_name: string | null;
   purpose: string | null;
+  steuer_split?: SteuerSplit[] | null;
 }
 
 async function selectAll<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
@@ -112,7 +113,7 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
   const [alleTx, posten, { data: orders }, { data: amanda }, verbrauch, { data: salden }, { data: amandaAnkuenfte }, { data: einfuhrNr }] = await Promise.all([
     selectAll<Tx>((from, to) =>
       sb.from("bank_transactions")
-        .select("account_iban, booking_date, amount, kategorie, counterparty_name, purpose")
+        .select("account_iban, booking_date, amount, kategorie, counterparty_name, purpose, steuer_split")
         .gte("booking_date", seit)
         .order("booking_date", { ascending: true })
         .order("id", { ascending: true })
@@ -213,7 +214,8 @@ export async function ladeRohdaten(sb: Sb = createServiceClient()): Promise<LiqR
 
   // ── Steuern ──
   const eustBezahlt: Record<string, number> = {};
-  for (const t of tx) if (t.kategorie === "st_eust") eustBezahlt[t.booking_date.slice(0, 7)] = (eustBezahlt[t.booking_date.slice(0, 7)] ?? 0) - t.amount;
+  // Je USt-Monat der Zollrechnung (wie der Steuerberater bucht), nicht je Abbuchungsmonat
+  for (const t of tx) if (t.kategorie === "st_eust") { const m = eustZeitraum({ booking_date: t.booking_date, steuer_split: t.steuer_split ?? null }); eustBezahlt[m] = (eustBezahlt[m] ?? 0) - t.amount; }
   const salonUstMonat = (m: string) =>
     (tx.filter((t) => t.account_iban === SALON_KONTO && (t.kategorie ?? "").startsWith("ein_") && t.booking_date.startsWith(m)).reduce((x, t) => x + t.amount, 0) * 19) / 119;
   const istSigned = (p: { richtung: string; ist_betrag: number }) => (p.richtung === "erstattung" ? -1 : 1) * Number(p.ist_betrag || 0);

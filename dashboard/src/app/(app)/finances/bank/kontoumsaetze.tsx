@@ -6,7 +6,7 @@ import { GeldflussBalken, Kennzahlen, KontoKarten } from "./bank-visuals";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { AlertTriangle, ChevronLeft, ChevronRight, Filter, Loader2, RefreshCw, RotateCcw, Search, Trash2, Wand2 } from "lucide-react";
-import { KATEGORIEN, KATEGORIE_BY_KEY, type KategorieGruppe, type SteuerSplit } from "@/lib/bank/kategorien";
+import { KATEGORIEN, KATEGORIE_BY_KEY, eustMonat, istDhlExpress, type KategorieGruppe, type SteuerSplit } from "@/lib/bank/kategorien";
 import { monatGrenzen, monatName, suchMonate } from "@/lib/bank/such-zeitraum";
 import {
   deleteRegelAction,
@@ -14,6 +14,7 @@ import {
   rekategorisierenAction,
   resetKategorieAction,
   saveRegelAction,
+  setEustMonatAction,
   setKategorieAction,
   sucheKontoumsaetze,
   type KontoSaldo,
@@ -309,6 +310,15 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
     setBusyId(u.id);
     setMeldung(null);
     const res = await setKategorieAction([u.id], kategorie);
+    if (res.ok) await reload();
+    else setMeldung({ ok: false, text: res.error ?? "Fehler" });
+    setBusyId(null);
+  }
+
+  async function setEust(u: KontoUmsatz, monat: string | null) {
+    setBusyId(u.id);
+    setMeldung(null);
+    const res = await setEustMonatAction(u.id, monat);
     if (res.ok) await reload();
     else setMeldung({ ok: false, text: res.error ?? "Fehler" });
     setBusyId(null);
@@ -676,7 +686,9 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
                           </>
                         )}
                       </div>
-                      {u.steuer_split.length > 0 && (
+                      {kat === "st_eust" && u.amount < 0 ? (
+                        <EustMonatWahl u={u} disabled={busy || busyId === "all"} onChange={(m) => setEust(u, m)} />
+                      ) : u.steuer_split.length > 0 && (
                         <div className="mt-1 text-xs text-neutral-500">
                           {u.steuer_split.map((s) => `${ART_LABEL[s.art]} ${zeitraumLabel(s.zeitraum)}`).join(", ")}
                         </div>
@@ -698,7 +710,8 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
         )}
         <p className="mt-3 text-xs text-neutral-500">
           Kategorie per Auswahlfeld ändern = gilt für diesen einen Umsatz. Mit <Wand2 size={12} className="inline" /> wird daraus eine Regel für alle
-          Umsätze derselben Gegenpartei (auch künftige).
+          Umsätze derselben Gegenpartei (auch künftige). Einfuhrumsatzsteuer zählt im Monat der Zollrechnung (so bucht der Steuerberater):
+          Carl Ungewitter = Abbuchungstag, DHL Express = Abbuchung − 7 Tage. Kam eine Abbuchung deutlich später, unter „EUSt für“ den Rechnungsmonat wählen.
         </p>
       </Card>
 
@@ -752,6 +765,41 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
           {summen.unklar.n} Umsätze ({fmt(summen.unklar.sum)}) sind noch nicht zugeordnet. Kachel „Nicht zugeordnet“ anklicken, um nur diese zu sehen.
         </div>
       )}
+    </div>
+  );
+}
+
+/** Monate rund um die Abbuchung (3 davor bis Abbuchungsmonat) für die EUSt-Zuordnung. */
+function monateUm(booking: string): string[] {
+  const [y, m] = booking.slice(0, 7).split("-").map(Number);
+  return [0, 1, 2, 3].map((i) => {
+    const d = new Date(Date.UTC(y, m - 1 - i, 1));
+    return d.toISOString().slice(0, 7);
+  });
+}
+
+/** USt-Monat einer EUSt-/Zoll-Abbuchung: automatisch (Rechnungsmonat geschätzt) oder von Hand. */
+function EustMonatWahl({ u, disabled, onChange }: { u: KontoUmsatz; disabled: boolean; onChange: (m: string | null) => void }) {
+  const auto = eustMonat({ ...u, eust_monat: null });
+  const gesetzt = u.eust_monat ?? null;
+  const dhl = istDhlExpress(u);
+  const optionen = [...new Set([...monateUm(u.booking_date), ...(gesetzt ? [gesetzt] : [])])].sort().reverse();
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-neutral-500">
+      <span>EUSt für</span>
+      <select
+        value={gesetzt ?? ""}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value || null)}
+        className={`rounded-md border px-1.5 py-0.5 text-xs bg-white focus:ring-2 focus:ring-neutral-900 focus:outline-none ${gesetzt ? "border-violet-300 text-violet-800" : "border-neutral-300"}`}
+        title={dhl ? "DHL Express bucht ca. 1 Woche nach der Rechnung ab — automatisch zählt der Monat von Abbuchung − 7 Tage" : "Zählt im Monat der Rechnung (= Abbuchungstag)"}
+      >
+        <option value="">{zeitraumLabel(auto)} (automatisch)</option>
+        {optionen.map((m) => (
+          <option key={m} value={m}>{zeitraumLabel(m)}</option>
+        ))}
+      </select>
+      {gesetzt && <span className="text-[10px] font-medium rounded px-1.5 py-0.5 bg-violet-50 text-violet-700">von Hand</span>}
     </div>
   );
 }

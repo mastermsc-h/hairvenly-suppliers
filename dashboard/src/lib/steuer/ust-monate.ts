@@ -1,4 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/server";
+import type { SteuerSplit } from "@/lib/bank/kategorien";
 
 type Sb = ReturnType<typeof createServiceClient>;
 
@@ -64,6 +65,11 @@ async function alle<T>(q: (from: number, to: number) => PromiseLike<{ data: T[] 
 }
 
 const r0 = (n: number) => Math.round(n);
+/** USt-Monat einer EUSt-Abbuchung: gespeicherter Steuer-Zeitraum, sonst Buchungsmonat. */
+export function eustZeitraum(t: { booking_date: string; steuer_split: SteuerSplit[] | null }): string {
+  const z = (t.steuer_split ?? []).find((s) => s.art === "eust")?.zeitraum;
+  return z && /^\d{4}-\d{2}$/.test(z) ? z : String(t.booking_date).slice(0, 7);
+}
 const monatBerlin = (iso: string) => new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }).slice(0, 7);
 
 /** Umsatzsteuer-Rechnung je Monat eines Jahres (bis zum laufenden Monat). */
@@ -78,9 +84,10 @@ export async function ladeUstMonate(jahr: number, sb: Sb = createServiceClient()
       sb.from("kunden_bestellungen").select("created_at, land, umsatz_eur, storniert")
         .gte("created_at", `${jahr - 1}-12-31T00:00:00Z`).lt("created_at", `${jahr + 1}-01-01T23:00:00Z`).order("created_at").range(from, to),
     ),
-    alle<{ booking_date: string; amount: number; kategorie: string | null; account_iban: string | null }>((from, to) =>
-      sb.from("bank_transactions").select("booking_date, amount, kategorie, account_iban")
-        .gte("booking_date", `${jahr}-01-01`).lte("booking_date", `${jahr}-12-31`).order("booking_date").order("id").range(from, to),
+    // Bis Mitte Januar laden: DHL-Express-EUSt für Dezember wird erst im Januar abgebucht
+    alle<{ booking_date: string; amount: number; kategorie: string | null; account_iban: string | null; steuer_split: SteuerSplit[] | null }>((from, to) =>
+      sb.from("bank_transactions").select("booking_date, amount, kategorie, account_iban, steuer_split")
+        .gte("booking_date", `${jahr}-01-01`).lte("booking_date", `${jahr + 1}-01-31`).order("booking_date").order("id").range(from, to),
     ),
     alle<{ zeitraum: string; richtung: string; ist_betrag: number; soll_betrag: number; soll_schaetzung: boolean | null; ist_quelle: string | null }>((from, to) =>
       sb.from("steuer_posten").select("zeitraum, richtung, ist_betrag, soll_betrag, soll_schaetzung, ist_quelle").eq("art", "ust_va").eq("jahr", jahr).range(from, to),
@@ -103,13 +110,19 @@ export async function ladeUstMonate(jahr: number, sb: Sb = createServiceClient()
     else a.shopDritt += wert;
   }
   for (const t of buchungen) {
-    const a = acc.get(String(t.booking_date).slice(0, 7));
-    if (!a) continue;
     const betrag = Number(t.amount);
     const k = t.kategorie ?? "";
+    // EUSt zählt im Monat der Zollrechnung (steuer_split.zeitraum, siehe eustMonat), nicht der Abbuchung
+    if (k === "st_eust") {
+      if (betrag >= 0) continue;
+      const a = acc.get(eustZeitraum(t));
+      if (a) a.eustAbb -= betrag;
+      continue;
+    }
+    const a = acc.get(String(t.booking_date).slice(0, 7));
+    if (!a) continue;
     if (t.account_iban === SALON_KONTO && k.startsWith("ein_")) a.salon += betrag;
     else if (betrag < 0 && VST_KATEGORIEN.has(k)) a.vstBasis -= betrag;
-    else if (betrag < 0 && k === "st_eust") a.eustAbb -= betrag;
   }
   const fa = new Map(posten.map((p) => [p.zeitraum, p]));
 

@@ -28,10 +28,11 @@ interface TxKatRow {
   kategorie_quelle: string | null;
   kategorie_regel_id: string | null;
   steuer_split: SteuerSplit[] | null;
+  eust_monat: string | null;
 }
 
 const KAT_FIELDS =
-  "id, booking_date, amount, counterparty_name, counterparty_iban, purpose, posting_text, match_status, kategorie, kategorie_quelle, kategorie_regel_id, steuer_split";
+  "id, booking_date, amount, counterparty_name, counterparty_iban, purpose, posting_text, match_status, kategorie, kategorie_quelle, kategorie_regel_id, steuer_split, eust_monat";
 
 async function inBatches<T>(items: T[], size: number, fn: (x: T) => PromiseLike<unknown>): Promise<void> {
   for (let i = 0; i < items.length; i += size) await Promise.all(items.slice(i, i + size).map(fn));
@@ -102,7 +103,7 @@ export async function runKategorisierung(
 
 /** Manuelle Kategorie für einzelne Umsätze (setzt Quelle "manuell"). */
 export async function setKategorieManuell(ids: string[], kategorie: string, sb: Sb = createServiceClient()): Promise<void> {
-  const { data, error } = await sb.from("bank_transactions").select("id, amount, booking_date, purpose, counterparty_name, counterparty_iban").in("id", ids);
+  const { data, error } = await sb.from("bank_transactions").select("id, amount, booking_date, purpose, counterparty_name, counterparty_iban, eust_monat").in("id", ids);
   if (error) throw new Error(error.message);
   await inBatches(data ?? [], 20, async (tx) => {
     const split = steuerSplitFuer(kategorie, { ...tx, amount: Number(tx.amount) });
@@ -112,6 +113,21 @@ export async function setKategorieManuell(ids: string[], kategorie: string, sb: 
       .eq("id", tx.id);
     if (e) throw new Error(e.message);
   });
+  await syncSteuerLedger(sb);
+}
+
+/**
+ * USt-Monat einer EUSt-Abbuchung von Hand setzen (null = wieder automatisch). Ändert nur den
+ * Steuer-Zeitraum, nicht die Kategorie; danach Steuer-Ledger neu abgleichen.
+ */
+export async function setEustMonat(id: string, monat: string | null, sb: Sb = createServiceClient()): Promise<void> {
+  if (monat !== null && !/^\d{4}-(0[1-9]|1[0-2])$/.test(monat)) throw new Error("Ungültiger Monat");
+  const { data: tx, error } = await sb.from("bank_transactions").select("id, amount, booking_date, purpose, counterparty_name, counterparty_iban, kategorie").eq("id", id).single();
+  if (error) throw new Error(error.message);
+  if (tx.kategorie !== "st_eust") throw new Error("Nur für Einfuhrumsatzsteuer / Zoll");
+  const split = steuerSplitFuer("st_eust", { ...tx, amount: Number(tx.amount), eust_monat: monat });
+  const { error: e } = await sb.from("bank_transactions").update({ eust_monat: monat, steuer_split: split }).eq("id", id);
+  if (e) throw new Error(e.message);
   await syncSteuerLedger(sb);
 }
 
