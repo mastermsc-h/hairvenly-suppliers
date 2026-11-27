@@ -84,7 +84,7 @@ export default async function OrdersPage() {
   // Orders we still owe money on stay visible even if their status moved past delivered.
   const isArchivable = (o: OrderWithTotals) =>
     o.status === "hidden" ||
-    ((o.status === "stocked" || o.status === "cancelled" || o.status === "manual") &&
+    ((o.status === "stocked" || o.status === "cancelled") &&
       Number(o.remaining_balance ?? 0) <= 0.009);
   const active = list.filter((o) => !isArchivable(o));
 

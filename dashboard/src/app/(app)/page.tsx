@@ -105,7 +105,8 @@ export default async function DashboardPage() {
   // Suppliers wir noch Geld schulden bleiben damit aktiv sichtbar.
   const isArchivable = (o: OrderWithTotals) => {
     if (o.status === "cancelled" || o.status === "hidden") return true;
-    if (o.status !== "stocked" && o.status !== "manual") return false;
+    // Manuelle Positionen nie automatisch archivieren — nur per Status "Ausgeblendet"
+    if (o.status !== "stocked") return false;
     if (o.invoice_total == null || Number(o.invoice_total) <= 0) return false;
     return Number(o.remaining_balance ?? 0) <= 0.009;
   };

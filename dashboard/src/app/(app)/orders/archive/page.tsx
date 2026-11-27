@@ -58,8 +58,7 @@ export default async function OrdersArchivePage() {
     .select("*")
     .or(
       "status.eq.cancelled,status.eq.hidden," +
-        "and(status.eq.stocked,invoice_total.gt.0,remaining_balance.lte.0.009)," +
-        "and(status.eq.manual,invoice_total.gt.0,remaining_balance.lte.0.009)",
+        "and(status.eq.stocked,invoice_total.gt.0,remaining_balance.lte.0.009)",
     );
   if (isSupplierRole && mySupplierId) {
     ordersQuery = ordersQuery.eq("supplier_id", mySupplierId);
