@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import {
-  Area, Bar, BarChart, Cell, ComposedChart, Line, Pie, PieChart, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Area, Bar, BarChart, Cell, ComposedChart, Line, Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
   ArrowRight, Banknote, CalendarClock, CircleDollarSign, HeartPulse, Landmark, LineChart, PiggyBank, Receipt, ShoppingBag, Scissors, TrendingDown, TrendingUp, Wallet,
@@ -296,7 +296,6 @@ export default function FinanzStartAnsicht({ d }: { d: FinanzStart }) {
   const tief = d.liquiditaet.tiefpunkt;
   const tiefAmpel = tief.saldo < 0 ? "rot" : tief.saldo < d.liquiditaet.puffer ? "gelb" : "gruen";
   const stand = new Date(d.stand).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-  const heute = d.kontoKurve.find((k) => k.prognose !== null)?.datum ?? null;
   const vorjahrQuote = d.umsatz.vorjahrMonatShop ? d.umsatz.shop / d.umsatz.vorjahrMonatShop - 1 : null;
   const fixTop = d.fixkosten.posten.slice(0, 6);
   const fixRest = d.fixkosten.posten.slice(6).reduce((s, x) => s + x.monat, 0);
@@ -401,46 +400,6 @@ export default function FinanzStartAnsicht({ d }: { d: FinanzStart }) {
             <div className="mt-1 text-[11px] text-neutral-400">Reserve {kEur(d.liquiditaet.puffer)}</div>
           </Link>
         </div>
-
-        {/* Kontostand: Verlauf + Vorschau */}
-        {d.kontoKurve.length > 1 && (
-          <Karte
-            titel="Kontostand — Verlauf und Vorschau"
-            untertitel="Letzte 60 Tage laut Konto, danach die Liquiditätsvorschau (Sparkasse, Vorschau ggf. inkl. PayPal)"
-            icon={<Wallet size={17} />}
-            farbe="bg-indigo-100 text-indigo-700"
-            rechts={<Mehr href="/finances/liquiditaet">Liquidität</Mehr>}
-          >
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={d.kontoKurve} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="kurve-ist" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#6366f1" stopOpacity={0.35} />
-                      <stop offset="100%" stopColor="#6366f1" stopOpacity={0.02} />
-                    </linearGradient>
-                    <linearGradient id="kurve-prog" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#a855f7" stopOpacity={0.18} />
-                      <stop offset="100%" stopColor="#a855f7" stopOpacity={0.01} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="datum" tickFormatter={(v: string) => dt(v)} tickLine={false} axisLine={false} fontSize={11} minTickGap={40} />
-                  <YAxis tickFormatter={achseK} tickLine={false} axisLine={false} fontSize={11} width={40} />
-                  <Tooltip
-                    formatter={(v, name) => [eur(Number(v)), name === "ist" ? "Kontostand" : "Vorschau"]}
-                    labelFormatter={(v) => `${dt(String(v))}${String(v).slice(0, 4)}`}
-                  />
-                  <ReferenceLine y={d.liquiditaet.puffer} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: "Reserve", position: "insideTopLeft", fontSize: 10, fill: "#b45309" }} />
-                  <ReferenceLine y={0} stroke="#e5e5e5" />
-                  {heute && <ReferenceLine x={heute} stroke="#a3a3a3" strokeDasharray="2 3" label={{ value: "heute", position: "top", fontSize: 10, fill: "#737373" }} />}
-                  <Area dataKey="ist" type="monotone" stroke="#6366f1" strokeWidth={2} fill="url(#kurve-ist)" connectNulls={false} dot={false} isAnimationActive={false} />
-                  <Area dataKey="prognose" type="monotone" stroke="#a855f7" strokeWidth={2} strokeDasharray="5 4" fill="url(#kurve-prog)" connectNulls={false} dot={false} isAnimationActive={false} />
-                  <ReferenceDot x={tief.datum} y={tief.saldo} r={5} fill={tiefAmpel === "rot" ? "#f43f5e" : tiefAmpel === "gelb" ? "#f59e0b" : "#10b981"} stroke="#fff" strokeWidth={2} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </Karte>
-        )}
 
         {/* Umsatzsteuer */}
         <UstKarte u={d.ustPlan} />
