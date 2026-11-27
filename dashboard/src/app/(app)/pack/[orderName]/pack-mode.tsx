@@ -302,7 +302,8 @@ export default function PackMode({
   // Flash auto-clear
   useEffect(() => {
     if (flash.kind === null) return;
-    const ms = flash.kind === "match" ? 800 : 2400;
+    // Fehlermeldungen mit Artikelnamen sind länger → mehr Lesezeit
+    const ms = flash.kind === "match" ? 800 : (flash.message?.length ?? 0) > 40 ? 4500 : 2400;
     const tm = setTimeout(() => setFlash({ kind: null }), ms);
     return () => clearTimeout(tm);
   }, [flash]);
@@ -655,9 +656,17 @@ export default function PackMode({
             });
           } else {
             playBeep(false);
+            // Sagen, WAS gescannt wurde — sonst kann der Packer nicht
+            // unterscheiden zwischen "falsch gegriffen" und "Etikett falsch".
+            const sc = res.scanned;
+            const wv = res.wrongVariant;
             setFlash({
               kind: "mismatch",
-              message: t(locale, "shipping.scan_mismatch"),
+              message: wv
+                ? `Falsche Variante: ${wv.scanned ?? "?"} gescannt — bestellt ist ${wv.expected ?? "eine andere Variante"}. Packung/Etikett prüfen!`
+                : sc
+                  ? `Falscher Artikel: ${sc.productTitle}${sc.variantTitle ? ` · ${sc.variantTitle}` : ""} — gehört nicht zu dieser Bestellung`
+                  : t(locale, "shipping.scan_mismatch"),
             });
           }
           // Historie im Hintergrund — der nächste Scan muss NICHT darauf

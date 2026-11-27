@@ -8,6 +8,7 @@ import {
   fulfillOrderInShopify,
   setOrderMetafield,
   lookupProductByBarcode,
+  lookupTitlesByBarcodes,
   addOrderTags,
   appendOrderNote,
   updateOrderShippingAddress,
@@ -329,6 +330,11 @@ export async function recordPackScan(
   matchedVariantId?: string | null;
   scannedCounts: Record<string, number>; // barcode → count so far
   isComplete: boolean;
+  /** Nur bei mismatch: WAS wurde gescannt (aus Shopify), damit der Packer
+   *  sieht, ob er falsch gegriffen hat oder das Etikett falsch ist. */
+  scanned?: { productTitle: string; variantTitle: string | null } | null;
+  /** Nur bei mismatch: gleiches Produkt, andere Variante (z.B. 150g statt 100g) */
+  wrongVariant?: { scanned: string | null; expected: string | null } | null;
 }> {
   const profile = await requireProfile();
   if (!hasFeature(profile, "shipping")) {
@@ -455,12 +461,34 @@ export async function recordPackScan(
     (e) => (scannedCounts[e.barcode ?? ""] ?? 0) >= e.quantity,
   );
 
+  // Fehlscan: gescannten Artikel in Shopify nachschlagen. Vorher sah der Packer
+  // nur "falscher Artikel" — bei #29574 (100g bestellt, 150g-Etikett gescannt)
+  // war nicht erkennbar, dass es dieselbe Farbe in anderer Variante war.
+  // Nur im Fehlerfall (kein Zusatz-Call beim normalen Scan); Shopify-Ausfall
+  // darf den Scan nie blockieren.
+  let scanned: { productTitle: string; variantTitle: string | null } | null = null;
+  let wrongVariant: { scanned: string | null; expected: string | null } | null = null;
+  if (status === "mismatch" && /^[A-Za-z0-9-]{4,}$/.test(trimmed)) {
+    try {
+      const map = await lookupTitlesByBarcodes([trimmed]);
+      scanned = map[trimmed] ?? null;
+      if (scanned) {
+        const same = expected.find((e) => e.title.trim() === scanned!.productTitle.trim());
+        if (same) wrongVariant = { scanned: scanned.variantTitle, expected: same.variantTitle };
+      }
+    } catch {
+      /* Lookup optional */
+    }
+  }
+
   return {
     status,
     matchedTitle,
     matchedVariantId,
     scannedCounts,
     isComplete,
+    scanned,
+    wrongVariant,
   };
 }
 
