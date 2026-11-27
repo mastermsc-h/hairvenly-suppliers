@@ -219,10 +219,10 @@ export function Kennzahlen({
   unklarN: number; unklarSumme: number; onUnklar: () => void; unklarAktiv: boolean;
 }) {
   const kacheln = [
-    { label: "Einnahmen", wert: einnahmen, icon: <ArrowDownLeft size={18} />, ring: "bg-emerald-100 text-emerald-700", text: "text-emerald-700" },
-    { label: "Ausgaben", wert: ausgaben, icon: <ArrowUpRight size={18} />, ring: "bg-orange-100 text-orange-700", text: "text-neutral-900" },
-    { label: "Steuern & Zoll", wert: steuern, icon: <Landmark size={18} />, ring: "bg-red-100 text-red-700", text: "text-red-700" },
-    { label: "Saldo (inkl. Überträge)", wert: saldo, icon: <Scale size={18} />, ring: saldo >= 0 ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700", text: saldo >= 0 ? "text-emerald-700" : "text-red-700" },
+    { label: "Einnahmen", wert: einnahmen, fluss: einnahmen, icon: <ArrowDownLeft size={18} />, ring: "bg-emerald-100 text-emerald-700", text: "text-emerald-700" },
+    { label: "Ausgaben", wert: ausgaben, fluss: -ausgaben, icon: <ArrowUpRight size={18} />, ring: "bg-orange-100 text-orange-700", text: "text-neutral-900" },
+    { label: "Steuern & Zoll", wert: steuern, fluss: -steuern, icon: <Landmark size={18} />, ring: "bg-red-100 text-red-700", text: "text-red-700" },
+    { label: "Saldo (inkl. Überträge)", wert: saldo, fluss: saldo, icon: <Scale size={18} />, ring: saldo >= 0 ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700", text: saldo >= 0 ? "text-emerald-700" : "text-red-700" },
   ];
   const basis = einnahmen > 0 ? einnahmen : 1;
   const anteilAus = Math.min(100, (ausgaben / basis) * 100);
@@ -238,7 +238,9 @@ export function Kennzahlen({
               <span className={`flex h-8 w-8 items-center justify-center rounded-full ${k.ring}`}>{k.icon}</span>
               <span className="text-xs font-medium text-neutral-500">{k.label}</span>
             </div>
-            <div className={`mt-2 text-xl font-bold tabular-nums tracking-tight ${k.text}`}>{fmt(k.wert)}</div>
+            <div className={`mt-2 text-xl font-bold tabular-nums tracking-tight ${k.text}`}>
+              {Math.abs(k.fluss) < 0.005 ? fmt(0) : `${k.fluss > 0 ? "+" : "−"}${fmt(Math.abs(k.fluss))}`}
+            </div>
           </div>
         ))}
         <button

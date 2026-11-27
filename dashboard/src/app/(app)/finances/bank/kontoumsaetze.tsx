@@ -59,6 +59,11 @@ const TON: Record<Ton, { rand: string; kopf: string; text: string }> = {
   slate: { rand: "border-l-slate-500", kopf: "bg-slate-100 border-slate-200", text: "text-slate-800" },
 };
 
+/** Geldfluss mit Vorzeichen: + rein, − raus (echtes Minuszeichen). */
+function fmtVz(n: number) {
+  if (Math.abs(n) < 0.005) return fmt(0);
+  return (n > 0 ? "+" : "−") + fmt(Math.abs(n));
+}
 function fmt(n: number) {
   return n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 }
@@ -472,7 +477,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
                     <td className="py-1.5 text-neutral-600">{z.zeitraum}</td>
                     <td className="py-1.5 text-neutral-500 text-xs">{z.u.counterparty_name ?? "—"}</td>
                     <td className={`py-1.5 text-right tabular-nums font-medium ${z.betrag < 0 ? "text-emerald-700" : "text-red-700"}`}>
-                      {z.betrag < 0 ? `Erstattung ${fmt(-z.betrag)}` : fmt(z.betrag)}
+                      {z.betrag < 0 ? `${fmtVz(-z.betrag)} Erstattung` : fmtVz(-z.betrag)}
                     </td>
                   </tr>
                 ))}
@@ -501,7 +506,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
               <div key={gruppe}>
                 <div className={`flex items-baseline justify-between rounded-md px-2 py-1 mb-1.5 text-xs font-bold uppercase tracking-wide ${GRUPPE_FARBE[gruppe].kopf}`}>
                   <span>{GRUPPE_LABEL[gruppe]}</span>
-                  <span className="tabular-nums normal-case font-semibold">{fmt(summen.g[gruppe])}</span>
+                  <span className="tabular-nums normal-case font-semibold">{fmtVz(summen.g[gruppe])}</span>
                 </div>
                 {rows.map((k) => {
                   const s = summen.byKat.get(k.key)!;
@@ -518,7 +523,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
                         <span className="underline decoration-dotted decoration-neutral-300 underline-offset-2 group-hover:decoration-neutral-500">{k.label}</span>
                         <span className="text-xs text-neutral-400">({s.n})</span>
                       </span>
-                      <span className={`tabular-nums ${s.sum >= 0 ? "text-emerald-700" : "text-neutral-800"}`}>{fmt(s.sum)}</span>
+                      <span className={`tabular-nums ${s.sum >= 0 ? "text-emerald-700" : "text-neutral-800"}`}>{fmtVz(s.sum)}</span>
                       <span className="col-span-2 block h-1 w-full overflow-hidden rounded-full bg-neutral-100" aria-hidden>
                         <span
                           className={`block h-full rounded-full ${{ einnahmen: "bg-emerald-400", ausgaben: "bg-orange-400", steuern: "bg-red-500", neutral: "bg-slate-400" }[gruppe]}`}
@@ -634,7 +639,7 @@ export default function Kontoumsaetze({ initialJahr, initialMonat, initial }: { 
                       <div className="text-xs text-neutral-500 truncate" title={u.purpose ?? ""}>{u.purpose}</div>
                     </td>
                     <td className={`py-2 pr-2 text-right tabular-nums font-medium whitespace-nowrap ${u.amount >= 0 ? "text-emerald-700" : "text-neutral-900"}`}>
-                      {fmt(u.amount)}
+                      {fmtVz(u.amount)}
                     </td>
                     <td className="py-2">
                       <div className="flex items-center gap-1.5">
