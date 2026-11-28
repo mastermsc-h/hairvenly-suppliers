@@ -554,6 +554,26 @@ check("2025 mit 0 €: kein Termin", stz(L.prognose(stRoh(), { ...E0, horizontTa
 check("Alte Einzel-Einstellung wird übernommen", L.mitDefaults({ steuerNachzahlung: N26 }).steuerNachzahlungen, [N26]);
 check("Liste hat Vorrang vor alter Einstellung", L.mitDefaults({ steuerNachzahlung: N26, steuerNachzahlungen: [] }).steuerNachzahlungen, []);
 
+// User 28.11.2026: kg/Monat selbst wählen (z. B. Amanda 15 statt Verbrauch) — droht ein Lager-Engpass, und wann?
+const lp = (o) => L.lagerProjektion({ start: "2026-12-01", ende: "2027-11-30", verkaufbarKg: 120, verbrauchKgMonat: 30.4375, ankuenfte: [], mindestKg: 56, ...o });
+const lp0 = lp({});
+check("Lager: ohne Nachschub unter Mindestbestand nach ~64 Tagen", lp0.engpassAb, "2027-02-02");
+check("Lager: leer nach ~120 Tagen", lp0.leerAb, "2027-03-30");
+const lpVoll = lp({ ankuenfte: Array.from({ length: 26 }, (_, i) => ({ datum: L.plusTage("2026-12-01", 14 * i), kg: 14 })) });
+check("Lager: Nachschub = Verbrauch → kein Engpass", [lpVoll.engpassAb, lpVoll.leerAb], [null, null]);
+const lpHalb = lp({ ankuenfte: Array.from({ length: 26 }, (_, i) => ({ datum: L.plusTage("2026-12-01", 14 * i), kg: 7 })) });
+check("Lager: halber Nachschub → Engpass später als ohne", lpHalb.engpassAb > lp0.engpassAb && lpHalb.engpassAb !== null, true);
+const nbRohL = (o = {}) => roh({ lagerKg: { glatt: 200, wellig: 0, stand: null }, nachbestellung: { kgProMonatAuto: 40, kgVerbrauchMonat: 30, usdProKgAuto: 1000, leadWochen: 6, letzteBestellung: "2026-10-10" }, ...o });
+const pVerbr = L.prognose(nbRohL(), { ...E0, horizontTage: 365, nachbestellungenEinrechnen: true });
+const p15 = L.prognose(nbRohL(), { ...E0, horizontTage: 365, nachbestellungenEinrechnen: true, nachbestellKgMonat: 15 });
+check("Prognose: Lagerprojektion glatt vorhanden, Verbrauch bleibt Verbrauch", [pVerbr.lager.glatt.verbrauchKgMonat, p15.lager.glatt.verbrauchKgMonat], [30, 30]);
+check("Prognose: verkaufbar = Lager − Ladenhüter-Standard (56)", pVerbr.lager.glatt.verkaufbarKg, 144);
+check("Prognose: bei Verbrauch kein Leerlaufen im Jahr", pVerbr.lager.glatt.leerAb, null);
+check("Prognose: 15 statt 30 kg → Engpass im Zeitraum", p15.lager.glatt.engpassAb !== null, true);
+check("Prognose: 15 kg spart Geld (Kontostand am Ende höher)", p15.tage.at(-1).saldo > pVerbr.tage.at(-1).saldo, true);
+check("Prognose: Mindestbestand = Verbrauch × (Lieferzeit + Abstand)", pVerbr.lager.glatt.mindestKg, Math.round((30 * (42 + 14) / (365 / 12)) * 100) / 100);
+check("Prognose ohne Lagerbestand: keine Projektion", L.prognose(roh(), E0).lager.glatt, null);
+
 // Defaults
 check("Defaults vollständig", Object.keys(L.mitDefaults({})).length, Object.keys(L.LIQ_DEFAULTS).length);
 

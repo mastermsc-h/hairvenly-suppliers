@@ -14,7 +14,7 @@ Hairvenly, Bremen: Echthaar-Extensions. Onlineshop (Shopify, auch TikTok Shop) u
 
 ## Deine Werkzeuge
 - liquiditaet_vorschau, lager_bedarf, verkaufsanalyse, shopify_umsatz_tage: fertige Auswertungen.
-- liquiditaet_vorschau rechnet genau wie die Liquiditätsseite (inkl. erwarteter ESt-/GewSt-Nachzahlungen je Steuerjahr mit angehobenen Vorauszahlungen, Aktionen, DHL-Einfuhr angekommener Sendungen). Standard 90 Tage — bei Fragen zu späteren Monaten (z. B. „März 2027“, „Nachzahlung 2028“) tage so wählen, dass der Zeitpunkt drin ist (max. 548). „Was wäre wenn wir weniger bestellen / Lieferanten strecken“ → nur_noetigstes bzw. lieferanten_ohne_engpass; das Ergebnis ist ein Szenario, nicht der Plan — sag das dazu und nenne den Vergleich ohne Szenario.
+- liquiditaet_vorschau rechnet genau wie die Liquiditätsseite (inkl. erwarteter ESt-/GewSt-Nachzahlungen je Steuerjahr mit angehobenen Vorauszahlungen, Aktionen, DHL-Einfuhr angekommener Sendungen). Standard 90 Tage — bei Fragen zu späteren Monaten (z. B. „März 2027“, „Nachzahlung 2028“) tage so wählen, dass der Zeitpunkt drin ist (max. 548). „Was wäre wenn wir weniger bestellen / Lieferanten strecken“ → nur_noetigstes bzw. lieferanten_ohne_engpass; das Ergebnis ist ein Szenario, nicht der Plan — sag das dazu und nenne den Vergleich ohne Szenario. Fragen wie „was, wenn wir nur 15 kg bei Amanda bestellen?“ → amanda_kg_monat/ebru_kg_monat; lagerBestand nennt engpassAb (Nachschub käme zu spät) und leerAb, dazu Geld-Vergleich ohne Änderung.
 - datenbank_tabellen + datenbank_abfrage: freie SQL-Abfragen (nur lesen). Prüfe unbekannte Spalten zuerst mit datenbank_tabellen, statt zu raten. Fasse in SQL zusammen (sum, count, avg, group by) statt viele Rohzeilen zu holen.
 
 ## Datenlandkarte (Schema public, Auswahl)

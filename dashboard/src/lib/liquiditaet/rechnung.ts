@@ -143,6 +143,49 @@ export interface LiqSzenario {
  */
 export const SZENARIO_STANDARD: LiqSzenario = { glaetten: false, minTeilEur: 5000, nurNoetigstes: false, amandaKgMonat: 9, ebruKgMonat: 24, zielMonate: 3, ladenhueterGlattKg: 56, ladenhueterWelligKg: 52 };
 
+/** Lagerbestand je Qualität über die Zeit — mit den Nachbestellungen der Vorschau (kg/Monat laut Einstellung). */
+export interface LagerProjektion {
+  lagerKg: number;
+  unterwegsKg: number;
+  ladenhueterKg: number;
+  /** Lager + unterwegs − Ladenhüter (Ladenhüter verkaufen sich nicht und zählen nicht als Vorrat). */
+  verkaufbarKg: number;
+  verbrauchKgMonat: number;
+  /** Im Schnitt bestellte kg/Monat in der Vorschau. */
+  bestellKgMonat: number;
+  /** Lieferzeit + Bestellabstand in Verbrauch: fällt der Bestand darunter, kommt Nachschub zu spät. */
+  mindestKg: number;
+  leadTage: number;
+  /** Erster Tag unter dem Mindestbestand bzw. unter 0 (null = nicht im Zeitraum). */
+  engpassAb: string | null;
+  leerAb: string | null;
+  endeKg: number;
+  /** Wöchentliche Punkte (für Anzeige/Hi). */
+  punkte: Array<{ datum: string; kg: number }>;
+}
+
+/**
+ * Bestand Tag für Tag: verkaufbar − Verbrauch + Ankünfte. Unterwegs-Ware zählt ab heute (kommt vor neuen
+ * Bestellungen an). Summe über alle Produkte einer Qualität — einzelne Topseller können früher ausgehen.
+ */
+export function lagerProjektion(p: { start: string; ende: string; verkaufbarKg: number; verbrauchKgMonat: number; ankuenfte: Array<{ datum: string; kg: number }>; mindestKg: number }): Pick<LagerProjektion, "engpassAb" | "leerAb" | "endeKg" | "punkte"> {
+  const vTag = (Math.max(0, p.verbrauchKgMonat) * 12) / 365;
+  const proTag = new Map<string, number>();
+  for (const a of p.ankuenfte) proTag.set(a.datum, (proTag.get(a.datum) ?? 0) + a.kg);
+  let kg = p.verkaufbarKg;
+  let engpassAb: string | null = null;
+  let leerAb: string | null = null;
+  const punkte: Array<{ datum: string; kg: number }> = [];
+  let i = 0;
+  for (let d = p.start; d <= p.ende; d = plusTage(d, 1), i++) {
+    kg += (proTag.get(d) ?? 0) - vTag;
+    if (!engpassAb && kg < p.mindestKg) engpassAb = d;
+    if (!leerAb && kg < 0) leerAb = d;
+    if (i % 7 === 0) punkte.push({ datum: d, kg: Math.round(kg * 10) / 10 });
+  }
+  return { engpassAb, leerAb, endeKg: Math.round(kg * 10) / 10, punkte };
+}
+
 /** Bestellmengen nach Lagerbestand (Szenario „nur das Nötigste“), je Qualität. */
 export interface BedarfsPlan {
   lagerKg: number;
@@ -819,6 +862,8 @@ export interface PrognoseErgebnis {
   glaettung: Glaettung | null;
   /** Szenario "nur das Nötigste": Bestellmengen nach Lagerbestand. */
   bedarf: { glatt: BedarfsPlan | null; wellig: BedarfsPlan | null } | null;
+  /** Lagerbestand je Qualität mit den Nachbestellungen der Vorschau (null = Lagerbestand nicht geladen). */
+  lager: { glatt: LagerProjektion | null; wellig: LagerProjektion | null };
 }
 
 export interface Glaettung {
@@ -892,6 +937,7 @@ interface Plan {
   /** Tag → Abweichung der Einnahmen vom Ø (Flaute nach der Aktion, negativ). */
   einnahmenKorrektur: Map<string, number>;
   bedarf: { glatt: BedarfsPlan | null; wellig: BedarfsPlan | null } | null;
+  lager: { glatt: LagerProjektion | null; wellig: LagerProjektion | null };
   eustAndereMonat: number;
   ustIstSchnitt: number | null;
 }
@@ -1234,25 +1280,30 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen, sz: LiqSzena
 
   // 1a') Künftige Ebru-Nachbestellungen (Schätzung): im Bestellrhythmus ab der letzten Bestellung, Rechnung bei Versand
   const ebruNb = roh.ebruNachbestellung ?? null;
-  // Nachbestellt wird nach Verbrauch (Usbekisch wellig laut Verkaufsanalyse), sonst Ø Bestellungen
-  const ebruNachbestellKgMonat = e.ebruNachbestellKgMonat ?? ebruNb?.kgVerbrauchMonat ?? ebruNb?.kgProMonatAuto ?? 0;
+  // Nachbestellt wird nach Verbrauch (Usbekisch wellig laut Verkaufsanalyse), sonst Ø Bestellungen — außer kg/Monat ist eingestellt
+  const ebruVerbrauchKgMonat = ebruNb?.kgVerbrauchMonat ?? ebruNb?.kgProMonatAuto ?? 0;
+  const ebruNachbestellKgMonat = e.ebruNachbestellKgMonat ?? ebruVerbrauchKgMonat;
   const nbPositionen: LiqManuellePosition[] = [];
+  const ebruUsdKg = e.ebruUsdProKg ?? ebruNb?.usdProKgAuto ?? 0;
+  // Unterwegs = Ebru-Ware noch nicht angekommen (Warenwert ÷ $/kg) + Ware in Produktion ohne Ankunftsdatum
+  const ebruUnterwegsKg = ebruNb && ebruUsdKg > 0
+    ? ((roh.einfuhrAndere ?? []).filter((b) => !WARE_DA.includes(b.status)).reduce((s, b) => s + b.warenUsd, 0) +
+        Object.entries(roh.ratenKommendUsd ?? {}).filter(([l]) => l === ebruNb.lieferant).reduce((s, [, v]) => s + v, 0)) / ebruUsdKg
+    : 0;
+  const ankuenfte: Record<"glatt" | "wellig", Array<{ datum: string; kg: number; bestellt: string }>> = { glatt: [], wellig: [] };
   if (e.ebruNachbestellungenEinrechnen && ebruNb && ebruEinzeln) {
-    const usdKg = e.ebruUsdProKg ?? ebruNb.usdProKgAuto;
+    const usdKg = ebruUsdKg;
     const kgStandard = (ebruNachbestellKgMonat * 12 * e.nachbestellAbstandTage) / 365;
     if (kgStandard <= 0 || usdKg <= 0) hinweise.push("Ebru-Nachbestellungen: keine kg/Monat oder kein Preis pro kg — nicht eingerechnet.");
     else {
       const tage = bestellTage(ebruNb.letzteBestellung, start, ende, e.nachbestellAbstandTage);
-      // Unterwegs = Ebru-Ware noch nicht angekommen (Warenwert ÷ $/kg) + Ware in Produktion ohne Ankunftsdatum
-      const ebruUnterwegsKg =
-        ((roh.einfuhrAndere ?? []).filter((b) => !WARE_DA.includes(b.status)).reduce((s, b) => s + b.warenUsd, 0) +
-          Object.entries(roh.ratenKommendUsd ?? {}).filter(([l]) => l === ebruNb.lieferant).reduce((s, [, v]) => s + v, 0)) / usdKg;
-      const mengen = bedarfFuer("wellig", tage, ebruNb.leadWochen * 7, ebruNachbestellKgMonat, ebruUnterwegsKg);
+      const mengen = bedarfFuer("wellig", tage, ebruNb.leadWochen * 7, ebruVerbrauchKgMonat, ebruUnterwegsKg);
       for (const [i, d] of tage.entries()) {
         const kgBestellung = mengen ? mengen[i] : kgStandard;
         if (kgBestellung <= 0.05) continue;
         const usd = r2(kgBestellung * usdKg);
         const ankunft = plusTage(d, ebruNb.leadWochen * 7);
+        ankuenfte.wellig.push({ datum: ankunft, kg: kgBestellung, bestellt: d });
         const rechnung = plusTage(ankunft, -e.zahlungVorAnkunftTage);
         const label = `Ebru-Nachbestellung ~${kgBestellung.toFixed(1)} kg (bestellt ${deKurz(d)})`;
         if (rechnung <= ende) nbPositionen.push({ id: `nb-ebru-${d}`, label, lieferant: ebruNb.lieferant, datum: rechnung, restUsd: usd, geschaetzt: true });
@@ -1290,24 +1341,28 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen, sz: LiqSzena
   }
 
   // 2) Künftige Nachbestellungen (Schätzung): im Bestellrhythmus ab der letzten Amanda-Bestellung
-  const nachbestellKgMonat = e.nachbestellKgMonat ?? roh.nachbestellung.kgVerbrauchMonat ?? roh.nachbestellung.kgProMonatAuto;
+  const amandaVerbrauchKgMonat = roh.nachbestellung.kgVerbrauchMonat ?? roh.nachbestellung.kgProMonatAuto;
+  const nachbestellKgMonat = e.nachbestellKgMonat ?? amandaVerbrauchKgMonat;
+  const amandaUsdKg = e.usdProKg ?? roh.nachbestellung.usdProKgAuto;
+  const amandaLeadTage = roh.nachbestellung.leadWochen * 7;
+  // Unterwegs = Amanda-Bestellungen noch nicht angekommen (kg, sonst Rechnung ÷ $/kg)
+  const amandaUnterwegsKg = roh.bestellungen
+    .filter((b) => !WARE_DA.includes(b.status))
+    .reduce((s, b) => s + (b.kg ?? (amandaUsdKg > 0 ? (b.invoiceUsd ?? 0) / amandaUsdKg : 0)), 0);
   if (e.nachbestellungenEinrechnen) {
     const kgMonat = nachbestellKgMonat;
-    const usdKg = e.usdProKg ?? roh.nachbestellung.usdProKgAuto;
-    const leadTage = roh.nachbestellung.leadWochen * 7;
+    const usdKg = amandaUsdKg;
+    const leadTage = amandaLeadTage;
     const kgStandard = (kgMonat * 12 * e.nachbestellAbstandTage) / 365;
     const tage = bestellTage(roh.nachbestellung.letzteBestellung, start, ende, e.nachbestellAbstandTage);
-    // Unterwegs = Amanda-Bestellungen noch nicht angekommen (kg, sonst Rechnung ÷ $/kg)
-    const amandaUnterwegsKg = roh.bestellungen
-      .filter((b) => !WARE_DA.includes(b.status))
-      .reduce((s, b) => s + (b.kg ?? (usdKg > 0 ? (b.invoiceUsd ?? 0) / usdKg : 0)), 0);
-    const mengen = bedarfFuer("glatt", tage, leadTage, kgMonat, amandaUnterwegsKg);
+    const mengen = bedarfFuer("glatt", tage, leadTage, amandaVerbrauchKgMonat, amandaUnterwegsKg);
     for (const [i, d] of tage.entries()) {
       const kgBestellung = mengen ? mengen[i] : kgStandard;
       if (kgBestellung <= 0.05) continue;
       const usd = kgBestellung * usdKg;
       const zahl = plusTage(d, leadTage - e.zahlungVorAnkunftTage);
       const ankunft = plusTage(d, leadTage);
+      ankuenfte.glatt.push({ datum: ankunft, kg: kgBestellung, bestellt: d });
       if (zahl <= ende) ereignisse.push({ datum: zahl, betrag: -r2(usd / fx), art: "nachbestellung", label: `Amanda-Nachbestellung ~${kgBestellung.toFixed(1)} kg (bestellt ${deKurz(d)})` });
       if (ankunft <= ende) {
         const ab = einfuhrFuer(usd, null);
@@ -1315,6 +1370,30 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen, sz: LiqSzena
         eustProMonat[monatVon(ankunft)] = (eustProMonat[monatVon(ankunft)] ?? 0) + ab.eust;
       }
     }
+  }
+
+  // 2a) Lagerbestand je Qualität mit diesen Nachbestellungen: droht ein Engpass, und ab wann?
+  const lager: Plan["lager"] = { glatt: null, wellig: null };
+  const tageMonat = 365 / 12;
+  for (const [q, verbrauch, unterwegs, leadTage, aktiv] of [
+    ["glatt", amandaVerbrauchKgMonat, amandaUnterwegsKg, amandaLeadTage, e.nachbestellungenEinrechnen],
+    ["wellig", ebruVerbrauchKgMonat, ebruUnterwegsKg, (ebruNb?.leadWochen ?? 8) * 7, e.ebruNachbestellungenEinrechnen && !!ebruNb && ebruEinzeln],
+  ] as const) {
+    const lagerKg = roh.lagerKg?.[q];
+    if (lagerKg === undefined || lagerKg === null || !(lagerKg > 0) || !(verbrauch > 0)) continue;
+    const ladenhueter = q === "glatt" ? (sz?.ladenhueterGlattKg ?? SZENARIO_STANDARD.ladenhueterGlattKg) : (sz?.ladenhueterWelligKg ?? SZENARIO_STANDARD.ladenhueterWelligKg);
+    const verkaufbar = Math.max(0, lagerKg + unterwegs - ladenhueter);
+    const mindestKg = r2((verbrauch * (leadTage + e.nachbestellAbstandTage)) / tageMonat);
+    const pr = lagerProjektion({ start, ende, verkaufbarKg: verkaufbar, verbrauchKgMonat: verbrauch, ankuenfte: ankuenfte[q], mindestKg });
+    const tageGesamt = Math.max(1, tageZwischen(start, ende) + 1);
+    // Ø bestellt nach Bestelltag (nicht Ankunft — sonst fehlt wegen der Lieferzeit der Anfang)
+    const bestellt = ankuenfte[q].filter((a) => a.bestellt <= ende).reduce((s2, a) => s2 + a.kg, 0);
+    lager[q] = {
+      lagerKg: r2(lagerKg), unterwegsKg: r2(unterwegs), ladenhueterKg: ladenhueter, verkaufbarKg: r2(verkaufbar),
+      verbrauchKgMonat: verbrauch,
+      bestellKgMonat: aktiv ? Math.round(((bestellt / tageGesamt) * tageMonat) * 10) / 10 : 0,
+      mindestKg, leadTage, ...pr,
+    };
   }
 
   // 2b) Verkaufsaktion (Black Friday): Mehrumsatz nach Tagesprofil, Gutschrift nach Auszahlungsverzug.
@@ -1558,7 +1637,7 @@ export function erstellePlan(roh: LiqRohdaten, e: LiqEinstellungen, sz: LiqSzena
 
   // Innerhalb eines Tages: Eingänge vor Ausgängen, sonst stabil
   ereignisse.sort((a, b) => a.datum.localeCompare(b.datum) || Math.sign(b.betrag) - Math.sign(a.betrag));
-  return { start, ende, fx, fxQuelle, ereignisse, ustBasis, eustAndereMonat, ustIstSchnitt, bestellInfo, hinweise, nachbestellKgMonat, ebruNachbestellKgMonat, einfuhrAndere, vermutungen, einnahmenKorrektur, bedarf };
+  return { start, ende, fx, fxQuelle, ereignisse, ustBasis, eustAndereMonat, ustIstSchnitt, bestellInfo, hinweise, nachbestellKgMonat, ebruNachbestellKgMonat, einfuhrAndere, vermutungen, einnahmenKorrektur, bedarf, lager };
 }
 
 function simuliere(
@@ -1771,5 +1850,6 @@ export function prognose(roh: LiqRohdaten, eIn: Partial<LiqEinstellungen> | null
     hinweise: plan.hinweise,
     glaettung,
     bedarf: plan.bedarf,
+    lager: plan.lager,
   };
 }

@@ -55,6 +55,8 @@ export const WERKZEUGE: Anthropic.Tool[] = [
         ziel_reichweite_monate: { type: "number", description: "Darunter wird wieder nach Verbrauch bestellt (Standard 3)" },
         ladenhueter_glatt_kg: { type: "number", description: "Ladenhüter glatt in kg, zählen nicht als Bestand (Standard 56)" },
         ladenhueter_wellig_kg: { type: "number", description: "Ladenhüter wellig in kg (Standard 52)" },
+        amanda_kg_monat: { type: "number", description: "Was-wäre-wenn: Amanda (glatt) so viele kg pro Monat nachbestellen statt Verbrauch — Ergebnis zeigt unter lagerBestand, ob/wann das Lager eng oder leer wird" },
+        ebru_kg_monat: { type: "number", description: "Was-wäre-wenn: Ebru (wellig) kg pro Monat statt Verbrauch" },
         lieferanten_ohne_engpass: { type: "boolean", description: "Was-wäre-wenn: Lieferantenzahlungen verschieben/teilen, damit das Konto über der Reserve bleibt" },
         min_teilzahlung_eur: { type: "number", description: "Kleinste Teilzahlung beim Verschieben (Standard 5000)" },
       },
@@ -177,16 +179,22 @@ function bedarfKurz(b: ReturnType<typeof prognose>["bedarf"], details: boolean) 
   return { glatt: b.glatt ? kurz(b.glatt) : null, wellig: b.wellig ? kurz(b.wellig) : null };
 }
 
-type LiqOptionen = { tage?: number; nurBis?: string; details?: boolean; szenario?: Partial<LiqSzenario> | null };
+type LiqOptionen = { tage?: number; nurBis?: string; details?: boolean; szenario?: Partial<LiqSzenario> | null; kgMonat?: { amanda?: number; ebru?: number } };
 
-async function liquiditaet({ tage, nurBis, details = false, szenario }: LiqOptionen) {
+async function liquiditaet({ tage, nurBis, details = false, szenario, kgMonat }: LiqOptionen) {
   // Gleiche Daten wie die Seite: Rohdaten + Steuer-Hochrechnung + Lagerbestand
   const [{ roh: rohBasis, einstellungen: gespeichert }, zusatz] = await Promise.all([ladePrognose(), ladeRohZusatz()]);
   const roh = { ...rohBasis, ...zusatz };
-  const einstellungen = tage ? { ...gespeichert, horizontTage: Math.round(tage) } : gespeichert;
+  const einstellungen = {
+    ...gespeichert,
+    ...(tage ? { horizontTage: Math.round(tage) } : {}),
+    ...(kgMonat?.amanda !== undefined ? { nachbestellKgMonat: kgMonat.amanda } : {}),
+    ...(kgMonat?.ebru !== undefined ? { ebruNachbestellKgMonat: kgMonat.ebru } : {}),
+  };
+  const kgGeaendert = kgMonat?.amanda !== undefined || kgMonat?.ebru !== undefined;
   const sz: LiqSzenario | null = szenario && (szenario.nurNoetigstes || szenario.glaetten) ? { ...SZENARIO_STANDARD, ...szenario } : null;
   const p = prognose(roh, einstellungen, sz);
-  const ohne = sz ? prognose(roh, einstellungen) : null;
+  const ohne = sz ? prognose(roh, einstellungen) : kgGeaendert ? prognose(roh, { ...gespeichert, ...(tage ? { horizontTage: Math.round(tage) } : {}) }) : null;
   const bis = nurBis ?? p.tage.at(-1)?.datum ?? p.start;
   const nah = plusTage(p.start, 120);
   const ratenPos = roh.ratenPositionen ?? [];
@@ -202,6 +210,14 @@ async function liquiditaet({ tage, nurBis, details = false, szenario }: LiqOptio
           },
         }
       : {}),
+    ...(kgGeaendert && ohne ? { kgMonatWasWaereWenn: { amanda: kgMonat?.amanda ?? null, ebru: kgMonat?.ebru ?? null, ohneAenderung: { tiefpunkt: ohne.tiefpunkt, standAmEnde: Math.round(ohne.tage.at(-1)?.saldo ?? 0) }, hinweis: "Nur Was-wäre-wenn — nicht gespeichert." } } : {}),
+    // Lager je Qualität mit den Nachbestellungen dieser Rechnung: engpassAb = Bestand unter Lieferzeit + Rhythmus (Nachschub käme zu spät), leerAb = 0 kg
+    lagerBestand: Object.fromEntries(
+      (["glatt", "wellig"] as const).map((q) => {
+        const l = p.lager[q];
+        return [q, l ? { verkaufbarKg: l.verkaufbarKg, verbrauchKgMonat: l.verbrauchKgMonat, bestelltKgMonat: l.bestellKgMonat, mindestKg: l.mindestKg, engpassAb: l.engpassAb, leerAb: l.leerAb, endeKg: l.endeKg, ...(details ? { punkte: l.punkte } : {}) } : null];
+      }),
+    ),
     steuerHochrechnung: roh.steuerPrognose ?? null,
     lagerKg: roh.lagerKg ?? null,
     start: p.start,
@@ -281,6 +297,8 @@ export async function fuehreAus(name: string, input: unknown): Promise<{ inhalt:
             ladenhueter_glatt_kg: z.number().min(0).max(5000).optional(),
             ladenhueter_wellig_kg: z.number().min(0).max(5000).optional(),
             lieferanten_ohne_engpass: z.boolean().optional(),
+            amanda_kg_monat: z.number().min(0).max(1000).optional(),
+            ebru_kg_monat: z.number().min(0).max(1000).optional(),
             min_teilzahlung_eur: z.number().min(100).max(1_000_000).optional(),
           })
           .parse(input ?? {});
@@ -294,7 +312,7 @@ export async function fuehreAus(name: string, input: unknown): Promise<{ inhalt:
           ...(i.ladenhueter_wellig_kg !== undefined ? { ladenhueterWelligKg: i.ladenhueter_wellig_kg } : {}),
           ...(i.min_teilzahlung_eur !== undefined ? { minTeilEur: i.min_teilzahlung_eur } : {}),
         };
-        return { inhalt: kuerzen(await liquiditaet({ tage: i.tage, nurBis: i.nur_bis, details: i.details, szenario })), fehler: false };
+        return { inhalt: kuerzen(await liquiditaet({ tage: i.tage, nurBis: i.nur_bis, details: i.details, szenario, kgMonat: { amanda: i.amanda_kg_monat, ebru: i.ebru_kg_monat } })), fehler: false };
       }
       case "lager_bedarf": {
         const i = z.object({ basis: z.enum(["ø90", "vorsichtig"]).optional(), rhythmus_tage: z.number().min(1).max(90).optional(), puffer_tage: z.number().min(0).max(120).optional(), details: z.boolean().optional() }).parse(input ?? {});

@@ -580,6 +580,7 @@ export default function Liquiditaet({ roh, gespeichert, verbrauch, verlauf }: { 
           eingang={(label) => p.ereignisse.filter((x) => x.art === "aktion" && aktionName(x.label) === label).reduce((s, x) => s + x.betrag, 0)}
         />
         <SzenarioLeiste sz={sz} setSz={setSz} p={p} pOhne={pOhne} puffer={e.puffer} e={e} />
+        <NachbestellLeiste e={e} set={set} p={p} roh={roh} geaendert={geaendert} saving={saving} onSpeichern={speichern} />
         {(zeigen.includes("amanda") || zeigen.includes("ebru")) && !zug && !zugFehler && (
           <p className="mb-1 text-[11px] text-neutral-400">Tipp: Kräftige Amanda- oder Ebru-Balken lassen sich auf einen anderen Tag ziehen — oder anklicken und dann den neuen Tag anklicken.</p>
         )}
@@ -1400,6 +1401,105 @@ function aktionAbschnitte(a: LiqAktion): Array<[string, string]> {
     }
   }
   return out;
+}
+
+/**
+ * kg/Monat für Amanda und Ebru direkt am Diagramm einstellen (gleiche Einstellung wie in den Annahmen) —
+ * darunter je Qualität, ob und wann das Lager eng wird.
+ */
+function NachbestellLeiste({
+  e, set, p, roh, geaendert, saving, onSpeichern,
+}: {
+  e: LiqEinstellungen;
+  set: <K extends keyof LiqEinstellungen>(k: K, v: LiqEinstellungen[K]) => void;
+  p: ReturnType<typeof prognose>;
+  roh: LiqRohdaten;
+  geaendert: boolean;
+  saving: boolean;
+  onSpeichern: () => void;
+}) {
+  const verbrauchGlatt = roh.nachbestellung.kgVerbrauchMonat ?? roh.nachbestellung.kgProMonatAuto;
+  const verbrauchWellig = roh.ebruNachbestellung?.kgVerbrauchMonat ?? roh.ebruNachbestellung?.kgProMonatAuto ?? 0;
+  const kg = (n: number) => n.toLocaleString("de-DE", { maximumFractionDigits: 1 });
+  const feld = (wert: number | null, platzhalter: number, onChange: (v: number | null) => void) => (
+    <input
+      type="number"
+      min={0}
+      step={1}
+      value={wert ?? ""}
+      placeholder={kg(platzhalter)}
+      onChange={(ev) => {
+        const raw = ev.target.value.replace(",", ".");
+        onChange(raw === "" ? null : Math.max(0, Number(raw)));
+      }}
+      className="w-16 rounded-md border border-neutral-300 px-1.5 py-0.5 text-xs tabular-nums"
+    />
+  );
+  const zeile = (q: "glatt" | "wellig", name: string, aktiv: boolean) => {
+    const l = p.lager[q];
+    if (!l) return <div key={q} className="text-neutral-400">{name}: Lagerbestand nicht verfügbar (Inventar-Sheet) — kein Engpass-Check.</div>;
+    const reichweite = l.verbrauchKgMonat > 0 ? l.endeKg / l.verbrauchKgMonat : 0;
+    const ende = p.tage.at(-1)?.datum ?? p.start;
+    return (
+      <div key={q} className="flex flex-wrap items-baseline gap-x-1.5">
+        <b className="text-neutral-800">{name}:</b>
+        <span className="text-neutral-500">
+          heute verkaufbar {Math.round(l.verkaufbarKg)} kg (Lager {Math.round(l.lagerKg)} + unterwegs {Math.round(l.unterwegsKg)} − Ladenhüter {Math.round(l.ladenhueterKg)}),
+          {" "}{aktiv ? `bestellt Ø ${kg(l.bestellKgMonat)}` : "keine Nachbestellungen eingerechnet"} bei {kg(l.verbrauchKgMonat)} kg Verbrauch/Monat →
+        </span>
+        {l.leerAb ? (
+          <span className="font-semibold text-red-700">
+            Engpass ab {deDate(l.engpassAb ?? l.leerAb)}, leer ab {deDate(l.leerAb)}
+          </span>
+        ) : l.engpassAb ? (
+          <span className="font-semibold text-amber-700">
+            Engpass ab {deDate(l.engpassAb)} (unter {Math.round(l.mindestKg)} kg = Lieferzeit {Math.round(l.leadTage / 7)} Wo. + {e.nachbestellAbstandTage} Tage Rhythmus — danach kommt Nachschub zu spät)
+          </span>
+        ) : (
+          <span className="font-semibold text-emerald-700">
+            kein Engpass bis {deDate(ende)} — dann noch {Math.round(l.endeKg)} kg ({kg(reichweite)} Monate)
+          </span>
+        )}
+      </div>
+    );
+  };
+  return (
+    <div className="mb-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-neutral-500">Nachbestellen pro Monat:</span>
+        <span className="text-neutral-700">Amanda</span>
+        {feld(e.nachbestellKgMonat, verbrauchGlatt, (v) => set("nachbestellKgMonat", v))}
+        <span className="text-neutral-500">kg (Verbrauch {kg(verbrauchGlatt)})</span>
+        <span className="ml-2 text-neutral-700">Ebru</span>
+        {feld(e.ebruNachbestellKgMonat, verbrauchWellig, (v) => set("ebruNachbestellKgMonat", v))}
+        <span className="text-neutral-500">kg (Verbrauch {kg(verbrauchWellig)})</span>
+        {(e.nachbestellKgMonat !== null || e.ebruNachbestellKgMonat !== null) && (
+          <button
+            onClick={() => {
+              set("nachbestellKgMonat", null);
+              set("ebruNachbestellKgMonat", null);
+            }}
+            className="text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-neutral-900"
+          >
+            wieder nach Verbrauch
+          </button>
+        )}
+        {geaendert && (
+          <button onClick={onSpeichern} disabled={saving} className="ml-auto inline-flex items-center gap-1 rounded-md bg-neutral-900 px-2.5 py-1 font-medium text-white disabled:opacity-50">
+            {saving && <Loader2 size={12} className="animate-spin" />} Speichern
+          </button>
+        )}
+      </div>
+      <div className="mt-1.5 space-y-0.5">
+        {zeile("glatt", "Glatt (Amanda)", e.nachbestellungenEinrechnen)}
+        {zeile("wellig", "Wellig (Ebru)", e.ebruNachbestellungenEinrechnen)}
+      </div>
+      <p className="mt-1 text-[11px] text-neutral-400">
+        Summe über alle Produkte einer Qualität: einzelne Topseller können früher ausgehen, Ladenhüter zählen nicht als Vorrat. Leer = alle Nachbestellungen dieser Menge eingerechnet.
+        {p.bedarf && " Mit „Nur das Nötigste“ gilt dessen Bestellplan."}
+      </p>
+    </div>
+  );
 }
 
 /** Knöpfe am Diagramm: jede Aktion ein-/ausschalten, neue Aktion anlegen. */
