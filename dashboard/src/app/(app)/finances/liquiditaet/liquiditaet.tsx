@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
 import { Area, Bar, CartesianGrid, ComposedChart, Line, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KATEGORIE_BY_KEY } from "@/lib/bank/kategorien";
 import { kontoZweck } from "@/lib/bank/konten";
@@ -1418,6 +1418,7 @@ function NachbestellLeiste({
   saving: boolean;
   onSpeichern: () => void;
 }) {
+  const [offen, setOffen] = useState(false);
   const verbrauchGlatt = roh.nachbestellung.kgVerbrauchMonat ?? roh.nachbestellung.kgProMonatAuto;
   const verbrauchWellig = roh.ebruNachbestellung?.kgVerbrauchMonat ?? roh.ebruNachbestellung?.kgProMonatAuto ?? 0;
   const kg = (n: number) => n.toLocaleString("de-DE", { maximumFractionDigits: 1 });
@@ -1463,9 +1464,34 @@ function NachbestellLeiste({
       </div>
     );
   };
+  // Standard zugeklappt (User 28.11.2026) — Kopfzeile zeigt Mengen + Engpass-Kurzfassung
+  if (!offen) {
+    const kurz = (q: "glatt" | "wellig", name: string) => {
+      const l = p.lager[q];
+      if (!l) return null;
+      return (
+        <span key={q} className={l.leerAb ? "text-red-700" : l.engpassAb ? "text-amber-700" : "text-neutral-500"}>
+          {name} {kg(l.bestellKgMonat || (q === "glatt" ? e.nachbestellKgMonat ?? verbrauchGlatt : e.ebruNachbestellKgMonat ?? verbrauchWellig))} kg
+          {l.leerAb ? ` · leer ab ${deDate(l.leerAb)}` : l.engpassAb ? ` · Engpass ab ${deDate(l.engpassAb)}` : ""}
+        </span>
+      );
+    };
+    return (
+      <button onClick={() => setOffen(true)} className="mb-2 flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-left text-xs hover:bg-neutral-50">
+        <ChevronRight size={14} className="text-neutral-400" />
+        <span className="text-neutral-500">Nachbestellen pro Monat:</span>
+        {kurz("glatt", "Amanda")}
+        {kurz("wellig", "Ebru")}
+        {(e.nachbestellKgMonat !== null || e.ebruNachbestellKgMonat !== null) && <span className="text-neutral-400">(eigene Menge)</span>}
+      </button>
+    );
+  }
   return (
     <div className="mb-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <button onClick={() => setOffen(false)} aria-label="Zuklappen" className="text-neutral-400 hover:text-neutral-900">
+          <ChevronDown size={14} />
+        </button>
         <span className="text-neutral-500">Nachbestellen pro Monat:</span>
         <span className="text-neutral-700">Amanda</span>
         {feld(e.nachbestellKgMonat, verbrauchGlatt, (v) => set("nachbestellKgMonat", v))}
