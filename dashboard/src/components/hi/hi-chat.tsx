@@ -131,7 +131,6 @@ function loescheAlleGespraeche() {
   }
 }
 
-const SEITEN_VORSCHLAEGE = ["Was fällt dir auf dieser Seite auf?", "Erklär mir kurz, was ich hier sehe.", "Was sollte ich hier als Nächstes tun?"];
 
 export default function HiChat({
   variante = "seite",
@@ -401,9 +400,9 @@ export default function HiChat({
         )}
       </div>
 
-      {leer && (
+      {leer && !schwebe && (
         <div className="hi-vorschlaege">
-          {(lokal ? SEITEN_VORSCHLAEGE : schwebe ? VORSCHLAEGE.slice(0, 3) : widget ? VORSCHLAEGE.slice(0, 2) : VORSCHLAEGE).map((v) => (
+          {(widget ? VORSCHLAEGE.slice(0, 2) : VORSCHLAEGE).map((v) => (
             <button key={v} type="button" className="hi-vorschlag" onClick={() => fragen(v)}>{v}</button>
           ))}
         </div>
