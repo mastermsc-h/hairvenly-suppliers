@@ -3,7 +3,7 @@
 import "./hi.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowUp, Maximize2, RotateCcw, Square, X } from "lucide-react";
+import { ArrowUp, Maximize2, RotateCcw, Square, Trash2, X } from "lucide-react";
 import HiGehirn, { type HiZustand } from "./hi-gehirn";
 import HiMarkdown from "./hi-markdown";
 import { hiVorschlagAusfuehren, hiVorschlagVerwerfen } from "@/lib/actions/hi";
@@ -21,6 +21,8 @@ interface Vorschlag {
 interface Anzeige {
   rolle: "du" | "hi";
   text: string;
+  /** Nur bei Fragen im schwebenden Hi: mit welchem Bezug gefragt wurde. */
+  bezug?: Bezug;
   schritte?: string[];
   fehler?: boolean;
   /** Kosten dieser Antwort in Euro. */
@@ -40,25 +42,25 @@ function VorschlagKarte({ v, onAendern }: { v: Vorschlag; onAendern: (neu: Parti
     }
   };
   return (
-    <div className="hi-vorschlag" data-status={status}>
-      <div className="hi-vorschlag-titel">{v.titel}</div>
+    <div className="hi-karte" data-status={status}>
+      <div className="hi-karte-titel">{v.titel}</div>
       <ul>
         {v.zeilen.map((z, j) => (
           <li key={j}>{z}</li>
         ))}
       </ul>
-      {status === "fehler" && <div className="hi-vorschlag-ergebnis">⚠ {v.ergebnis}</div>}
+      {status === "fehler" && <div className="hi-karte-ergebnis">⚠ {v.ergebnis}</div>}
       {status === "offen" || status === "laeuft" || status === "fehler" ? (
-        <div className="hi-vorschlag-knoepfe">
-          <button type="button" className="hi-vorschlag-ja" disabled={status === "laeuft"} onClick={() => klick(true)}>
+        <div className="hi-karte-knoepfe">
+          <button type="button" className="hi-karte-ja" disabled={status === "laeuft"} onClick={() => klick(true)}>
             {status === "laeuft" ? "Trägt ein …" : status === "fehler" ? "Nochmal versuchen" : "Eintragen"}
           </button>
-          <button type="button" className="hi-vorschlag-nein" disabled={status === "laeuft"} onClick={() => klick(false)}>
+          <button type="button" className="hi-karte-nein" disabled={status === "laeuft"} onClick={() => klick(false)}>
             Abbrechen
           </button>
         </div>
       ) : (
-        <div className="hi-vorschlag-ergebnis">{status === "ok" ? "✓ " : ""}{v.ergebnis}</div>
+        <div className="hi-karte-ergebnis">{status === "ok" ? "✓ " : ""}{v.ergebnis}</div>
       )}
     </div>
   );
@@ -111,6 +113,24 @@ function kuerzen(verlauf: ApiMessage[]): ApiMessage[] {
 /** Kontext der Seite, auf der Hi gerade gefragt wird (schwebendes Hi). */
 export interface SeitenKontext { pfad: string; titel: string; text: string }
 
+/** Schwebendes Hi: Frage zu dieser Seite oder allgemein zum ganzen Unternehmen. */
+type Bezug = "seite" | "allgemein";
+const SPEICHER_BEZUG = "hi:bezug";
+
+/** Alle gespeicherten Hi-Gespräche dieses Browsers löschen (großes Hi, Startbildschirm, alle Seiten). */
+function loescheAlleGespraeche() {
+  try {
+    const weg: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith(SPEICHER_VERLAUF) || k.startsWith(SPEICHER_ANZEIGE) || k.startsWith(SPEICHER_BEZUG))) weg.push(k);
+    }
+    weg.forEach((k) => localStorage.removeItem(k));
+  } catch {
+    /* Speicher gesperrt — nichts zu löschen */
+  }
+}
+
 const SEITEN_VORSCHLAEGE = ["Was fällt dir auf dieser Seite auf?", "Erklär mir kurz, was ich hier sehe.", "Was sollte ich hier als Nächstes tun?"];
 
 export default function HiChat({
@@ -142,6 +162,8 @@ export default function HiChat({
   const [zustand, setZustand] = useState<HiZustand>("ruhig");
   const [impuls, setImpuls] = useState(0);
   const [gruendlich, setGruendlich] = useState(false);
+  const [bezug, setBezug] = useState<Bezug>("seite");
+  const [loeschMenue, setLoeschMenue] = useState(false);
   const abbruch = useRef<AbortController | null>(null);
   const listeRef = useRef<HTMLDivElement>(null);
   const feldRef = useRef<HTMLTextAreaElement>(null);
@@ -149,6 +171,10 @@ export default function HiChat({
   const schwebe = variante === "schwebe";
   const kVerlauf = sitzung ? `${SPEICHER_VERLAUF}:${sitzung}` : SPEICHER_VERLAUF;
   const kAnzeige = sitzung ? `${SPEICHER_ANZEIGE}:${sitzung}` : SPEICHER_ANZEIGE;
+  const kBezug = `${SPEICHER_BEZUG}:${sitzung ?? "hi"}`;
+  /** Schalter nur, wenn es eine Seite gibt, auf die sich Hi beziehen kann. */
+  const mitBezug = !!seitenKontext;
+  const lokal = mitBezug && bezug === "seite";
   const [geladen, setGeladen] = useState(false);
   const startGefragt = useRef(false);
 
@@ -156,8 +182,20 @@ export default function HiChat({
     setAnzeige(lies<Anzeige[]>(kAnzeige, []));
     setVerlauf(lies<ApiMessage[]>(kVerlauf, []));
     setGruendlich(lies<boolean>(SPEICHER_MODUS, false));
+    setBezug(lies<Bezug>(kBezug, "seite") === "allgemein" ? "allgemein" : "seite");
     setGeladen(true);
-  }, [kAnzeige, kVerlauf]);
+  }, [kAnzeige, kVerlauf, kBezug]);
+
+  // Löschmenü schließt bei Klick daneben oder Esc
+  useEffect(() => {
+    if (!loeschMenue) return;
+    const zu = (e: Event) => {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !(e.target as Element | null)?.closest?.(".hi-loeschen")) setLoeschMenue(false);
+    };
+    document.addEventListener("mousedown", zu);
+    document.addEventListener("keydown", zu);
+    return () => { document.removeEventListener("mousedown", zu); document.removeEventListener("keydown", zu); };
+  }, [loeschMenue]);
 
   useEffect(() => {
     const el = listeRef.current;
@@ -170,7 +208,7 @@ export default function HiChat({
       if (!frage || zustand !== "ruhig") return;
       setEingabe("");
       const basis = kuerzen(verlauf);
-      const neu: Anzeige[] = [...anzeige, { rolle: "du", text: frage }, { rolle: "hi", text: "", schritte: [] }];
+      const neu: Anzeige[] = [...anzeige, { rolle: "du", text: frage, ...(mitBezug ? { bezug } : {}) }, { rolle: "hi", text: "", schritte: [] }];
       setAnzeige(neu);
       setZustand("denkt");
       const ctrl = new AbortController();
@@ -178,7 +216,7 @@ export default function HiChat({
       const aendereLetzte = (f: (a: Anzeige) => Anzeige) => setAnzeige((alt) => [...alt.slice(0, -1), f(alt[alt.length - 1])]);
 
       try {
-        const res = await fetch("/api/hi", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ verlauf: basis, frage, modus: gruendlich ? "gruendlich" : "normal", seite: seitenKontext?.() ?? undefined }), signal: ctrl.signal });
+        const res = await fetch("/api/hi", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ verlauf: basis, frage, modus: gruendlich ? "gruendlich" : "normal", seite: seitenKontext?.() ?? undefined, ...(mitBezug ? { bezug } : {}) }), signal: ctrl.signal });
         if (!res.ok || !res.body) throw new Error(res.status === 403 ? "Hi ist nur für Admins freigeschaltet." : `Hi ist gerade nicht erreichbar (${res.status}).`);
         // Abgelaufene Anmeldung: die Middleware leitet auf die Login-Seite um (HTML statt Antwort-Stream)
         if (!(res.headers.get("content-type") ?? "").includes("ndjson")) throw new Error("Bitte neu anmelden — die Sitzung ist abgelaufen.");
@@ -230,7 +268,7 @@ export default function HiChat({
         feldRef.current?.focus();
       }
     },
-    [anzeige, verlauf, zustand, gruendlich, seitenKontext, kAnzeige, kVerlauf],
+    [anzeige, verlauf, zustand, gruendlich, seitenKontext, kAnzeige, kVerlauf, bezug, mitBezug],
   );
 
   useEffect(() => {
@@ -252,6 +290,19 @@ export default function HiChat({
     setVerlauf([]);
     schreib(kAnzeige, []);
     schreib(kVerlauf, []);
+  };
+  const alleLoeschen = () => {
+    setLoeschMenue(false);
+    if (!window.confirm("Alle Hi-Gespräche löschen — das große Hi, den Startbildschirm und die Gespräche aller Seiten? Das lässt sich nicht rückgängig machen.")) return;
+    if (zustand !== "ruhig") abbruch.current?.abort();
+    loescheAlleGespraeche();
+    setAnzeige([]);
+    setVerlauf([]);
+  };
+  const bezugSetzen = (b: Bezug) => {
+    setBezug(b);
+    schreib(kBezug, b);
+    feldRef.current?.focus();
   };
 
   const aendereVorschlag = useCallback((id: string, neu: Partial<Vorschlag>) => {
@@ -283,6 +334,21 @@ export default function HiChat({
               <RotateCcw size={14} /> {!widget && "Neu"}
             </button>
           )}
+          <div className="hi-loeschen">
+            <button type="button" className="hi-knopf-klein hi-loeschen-knopf" onClick={() => setLoeschMenue(!loeschMenue)} aria-expanded={loeschMenue} title="Verlauf löschen">
+              <Trash2 size={14} />
+            </button>
+            {loeschMenue && (
+              <div className="hi-loeschen-menue" role="menu">
+                <button type="button" role="menuitem" disabled={leer} onClick={() => { setLoeschMenue(false); neuesGespraech(); }}>
+                  {sitzungName ? `Gespräch „${sitzungName}“ löschen` : "Dieses Gespräch löschen"}
+                </button>
+                <button type="button" role="menuitem" className="hi-loeschen-alle" onClick={alleLoeschen}>
+                  Alle Hi-Gespräche löschen
+                </button>
+              </div>
+            )}
+          </div>
           {widget && (
             <Link href="/hi" className="hi-knopf-klein" title="Im großen Fenster öffnen">
               <Maximize2 size={14} />
@@ -299,7 +365,7 @@ export default function HiChat({
       {leer && !widget && <p className="hi-begruessung">Frag mich alles über Hairvenly — Finanzen, Lager, Bestellungen, Team, Kunden, Retouren. Ich schaue in den echten Daten nach.</p>}
 
       <div className="hi-liste" ref={listeRef}>
-        {leer && begruessung && (
+        {leer && begruessung && lokal && (
           <div className="hi-antwort hi-seiten-info">
             <div className="hi-seiten-info-kopf">Diese Seite</div>
             <p>{begruessung}</p>
@@ -308,7 +374,10 @@ export default function HiChat({
         )}
         {sichtbar.map((a, i) =>
           a.rolle === "du" ? (
-            <div key={i} className="hi-du">{a.text}</div>
+            <div key={i} className="hi-du">
+              {a.bezug === "allgemein" && <span className="hi-du-bezug">Allgemein</span>}
+              {a.text}
+            </div>
           ) : (
             <div key={i} className={`hi-antwort ${a.fehler ? "hi-fehler" : ""}`}>
               {!!a.schritte?.length && (
@@ -334,7 +403,7 @@ export default function HiChat({
 
       {leer && (
         <div className="hi-vorschlaege">
-          {(schwebe ? SEITEN_VORSCHLAEGE : widget ? VORSCHLAEGE.slice(0, 2) : VORSCHLAEGE).map((v) => (
+          {(lokal ? SEITEN_VORSCHLAEGE : schwebe ? VORSCHLAEGE.slice(0, 3) : widget ? VORSCHLAEGE.slice(0, 2) : VORSCHLAEGE).map((v) => (
             <button key={v} type="button" className="hi-vorschlag" onClick={() => fragen(v)}>{v}</button>
           ))}
         </div>
@@ -358,12 +427,22 @@ export default function HiChat({
           )}
         </div>
       )}
+      {mitBezug && (
+        <div className="hi-bezug" role="radiogroup" aria-label="Worauf soll sich Hi beziehen?">
+          <button type="button" role="radio" aria-checked={bezug === "seite"} data-an={bezug === "seite"} onClick={() => bezugSetzen("seite")} title="Hi bleibt beim Thema dieser Seite und sieht, was hier angezeigt wird">
+            Diese Seite
+          </button>
+          <button type="button" role="radio" aria-checked={bezug === "allgemein"} data-an={bezug === "allgemein"} onClick={() => bezugSetzen("allgemein")} title="Hi antwortet für das ganze Unternehmen, nicht nur für diese Seite">
+            Allgemein
+          </button>
+        </div>
+      )}
       <form className="hi-eingabe" onSubmit={(e) => { e.preventDefault(); fragen(eingabe); }}>
         <textarea
           ref={feldRef}
           value={eingabe}
           rows={1}
-          placeholder={widget ? "Frag Hi …" : "Frag Hi irgendetwas …"}
+          placeholder={lokal ? "Frag Hi zu dieser Seite …" : mitBezug ? "Frag Hi allgemein …" : widget ? "Frag Hi …" : "Frag Hi irgendetwas …"}
           onChange={(e) => setEingabe(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); fragen(eingabe); }

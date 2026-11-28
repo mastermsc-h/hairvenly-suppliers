@@ -68,7 +68,7 @@ export async function POST(req: Request) {
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
   if (profile?.role !== "admin") return new Response("Nur für Admins", { status: 403 });
 
-  let body: { verlauf?: unknown; frage?: unknown; modus?: unknown; seite?: unknown };
+  let body: { verlauf?: unknown; frage?: unknown; modus?: unknown; seite?: unknown; bezug?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -84,10 +84,18 @@ export async function POST(req: Request) {
   const heute = new Date().toLocaleDateString("de-DE", { timeZone: "Europe/Berlin", weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" });
   // Schwebendes Hi: die Seite, auf der gefragt wird (Pfad, Titel, sichtbarer Text, gekürzt)
   const s = body.seite && typeof body.seite === "object" ? (body.seite as Record<string, unknown>) : null;
-  const seitenText = s && typeof s.pfad === "string"
-    ? `\n\n<aktuelle_seite pfad="${String(s.pfad).slice(0, 200)}" titel="${String(s.titel ?? "").slice(0, 200).replace(/"/g, "'")}">\n${String(s.text ?? "").slice(0, 6000)}\n</aktuelle_seite>\n(Die Frage bezieht sich auf diese Dashboard-Seite, die gerade offen ist. Der Text oben ist der sichtbare Inhalt – nutze ihn als Ausgangspunkt und prüfe Zahlen bei Bedarf mit den Werkzeugen.)`
-    : "";
+  // Bezug (Schalter im schwebenden Hi): "seite" = nur Thema dieser Seite, "allgemein" = ganzes Unternehmen
+  const allgemein = body.bezug === "allgemein";
+  const pfadS = s && typeof s.pfad === "string" ? String(s.pfad).slice(0, 200) : "";
+  const titelS = s ? String(s.titel ?? "").slice(0, 200).replace(/"/g, "'") : "";
+  const seitenText = !pfadS
+    ? ""
+    : allgemein
+      ? `\n\n(Bezug: ALLGEMEIN. Gefragt wurde zwar auf der Seite „${titelS}“ (${pfadS}), die Frage ist aber für das ganze Unternehmen gemeint — beantworte sie bereichsübergreifend und beschränke dich nicht auf diese Seite.)`
+      : `\n\n<aktuelle_seite pfad="${pfadS}" titel="${titelS}">\n${String(s?.text ?? "").slice(0, 6000)}\n</aktuelle_seite>\n(Bezug: DIESE SEITE. Die Frage bezieht sich auf diese Dashboard-Seite und ihr Thema; der Text oben ist ihr sichtbarer Inhalt. Bleib bei diesem Thema: antworte aus dem, was die Seite zeigt, und nutze Werkzeuge nur, um Zahlen genau dieses Bereichs zu prüfen oder zu vertiefen. Zieh keine anderen Bereiche heran (z.B. Liquidität, Schulden, Lager, andere Lieferanten oder Steuern), wenn die Seite sie nicht zeigt — außer die Frage verlangt es ausdrücklich. Geht die Frage klar über die Seite hinaus, antworte knapp für diesen Bereich und sag in einem Satz, dass man mit dem Schalter „Allgemein“ das ganze Unternehmen fragen kann.)`;
   const frageText = `${frage}${seitenText}\n\n(Heute ist ${heute}.)`;
+  // Für den Verlauf nur Frage + kurzer Bezug — der Seitentext (bis 6.000 Zeichen) würde sonst bei jeder Folgefrage erneut bezahlt
+  const frageImVerlauf = `${frage}${pfadS ? `\n\n(Bezug: ${allgemein ? "allgemein" : `Seite „${titelS}“ (${pfadS})`})` : ""}`;
   let messages: Anthropic.MessageParam[] = [...vorher, { role: "user", content: frageText }];
   const beginn = Date.now();
   const nutzung = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0, runden: 0 };
@@ -208,7 +216,7 @@ export async function POST(req: Request) {
             kosten_usd: Math.round(usd * 10000) / 10000, dauer_ms: Date.now() - beginn,
           })
           .then(({ error }) => error && console.warn("[hi] Nutzung nicht gespeichert:", error.message));
-        send({ t: "fertig", verlauf: [...vorher, { role: "user", content: frageText }, ...(antwort.trim() ? [{ role: "assistant", content: antwort.trim() }] : [])] });
+        send({ t: "fertig", verlauf: [...vorher, { role: "user", content: frageImVerlauf }, ...(antwort.trim() ? [{ role: "assistant", content: antwort.trim() }] : [])] });
       } catch (err) {
         console.error("[hi]", err);
         const text =
